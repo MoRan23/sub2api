@@ -144,7 +144,7 @@ func (s *PromptService) CheckKeyword(ctx context.Context, req Request) (*PromptD
 		return &PromptDecision{Kind: DecisionAllow, AllowNextStage: true}, nil
 	}
 
-	digest := sha256.Sum256([]byte(strings.ToLower(strings.TrimSpace(keyword))))
+	digest := sha256.Sum256([]byte(promptKeywordEvidenceText(keyword)))
 	keywordHash := hex.EncodeToString(digest[:])
 	latency := clock.Now().Sub(started)
 	result := &NormalizedResult{

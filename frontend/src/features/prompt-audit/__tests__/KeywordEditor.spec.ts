@@ -71,6 +71,17 @@ describe('KeywordEditor editing draft', () => {
     expect(textarea.element.value).toBe('')
   })
 
+  it('preserves regex case and incomplete expressions while editing', async () => {
+    const { textarea, keywords } = mountEditor([])
+    const draft = 'regex:Foo\nregex:foo\nREGEX:foo\nregex:Foo\nregex:(\n'
+    await textarea.setValue(draft)
+    expect(keywords.value).toEqual(['regex:Foo', 'regex:foo', 'REGEX:foo', 'regex:('])
+    expect(textarea.element.value).toBe(draft)
+    keywords.value = [...keywords.value]
+    await nextTick()
+    expect(textarea.element.value).toBe(draft)
+  })
+
   it('waits for composition to finish and preserves the newline before Chinese input', async () => {
     const { textarea, keywords } = mountEditor()
     await textarea.setValue('first\n')

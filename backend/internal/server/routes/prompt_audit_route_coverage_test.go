@@ -134,13 +134,18 @@ func TestPromptAuditAdminRoutesRejectUnauthenticatedAndNonAdminRequests(t *testi
 		{name: "non-admin", auth: "Bearer user-token", wantStatus: http.StatusForbidden},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			recorder := httptest.NewRecorder()
-			request := httptest.NewRequest(http.MethodGet, "/api/v1/admin/prompt-audit/config", nil)
-			if tc.auth != "" {
-				request.Header.Set("Authorization", tc.auth)
+			for _, route := range []struct{ method, path string }{
+				{http.MethodGet, "/api/v1/admin/prompt-audit/config"},
+				{http.MethodPost, "/api/v1/admin/prompt-audit/keyword-whitelist-identities"},
+			} {
+				recorder := httptest.NewRecorder()
+				request := httptest.NewRequest(route.method, route.path, nil)
+				if tc.auth != "" {
+					request.Header.Set("Authorization", tc.auth)
+				}
+				router.ServeHTTP(recorder, request)
+				require.Equal(t, tc.wantStatus, recorder.Code, route.path)
 			}
-			router.ServeHTTP(recorder, request)
-			require.Equal(t, tc.wantStatus, recorder.Code)
 		})
 	}
 }

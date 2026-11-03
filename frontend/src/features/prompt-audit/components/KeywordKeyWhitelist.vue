@@ -46,21 +46,27 @@
     <ul v-if="modelValue.length" class="mt-4 space-y-2">
       <li v-for="entry in modelValue" :key="entryId(entry)" class="flex items-center justify-between gap-3 rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-900/50" data-test="saved-entry">
         <div class="min-w-0 break-words">
-          <p>{{ t('admin.promptAudit.keywordWhitelist.identity', { userId: entry.user_id, keyId: entry.api_key_id }) }}</p>
-          <p v-if="labels[entryId(entry)]" class="text-xs text-gray-500 dark:text-dark-400">{{ labels[entryId(entry)] }}</p>
+          <p v-if="identities[entryId(entry)]?.available" class="font-medium">
+            {{ identityLabel(identities[entryId(entry)]) }} · {{ identities[entryId(entry)].key_name || t('admin.promptAudit.keywordWhitelist.unnamedKey') }}
+          </p>
+          <p v-else-if="identitiesLoading" role="status">{{ t('admin.promptAudit.keywordWhitelist.metadataLoading') }}</p>
+          <p v-else-if="identitiesFailed" class="text-amber-600 dark:text-amber-400">{{ t('admin.promptAudit.keywordWhitelist.metadataLoadFailed') }}</p>
+          <p v-else class="text-amber-600 dark:text-amber-400">{{ t('admin.promptAudit.keywordWhitelist.missingIdentity') }}</p>
+          <p class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.keywordWhitelist.identity', { userId: entry.user_id, keyId: entry.api_key_id }) }}</p>
         </div>
         <button type="button" class="btn btn-secondary btn-sm shrink-0" data-test="remove-key" :aria-label="t('admin.promptAudit.keywordWhitelist.remove', { userId: entry.user_id, keyId: entry.api_key_id })" @click="removeKey(entry)">{{ t('common.remove') }}</button>
       </li>
     </ul>
     <p v-else class="mt-3 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.keywordWhitelist.empty') }}</p>
+    <button v-if="modelValue.length && identitiesFailed" type="button" class="btn btn-secondary btn-sm mt-2" data-test="retry-identities" @click="loadIdentities">{{ t('admin.promptAudit.actions.retry') }}</button>
   </div>
 </template>
 
 <script setup lang="ts">
 import { computed, onBeforeUnmount, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
-import { listKeywordWhitelistKeys, listKeywordWhitelistUsers } from '../api'
-import type { PromptKeywordKeyOption, PromptKeywordUserOption, PromptKeywordWhitelistKey } from '../types'
+import { getKeywordWhitelistIdentities, listKeywordWhitelistKeys, listKeywordWhitelistUsers } from '../api'
+import type { PromptKeywordKeyOption, PromptKeywordUserOption, PromptKeywordWhitelistIdentity, PromptKeywordWhitelistKey } from '../types'
 
 const props = defineProps<{ modelValue: PromptKeywordWhitelistKey[] }>()
 const emit = defineEmits<{ (event: 'update:modelValue', value: PromptKeywordWhitelistKey[]): void }>()
@@ -79,14 +85,47 @@ const keysLoading = ref(false)
 const selectedUserId = ref(0)
 const selectedKeyId = ref(0)
 const error = ref('')
-const labels = ref<Record<string, string>>({})
+const identities = ref<Record<string, PromptKeywordWhitelistIdentity>>({})
+const identitiesLoading = ref(false)
+const identitiesFailed = ref(false)
 let userRequest = 0
 let keyRequest = 0
+let identityRequest = 0
 
 const selectedUser = computed(() => users.value.find((user) => user.id === selectedUserId.value))
 const selectedKey = computed(() => keys.value.find((key) => key.id === selectedKeyId.value && key.user_id === selectedUserId.value))
 const canAdd = computed(() => !usersLoading.value && !keysLoading.value && selectedUser.value && selectedKey.value && props.modelValue.length < 1000 && !props.modelValue.some((entry) => entry.user_id === selectedUserId.value && entry.api_key_id === selectedKeyId.value))
 const entryId = (entry: PromptKeywordWhitelistKey) => `${entry.user_id}:${entry.api_key_id}`
+const identityLabel = (identity: PromptKeywordWhitelistIdentity) => [identity.user_email, identity.username].filter(Boolean).join(' / ')
+
+// Watch IDs only: a cloned settings draft does not need another identity lookup.
+watch(() => props.modelValue.map(entryId).join(','), () => { void loadIdentities() }, { immediate: true })
+
+async function loadIdentities() {
+  const request = ++identityRequest
+  const keys = props.modelValue.map(({ user_id, api_key_id }) => ({ user_id, api_key_id }))
+  const retained = Object.fromEntries(keys.flatMap((key) => {
+    const identity = identities.value[entryId(key)]
+    return identity ? [[entryId(key), identity]] : []
+  }))
+  identities.value = retained
+  identitiesFailed.value = false
+  identitiesLoading.value = keys.length > 0
+  if (!keys.length) return
+  try {
+    const result = await getKeywordWhitelistIdentities(keys)
+    if (request !== identityRequest) return
+    const requested = new Set(keys.map(entryId))
+    identities.value = Object.fromEntries(result.filter((identity) => requested.has(entryId(identity))).map((identity) => [entryId(identity), identity]))
+  } catch {
+    if (request === identityRequest) {
+      identities.value = {}
+      identitiesFailed.value = true
+    }
+  } finally {
+    if (request === identityRequest) identitiesLoading.value = false
+  }
+}
 
 function clearKeys() {
   keyRequest++
@@ -108,7 +147,7 @@ watch(search, () => {
   error.value = ''
 })
 watch(selectedUserId, () => { clearKeys(); if (selectedUser.value) void loadKeys(1) })
-onBeforeUnmount(() => { userRequest++; keyRequest++ })
+onBeforeUnmount(() => { userRequest++; keyRequest++; identityRequest++ })
 
 async function loadUsers(page: number) {
   const request = ++userRequest
@@ -154,7 +193,7 @@ async function loadKeys(page: number) {
 function addKey() {
   if (!canAdd.value || !selectedUser.value || !selectedKey.value) return
   const entry = { user_id: selectedUser.value.id, api_key_id: selectedKey.value.id }
-  labels.value[entryId(entry)] = `${selectedUser.value.email} · ${selectedKey.value.name}`
+  identities.value[entryId(entry)] = { ...entry, user_email: selectedUser.value.email, username: '', key_name: selectedKey.value.name, available: true }
   emit('update:modelValue', [...props.modelValue.map((value) => ({ ...value })), entry])
   selectedKeyId.value = 0
 }

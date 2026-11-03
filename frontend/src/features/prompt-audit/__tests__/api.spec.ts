@@ -4,7 +4,7 @@ import { emptyEventFilters } from '../viewModel'
 const client = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn(), post: vi.fn(), delete: vi.fn() }))
 vi.mock('@/api/client', () => ({ apiClient: client }))
 
-import promptAuditAPI, { listKeywordWhitelistKeys, listKeywordWhitelistUsers } from '../api'
+import promptAuditAPI, { getKeywordWhitelistIdentities, listKeywordWhitelistKeys, listKeywordWhitelistUsers } from '../api'
 
 describe('Prompt Audit API', () => {
   beforeEach(() => Object.values(client).forEach((mock) => mock.mockReset()))
@@ -28,6 +28,13 @@ describe('Prompt Audit API', () => {
     client.get.mockResolvedValue({ data: { process_status: 'running' } })
     await promptAuditAPI.getRuntime()
     expect(client.get).toHaveBeenCalledWith('/admin/prompt-audit/runtime')
+  })
+
+  it('looks up saved identity pairs using only IDs and retains no secret fields', async () => {
+    const pair = { user_id: 8, api_key_id: 17, key: 'not-in-request' }
+    client.post.mockResolvedValue({ data: { items: [{ user_id: 8, api_key_id: 17, user_email: 'owner@example.test', username: 'owner', key_name: 'main', available: true, key: 'not-in-response' }] } })
+    expect(await getKeywordWhitelistIdentities([pair])).toEqual([{ user_id: 8, api_key_id: 17, user_email: 'owner@example.test', username: 'owner', key_name: 'main', available: true }])
+    expect(client.post).toHaveBeenCalledWith('/admin/prompt-audit/keyword-whitelist-identities', { keys: [{ user_id: 8, api_key_id: 17 }] })
   })
 
   it('sends a temporary probe token only in the request and never invents response credentials', async () => {

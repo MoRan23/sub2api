@@ -5,6 +5,7 @@ import type {
   PromptAuditUpdateRequest,
   PromptEventFilters,
 } from './types'
+import { normalizeKeywordRules } from './keywordRules'
 
 export const DEFAULT_GUARD_MODEL = 'sileader/qwen3guard:0.6b'
 
@@ -68,7 +69,7 @@ export function buildUpdateRequest(draft: PromptAuditDraft): PromptAuditUpdateRe
     blocking_enabled: draft.enabled && draft.blocking_enabled,
     blocking_latest_turn_only: draft.blocking_latest_turn_only,
     keyword_blocking_enabled: draft.keyword_blocking_enabled,
-    blocked_keywords: draft.blocked_keywords.map((keyword) => keyword.trim()).filter(Boolean),
+    blocked_keywords: normalizeKeywordRules(draft.blocked_keywords),
     keyword_all_groups: draft.keyword_all_groups,
     keyword_group_ids: draft.keyword_all_groups ? [] : [...draft.keyword_group_ids].sort((a, b) => a - b),
     keyword_whitelist_keys: (draft.keyword_whitelist_keys ?? []).map(({ user_id, api_key_id }) => ({ user_id, api_key_id })),

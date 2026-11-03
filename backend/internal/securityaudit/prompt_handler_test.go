@@ -20,6 +20,7 @@ import (
 
 type fakePromptAdminService struct {
 	config       PublicConfig
+	identities   func(context.Context, []KeywordWhitelistKey) ([]KeywordWhitelistIdentity, error)
 	save         func(context.Context, UpdateConfigRequest, int64) (PublicConfig, error)
 	probe        func(context.Context, ProbeRequest) ProbeResult
 	runtime      RuntimeSnapshot
@@ -33,6 +34,12 @@ type fakePromptAdminService struct {
 
 func (s *fakePromptAdminService) GetConfig() (PublicConfig, error) {
 	return s.config, nil
+}
+func (s *fakePromptAdminService) ResolveKeywordWhitelistIdentities(ctx context.Context, keys []KeywordWhitelistKey) ([]KeywordWhitelistIdentity, error) {
+	if s.identities == nil {
+		return nil, errors.New("unexpected ResolveKeywordWhitelistIdentities call")
+	}
+	return s.identities(ctx, keys)
 }
 func (s *fakePromptAdminService) SaveConfig(ctx context.Context, req UpdateConfigRequest, actorID int64) (PublicConfig, error) {
 	if s.save == nil {
@@ -96,6 +103,7 @@ func promptAdminRouter(service PromptAdminService) *gin.Engine {
 	group := router.Group("/admin/prompt-audit")
 	group.GET("/config", handler.GetConfig)
 	group.PUT("/config", handler.UpdateConfig)
+	group.POST("/keyword-whitelist-identities", handler.ResolveKeywordWhitelistIdentities)
 	group.POST("/endpoints/probe", handler.ProbeEndpoint)
 	group.GET("/runtime", handler.GetRuntime)
 	group.GET("/events", handler.ListEvents)

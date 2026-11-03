@@ -1,10 +1,10 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import KeywordKeyWhitelist from '../components/KeywordKeyWhitelist.vue'
-import type { PromptKeywordKeyOption } from '../types'
+import type { PromptKeywordKeyOption, PromptKeywordWhitelistIdentity, PromptKeywordWhitelistKey } from '../types'
 
-const api = vi.hoisted(() => ({ users: vi.fn(), keys: vi.fn() }))
-vi.mock('../api', () => ({ listKeywordWhitelistUsers: api.users, listKeywordWhitelistKeys: api.keys }))
+const api = vi.hoisted(() => ({ users: vi.fn(), keys: vi.fn(), identities: vi.fn() }))
+vi.mock('../api', () => ({ listKeywordWhitelistUsers: api.users, listKeywordWhitelistKeys: api.keys, getKeywordWhitelistIdentities: api.identities }))
 vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, values?: Record<string, unknown>) => key + (values ? JSON.stringify(values) : '') }) }))
 function page<T>(items: T[], total = items.length) {
   return { items, total, page: 1, page_size: 20, pages: Math.ceil(total / 20) }
@@ -25,6 +25,7 @@ describe('keyword key allowlist', () => {
   beforeEach(() => {
     api.users.mockReset().mockResolvedValue(page([{ id: 1, email: 'alice@example.test' }, { id: 2, email: 'bob@example.test' }]))
     api.keys.mockReset().mockResolvedValue(page([{ id: 11, user_id: 1, name: 'key-one' }, { id: 12, user_id: 1, name: 'key-two' }, { id: 21, user_id: 2, name: 'wrong-owner' }]))
+    api.identities.mockReset().mockImplementation(async (keys: PromptKeywordWhitelistKey[]) => keys.map((key) => ({ ...key, user_email: 'alice@example.test', username: 'Alice', key_name: 'key-one', available: true })))
   })
 
   it('requires one user and one owned key, and saves only their IDs', async () => {
@@ -98,13 +99,75 @@ describe('keyword key allowlist', () => {
   })
 
   it('keeps saved and deleted identities removable without fetching secrets', async () => {
+    api.identities.mockResolvedValue([{ user_id: 900, api_key_id: 999, user_email: '', username: '', key_name: '', available: false }])
     const wrapper = mount(KeywordKeyWhitelist, { props: { modelValue: [{ user_id: 900, api_key_id: 999 }] } })
+    await flushPromises()
     expect(wrapper.get('[data-test="saved-entry"]').text()).toContain('900')
     expect(wrapper.get('[data-test="saved-entry"]').text()).toContain('999')
+    expect(wrapper.get('[data-test="saved-entry"]').text()).toContain('admin.promptAudit.keywordWhitelist.missingIdentity')
     expect(api.users).not.toHaveBeenCalled()
     expect(api.keys).not.toHaveBeenCalled()
     await wrapper.get('[data-test="remove-key"]').trigger('click')
     expect(wrapper.emitted('update:modelValue')?.[0]?.[0]).toEqual([])
+    wrapper.unmount()
+  })
+
+  it('loads saved emails, usernames, and key names in a single metadata batch', async () => {
+    const saved = [{ user_id: 1, api_key_id: 11 }, { user_id: 2, api_key_id: 21 }]
+    api.identities.mockResolvedValue([
+      { ...saved[0], user_email: 'alice@example.test', username: 'Alice', key_name: 'main-key', available: true },
+      { ...saved[1], user_email: 'bob@example.test', username: '', key_name: '', available: true },
+    ])
+    const wrapper = mount(KeywordKeyWhitelist, { props: { modelValue: saved } })
+    expect(wrapper.text()).toContain('admin.promptAudit.keywordWhitelist.metadataLoading')
+    await flushPromises()
+    expect(api.identities).toHaveBeenCalledTimes(1)
+    expect(api.identities).toHaveBeenCalledWith(saved)
+    expect(wrapper.get('[data-test="saved-entry"]').text()).toContain('alice@example.test / Alice · main-key')
+    expect(wrapper.text()).toContain('bob@example.test')
+    expect(wrapper.text()).toContain('admin.promptAudit.keywordWhitelist.unnamedKey')
+    await wrapper.setProps({ modelValue: saved.map((key) => ({ ...key })) })
+    expect(api.identities).toHaveBeenCalledTimes(1)
+    expect(api.users).not.toHaveBeenCalled()
+    expect(api.keys).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('distinguishes a failed lookup from a deleted key and allows retry and removal', async () => {
+    api.identities.mockRejectedValueOnce(new Error('offline'))
+    const wrapper = mount(KeywordKeyWhitelist, { props: { modelValue: [{ user_id: 1, api_key_id: 11 }] } })
+    await flushPromises()
+    expect(wrapper.text()).toContain('admin.promptAudit.keywordWhitelist.metadataLoadFailed')
+    expect(wrapper.text()).not.toContain('admin.promptAudit.keywordWhitelist.missingIdentity')
+    expect(wrapper.get('[data-test="remove-key"]').attributes('disabled')).toBeUndefined()
+    await wrapper.get('[data-test="retry-identities"]').trigger('click')
+    await flushPromises()
+    expect(wrapper.text()).toContain('alice@example.test / Alice · key-one')
+    expect(wrapper.find('[data-test="retry-identities"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('ignores stale identity batches after the saved pairs change or clear', async () => {
+    const old = deferred<PromptKeywordWhitelistIdentity[]>()
+    api.identities.mockReturnValueOnce(old.promise).mockResolvedValueOnce([
+      { user_id: 2, api_key_id: 21, user_email: 'bob@example.test', username: 'Bob', key_name: 'bob-key', available: true },
+    ])
+    const wrapper = mount(KeywordKeyWhitelist, { props: { modelValue: [{ user_id: 1, api_key_id: 11 }] } })
+    await wrapper.setProps({ modelValue: [{ user_id: 2, api_key_id: 21 }] })
+    await flushPromises()
+    old.resolve([{ user_id: 1, api_key_id: 11, user_email: 'stale@example.test', username: '', key_name: 'stale-key', available: true }])
+    await flushPromises()
+    expect(wrapper.text()).toContain('bob@example.test / Bob · bob-key')
+    expect(wrapper.text()).not.toContain('stale')
+
+    const pending = deferred<PromptKeywordWhitelistIdentity[]>()
+    api.identities.mockReturnValueOnce(pending.promise)
+    await wrapper.setProps({ modelValue: [{ user_id: 3, api_key_id: 31 }] })
+    await wrapper.setProps({ modelValue: [] })
+    pending.resolve([{ user_id: 3, api_key_id: 31, user_email: 'cleared@example.test', username: '', key_name: 'cleared-key', available: true }])
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('cleared')
+    expect(wrapper.find('[data-test="saved-entry"]').exists()).toBe(false)
     wrapper.unmount()
   })
 })

@@ -30,6 +30,7 @@
         <fieldset class="mt-5 border-t border-gray-100 pt-5 dark:border-dark-800">
           <legend class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.promptAudit.policy.keywordTitle') }}</legend>
           <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.policy.keywordDescription') }}</p>
+          <p class="mt-2 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.policy.keywordRegexHint') }}</p>
           <div class="mt-3">
             <KeywordEditor
               v-model="keywordModel"
@@ -81,6 +82,7 @@ import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import type { PromptAuditDraft, PromptAuditGroup } from '../types'
 import { cloneData, SCANNER_CATALOG } from '../viewModel'
+import { keywordRuleLengthError, normalizeKeywordRules } from '../keywordRules'
 import GroupScopeSelector from './GroupScopeSelector.vue'
 import KeywordEditor from './KeywordEditor.vue'
 import KeywordKeyWhitelist from './KeywordKeyWhitelist.vue'
@@ -96,21 +98,11 @@ const keywordModel = computed<string[]>({
   get: () => props.draft.blocked_keywords,
   set: (value) => patch({ blocked_keywords: value }),
 })
-const effectiveKeywords = computed(() => {
-  const seen = new Set<string>()
-  return props.draft.blocked_keywords.map((value) => value.trim()).filter((value) => {
-    if (!value) return false
-    const key = value.toLowerCase()
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
-})
+const effectiveKeywords = computed(() => normalizeKeywordRules(props.draft.blocked_keywords))
 const effectiveKeywordCount = computed(() => effectiveKeywords.value.length)
 const keywordError = computed(() => {
-  if (effectiveKeywordCount.value > 10000) return t('admin.promptAudit.errors.prompt_audit_too_many_keywords')
-  if (effectiveKeywords.value.some((value) => Array.from(value).length > 200)) return t('admin.promptAudit.errors.prompt_audit_keyword_too_long')
-  return ''
+  const errorCode = keywordRuleLengthError(effectiveKeywords.value)
+  return errorCode ? t(`admin.promptAudit.errors.${errorCode}`) : ''
 })
 
 function patch(value: Partial<PromptAuditDraft>) {

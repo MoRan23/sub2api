@@ -25,6 +25,13 @@ export interface PromptKeywordWhitelistKey {
   api_key_id: number
 }
 
+export interface PromptKeywordWhitelistIdentity extends PromptKeywordWhitelistKey {
+  user_email: string
+  username: string
+  key_name: string
+  available: boolean
+}
+
 export interface PromptKeywordUserOption {
   id: number
   email: string

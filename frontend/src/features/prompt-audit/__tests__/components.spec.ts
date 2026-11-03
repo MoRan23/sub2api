@@ -97,6 +97,14 @@ describe('Prompt Audit components', () => {
     await keywordScope.get('[aria-label="admin.promptAudit.policy.removeMissingGroup"]').trigger('click')
     const missingRemoved = wrapper.emitted('update:draft')?.at(-1)?.[0] as PromptAuditDraft
     expect(missingRemoved.keyword_group_ids).toEqual([2])
+
+    await wrapper.setProps({ draft: { ...draft, blocked_keywords: ['regex:' + 'a'.repeat(1994)] } })
+    expect(wrapper.getComponent(KeywordEditor).props('error')).toBe('')
+    expect(wrapper.text()).toContain('admin.promptAudit.policy.keywordRegexHint')
+    await wrapper.setProps({ draft: { ...draft, blocked_keywords: ['regex:' + 'a'.repeat(1995)] } })
+    expect(wrapper.getComponent(KeywordEditor).props('error')).toContain('prompt_audit_keyword_regex_too_long')
+    await wrapper.setProps({ draft: { ...draft, blocked_keywords: ['a'.repeat(201)] } })
+    expect(wrapper.getComponent(KeywordEditor).props('error')).toContain('prompt_audit_keyword_too_long')
   })
 
   it('normalizes keyword editor lines and exposes validation errors', async () => {

@@ -118,6 +118,12 @@ describe('Prompt Audit view model', () => {
     expect(draftFingerprint(changed)).not.toBe(draftFingerprint(original))
   })
 
+  it('saves regex case and 2000-character rules without folding literal namespaces', () => {
+    const longRule = 'regex:' + 'a'.repeat(1994)
+    const draft = configToDraft({ ...config(), blocked_keywords: [' Alpha ', 'alpha', 'regex:Alpha', 'regex:alpha', 'REGEX:Alpha', 'regex:Alpha', longRule] })
+    expect(buildUpdateRequest(draft).blocked_keywords).toEqual(['Alpha', 'regex:Alpha', 'regex:alpha', 'REGEX:Alpha', longRule])
+  })
+
   it('requires a valid explicit range and sends canonical ISO timestamps for filter deletion', () => {
     const filters = emptyEventFilters()
     expect(hasExplicitDeleteRange(filters)).toBe(false)

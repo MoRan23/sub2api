@@ -143,6 +143,7 @@ func registerPromptAuditRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 	{
 		promptAudit.GET("/config", h.Admin.PromptAudit.GetConfig)
 		promptAudit.PUT("/config", h.Admin.PromptAudit.UpdateConfig)
+		promptAudit.POST("/keyword-whitelist-identities", h.Admin.PromptAudit.ResolveKeywordWhitelistIdentities)
 		promptAudit.POST("/endpoints/probe", h.Admin.PromptAudit.ProbeEndpoint)
 		promptAudit.GET("/runtime", h.Admin.PromptAudit.GetRuntime)
 		promptAudit.GET("/events", h.Admin.PromptAudit.ListEvents)

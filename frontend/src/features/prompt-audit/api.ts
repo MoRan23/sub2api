@@ -14,10 +14,19 @@ import type {
   PromptAuditEndpointDraft,
   PromptKeywordUserOption,
   PromptKeywordKeyOption,
+  PromptKeywordWhitelistKey,
+  PromptKeywordWhitelistIdentity,
 } from './types'
 import { eventFilterPayload, eventQueryParams } from './viewModel'
 
 const basePath = '/admin/prompt-audit'
+
+export async function getKeywordWhitelistIdentities(keys: PromptKeywordWhitelistKey[]): Promise<PromptKeywordWhitelistIdentity[]> {
+  const { data } = await apiClient.post<{ items: PromptKeywordWhitelistIdentity[] }>(`${basePath}/keyword-whitelist-identities`, {
+    keys: keys.map(({ user_id, api_key_id }) => ({ user_id, api_key_id })),
+  })
+  return data.items.map(({ user_id, api_key_id, user_email, username, key_name, available }) => ({ user_id, api_key_id, user_email, username, key_name, available }))
+}
 
 export async function listKeywordWhitelistUsers(search: string, page = 1): Promise<PaginatedResponse<PromptKeywordUserOption>> {
   const { data } = await apiClient.get<PaginatedResponse<PromptKeywordUserOption>>('/admin/users', {

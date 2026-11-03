@@ -15,6 +15,7 @@ import (
 
 type PromptAdminService interface {
 	GetConfig() (PublicConfig, error)
+	ResolveKeywordWhitelistIdentities(context.Context, []KeywordWhitelistKey) ([]KeywordWhitelistIdentity, error)
 	SaveConfig(context.Context, UpdateConfigRequest, int64) (PublicConfig, error)
 	Probe(context.Context, ProbeRequest) ProbeResult
 	Runtime(context.Context) RuntimeSnapshot

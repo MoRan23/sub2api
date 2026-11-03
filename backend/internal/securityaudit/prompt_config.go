@@ -12,7 +12,6 @@ import (
 	"unicode/utf8"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/keywordmatcher"
 )
 
 const (
@@ -29,6 +28,7 @@ const (
 	DefaultPayloadTTL      = 30 * time.Minute
 	MaxBlockedKeywords     = 10000
 	MaxBlockedKeywordRunes = 200
+	MaxBlockedRegexRunes   = 2000
 )
 
 type SecretEncryptor interface {
@@ -129,7 +129,7 @@ type ActiveConfig struct {
 	UpdatedAt              time.Time
 	UpdatedBy              int64
 	ChangeSummary          string
-	keywordMatcher         *keywordmatcher.Matcher
+	keywordMatcher         *promptKeywordMatcher
 }
 
 type PublicEndpoint struct {
@@ -529,6 +529,10 @@ func PublicFromStorage(cfg storageConfig, riskControlEnabled bool, invalidTokenE
 }
 
 func ActiveFromStorage(cfg storageConfig, riskControlEnabled bool, encryptor SecretEncryptor) (ActiveConfig, error) {
+	matcher, err := newPromptKeywordMatcher(cfg.BlockedKeywords)
+	if err != nil {
+		return ActiveConfig{}, err
+	}
 	active := ActiveConfig{
 		RiskControlEnabled: riskControlEnabled, Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled,
 		BlockingLatestTurnOnly: cfg.BlockingLatestTurnOnly,
@@ -542,7 +546,7 @@ func ActiveFromStorage(cfg storageConfig, riskControlEnabled bool, encryptor Sec
 		GroupIDs: append([]int64(nil), cfg.GroupIDs...), ConfigVersion: cfg.ConfigVersion,
 		UpdatedAt: cfg.UpdatedAt, UpdatedBy: cfg.UpdatedBy, ChangeSummary: cfg.ChangeSummary,
 		Endpoints:      make([]ActiveEndpoint, 0, len(cfg.Endpoints)),
-		keywordMatcher: keywordmatcher.New(cfg.BlockedKeywords),
+		keywordMatcher: matcher,
 	}
 	for _, ep := range cfg.Endpoints {
 		token := ""
@@ -640,7 +644,10 @@ func canonicalBlockedKeywords(values []string) []string {
 		if keyword == "" {
 			continue
 		}
-		key := strings.ToLower(keyword)
+		key := "literal:" + strings.ToLower(keyword)
+		if strings.HasPrefix(keyword, promptKeywordRegexPrefix) {
+			key = "regex:" + keyword
+		}
 		if _, ok := seen[key]; ok {
 			continue
 		}
@@ -666,7 +673,13 @@ func validateBlockedKeywords(values []string) error {
 	if len(values) > MaxBlockedKeywords {
 		return infraerrors.BadRequest("prompt_audit_too_many_keywords", "提示词审计关键字数量超出允许范围")
 	}
-	for _, keyword := range values {
+	for index, keyword := range values {
+		if strings.HasPrefix(keyword, promptKeywordRegexPrefix) {
+			if _, err := compilePromptKeywordRegex(keyword, index); err != nil {
+				return err
+			}
+			continue
+		}
 		if utf8.RuneCountInString(keyword) > MaxBlockedKeywordRunes {
 			return infraerrors.BadRequest("prompt_audit_keyword_too_long", "提示词审计关键字长度超出允许范围")
 		}

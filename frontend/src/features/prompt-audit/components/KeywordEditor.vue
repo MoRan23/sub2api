@@ -21,6 +21,7 @@
 
 <script setup lang="ts">
 import { computed, ref, watch } from 'vue'
+import { normalizeKeywordRules } from '../keywordRules'
 
 const { label, placeholder = '', disabled = false, error = '', countLabel, limitLabel } = defineProps<{
   label: string
@@ -48,14 +49,7 @@ watch(keywords, (value) => {
 }, { deep: true })
 
 function normalizeLines(value: string): string[] {
-  const seen = new Set<string>()
-  return value.split(/\r?\n/).map((line) => line.trim()).filter((line) => {
-    if (!line) return false
-    const key = line.toLowerCase()
-    if (seen.has(key)) return false
-    seen.add(key)
-    return true
-  })
+  return normalizeKeywordRules(value.split(/\r?\n/))
 }
 
 function sameKeywords(left: string[], right: string[]): boolean {
