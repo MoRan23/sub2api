@@ -20,7 +20,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, ref, watch } from 'vue'
 
 const { label, placeholder = '', disabled = false, error = '', countLabel, limitLabel } = defineProps<{
   label: string
@@ -32,17 +32,33 @@ const { label, placeholder = '', disabled = false, error = '', countLabel, limit
 }>()
 
 const keywords = defineModel<string[]>({ required: true })
+const draftText = ref(keywords.value.join('\n'))
 const text = computed({
-  get: () => keywords.value.join('\n'),
+  get: () => draftText.value,
   set: (value: string) => {
-    const seen = new Set<string>()
-    keywords.value = value.split(/\r?\n/).map((line) => line.trim()).filter((line) => {
-      if (!line) return false
-      const key = line.toLowerCase()
-      if (seen.has(key)) return false
-      seen.add(key)
-      return true
-    })
+    draftText.value = value
+    const normalized = normalizeLines(value)
+    if (!sameKeywords(normalized, keywords.value)) keywords.value = normalized
   },
 })
+
+watch(keywords, (value) => {
+  // Preserve the editing draft when the parent echoes normalized keywords.
+  if (!sameKeywords(value, normalizeLines(draftText.value))) draftText.value = value.join('\n')
+}, { deep: true })
+
+function normalizeLines(value: string): string[] {
+  const seen = new Set<string>()
+  return value.split(/\r?\n/).map((line) => line.trim()).filter((line) => {
+    if (!line) return false
+    const key = line.toLowerCase()
+    if (seen.has(key)) return false
+    seen.add(key)
+    return true
+  })
+}
+
+function sameKeywords(left: string[], right: string[]): boolean {
+  return left.length === right.length && left.every((value, index) => value === right[index])
+}
 </script>

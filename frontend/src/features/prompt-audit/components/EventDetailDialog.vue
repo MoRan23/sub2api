@@ -23,6 +23,10 @@
             <dt class="text-gray-500">{{ t('admin.promptAudit.events.group') }}</dt><dd>{{ event.snapshot.group_name || '—' }}</dd>
             <dt class="text-gray-500">{{ t('admin.promptAudit.events.model') }}</dt><dd>{{ event.snapshot.model || '—' }}</dd>
             <dt class="text-gray-500">{{ t('admin.promptAudit.events.categories') }}</dt><dd>{{ formatCategories(event.categories) }}</dd>
+            <template v-if="event.matched_scanners.includes('keyword')">
+              <dt class="text-gray-500">{{ t('admin.promptAudit.keyword.matchedKeyword') }}</dt>
+              <dd class="whitespace-pre-wrap break-words" data-test="summary-matched-keyword">{{ event.matched_keyword || t('admin.promptAudit.keyword.notRecorded') }}</dd>
+            </template>
           </dl>
         </div>
 
@@ -51,6 +55,7 @@
               <dl class="mt-2 grid gap-1 text-xs text-gray-500 dark:text-dark-400 sm:grid-cols-2">
                 <div><dt class="inline text-gray-400">{{ t('admin.promptAudit.events.categories') }} · </dt><dd class="inline">{{ translateCategory(issue.category || issue.scanner_id) }}</dd></div>
                 <div><dt class="inline text-gray-400">{{ t('admin.promptAudit.events.score') }} · </dt><dd class="inline">{{ issue.score }}</dd></div>
+                <div v-if="issue.scanner_id === 'keyword'" class="sm:col-span-2"><dt class="inline text-gray-400">{{ t('admin.promptAudit.keyword.matchedKeyword') }} · </dt><dd class="inline whitespace-pre-wrap break-words" data-test="risk-matched-keyword">{{ event.matched_keyword || t('admin.promptAudit.keyword.notRecorded') }}</dd></div>
                 <div class="sm:col-span-2"><dt class="inline text-gray-400">{{ t('admin.promptAudit.events.evidence') }} · </dt><dd class="inline break-words">{{ issue.evidence ? translateEvidence(issue.evidence) : '—' }}</dd></div>
               </dl>
             </article>
@@ -132,6 +137,7 @@ function formatGuardReturn(event: PromptAuditEvent): string {
     matched_scanners: event.matched_scanners.map(translateCategory),
     scanner_scores: event.scanner_scores,
     scanner_evidence: evidence,
+    matched_keyword: event.matched_keyword,
     scanner_backend: event.scanner_backend,
     scanner_version: event.scanner_version,
     guard_endpoint_id: event.guard_endpoint_id,

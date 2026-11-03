@@ -32,7 +32,7 @@ export default {
       copyright_violation: 'Copyright infringement',
       jailbreak: 'Prompt injection or jailbreak attempt',
     },
-    keyword: { category: 'Keyword block', description: 'The prompt matched an administrator-configured keyword rule.', localPolicy: 'Local keyword policy' },
+    keyword: { category: 'Keyword block', description: 'The prompt matched an administrator-configured keyword rule.', localPolicy: 'Local keyword policy', matchedKeyword: 'Matched keyword', notRecorded: 'Not recorded' },
     runtime: {
       title: 'Runtime overview',
       description: 'Shows the configuration currently active on the server. Unsaved draft changes do not affect these values.',

@@ -15,6 +15,9 @@ func BuildIssueSummaries(result NormalizedResult) []IssueSummary {
 	for _, category := range resultCategories {
 		if category == "keyword" {
 			evidence := RedactPreview(result.ScannerEvidence[category], 160)
+			if result.ScannerBackend == "local-keyword" && result.PolicyID == "keyword-substring" && result.matchedKeyword != "" {
+				evidence = result.ScannerEvidence[category]
+			}
 			evidenceHash := strings.TrimPrefix(evidence, "sha256:")
 			if len(evidenceHash) != sha256.Size*2 {
 				digest := sha256.Sum256([]byte(evidence))

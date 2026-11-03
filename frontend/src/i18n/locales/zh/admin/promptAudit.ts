@@ -32,7 +32,7 @@ export default {
       copyright_violation: '版权侵权',
       jailbreak: '提示注入或越狱尝试',
     },
-    keyword: { category: '关键字拦截', description: '提示词命中管理员配置的关键字规则。', localPolicy: '本地关键字策略' },
+    keyword: { category: '关键字拦截', description: '提示词命中管理员配置的关键字规则。', localPolicy: '本地关键字策略', matchedKeyword: '命中的关键词', notRecorded: '未记录' },
     runtime: {
       title: '运行概览',
       description: '显示服务端当前生效状态；未保存的草稿不会改变这些数值。',

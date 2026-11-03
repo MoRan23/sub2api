@@ -114,8 +114,54 @@ func TestPromptServiceKeywordOnlyBlocksBeforeGuardAndScansAllPromptRoles(t *test
 	digest := sha256.Sum256([]byte("forbidden"))
 	require.Equal(t, "sha256:"+hex.EncodeToString(digest[:]), decision.Result.ScannerEvidence["keyword"], "evidence must be a hash, not plaintext")
 	require.NotContains(t, decision.Result.ScannerEvidence["keyword"], "forbidden")
+	require.Equal(t, "forbidden", decision.Result.matchedKeyword)
+	decisionJSON, err := json.Marshal(decision)
+	require.NoError(t, err)
+	require.NotContains(t, string(decisionJSON), "forbidden", "matched rule is internal to the audit persistence path")
 	require.Equal(t, int64(1), metrics.Snapshot().Blocked)
 	require.Equal(t, int64(1), metrics.Snapshot().KeywordBlocked)
+}
+
+func TestPromptServiceKeywordPreservesActualConfiguredMatch(t *testing.T) {
+	active, err := ActiveFromStorage(storageConfig{
+		KeywordBlockingEnabled: true,
+		BlockedKeywords:        []string{"First RULE", "second rule"},
+		KeywordAllGroups:       true,
+	}, true, prefixEncryptor{})
+	require.NoError(t, err)
+	service := &PromptService{config: &fakeConfigStore{active: true, cfg: active}}
+	decision, err := service.CheckKeyword(context.Background(), Request{
+		Protocol: "openai_chat_completions",
+		Body:     []byte(`{"messages":[{"role":"user","content":"SECOND RULE appears before first rule"}]}`),
+	})
+	require.NoError(t, err)
+	require.Equal(t, DecisionBlock, decision.Kind)
+	require.Equal(t, "First RULE", decision.Result.matchedKeyword, "retain the matching rule's original spelling and existing configuration priority")
+}
+
+func TestKeywordIssueSummaryPreservesOnlyTrustedLocalDigest(t *testing.T) {
+	const keyword = "KEYWORD_CANARY_PRIVATE_RULE"
+	digest := sha256.Sum256([]byte(strings.ToLower(keyword)))
+	evidence := "sha256:" + hex.EncodeToString(digest[:])
+	require.NotEqual(t, evidence, RedactPreview(evidence, 160), "fixture exercises digit redaction inside a hash")
+	result := NormalizedResult{
+		Categories: []string{"keyword"}, ScannerEvidence: map[string]string{"keyword": evidence},
+		ScannerBackend: "local-keyword", PolicyID: "keyword-substring", matchedKeyword: keyword,
+	}
+	summaries := BuildIssueSummaries(result)
+	require.Len(t, summaries, 1)
+	require.Equal(t, evidence, summaries[0].Evidence)
+	require.Equal(t, hex.EncodeToString(digest[:]), summaries[0].EvidenceHash)
+
+	for _, change := range []func(*NormalizedResult){
+		func(value *NormalizedResult) { value.ScannerBackend = "qwen3guard-openai" },
+		func(value *NormalizedResult) { value.PolicyID = "priority" },
+		func(value *NormalizedResult) { value.matchedKeyword = "" },
+	} {
+		untrusted := result
+		change(&untrusted)
+		require.Equal(t, RedactPreview(evidence, 160), BuildIssueSummaries(untrusted)[0].Evidence)
+	}
 }
 
 func TestPromptServiceKeywordPolicySkipsOutOfScopeAndNoTextAndFailsClosedOnInvalidJSON(t *testing.T) {

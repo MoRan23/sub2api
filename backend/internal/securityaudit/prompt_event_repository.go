@@ -352,9 +352,18 @@ func scanEvent(row rowScanner, withFullPrompt ...bool) (*Event, error) {
 	_ = json.Unmarshal(matched, &event.MatchedScanners)
 	_ = json.Unmarshal(scores, &event.ScannerScores)
 	_ = json.Unmarshal(evidence, &event.ScannerEvidence)
+	var matchedKeyword string
+	if event.ScannerBackend == "local-keyword" && event.PolicyID == "keyword-substring" {
+		matchedKeyword = event.ScannerEvidence[matchedKeywordEvidenceKey]
+		if len(withFullPrompt) > 0 && withFullPrompt[0] {
+			event.MatchedKeyword = matchedKeyword
+		}
+	}
+	delete(event.ScannerEvidence, matchedKeywordEvidenceKey)
 	result := NormalizedResult{Decision: event.Decision, RiskLevel: event.RiskLevel, Action: event.Action,
 		Categories: event.Categories, MatchedScanners: event.MatchedScanners, ScannerScores: event.ScannerScores,
-		ScannerEvidence: event.ScannerEvidence}
+		ScannerEvidence: event.ScannerEvidence, ScannerBackend: event.ScannerBackend,
+		PolicyID: event.PolicyID, matchedKeyword: matchedKeyword}
 	event.IssueSummaries = BuildIssueSummaries(result)
 	return event, nil
 }

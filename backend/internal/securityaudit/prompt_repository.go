@@ -13,6 +13,9 @@ import (
 const (
 	promptAuditAdmissionLockKey int64 = 579147893221901921
 	promptAuditConfigLockKey    int64 = 579147893221901922
+	// Reserved storage-only evidence key. It is exposed through matched_keyword
+	// exclusively on administrator event detail reads.
+	matchedKeywordEvidenceKey = "_matched_keyword"
 )
 
 var (
@@ -51,6 +54,7 @@ type Event struct {
 	MatchedScanners []string           `json:"matched_scanners"`
 	ScannerScores   map[string]float64 `json:"scanner_scores"`
 	ScannerEvidence map[string]string  `json:"scanner_evidence"`
+	MatchedKeyword  string             `json:"matched_keyword,omitempty"`
 	ScannerBackend  string             `json:"scanner_backend"`
 	ScannerVersion  string             `json:"scanner_version"`
 	GuardEndpointID string             `json:"guard_endpoint_id"`
@@ -338,9 +342,24 @@ func insertEvent(ctx context.Context, queryer sqlQueryer, jobID int64, snapshot 
 	categories, _ := json.Marshal(result.Categories)
 	matched, _ := json.Marshal(result.MatchedScanners)
 	scores, _ := json.Marshal(result.ScannerScores)
+	localKeyword := result.ScannerBackend == "local-keyword" && result.PolicyID == "keyword-substring" && result.matchedKeyword != ""
 	evidence := make(map[string]string, len(result.ScannerEvidence))
 	for key, value := range result.ScannerEvidence {
-		evidence[key] = RedactPreview(value, 160)
+		if key == matchedKeywordEvidenceKey {
+			continue
+		}
+		if localKeyword && key == "keyword" {
+			// The locally generated digest is not prompt text. Redacting digit
+			// sequences as phone numbers would corrupt its identity.
+			evidence[key] = value
+		} else {
+			evidence[key] = RedactPreview(value, 160)
+		}
+	}
+	if localKeyword {
+		// Preserve the exact configured keyword, including rules beyond the
+		// preview's 160-rune limit and rules resembling redacted sensitive data.
+		evidence[matchedKeywordEvidenceKey] = result.matchedKeyword
 	}
 	evidenceJSON, _ := json.Marshal(evidence)
 	row := queryer.QueryRowContext(ctx, `

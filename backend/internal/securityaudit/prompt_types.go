@@ -138,6 +138,11 @@ type NormalizedResult struct {
 	ChunkTotal        int                `json:"chunk_total"`
 	LatencyMS         int                `json:"latency_ms"`
 	UnknownCategories []string           `json:"unknown_categories,omitempty"`
+
+	// matchedKeyword is the configured rule that actually blocked the request.
+	// It is persisted for administrator detail reads, never serialized with the
+	// gateway decision or substituted for redacted scanner evidence.
+	matchedKeyword string
 }
 
 type PromptDecision struct {

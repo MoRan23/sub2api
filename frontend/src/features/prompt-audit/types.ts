@@ -194,6 +194,7 @@ export interface PromptAuditEvent {
   matched_scanners: string[]
   scanner_scores: Record<string, number>
   scanner_evidence: Record<string, string>
+  matched_keyword?: string
   scanner_backend: string
   scanner_version: string
   guard_endpoint_id: string

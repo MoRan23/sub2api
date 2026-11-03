@@ -295,6 +295,90 @@ func TestPromptAuditRepositoryAdmissionClaimFencingAndEventTransaction(t *testin
 	require.Equal(t, "failed", status)
 }
 
+func TestPromptAuditKeywordEvidencePersistsOnlyInAdminDetails(t *testing.T) {
+	db := openPromptAuditIntegrationDB(t)
+	repo := NewPostgreSQLRepository(db)
+	ctx := context.Background()
+	for index, keyword := range []string{
+		"KEYWORD_CANARY_PRIVATE_RULE",
+		strings.Repeat("关键词", 64) + "RULECase", // Exactly the configured 200-rune limit.
+	} {
+		t.Run(fmt.Sprintf("rule-%d", index), func(t *testing.T) {
+			active, err := ActiveFromStorage(storageConfig{
+				KeywordBlockingEnabled: true, BlockedKeywords: []string{keyword}, KeywordAllGroups: true, ConfigVersion: 7,
+			}, true, prefixEncryptor{})
+			require.NoError(t, err)
+			config := &fakeConfigStore{active: true, cfg: active}
+			service := &PromptService{config: config, repo: repo}
+			request := Request{
+				RequestID: fmt.Sprintf("keyword-%d", index), Protocol: "openai_chat_completions",
+				Body: []byte(`{"messages":[{"role":"user","content":"` + strings.ToLower(keyword) + `"}]}`),
+			}
+			decision, err := service.CheckKeyword(ctx, request)
+			require.NoError(t, err)
+			require.Equal(t, DecisionBlock, decision.Kind)
+
+			// Rule changes must never rewrite the meaning of historical evidence.
+			config.cfg = ActiveConfig{}
+			page, err := repo.ListEvents(ctx, EventFilter{RequestID: request.RequestID}, 1, 20)
+			require.NoError(t, err)
+			require.Len(t, page.Items, 1)
+			event := page.Items[0]
+			require.Empty(t, event.MatchedKeyword)
+			require.NotContains(t, event.ScannerEvidence, matchedKeywordEvidenceKey)
+			listJSON, err := json.Marshal(event)
+			require.NoError(t, err)
+			require.NotContains(t, string(listJSON), keyword)
+			require.NotContains(t, string(listJSON), `"matched_keyword"`)
+
+			detail, err := repo.GetEvent(ctx, event.ID)
+			require.NoError(t, err)
+			require.Equal(t, keyword, detail.MatchedKeyword)
+			require.Equal(t, decision.Result.ScannerEvidence, detail.ScannerEvidence)
+			require.Len(t, detail.IssueSummaries, 1)
+			require.Equal(t, decision.Result.ScannerEvidence["keyword"], detail.IssueSummaries[0].Evidence)
+			var storedKeyword string
+			require.NoError(t, db.QueryRowContext(ctx, `SELECT scanner_evidence->>$2::text FROM prompt_audit_events WHERE id=$1`, event.ID, matchedKeywordEvidenceKey).Scan(&storedKeyword))
+			require.Equal(t, keyword, storedKeyword)
+
+			// Existing rows have only the digest and must not acquire a guessed rule.
+			_, err = db.ExecContext(ctx, `UPDATE prompt_audit_events SET scanner_evidence = scanner_evidence - $2::text WHERE id=$1`, event.ID, matchedKeywordEvidenceKey)
+			require.NoError(t, err)
+			legacy, err := repo.GetEvent(ctx, event.ID)
+			require.NoError(t, err)
+			require.Empty(t, legacy.MatchedKeyword)
+			require.Equal(t, detail.ScannerEvidence, legacy.ScannerEvidence)
+			legacyJSON, err := json.Marshal(legacy)
+			require.NoError(t, err)
+			require.NotContains(t, string(legacyJSON), `"matched_keyword"`)
+		})
+	}
+}
+
+func TestPromptAuditKeywordEvidenceRejectsGuardReservedKey(t *testing.T) {
+	db := openPromptAuditIntegrationDB(t)
+	repo := NewPostgreSQLRepository(db)
+	ctx := context.Background()
+	result := integrationResult(EventCritical)
+	result.ScannerEvidence[matchedKeywordEvidenceKey] = "forged rule from guard"
+	result.matchedKeyword = "not a local rule"
+	event, err := repo.RecordBlocking(ctx, integrationSnapshot("guard-reserved"), 1, result, false)
+	require.NoError(t, err)
+	require.Empty(t, event.MatchedKeyword)
+	require.NotContains(t, event.ScannerEvidence, matchedKeywordEvidenceKey)
+	var storedReservedKey bool
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT scanner_evidence ? $2 FROM prompt_audit_events WHERE id=$1`, event.ID, matchedKeywordEvidenceKey).Scan(&storedReservedKey))
+	require.False(t, storedReservedKey)
+
+	// Even a malformed historical Guard row is never interpreted as a local hit.
+	_, err = db.ExecContext(ctx, `UPDATE prompt_audit_events SET scanner_evidence = scanner_evidence || jsonb_build_object($2::text, 'forged rule') WHERE id=$1`, event.ID, matchedKeywordEvidenceKey)
+	require.NoError(t, err)
+	detail, err := repo.GetEvent(ctx, event.ID)
+	require.NoError(t, err)
+	require.Empty(t, detail.MatchedKeyword)
+	require.NotContains(t, detail.ScannerEvidence, matchedKeywordEvidenceKey)
+}
+
 func TestPromptAuditRepositoryForeignKeysFiltersAndStableIdentitySnapshots(t *testing.T) {
 	db := openPromptAuditIntegrationDB(t)
 	repo := NewPostgreSQLRepository(db)
