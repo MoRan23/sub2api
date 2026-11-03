@@ -6,10 +6,13 @@ import (
 	"context"
 	"encoding/json"
 	"io"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -145,5 +148,110 @@ func TestCodexEngineHandlerDoesNotReplayOrAppendBusinessError(t *testing.T) {
 			require.Equal(t, tc.contentType, rec.Header().Get("Content-Type"))
 			require.Equal(t, tc.wire, rec.Body.String(), "the original error must not be replaced by fallback success or appended SSE")
 		})
+	}
+}
+
+type codexEngineTransportTestUpstream struct {
+	service.HTTPUpstream
+	client   *http.Client
+	target   string
+	err      error
+	accounts []int64
+}
+
+// Real refused dials can enter the shared transport helper's persistent
+// cooldown path. Support that repository write in this in-memory fixture.
+func (r openAIImagesFailoverAccountRepo) SetTempUnschedulable(_ context.Context, id int64, until time.Time, reason string) error {
+	for i := range r.accounts {
+		if r.accounts[i].ID == id {
+			r.accounts[i].TempUnschedulableUntil = &until
+			r.accounts[i].TempUnschedulableReason = reason
+			return nil
+		}
+	}
+	return service.ErrNoAvailableAccounts
+}
+
+func (u *codexEngineTransportTestUpstream) Do(req *http.Request, _ string, accountID int64, _ int) (*http.Response, error) {
+	u.accounts = append(u.accounts, accountID)
+	if accountID == 2 {
+		return astra200(), nil
+	}
+	if u.err != nil {
+		return nil, u.err
+	}
+	clone := req.Clone(req.Context())
+	clone.URL.Scheme, clone.URL.Host = "http", u.target
+	return u.client.Do(clone)
+}
+
+func TestCodexEngineHandlerDoesNotReplayAcceptedTransportFailure(t *testing.T) {
+	var requests atomic.Int64
+	received := make(chan string, 1)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		requests.Add(1)
+		data, err := io.ReadAll(r.Body)
+		if err == nil {
+			select {
+			case received <- string(data):
+			default:
+			}
+		}
+		// Engine has consumed the complete request, but the response headers are lost.
+		conn, _, hijackErr := w.(http.Hijacker).Hijack()
+		if hijackErr == nil {
+			_ = conn.Close()
+		}
+	}))
+	defer server.Close()
+	client := &http.Client{Transport: &http.Transport{DisableKeepAlives: true}, Timeout: 5 * time.Second}
+	defer client.CloseIdleConnections()
+	upstream := &codexEngineTransportTestUpstream{client: client, target: strings.TrimPrefix(server.URL, "http://")}
+	h := newOpenAIResponsesFailoverTestHandler(t, upstream, configureEngineTransportTestAccounts)
+	c, rec := newAstraProFailoverContext(t, astraProRequestBody)
+	h.Responses(c)
+	require.Equal(t, []int64{1}, upstream.accounts, "an accepted request must not be retried on account 2")
+	require.Equal(t, int64(1), requests.Load())
+	select {
+	case body := <-received:
+		require.Equal(t, astraProRequestBody, body)
+	case <-time.After(3 * time.Second):
+		t.Fatal("Engine did not receive the complete request")
+	}
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+	raw, exists := c.Get(service.OpsUpstreamErrorsKey)
+	require.True(t, exists)
+	require.Len(t, raw.([]*service.OpsUpstreamErrorEvent), 1)
+}
+
+func TestCodexEngineHandlerStillFailsOverConfirmedDialFailure(t *testing.T) {
+	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	require.NoError(t, err)
+	target := listener.Addr().String()
+	require.NoError(t, listener.Close())
+	client := &http.Client{Transport: &http.Transport{}, Timeout: 5 * time.Second}
+	defer client.CloseIdleConnections()
+	upstream := &codexEngineTransportTestUpstream{client: client, target: target}
+	h := newOpenAIResponsesFailoverTestHandler(t, upstream, configureEngineTransportTestAccounts)
+	c, rec := newAstraProFailoverContext(t, astraProRequestBody)
+	h.Responses(c)
+	require.Equal(t, []int64{1, 2}, upstream.accounts, "response: %s", rec.Body.String())
+	require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+}
+
+func TestCodexEngineHandlerDoesNotReplayUntracedEOF(t *testing.T) {
+	upstream := &codexEngineTransportTestUpstream{err: io.EOF}
+	h := newOpenAIResponsesFailoverTestHandler(t, upstream, configureEngineTransportTestAccounts)
+	c, rec := newAstraProFailoverContext(t, astraProRequestBody)
+	h.Responses(c)
+	require.Equal(t, []int64{1}, upstream.accounts)
+	require.Equal(t, http.StatusBadGateway, rec.Code)
+}
+
+func configureEngineTransportTestAccounts(accounts []service.Account) {
+	for i := range accounts {
+		accounts[i].Type = service.AccountTypeAPIKey
+		accounts[i].Credentials = map[string]any{"api_key": "engine", "base_url": "https://engine.example", "pool_mode": true, "pool_mode_retry_count": 3}
+		accounts[i].Extra = map[string]any{service.OpenAIAPIKeyModeExtraKey: "codex_engine"}
 	}
 }

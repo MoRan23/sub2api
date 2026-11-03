@@ -361,6 +361,8 @@ func (s *OpenAIGatewayService) forwardCodexEngine(ctx context.Context, c *gin.Co
 		// start a fresh upstream request for a caller that has already gone away.
 		return nil, downstreamCtx.Err()
 	}
+	attempt := &codexEngineTransportAttempt{}
+	req = attempt.traceRequest(req)
 	resp, err := s.httpUpstream.Do(req, proxy, account.ID, account.Concurrency)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(start).Milliseconds())
 	if err != nil {
@@ -372,7 +374,7 @@ func (s *OpenAIGatewayService) forwardCodexEngine(ctx context.Context, c *gin.Co
 			recordCodexEngineUsageDrainTimeout(c, account, nil)
 			return nil, errCodexEngineUsageDrainTimeout
 		}
-		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
+		return nil, s.handleCodexEngineTransportError(ctx, c, account, err, attempt)
 	}
 	defer resp.Body.Close()
 	result := &OpenAIForwardResult{Model: model, BillingModel: billingModel, UpstreamModel: upstreamModel, UpstreamEndpoint: endpoint, ImageEndpoint: imageRequest,
@@ -499,6 +501,7 @@ func observeCodexEnginePayload(result *OpenAIForwardResult, data []byte, event s
 	if count := extractOpenAIImagesBillableCountFromJSONBytes(data); count > result.ImageCount {
 		result.ImageCount = count
 	}
+	observeCodexEngineUsageFinality(result, data, event)
 }
 
 // Relay complete SSE frames without rewriting their bytes. A separate reader

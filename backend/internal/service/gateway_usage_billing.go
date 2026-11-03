@@ -79,6 +79,7 @@ type postUsageBillingParams struct {
 	Account               *Account
 	Subscription          *UserSubscription
 	RequestPayloadHash    string
+	engineUsageReceipt    *codexEngineUsageReceipt
 	IsSubscriptionBill    bool
 	AccountRateMultiplier float64
 	APIKeyService         APIKeyQuotaUpdater
@@ -90,6 +91,7 @@ type postUsageBillingParams struct {
 }
 
 var ErrSimpleModeKeyRateLimitBillingUnavailable = errors.New("simple mode api key rate-limit billing unavailable")
+var ErrCodexEngineUsageBillingUnavailable = errors.New("codex engine receipt billing requires transactional storage")
 
 func simpleModeKeyRateLimitBillingEnabled(cfg *config.Config, apiKey *APIKey) bool {
 	return cfg != nil && cfg.RunMode == config.RunModeSimple && cfg.SimpleModeKeyRateLimitEnabled && apiKey != nil && apiKey.HasRateLimits()
@@ -299,6 +301,9 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 		AccountType:        p.Account.Type,
 		RequestPayloadHash: strings.TrimSpace(p.RequestPayloadHash),
 	}
+	if receipt := p.engineUsageReceipt; receipt != nil && p.Account.IsCodexEngine() && receipt.requestID == requestID {
+		cmd.RequestFingerprint = receipt.fingerprint
+	}
 	if usageLog != nil {
 		cmd.Model = usageLog.Model
 		cmd.BillingType = usageLog.BillingType
@@ -360,6 +365,9 @@ func applyUsageBilling(ctx context.Context, requestID string, usageLog *UsageLog
 
 	cmd := buildUsageBillingCommand(requestID, usageLog, p)
 	if cmd == nil || cmd.RequestID == "" || repo == nil {
+		if p.engineUsageReceipt != nil {
+			return false, ErrCodexEngineUsageBillingUnavailable
+		}
 		if p.SimpleModeKeyRateLimitOnly {
 			return false, ErrSimpleModeKeyRateLimitBillingUnavailable
 		}

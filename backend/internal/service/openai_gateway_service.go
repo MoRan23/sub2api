@@ -276,11 +276,17 @@ type OpenAIForwardResult struct {
 	// UpstreamTerminalEvent is the normalized terminal event observed on an
 	// upstream Responses WebSocket turn. Empty preserves legacy/non-WS success.
 	UpstreamTerminalEvent string
-	ResponseHeaders       http.Header
-	Duration              time.Duration
-	FirstTokenMs          *int
-	ClientDisconnect      bool
-	ImageCount            int
+	// Engine receipts can be claimed only after authoritative terminal usage,
+	// never from receipt headers alone or intermediate stream counters.
+	CodexEngineUsageFinalized       bool
+	codexEngineUsageChatObserved    bool
+	codexEngineUsageMessageObserved bool
+	codexEngineReceiptUsage         OpenAIUsage
+	ResponseHeaders                 http.Header
+	Duration                        time.Duration
+	FirstTokenMs                    *int
+	ClientDisconnect                bool
+	ImageCount                      int
 	// ImageEndpoint 标记请求来自专用图片端点；分组 image_count_billing 开关
 	// 只对这类请求生效，混合 Responses/Chat/WS 请求仍按 token 计费。
 	ImageEndpoint      bool
