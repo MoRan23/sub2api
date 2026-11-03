@@ -12,8 +12,8 @@
             <label class="block text-sm font-medium">{{ t('attribution.service') }}<input v-model="config.base_url" type="url" class="input mt-2 w-full" placeholder="http://lm-detector:8080" data-testid="attribution-url" @input="clearConnection" /></label>
             <button type="button" class="btn btn-secondary btn-sm" :disabled="connecting || !config.base_url" @click="connect">{{ connecting ? t('attribution.loading') : t('attribution.connect') }}</button>
             <p v-if="candidates.length" class="break-all text-xs text-gray-500">{{ t('attribution.candidates') }}: {{ candidates.join(', ') }}</p>
-            <p class="text-xs" data-testid="detector-connection">{{ t(connected ? 'attribution.connected' : 'attribution.connectionRequired') }}</p>
-            <p v-if="config.detector" class="break-all text-xs text-gray-500" data-testid="detector-version">{{ t('attribution.detectorVersion') }}: {{ config.detector.revision.slice(0, 12) }} · {{ config.detector.bank_built_at }}</p>
+            <p class="text-xs" data-testid="detector-connection">{{ t(connected ? 'attribution.connected' : 'attribution.connectionUnchecked') }}</p>
+            <p v-if="config.detector" class="break-all text-xs text-gray-500" data-testid="detector-version">{{ t('attribution.detectorObservedVersion') }}: {{ config.detector.revision.slice(0, 12) }} · {{ config.detector.bank_built_at }}</p>
             <AttributionPolicyFields ref="defaultFields" v-model="config.default" :candidates="candidates" :groups="groups" />
             <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('attribution.mappingHelp') }}</p>
             <div class="space-y-3 border-t border-gray-200 pt-4 dark:border-dark-600" data-testid="global-group-priority">
@@ -127,7 +127,6 @@ async function save() {
   if (expectedLists.some(models => !validAttributionExpectedModels(models))) { error.value = t('attribution.invalidExpectedModels'); return }
   if (initialModels.some(m => !m || m.length > 200 || /[\s*]/.test(m))) { error.value = t('attribution.newAccount.invalid'); return }
   if (config.value.enabled && (!/^https?:\/\//.test(config.value.base_url) || !validPolicy(config.value.default) || config.value.groups.some(g => g.enabled && !validPolicy(g)))) { error.value = t('attribution.invalid'); return }
-  if (config.value.enabled && !config.value.detector) { error.value = t('attribution.connectionRequired'); return }
   saving.value = true
   try { config.value = await attributionAPI.save(config.value); message.value = t('attribution.saved') }
   catch (e) { error.value = e && typeof e === 'object' && 'status' in e && e.status === 409 ? t('attribution.conflict') : t('attribution.error') }

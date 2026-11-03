@@ -218,7 +218,15 @@ func (s *ModelAttributionService) execute(parent context.Context, j *Attribution
 		j.Reason = safeAttributionAnalyzerError(err)
 		return
 	}
-	if !SameAttributionDetector(detector, j.Snapshot.Detector) || !SameAttributionDetector(detector, c.Detector) {
+	if j.Snapshot.Version >= 6 && j.Checkpoint == nil {
+		// New rounds discover the live detector themselves. Once challenges have
+		// been checkpointed, a resumed round must keep that exact identity.
+		if j.Result.CompletedProbes != 0 || j.Result.Retries != 0 || len(j.Result.Usage) != 0 {
+			j.Status, j.Reason = "failed", "checkpoint_invalid"
+			return
+		}
+		j.Snapshot.Detector = detector
+	} else if !SameAttributionDetector(detector, j.Snapshot.Detector) || j.Snapshot.Version < 6 && !SameAttributionDetector(detector, c.Detector) {
 		j.Reason = "detector_version_changed"
 		return
 	}
@@ -532,18 +540,16 @@ func (s *ModelAttributionService) SaveConfig(ctx context.Context, c AttributionC
 	if c.Version != previous.Version {
 		return c, ErrAttributionConflict
 	}
-	if !c.Enabled && c.BaseURL == previous.BaseURL && (c.Detector == nil || SameAttributionDetector(c.Detector, previous.Detector)) {
-		// Disabling must remain possible during an analyzer outage.
+	if !c.Enabled && c.BaseURL == previous.BaseURL {
+		// Disabling must remain immediate even during an analyzer outage.
 		c.Detector = previous.Detector
 	} else if c.BaseURL != "" {
 		connection, err := s.Connection(ctx, c.BaseURL)
 		if err != nil {
 			return c, err
 		}
-		// The administrator must first inspect the connection's advertised version.
-		if !SameAttributionDetector(c.Detector, connection.Detector) {
-			return c, ErrAttributionInvalid
-		}
+		// The server verifies the live identity; a separate connection check or
+		// administrator approval of this version is not required.
 		c.Detector = connection.Detector
 	} else {
 		c.Detector = nil

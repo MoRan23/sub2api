@@ -401,7 +401,7 @@ type AttributionDetector struct {
 }
 
 func (d *AttributionDetector) Valid() bool {
-	if d == nil || d.Provider != "lm_fingerprint_detector" || d.Protocol != 1 || d.Algorithm != "shared-detector-v1" {
+	if d == nil || d.Provider != "lm_fingerprint_detector" || d.Protocol != 1 || (d.Algorithm != "shared-detector-v1" && d.Algorithm != "shared-detector-v2") {
 		return false
 	}
 	for _, item := range []struct {

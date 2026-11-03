@@ -168,7 +168,7 @@ func ValidateAttributionAnalysis(a *AttributionAnalysis, expected []string, mode
 	if a.ProbabilityStatus != "reference_calibrated" {
 		return errors.New("detector_calibration_unavailable")
 	}
-	if a.Method != "shared-detector-v1" || !a.Detector.Valid() {
+	if !a.Detector.Valid() || a.Method != a.Detector.Algorithm {
 		return errors.New("detector_identity_invalid")
 	}
 	known := map[string]bool{}
@@ -223,7 +223,7 @@ func attributionSafeAnalysis(a *AttributionAnalysis, models []string) *Attributi
 	if a == nil || len(a.Results) > 1000 || len(a.Diagnostics) > 3 || a.UsedOutputs < 0 || a.UsedOutputs > 3 || a.Probability != nil && !validAttributionProbability(a.Probability) || !finiteAttributionScore(a.RankingScore) || !a.Detector.Valid() {
 		return nil
 	}
-	if a.Method != "shared-detector-v1" || (a.ProbabilityStatus != "reference_calibrated" && a.ProbabilityStatus != "unavailable") {
+	if a.Method != a.Detector.Algorithm || (a.ProbabilityStatus != "reference_calibrated" && a.ProbabilityStatus != "unavailable") {
 		return nil
 	}
 	known := map[string]bool{}

@@ -349,7 +349,7 @@ func enqueueAttribution(ctx context.Context, tx *sql.Tx, id int64, c service.Att
 	if a == nil {
 		return nil, service.ErrAttributionNotFound
 	}
-	s.Version = 5
+	s.Version = 6
 	if source == "manual" && a.IsOpenAIApiKey() {
 		allowed := a.IsOpenAIAPIKeyAutoAttributionEnabled()
 		s.ManualResultUpdatesAllowed = &allowed
@@ -579,6 +579,34 @@ func (r *attributionRepository) saveCheckpoint(ctx context.Context, j *service.A
 	if err != nil || !owned {
 		return false, err
 	}
+	if j.Snapshot.Version >= 6 {
+		if !j.Snapshot.Detector.Valid() {
+			return false, service.ErrAttributionInvalid
+		}
+		var firstCheckpoint bool
+		var storedDetectorJSON []byte
+		if err = tx.QueryRowContext(ctx, `SELECT checkpoint IS NULL,snapshot->'detector' FROM model_attribution_jobs WHERE id=$1`, j.ID).Scan(&firstCheckpoint, &storedDetectorJSON); err != nil {
+			return false, err
+		}
+		var storedDetector *service.AttributionDetector
+		if len(storedDetectorJSON) != 0 {
+			if err = json.Unmarshal(storedDetectorJSON, &storedDetector); err != nil {
+				return false, err
+			}
+		}
+		if !service.SameAttributionDetector(j.Snapshot.Detector, storedDetector) && (!firstCheckpoint || len(j.Checkpoint.Outputs) != 0 || j.Result.CompletedProbes != 0 || j.Result.Retries != 0) {
+			return false, service.ErrAttributionInvalid
+		}
+		detectorJSON, err := json.Marshal(j.Snapshot.Detector)
+		if err != nil {
+			return false, err
+		}
+		// Bind the live identity with the first challenge checkpoint under the
+		// same claim/transaction. Never replace the other frozen policy fields.
+		if _, err = tx.ExecContext(ctx, `UPDATE model_attribution_jobs SET snapshot=jsonb_set(snapshot,'{detector}',$2::jsonb) WHERE id=$1`, j.ID, detectorJSON); err != nil {
+			return false, err
+		}
+	}
 	if next == nil {
 		_, err = tx.ExecContext(ctx, `UPDATE model_attribution_jobs SET checkpoint=$3,result=$4 WHERE id=$1 AND claim_id=$2`, j.ID, j.Claim, checkpoint, result)
 	} else {
@@ -667,6 +695,12 @@ func (r *attributionRepository) finishAttempt(ctx context.Context, j *service.At
 		if j.Snapshot.Version >= 2 {
 			authorizationValid = validAttributionAuthorization(j.Snapshot, a, s, skip)
 			s.Version = j.Snapshot.Version
+			if j.Snapshot.Version >= 6 {
+				// Configuration retains the last connection metadata for display;
+				// the running round owns its detector identity. It still participates
+				// in the consecutive-pass digest below, independently of settings.
+				s.Detector = j.Snapshot.Detector
+			}
 			applyAttributionOverrides(&s, j.Snapshot.Overrides)
 			valid = authorizationValid && !modeChanged && !schedulingChanged && s.ConfigVersion == j.Snapshot.ConfigVersion &&
 				service.SameAttributionDetector(j.Snapshot.Detector, s.Detector) &&

@@ -1,0 +1,667 @@
+{
+  "source": "Vendored detector e9bd7c545bf75f35aa02aaf0878b36b89fe7dfa4; first three gpt-6-astra reference samples",
+  "models": [
+    "claude-haiku-4.5",
+    "claude-sonnet-4.6",
+    "claude-sonnet-5",
+    "claude-opus-4.6",
+    "claude-opus-4.7",
+    "claude-opus-4.8",
+    "claude-opus-5",
+    "claude-fable-5.1",
+    "claude-fable-5",
+    "gemini-2.5-pro",
+    "gemini-3.1-pro-preview",
+    "gemini-3.5-flash",
+    "gemini-3.6-flash",
+    "gemini-3.7-flash",
+    "gemini-3.8-flash",
+    "grok-4.5",
+    "grok-4.6",
+    "gpt-4o",
+    "glm-5.2",
+    "glm-5.3",
+    "qwen3.8-max-0902",
+    "qwen3.8-27b",
+    "kimi-k3",
+    "hy4-preview",
+    "muse-spark-1.2",
+    "muse-spark-1.3",
+    "kimi-k2.8-preview",
+    "grok-4.7",
+    "mimo-v2.5",
+    "mimo-v2.5-pro",
+    "mimo-v2.6-flash",
+    "mimo-v2.6-pro",
+    "step-5-preview",
+    "claude-opus-5.5",
+    "gpt-6-luna",
+    "glm-5.3-flashx",
+    "glm-5.3-flash",
+    "deepseek-v4.1-flash",
+    "deepseek-v4-flash",
+    "deepseek-v4-pro-0813",
+    "deepseek-v4-pro",
+    "deepseek-v4-flash-0731",
+    "deepseek-v3.2",
+    "gpt-6-sol",
+    "claude-sonnet-5.5",
+    "gpt-6-astra",
+    "gpt-5.4",
+    "gpt-5.5",
+    "gpt-5.6-sol",
+    "gpt-5.6-terra",
+    "gpt-5.6-luna",
+    "seed-2.0-mini",
+    "seed-2.0-lite",
+    "qwen3.8-omni-flash",
+    "seed-2.1-turbo",
+    "qwen3.8-flash",
+    "claude-haiku-5.5",
+    "muse-wonder",
+    "gemini-4-argon",
+    "deepseek-v4.1-flash-1017",
+    "kimi-k3.1-pro",
+    "gemini-3.5-flash-lite",
+    "minimax-m3.1-flash",
+    "gpt-6.1-terra",
+    "openpangu-2.0-flash",
+    "openpangu-2.0-pro"
+  ],
+  "analysis": {
+    "probability": 0.9999611849793368,
+    "probability_status": "reference_calibrated",
+    "used_outputs": 3,
+    "diagnostics": [
+      {
+        "index": 0,
+        "parsed_numbers": 228,
+        "minimum_numbers": 120,
+        "accepted": true,
+        "raw_out_of_range_count": 0
+      },
+      {
+        "index": 1,
+        "parsed_numbers": 233,
+        "minimum_numbers": 129,
+        "accepted": true,
+        "raw_out_of_range_count": 0
+      },
+      {
+        "index": 2,
+        "parsed_numbers": 247,
+        "minimum_numbers": 136,
+        "accepted": true,
+        "raw_out_of_range_count": 0
+      }
+    ],
+    "sequence": {
+      "autocorrelation": -0.5947639881269665,
+      "small_step_share": 0,
+      "model_like": true
+    },
+    "method": "shared-detector-v2",
+    "model_version": {
+      "base_sha256": "ae48f7c1832e118382b03da9b150fa333cabc5f91a74e722e0719caa48ff87c4"
+    },
+    "prediction": "gpt-6-astra",
+    "prediction_name": "gpt-6-astra/6.1-sol",
+    "family_prediction": "gpt",
+    "family_prediction_name": "GPT",
+    "results": [
+      {
+        "model": "gpt-6-astra",
+        "display_name": "gpt-6-astra/6.1-sol",
+        "family": "gpt",
+        "family_name": "GPT",
+        "score": 4.0622760460472955,
+        "probability": 0.9999611849793368
+      },
+      {
+        "model": "gpt-6-sol",
+        "display_name": "gpt-6-sol",
+        "family": "gpt",
+        "family_name": "GPT",
+        "score": 1.9048307426263142,
+        "probability": 0.000030287875001137677
+      },
+      {
+        "model": "gpt-6.1-terra",
+        "display_name": "gpt-6.1-terra",
+        "family": "gpt",
+        "family_name": "GPT",
+        "score": 1.507166990460208,
+        "probability": 0.000004450124746605519
+      },
+      {
+        "model": "gpt-5.6-sol",
+        "display_name": "gpt-5.6-sol",
+        "family": "gpt",
+        "family_name": "GPT",
+        "score": 1.1932441860572631,
+        "probability": 9.791942454826231e-7
+      },
+      {
+        "model": "deepseek-v4-flash-0731",
+        "display_name": "deepseek-v4-flash-0731",
+        "family": "deepseek",
+        "family_name": "DeepSeek",
+        "score": 1.1639546740971523,
+        "probability": 8.502031591997442e-7
+      },
+      {
+        "model": "deepseek-v4.1-flash-1017",
+        "display_name": "deepseek-v4.1-flash-1017",
+        "family": "deepseek",
+        "family_name": "DeepSeek",
+        "score": 1.084641715556911,
+        "probability": 5.799676091411346e-7
+      },
+      {
+        "model": "gpt-5.5",
+        "display_name": "gpt-5.5",
+        "family": "gpt",
+        "family_name": "GPT",
+        "score": 1.0801212735006536,
+        "probability": 5.674606983380751e-7
+      },
+      {
+        "model": "gpt-6-luna",
+        "display_name": "gpt-6-luna",
+        "family": "gpt",
+        "family_name": "GPT",
+        "score": 0.9117994751147207,
+        "probability": 2.519939190416408e-7
+      },
+      {
+        "model": "gpt-5.6-terra",
+        "display_name": "gpt-5.6-terra",
+        "family": "gpt",
+        "family_name": "GPT",
+        "score": 0.7987366219408325,
+        "probability": 1.460773189115443e-7
+      },
+      {
+        "model": "gpt-5.4",
+        "display_name": "gpt-5.4",
+        "family": "gpt",
+        "family_name": "GPT",
+        "score": 0.7346282958505916,
+        "probability": 1.0722832701077938e-7
+      },
+      {
+        "model": "deepseek-v4-pro-0813",
+        "display_name": "deepseek-v4-pro-0813",
+        "family": "deepseek",
+        "family_name": "DeepSeek",
+        "score": 0.7011586578154224,
+        "probability": 9.12448211338129e-8
+      },
+      {
+        "model": "step-5-preview",
+        "display_name": "step-5-preview",
+        "family": "step",
+        "family_name": "Step",
+        "score": 0.594076336117143,
+        "probability": 5.444111656007203e-8
+      },
+      {
+        "model": "gpt-5.6-luna",
+        "display_name": "gpt-5.6-luna",
+        "family": "gpt",
+        "family_name": "GPT",
+        "score": 0.5908438922166263,
+        "probability": 5.359900803531223e-8
+      },
+      {
+        "model": "grok-4.6",
+        "display_name": "grok-4.6",
+        "family": "grok",
+        "family_name": "Grok",
+        "score": 0.5860107329176124,
+        "probability": 5.236412162785311e-8
+      },
+      {
+        "model": "deepseek-v4.1-flash",
+        "display_name": "deepseek-v4.1-flash",
+        "family": "deepseek",
+        "family_name": "DeepSeek",
+        "score": 0.5568245092164839,
+        "probability": 4.548875173209818e-8
+      },
+      {
+        "model": "deepseek-v4-pro",
+        "display_name": "deepseek-v4-pro",
+        "family": "deepseek",
+        "family_name": "DeepSeek",
+        "score": 0.4728800166740602,
+        "probability": 3.034480939814968e-8
+      },
+      {
+        "model": "muse-spark-1.2",
+        "display_name": "muse-spark-1.2",
+        "family": "muse",
+        "family_name": "Muse",
+        "score": 0.43840740770085185,
+        "probability": 2.5696999192050352e-8
+      },
+      {
+        "model": "gemini-3.7-flash",
+        "display_name": "gemini-3.7-flash",
+        "family": "gemini",
+        "family_name": "Gemini",
+        "score": 0.4224198217538735,
+        "probability": 2.3790130182571766e-8
+      },
+      {
+        "model": "deepseek-v3.2",
+        "display_name": "deepseek-v3.2",
+        "family": "deepseek",
+        "family_name": "DeepSeek",
+        "score": 0.4142670719682522,
+        "probability": 2.287289263465072e-8
+      },
+      {
+        "model": "qwen3.8-omni-flash",
+        "display_name": "qwen3.8-omni-flash",
+        "family": "qwen",
+        "family_name": "Qwen",
+        "score": 0.39972329228168185,
+        "probability": 2.132355028259111e-8
+      },
+      {
+        "model": "openpangu-2.0-pro",
+        "display_name": "openpangu-2.0-pro",
+        "family": "openpangu",
+        "family_name": "openPangu",
+        "score": 0.3718136585145857,
+        "probability": 1.8638179767378073e-8
+      },
+      {
+        "model": "kimi-k2.8-preview",
+        "display_name": "kimi-k2.8-preview",
+        "family": "kimi",
+        "family_name": "Kimi",
+        "score": 0.35700350198160996,
+        "probability": 1.7353376921119284e-8
+      },
+      {
+        "model": "kimi-k3",
+        "display_name": "kimi-k3",
+        "family": "kimi",
+        "family_name": "Kimi",
+        "score": 0.3284995465450022,
+        "probability": 1.5124575350899788e-8
+      },
+      {
+        "model": "gemini-3.8-flash",
+        "display_name": "gemini-3.8-flash",
+        "family": "gemini",
+        "family_name": "Gemini",
+        "score": 0.31228738525620275,
+        "probability": 1.398708552019325e-8
+      },
+      {
+        "model": "deepseek-v4-flash",
+        "display_name": "deepseek-v4-flash",
+        "family": "deepseek",
+        "family_name": "DeepSeek",
+        "score": 0.2863335193988322,
+        "probability": 1.2341487795039518e-8
+      },
+      {
+        "model": "minimax-m3.1-flash",
+        "display_name": "minimax-m3.1-flash",
+        "family": "minimax",
+        "family_name": "MiniMax",
+        "score": 0.2288373009873065,
+        "probability": 9.352832364843911e-9
+      },
+      {
+        "model": "muse-spark-1.3",
+        "display_name": "muse-spark-1.3",
+        "family": "muse",
+        "family_name": "Muse",
+        "score": 0.21838959176766193,
+        "probability": 8.893253849363353e-9
+      },
+      {
+        "model": "gemini-4-argon",
+        "display_name": "gemini-4-argon",
+        "family": "gemini",
+        "family_name": "Gemini",
+        "score": 0.20989832618529308,
+        "probability": 8.536423429568526e-9
+      },
+      {
+        "model": "seed-2.1-turbo",
+        "display_name": "seed-2.1-turbo",
+        "family": "seed",
+        "family_name": "Seed",
+        "score": 0.2041560410424723,
+        "probability": 8.303264620717498e-9
+      },
+      {
+        "model": "qwen3.8-27b",
+        "display_name": "qwen3.8-27b",
+        "family": "qwen",
+        "family_name": "Qwen",
+        "score": 0.18884616594061399,
+        "probability": 7.71227904372981e-9
+      },
+      {
+        "model": "claude-opus-5.5",
+        "display_name": "claude-opus-5.5",
+        "family": "claude",
+        "family_name": "Claude",
+        "score": 0.18550513781354933,
+        "probability": 7.589008447337457e-9
+      },
+      {
+        "model": "mimo-v2.5-pro",
+        "display_name": "mimo-v2.5-pro",
+        "family": "mimo",
+        "family_name": "MiMo",
+        "score": 0.16865052884582935,
+        "probability": 6.9965426561583286e-9
+      },
+      {
+        "model": "kimi-k3.1-pro",
+        "display_name": "kimi-k3.1-pro",
+        "family": "kimi",
+        "family_name": "Kimi",
+        "score": 0.15635364328674994,
+        "probability": 6.593681604077619e-9
+      },
+      {
+        "model": "mimo-v2.6-flash",
+        "display_name": "mimo-v2.6-flash",
+        "family": "mimo",
+        "family_name": "MiMo",
+        "score": 0.12555699378788132,
+        "probability": 5.6836218171355584e-9
+      },
+      {
+        "model": "grok-4.5",
+        "display_name": "grok-4.5",
+        "family": "grok",
+        "family_name": "Grok",
+        "score": 0.11691084155760417,
+        "probability": 5.451500128242682e-9
+      },
+      {
+        "model": "qwen3.8-max-0902",
+        "display_name": "qwen3.8-max-0902",
+        "family": "qwen",
+        "family_name": "Qwen",
+        "score": 0.10456279979779477,
+        "probability": 5.1363353043753055e-9
+      },
+      {
+        "model": "openpangu-2.0-flash",
+        "display_name": "openpangu-2.0-flash",
+        "family": "openpangu",
+        "family_name": "openPangu",
+        "score": -0.026189691026382106,
+        "probability": 2.7339816746825064e-9
+      },
+      {
+        "model": "qwen3.8-flash",
+        "display_name": "qwen3.8-flash",
+        "family": "qwen",
+        "family_name": "Qwen",
+        "score": -0.0526570921186678,
+        "probability": 2.4063583416230487e-9
+      },
+      {
+        "model": "muse-wonder",
+        "display_name": "muse-wonder",
+        "family": "muse",
+        "family_name": "Muse",
+        "score": -0.11554977044061998,
+        "probability": 1.776778067957344e-9
+      },
+      {
+        "model": "claude-fable-5.1",
+        "display_name": "claude-fable-5.1",
+        "family": "claude",
+        "family_name": "Claude",
+        "score": -0.11618876623058973,
+        "probability": 1.7713110191005827e-9
+      },
+      {
+        "model": "gpt-4o",
+        "display_name": "gpt-4o",
+        "family": "gpt",
+        "family_name": "GPT",
+        "score": -0.1371209514332004,
+        "probability": 1.6012269631057703e-9
+      },
+      {
+        "model": "gemini-3.6-flash",
+        "display_name": "gemini-3.6-flash",
+        "family": "gemini",
+        "family_name": "Gemini",
+        "score": -0.14922589385864388,
+        "probability": 1.5104258177720725e-9
+      },
+      {
+        "model": "mimo-v2.5",
+        "display_name": "mimo-v2.5",
+        "family": "mimo",
+        "family_name": "MiMo",
+        "score": -0.2057327585587552,
+        "probability": 1.150130734049307e-9
+      },
+      {
+        "model": "mimo-v2.6-pro",
+        "display_name": "mimo-v2.6-pro",
+        "family": "mimo",
+        "family_name": "MiMo",
+        "score": -0.3218387815868767,
+        "probability": 6.570010982097381e-10
+      },
+      {
+        "model": "grok-4.7",
+        "display_name": "grok-4.7",
+        "family": "grok",
+        "family_name": "Grok",
+        "score": -0.39641770207383864,
+        "probability": 4.5852439087282744e-10
+      },
+      {
+        "model": "claude-sonnet-5.5",
+        "display_name": "claude-sonnet-5.5",
+        "family": "claude",
+        "family_name": "Claude",
+        "score": -0.4458199621110367,
+        "probability": 3.61318887965604e-10
+      },
+      {
+        "model": "glm-5.3-flash",
+        "display_name": "glm-5.3-flash",
+        "family": "glm",
+        "family_name": "GLM",
+        "score": -0.5037403881962501,
+        "probability": 2.7326109546891314e-10
+      },
+      {
+        "model": "seed-2.0-lite",
+        "display_name": "seed-2.0-lite",
+        "family": "seed",
+        "family_name": "Seed",
+        "score": -0.5632233065277601,
+        "probability": 2.0511260240648016e-10
+      },
+      {
+        "model": "claude-opus-4.6",
+        "display_name": "claude-opus-4.6",
+        "family": "claude",
+        "family_name": "Claude",
+        "score": -0.5763664721060322,
+        "probability": 1.9251488697995785e-10
+      },
+      {
+        "model": "glm-5.3-flashx",
+        "display_name": "glm-5.3-flashx",
+        "family": "glm",
+        "family_name": "GLM",
+        "score": -0.6107734939608571,
+        "probability": 1.6307961825541768e-10
+      },
+      {
+        "model": "glm-5.3",
+        "display_name": "glm-5.3",
+        "family": "glm",
+        "family_name": "GLM",
+        "score": -0.6134499436608294,
+        "probability": 1.6098815763970772e-10
+      },
+      {
+        "model": "claude-haiku-5.5",
+        "display_name": "claude-haiku-5.5",
+        "family": "claude",
+        "family_name": "Claude",
+        "score": -0.6206765159254332,
+        "probability": 1.5547410249014834e-10
+      },
+      {
+        "model": "gemini-3.1-pro-preview",
+        "display_name": "gemini-3.1-pro-preview",
+        "family": "gemini",
+        "family_name": "Gemini",
+        "score": -0.6249824508502574,
+        "probability": 1.5227877945552486e-10
+      },
+      {
+        "model": "gemini-3.5-flash-lite",
+        "display_name": "gemini-3.5-flash-lite",
+        "family": "gemini",
+        "family_name": "Gemini",
+        "score": -0.6304353670731117,
+        "probability": 1.4832637835494463e-10
+      },
+      {
+        "model": "claude-sonnet-4.6",
+        "display_name": "claude-sonnet-4.6",
+        "family": "claude",
+        "family_name": "Claude",
+        "score": -0.889819860251714,
+        "probability": 4.245649775784568e-11
+      },
+      {
+        "model": "gemini-3.5-flash",
+        "display_name": "gemini-3.5-flash",
+        "family": "gemini",
+        "family_name": "Gemini",
+        "score": -0.9421552592602769,
+        "probability": 3.2985950553218376e-11
+      },
+      {
+        "model": "glm-5.2",
+        "display_name": "glm-5.2",
+        "family": "glm",
+        "family_name": "GLM",
+        "score": -1.020312970288902,
+        "probability": 2.262714005001324e-11
+      },
+      {
+        "model": "claude-haiku-4.5",
+        "display_name": "claude-haiku-4.5",
+        "family": "claude",
+        "family_name": "Claude",
+        "score": -1.033888567135858,
+        "probability": 2.1193170031373747e-11
+      },
+      {
+        "model": "claude-fable-5",
+        "display_name": "claude-fable-5",
+        "family": "claude",
+        "family_name": "Claude",
+        "score": -1.122813650080314,
+        "probability": 1.380208180093776e-11
+      },
+      {
+        "model": "claude-sonnet-5",
+        "display_name": "claude-sonnet-5",
+        "family": "claude",
+        "family_name": "Claude",
+        "score": -1.2024918613534403,
+        "probability": 9.398544654743669e-12
+      },
+      {
+        "model": "seed-2.0-mini",
+        "display_name": "seed-2.0-mini",
+        "family": "seed",
+        "family_name": "Seed",
+        "score": -1.3312245746679097,
+        "probability": 5.051649544708868e-12
+      },
+      {
+        "model": "gemini-2.5-pro",
+        "display_name": "gemini-2.5-pro",
+        "family": "gemini",
+        "family_name": "Gemini",
+        "score": -1.3436031731416418,
+        "probability": 4.758899728788683e-12
+      },
+      {
+        "model": "hy4-preview",
+        "display_name": "hy4-preview",
+        "family": "hunyuan",
+        "family_name": "Hunyuan",
+        "score": -1.362592576696265,
+        "probability": 4.342439047810493e-12
+      },
+      {
+        "model": "claude-opus-4.8",
+        "display_name": "claude-opus-4.8",
+        "family": "claude",
+        "family_name": "Claude",
+        "score": -1.692607606641081,
+        "probability": 8.841493686492357e-13
+      },
+      {
+        "model": "claude-opus-5",
+        "display_name": "claude-opus-5",
+        "family": "claude",
+        "family_name": "Claude",
+        "score": -1.863636265607877,
+        "probability": 3.875345818651231e-13
+      },
+      {
+        "model": "claude-opus-4.7",
+        "display_name": "claude-opus-4.7",
+        "family": "claude",
+        "family_name": "Claude",
+        "score": -2.6660810697585173,
+        "probability": 8.083700632888545e-15
+      }
+    ],
+    "ranking_score": 4.0622760460472955,
+    "probability_scope": "reference-closed-set",
+    "calibration": {
+      "method": "ranking-temperature",
+      "run": ".training/20261103T120705208Z-4b673520/calibration",
+      "tau": 4.822705937547017,
+      "sha256": "a6c17cf62a4757264783e0f90a41a773da0f22f1a3bee3dd8ce6b0ecf224841f"
+    },
+    "evidence": {
+      "insufficient": true,
+      "label": "库内校准排名",
+      "reason": "置信度是参考库内的闭集相对概率，不包含库外模型。",
+      "threshold": null,
+      "method": "reference-calibrated-ranking"
+    },
+    "detector": {
+      "provider": "lm_fingerprint_detector",
+      "protocol": 1,
+      "revision": "e9bd7c545bf75f35aa02aaf0878b36b89fe7dfa4",
+      "algorithm": "shared-detector-v2",
+      "bank_built_at": "2026-11-03T12:06:39.864352+00:00",
+      "reference_sha256": "ce430f0de948c3f14da1143c693b4e4d69754169bb2856e766eb223cf5a4bacb",
+      "ranker_sha256": "ae48f7c1832e118382b03da9b150fa333cabc5f91a74e722e0719caa48ff87c4",
+      "calibration_sha256": "a6c17cf62a4757264783e0f90a41a773da0f22f1a3bee3dd8ce6b0ecf224841f"
+    }
+  }
+}

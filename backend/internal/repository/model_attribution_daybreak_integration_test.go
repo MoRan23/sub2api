@@ -36,7 +36,7 @@ func TestAttributionDaybreakPreferencesFreezeAtStartAndSurviveRetry(t *testing.T
 	r, ar, a := attributionFixture(t)
 	jobs, err := r.Enqueue(ctx, []int64{a.ID}, true)
 	require.NoError(t, err)
-	require.Equal(t, 5, jobs[0].Snapshot.Version)
+	require.Equal(t, 6, jobs[0].Snapshot.Version)
 	require.Nil(t, jobs[0].Snapshot.Daybreak, "queueing must not freeze preferences")
 	setAttributionDaybreakPreferences(t, a.ID, true, true)
 	j, err := r.Claim(ctx)
@@ -194,16 +194,29 @@ func TestAttributionDaybreakMalformedResumeDoesNotRefreeze(t *testing.T) {
 	require.Nil(t, j.Snapshot.Daybreak, "resuming incomplete evidence must not silently adopt current preferences")
 }
 
-func TestAttributionDaybreakNonOAuthPreferencesStayDisabled(t *testing.T) {
-	ctx := context.Background()
-	r, ar, _ := attributionFixture(t)
-	a := attributionAPIKeyAccount(t, ar)
-	setAttributionDaybreakPreferences(t, a.ID, true, true)
-	_, err := r.Enqueue(ctx, []int64{a.ID}, true)
-	require.NoError(t, err)
-	j, err := r.Claim(ctx)
-	require.NoError(t, err)
-	require.Equal(t, &service.DiagnosticDaybreakPreferences{}, j.Snapshot.Daybreak)
+func TestAttributionDaybreakAPIKeyPreferencesRespectMode(t *testing.T) {
+	for _, tc := range []struct {
+		mode string
+		want service.DiagnosticDaybreakPreferences
+	}{
+		{"generic", service.DiagnosticDaybreakPreferences{Blue: true, Red: true}},
+		{"codex_engine", service.DiagnosticDaybreakPreferences{}},
+	} {
+		t.Run(tc.mode, func(t *testing.T) {
+			ctx := context.Background()
+			r, ar, _ := attributionFixture(t)
+			a := attributionAPIKeyAccount(t, ar)
+			setAttributionDaybreakPreferences(t, a.ID, true, true)
+			_, err := integrationDB.ExecContext(ctx, `UPDATE accounts SET extra=extra||jsonb_build_object('openai_api_key_mode',$2::text) WHERE id=$1`, a.ID, tc.mode)
+			require.NoError(t, err)
+			_, err = r.Enqueue(ctx, []int64{a.ID}, true)
+			require.NoError(t, err)
+			j, err := r.Claim(ctx)
+			require.NoError(t, err)
+			require.NotNil(t, j)
+			require.Equal(t, &tc.want, j.Snapshot.Daybreak)
+		})
+	}
 }
 
 func TestAttributionDaybreakSharedCredentialsUseBusinessAccountPreferences(t *testing.T) {

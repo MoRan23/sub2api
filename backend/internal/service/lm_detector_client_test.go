@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"net/http"
 	"net/http/httptest"
+	"os"
 	"strings"
 	"testing"
 
@@ -38,26 +39,28 @@ func TestAttributionDetectorConfigVerification(t *testing.T) {
 	c.Enabled = true
 	c.Default.HighModels = []string{"high"}
 	c.Default.LowModels = []string{"low"}
-	_, err := s.SaveConfig(context.Background(), c)
-	require.ErrorIs(t, err, ErrAttributionInvalid, "must inspect and provide the verified version first")
+	saved, err := s.SaveConfig(context.Background(), c)
+	require.NoError(t, err, "saving resolves the live identity without a separate connection check")
+	require.Equal(t, detector, saved.Detector)
 	connection, err := s.Connection(context.Background(), server.URL)
 	require.NoError(t, err)
 	c.Detector = connection.Detector
-	saved, err := s.SaveConfig(context.Background(), c)
+	saved, err = s.SaveConfig(context.Background(), c)
 	require.NoError(t, err)
 	require.Equal(t, detector, saved.Detector)
-	oldRevision := saved.Detector.Revision
 	detector.Revision = strings.Repeat("f", 40)
-	_, err = s.SaveConfig(context.Background(), saved)
-	require.ErrorIs(t, err, ErrAttributionInvalid, "an enabled configuration cannot silently adopt a new service version")
-	require.Equal(t, oldRevision, repo.config.Detector.Revision)
-	// Turning it off is always possible even if the service is down.
-	server.Close()
+	saved, err = s.SaveConfig(context.Background(), saved)
+	require.NoError(t, err, "stale connection metadata is refreshed automatically")
+	require.Equal(t, detector.Revision, repo.config.Detector.Revision)
+	// Turning it off never waits for the service, even if it is down.
 	before := calls
 	saved.Enabled = false
 	_, err = s.SaveConfig(context.Background(), saved)
 	require.NoError(t, err)
 	require.Equal(t, before, calls)
+	server.Close()
+	_, err = s.SaveConfig(context.Background(), saved)
+	require.NoError(t, err)
 }
 
 func TestAttributionDetectorProtocolErrors(t *testing.T) {
@@ -104,6 +107,68 @@ func TestAttributionDetectorProtocolErrors(t *testing.T) {
 			}
 			require.NoError(t, err)
 			require.Error(t, ValidateAttributionAnalysis(a, []string{AttributionDefaultModel}, []string{AttributionDefaultModel, "gpt-6-luna"}))
+		})
+	}
+}
+
+func TestLMDetectorV2AnalysisWithoutDecisionIsAccepted(t *testing.T) {
+	// Captured from the pinned v2 adapter using the first three gpt-6-astra
+	// reference samples. Keep the original response fields and probabilities
+	// so this exercises the upstream wire format, including omitted decision.
+	data, err := os.ReadFile("testdata/lm_detector_v2_analysis.json")
+	require.NoError(t, err)
+	var fixture struct {
+		Models   []string        `json:"models"`
+		Analysis json.RawMessage `json:"analysis"`
+	}
+	require.NoError(t, json.Unmarshal(data, &fixture))
+	var expected AttributionAnalysis
+	require.NoError(t, json.Unmarshal(fixture.Analysis, &expected))
+	detector := expected.Detector
+	require.True(t, detector.Valid())
+	require.NotContains(t, string(fixture.Analysis), `"decision"`)
+	require.Contains(t, string(fixture.Analysis), `"display_name": "gpt-6-astra/6.1-sol"`)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		require.Equal(t, "/api/analyze", r.URL.Path)
+		require.Equal(t, detector.Version(), r.Header.Get("X-LM-Detector-Version"))
+		w.Header().Set("X-LM-Detector-Version", detector.Version())
+		_, _ = w.Write(fixture.Analysis)
+	}))
+	defer server.Close()
+
+	analysis, err := NewLMDetectorClient().Analyze(context.Background(), server.URL, detector, []AttributionOutput{})
+	require.NoError(t, err)
+	require.NoError(t, ValidateAttributionAnalysis(analysis, []string{"gpt-6-astra"}, fixture.Models))
+	require.Equal(t, &expected, analysis)
+	require.Equal(t, analysis, attributionSafeAnalysis(analysis, fixture.Models))
+	require.Equal(t, "shared-detector-v2", analysis.Method)
+	require.Equal(t, "gpt-6-astra", analysis.Prediction)
+	require.Equal(t, 0.9999611849793368, *analysis.Probability)
+	for _, alias := range []string{"gpt-6.1-sol", "gpt-6-astra/6.1-sol"} {
+		require.NotContains(t, fixture.Models, alias)
+		require.EqualError(t, ValidateAttributionAnalysis(analysis, []string{alias}, fixture.Models), "expected_model_not_enrolled")
+	}
+}
+
+func TestAttributionDetectorAlgorithmCompatibility(t *testing.T) {
+	for _, algorithm := range []string{"shared-detector-v1", "shared-detector-v2", "shared-detector-v3", "shared-ranker-partial-v1"} {
+		t.Run(algorithm, func(t *testing.T) {
+			a := validAttributionAnalysis()
+			a.Method, a.Detector.Algorithm = algorithm, algorithm
+			models := []string{AttributionDefaultModel, "gpt-6-luna"}
+			if algorithm == "shared-detector-v1" || algorithm == "shared-detector-v2" {
+				require.True(t, a.Detector.Valid())
+				require.NoError(t, ValidateAttributionAnalysis(a, []string{AttributionDefaultModel}, models))
+				require.NotNil(t, attributionSafeAnalysis(a, models))
+				a.Method = "shared-detector-v2"
+				if algorithm == "shared-detector-v2" {
+					a.Method = "shared-detector-v1"
+				}
+			} else {
+				require.False(t, a.Detector.Valid())
+			}
+			require.EqualError(t, ValidateAttributionAnalysis(a, []string{AttributionDefaultModel}, models), "detector_identity_invalid")
+			require.Nil(t, attributionSafeAnalysis(a, models))
 		})
 	}
 }

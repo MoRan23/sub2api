@@ -65,17 +65,22 @@ func TestAttributionDetectorMigrationAndLateResult(t *testing.T) {
 	require.Equal(t, "high", attributionRun(t, r, a.ID, "passed").Result.Action)
 }
 
-func TestAttributionDetectorVersionFenceAndStreak(t *testing.T) {
+func TestAttributionLegacyDetectorVersionFenceAndStreak(t *testing.T) {
 	ctx := context.Background()
 	r, ar, a := attributionFixture(t)
 	require.Equal(t, "low", attributionRun(t, r, a.ID, "mismatch").Result.Action)
 	low := attributionMapping(t, ar, a.ID)
 	require.Equal(t, "awaiting_confirmation", attributionRun(t, r, a.ID, "passed").Result.Action)
-	_, err := r.Enqueue(ctx, []int64{a.ID}, true)
+	jobs, err := r.Enqueue(ctx, []int64{a.ID}, true)
+	require.NoError(t, err)
+	// Queued jobs from before live detector discovery retain their original
+	// saved-version contract when resumed after the application update.
+	_, err = integrationDB.ExecContext(ctx, `UPDATE model_attribution_jobs SET snapshot=jsonb_set(snapshot,'{version}','5') WHERE id=$1`, jobs[0].ID)
 	require.NoError(t, err)
 	old, err := r.Claim(ctx)
 	require.NoError(t, err)
 	require.NotNil(t, old)
+	require.Equal(t, 5, old.Snapshot.Version)
 	// A detector update is independently fenced even if a config writer omitted a version bump.
 	_, err = integrationDB.ExecContext(ctx, `UPDATE model_attribution_config SET config=jsonb_set(config,'{detector,revision}',to_jsonb($1::text))`, strings.Repeat("e", 40))
 	require.NoError(t, err)
@@ -97,4 +102,33 @@ func TestAttributionDetectorVersionFenceAndStreak(t *testing.T) {
 	require.Nil(t, legacy.Snapshot.Detector)
 	require.NotNil(t, legacy.Result.Analysis.Probability)
 	require.Equal(t, .9, *legacy.Result.Analysis.Probability)
+}
+
+func TestAttributionLiveDetectorIgnoresSavedMetadataChanges(t *testing.T) {
+	ctx := context.Background()
+	r, ar, a := attributionFixture(t)
+	require.Equal(t, "low", attributionRun(t, r, a.ID, "mismatch").Result.Action)
+	require.Equal(t, "awaiting_confirmation", attributionRun(t, r, a.ID, "passed").Result.Action)
+	_, err := r.Enqueue(ctx, []int64{a.ID}, true)
+	require.NoError(t, err)
+	j, err := r.Claim(ctx)
+	require.NoError(t, err)
+	require.NotNil(t, j)
+	require.Equal(t, 6, j.Snapshot.Version)
+	j.Checkpoint = attributionRetryCheckpoint()
+	j.Checkpoint.Outputs = nil
+	j.Checkpoint.OrdinaryRetries, j.Checkpoint.UnavailableRetries = 0, 0
+	ok, err := r.SaveCheckpoint(ctx, j)
+	require.NoError(t, err)
+	require.True(t, ok)
+	// Display metadata is independent of the detector bound to this round.
+	// Configuration versions and all actual policy changes remain fenced.
+	_, err = integrationDB.ExecContext(ctx, `UPDATE model_attribution_config SET config=jsonb_set(config,'{detector,revision}',to_jsonb($1::text))`, strings.Repeat("e", 40))
+	require.NoError(t, err)
+	j.Status = "passed"
+	attributionSuccessfulProbeEvidence(j, "")
+	require.NoError(t, r.Finish(ctx, j))
+	require.Equal(t, "high", j.Result.Action)
+	require.Equal(t, 2, j.Result.PassStreak)
+	require.Contains(t, attributionMapping(t, ar, a.ID), "high")
 }
