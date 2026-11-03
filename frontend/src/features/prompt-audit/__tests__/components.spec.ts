@@ -69,7 +69,7 @@ describe('Prompt Audit components', () => {
   it('supports group search, stale configured groups, nine scanners, and bounded worker inputs', async () => {
     const draft: PromptAuditDraft = {
       enabled: true, blocking_enabled: false, blocking_latest_turn_only: false, keyword_blocking_enabled: false, keyword_blocking_active: false, blocked_keywords: [], store_pass_events: false, effective_mode: 'async_audit', strategy: 'priority',
-      keyword_all_groups: false, keyword_group_ids: [2, 100],
+      keyword_all_groups: false, keyword_group_ids: [2, 100], keyword_whitelist_keys: [],
       worker_count: 4, queue_capacity: 100, scanners: SCANNER_CATALOG.map((item) => item.id), all_groups: false, group_ids: [1, 99],
       endpoints: [endpoint()], config_version: 1, updated_at: '', updated_by: 0, change_summary: '',
     }

@@ -19,6 +19,7 @@ const config = (): PromptAuditConfig => ({
   blocked_keywords: [],
   keyword_all_groups: true,
   keyword_group_ids: [],
+  keyword_whitelist_keys: [],
   store_pass_events: false,
   effective_mode: 'async_audit',
   strategy: 'priority',
@@ -39,6 +40,21 @@ const config = (): PromptAuditConfig => ({
 })
 
 describe('Prompt Audit view model', () => {
+  it('round-trips exact user/key pairs and explicitly clears the keyword allowlist', () => {
+    const saved = { ...config(), keyword_whitelist_keys: [{ user_id: 7, api_key_id: 12 }] }
+    const draft = configToDraft(saved)
+    expect(draft.keyword_whitelist_keys).toEqual([{ user_id: 7, api_key_id: 12 }])
+    expect(buildUpdateRequest(draft).keyword_whitelist_keys).toEqual([{ user_id: 7, api_key_id: 12 }])
+    const previous = draftFingerprint(draft)
+    draft.keyword_whitelist_keys[0]!.api_key_id = 13
+    expect(saved.keyword_whitelist_keys[0]!.api_key_id).toBe(12)
+    expect(draftFingerprint(draft)).not.toBe(previous)
+    draft.keyword_whitelist_keys = []
+    expect(buildUpdateRequest(draft).keyword_whitelist_keys).toEqual([])
+    const { keyword_whitelist_keys: _removed, ...legacy } = saved
+    expect(configToDraft(legacy as PromptAuditConfig).keyword_whitelist_keys).toEqual([])
+    expect(configToDraft({ ...saved, keyword_whitelist_keys: null } as unknown as PromptAuditConfig).keyword_whitelist_keys).toEqual([])
+  })
   it('normalizes legacy null collections from the public config', () => {
     const legacy = { ...config(), keyword_group_ids: null, group_ids: null, scanners: null, endpoints: null } as unknown as PromptAuditConfig
     expect(configToDraft(legacy)).toMatchObject({ keyword_group_ids: [], group_ids: [], scanners: [], endpoints: [] })

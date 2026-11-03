@@ -19,7 +19,7 @@ vi.mock('vue-i18n', async () => {
 })
 
 const baseConfig = (): PromptAuditConfig => ({
-  enabled: true, blocking_enabled: false, blocking_latest_turn_only: false, keyword_blocking_enabled: false, keyword_blocking_active: false, blocked_keywords: [], keyword_all_groups: true, keyword_group_ids: [], store_pass_events: false, effective_mode: 'async_audit', strategy: 'priority',
+  enabled: true, blocking_enabled: false, blocking_latest_turn_only: false, keyword_blocking_enabled: false, keyword_blocking_active: false, blocked_keywords: [], keyword_all_groups: true, keyword_group_ids: [], keyword_whitelist_keys: [], store_pass_events: false, effective_mode: 'async_audit', strategy: 'priority',
   worker_count: 4, queue_capacity: 100, scanners: SCANNER_CATALOG.map((item) => item.id), all_groups: true, group_ids: [],
   endpoints: [{ id: 'guard-1', name: 'Guard One', protocol: 'openai_compatible', base_url: 'http://127.0.0.1:8000', model: 'guard-model', timeout_ms: 3000, input_limit: 4000, enabled: true, has_token: true, token_status: 'configured' }],
   config_version: 7, updated_at: '2026-07-16T00:00:00Z', updated_by: 1, change_summary: '{}',
@@ -194,6 +194,29 @@ describe('PromptAuditView', () => {
     await wrapper.get('[data-test="save-config"]').trigger('click')
     await flushPromises()
     expect(mocks.updateConfig).toHaveBeenCalledWith(expect.objectContaining({ keyword_blocking_enabled: true, blocked_keywords: ['seed'] }))
+  })
+
+  it('loads, saves, and clears exact keyword allowlist identities without widening to a user', async () => {
+    const saved = { ...baseConfig(), keyword_whitelist_keys: [{ user_id: 7, api_key_id: 12 }] }
+    mocks.getConfig.mockResolvedValue(saved)
+    mocks.updateConfig.mockImplementation(async (payload) => ({ ...saved, ...payload, config_version: 8 }))
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('[data-test="tab-config"]').trigger('click')
+    const policy = wrapper.getComponent(PolicyStub)
+    expect(policy.props('draft').keyword_whitelist_keys).toEqual([{ user_id: 7, api_key_id: 12 }])
+    policy.vm.$emit('update:draft', { ...policy.props('draft'), keyword_whitelist_keys: [{ user_id: 7, api_key_id: 13 }] })
+    await flushPromises()
+    await wrapper.get('[data-test="save-config"]').trigger('click')
+    await flushPromises()
+    expect(mocks.updateConfig).toHaveBeenLastCalledWith(expect.objectContaining({ keyword_whitelist_keys: [{ user_id: 7, api_key_id: 13 }] }))
+    expect(policy.props('draft').keyword_whitelist_keys).toEqual([{ user_id: 7, api_key_id: 13 }])
+    policy.vm.$emit('update:draft', { ...policy.props('draft'), keyword_whitelist_keys: [] })
+    await flushPromises()
+    await wrapper.get('[data-test="save-config"]').trigger('click')
+    await flushPromises()
+    expect(mocks.updateConfig).toHaveBeenLastCalledWith(expect.objectContaining({ keyword_whitelist_keys: [] }))
+    wrapper.unmount()
   })
 
   it('executes single, selected-batch, and preview-confirmed filter deletion flows', async () => {

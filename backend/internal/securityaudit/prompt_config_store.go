@@ -291,6 +291,11 @@ func (m *ConfigManager) Save(ctx context.Context, req UpdateConfigRequest, actor
 	if err != nil {
 		return PublicConfig{}, err
 	}
+	if req.KeywordWhitelistKeys != nil {
+		if err := validateKeywordWhitelistOwnership(ctx, tx, next.KeywordWhitelistKeys); err != nil {
+			return PublicConfig{}, err
+		}
+	}
 	next.ConfigVersion = current.ConfigVersion + 1
 	next.UpdatedAt = m.clock.Now()
 	next.UpdatedBy = actorID
@@ -345,6 +350,10 @@ func (m *ConfigManager) buildNextStorage(current storageConfig, req UpdateConfig
 		return storageConfig{}, err
 	}
 	keywordAllGroups := current.KeywordAllGroups
+	keywordWhitelistKeys := append([]KeywordWhitelistKey{}, current.KeywordWhitelistKeys...)
+	if req.KeywordWhitelistKeys != nil {
+		keywordWhitelistKeys = append([]KeywordWhitelistKey{}, (*req.KeywordWhitelistKeys)...)
+	}
 	keywordGroupIDs := append([]int64(nil), current.KeywordGroupIDs...)
 	if req.KeywordAllGroups != nil {
 		keywordAllGroups = *req.KeywordAllGroups
@@ -358,7 +367,8 @@ func (m *ConfigManager) buildNextStorage(current storageConfig, req UpdateConfig
 		Enabled: req.Enabled, BlockingEnabled: req.BlockingEnabled, BlockingLatestTurnOnly: req.BlockingLatestTurnOnly, StorePassEvents: req.StorePassEvents,
 		KeywordBlockingEnabled: req.KeywordBlockingEnabled, BlockedKeywords: append([]string(nil), req.BlockedKeywords...),
 		KeywordAllGroups: keywordAllGroups, KeywordGroupIDs: keywordGroupIDs,
-		Strategy: strings.TrimSpace(req.Strategy), WorkerCount: req.WorkerCount,
+		KeywordWhitelistKeys: keywordWhitelistKeys,
+		Strategy:             strings.TrimSpace(req.Strategy), WorkerCount: req.WorkerCount,
 		QueueCapacity: req.QueueCapacity, Scanners: append([]string(nil), req.Scanners...),
 		AllGroups: req.AllGroups, GroupIDs: append([]int64(nil), req.GroupIDs...),
 		ConfigVersion: current.ConfigVersion, UpdatedBy: actorID,
@@ -525,6 +535,7 @@ func (m *ConfigManager) clearLoadError() bool {
 }
 
 func cloneStorageConfig(cfg storageConfig) storageConfig {
+	cfg.KeywordWhitelistKeys = append([]KeywordWhitelistKey{}, cfg.KeywordWhitelistKeys...)
 	cfg.Scanners = append([]string(nil), cfg.Scanners...)
 	cfg.GroupIDs = append([]int64(nil), cfg.GroupIDs...)
 	cfg.KeywordGroupIDs = append([]int64(nil), cfg.KeywordGroupIDs...)
@@ -534,6 +545,7 @@ func cloneStorageConfig(cfg storageConfig) storageConfig {
 }
 
 func cloneActiveConfig(cfg ActiveConfig) ActiveConfig {
+	cfg.KeywordWhitelistKeys = append([]KeywordWhitelistKey{}, cfg.KeywordWhitelistKeys...)
 	cfg.Scanners = append([]string(nil), cfg.Scanners...)
 	cfg.GroupIDs = append([]int64(nil), cfg.GroupIDs...)
 	cfg.KeywordGroupIDs = append([]int64(nil), cfg.KeywordGroupIDs...)

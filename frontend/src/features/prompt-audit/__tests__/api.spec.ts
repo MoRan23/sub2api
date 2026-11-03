@@ -4,10 +4,21 @@ import { emptyEventFilters } from '../viewModel'
 const client = vi.hoisted(() => ({ get: vi.fn(), put: vi.fn(), post: vi.fn(), delete: vi.fn() }))
 vi.mock('@/api/client', () => ({ apiClient: client }))
 
-import promptAuditAPI from '../api'
+import promptAuditAPI, { listKeywordWhitelistKeys, listKeywordWhitelistUsers } from '../api'
 
 describe('Prompt Audit API', () => {
   beforeEach(() => Object.values(client).forEach((mock) => mock.mockReset()))
+
+  it('loads paginated user-owned keys and discards secret fields', async () => {
+    client.get.mockResolvedValue({ data: { items: [{ id: 8, email: 'owner@example.test', notes: 'private' }], total: 21, page: 2, page_size: 20, pages: 2 } })
+    expect((await listKeywordWhitelistUsers('owner', 2)).items).toEqual([{ id: 8, email: 'owner@example.test' }])
+    expect(client.get).toHaveBeenLastCalledWith('/admin/users', { params: { search: 'owner', page: 2, page_size: 20 } })
+    client.get.mockResolvedValue({ data: { items: [{ id: 17, user_id: 8, name: 'my-key', key: 'secret-must-not-remain' }], total: 21, page: 2, page_size: 20, pages: 2 } })
+    const result = await listKeywordWhitelistKeys(8, 2)
+    expect(result.items).toEqual([{ id: 17, user_id: 8, name: 'my-key' }])
+    expect(JSON.stringify(result)).not.toContain('secret-must-not-remain')
+    expect(client.get).toHaveBeenLastCalledWith('/admin/users/8/api-keys', { params: { page: 2, page_size: 20 } })
+  })
 
   it('uses the independent admin route namespace', async () => {
     client.get.mockResolvedValue({ data: { config_version: 1 } })

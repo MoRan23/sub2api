@@ -50,6 +50,11 @@
             :search-aria-label="t('admin.promptAudit.policy.searchKeywordGroups')"
             data-test="keyword-group-scope"
           />
+          <KeywordKeyWhitelist
+            :model-value="draft.keyword_whitelist_keys ?? []"
+            class="mt-5 border-t border-gray-100 pt-5 dark:border-dark-800"
+            @update:model-value="patch({ keyword_whitelist_keys: $event })"
+          />
         </fieldset>
       </div>
 
@@ -78,6 +83,7 @@ import type { PromptAuditDraft, PromptAuditGroup } from '../types'
 import { cloneData, SCANNER_CATALOG } from '../viewModel'
 import GroupScopeSelector from './GroupScopeSelector.vue'
 import KeywordEditor from './KeywordEditor.vue'
+import KeywordKeyWhitelist from './KeywordKeyWhitelist.vue'
 
 const props = defineProps<{ draft: PromptAuditDraft; groups: PromptAuditGroup[] }>()
 const emit = defineEmits<{ (event: 'update:draft', value: PromptAuditDraft): void }>()

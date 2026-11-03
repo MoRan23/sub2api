@@ -112,6 +112,61 @@ func TestCoordinatorKeywordBlockShortCircuitsLegacyQueueAndGuard(t *testing.T) {
 	require.Zero(t, prompt.evaluates.Load())
 }
 
+func TestCoordinatorKeywordBlockReturnsActualMatch(t *testing.T) {
+	active, err := ActiveFromStorage(storageConfig{
+		KeywordBlockingEnabled: true,
+		BlockedKeywords:        []string{".gov.", "Other Rule", "unmatched-private-rule"},
+		KeywordAllGroups:       true,
+	}, true, prefixEncryptor{})
+	require.NoError(t, err)
+	legacy := &fakeLegacyEngine{}
+	prompt := &PromptService{config: &fakeConfigStore{active: true, cfg: active}}
+	decision := NewCoordinator(legacy, prompt).Check(context.Background(), Request{
+		Protocol: "openai_responses",
+		Body:     []byte(`{"input":"private prompt: OTHER RULE appears before example.GOV.cn"}`),
+	})
+	require.Equal(t, DecisionBlock, decision.Kind)
+	require.False(t, decision.AllowNextStage)
+	require.Equal(t, http.StatusForbidden, decision.HTTPStatus)
+	require.Equal(t, ErrorCodeKeywordBlocked, decision.ErrorCode)
+	require.Equal(t, `提示词包含禁止内容，请调整输入后重试（命中关键词：".gov."）`, decision.ClientMessage)
+	require.Zero(t, legacy.calls.Load())
+	require.NotContains(t, decision.ClientMessage, "private prompt")
+	require.NotContains(t, decision.ClientMessage, "Other Rule")
+	require.NotContains(t, decision.ClientMessage, "unmatched-private-rule")
+	require.Equal(t, ".gov.", decision.Prompt.Result.matchedKeyword)
+	require.Contains(t, decision.Prompt.Result.ScannerEvidence["keyword"], "sha256:")
+}
+
+func TestCoordinatorKeywordMessageRequiresLocalMatch(t *testing.T) {
+	for _, tc := range []struct {
+		name   string
+		result *NormalizedResult
+	}{
+		{name: "missing result"},
+		{name: "missing match", result: &NormalizedResult{ScannerBackend: "local-keyword", PolicyID: "keyword-substring"}},
+		{name: "guard evidence", result: &NormalizedResult{ScannerBackend: "qwen3guard-openai", PolicyID: "keyword-substring", matchedKeyword: "private guard text"}},
+		{name: "different policy", result: &NormalizedResult{ScannerBackend: "local-keyword", PolicyID: "other-policy", matchedKeyword: "private guard text"}},
+		{name: "evidence is not a match", result: &NormalizedResult{ScannerBackend: "local-keyword", PolicyID: "keyword-substring", ScannerEvidence: map[string]string{"keyword": "private guard text"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			decision := prioritize(nil, &PromptDecision{Kind: DecisionBlock, ErrorCode: ErrorCodeKeywordBlocked, Result: tc.result})
+			require.Equal(t, `提示词包含禁止内容，请调整输入后重试`, decision.ClientMessage)
+		})
+	}
+	result := &NormalizedResult{ScannerBackend: "local-keyword", PolicyID: "keyword-substring", matchedKeyword: "private rule"}
+	decision := prioritize(nil, &PromptDecision{Kind: DecisionBlock, ErrorCode: ErrorCodeBlocked, Result: result})
+	require.Equal(t, "提示词安全审计拒绝了该请求，请调整输入后重试", decision.ClientMessage)
+}
+
+func TestCoordinatorKeywordMessageQuotesConfiguredRule(t *testing.T) {
+	decision := prioritize(nil, &PromptDecision{Kind: DecisionBlock, ErrorCode: ErrorCodeKeywordBlocked, Result: &NormalizedResult{
+		ScannerBackend: "local-keyword", PolicyID: "keyword-substring", matchedKeyword: "中文\"规则\\\n\t",
+	}})
+	require.Equal(t, `提示词包含禁止内容，请调整输入后重试（命中关键词："中文\"规则\\\n\t"）`, decision.ClientMessage)
+	require.NotContains(t, decision.ClientMessage, "\n")
+}
+
 func TestCoordinatorBlockingPriorityCoversBothEngineDecisionMatrix(t *testing.T) {
 	legacyCases := []struct {
 		name     string

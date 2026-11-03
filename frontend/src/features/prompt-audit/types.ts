@@ -20,6 +20,22 @@ export interface PromptAuditEndpointDraft extends PromptAuditEndpoint {
   clear_token: boolean
 }
 
+export interface PromptKeywordWhitelistKey {
+  user_id: number
+  api_key_id: number
+}
+
+export interface PromptKeywordUserOption {
+  id: number
+  email: string
+}
+
+export interface PromptKeywordKeyOption {
+  id: number
+  user_id: number
+  name: string
+}
+
 export interface PromptAuditConfig {
   enabled: boolean
   blocking_enabled: boolean
@@ -29,6 +45,7 @@ export interface PromptAuditConfig {
   blocked_keywords: string[]
   keyword_all_groups: boolean
   keyword_group_ids: number[]
+  keyword_whitelist_keys: PromptKeywordWhitelistKey[]
   store_pass_events: boolean
   effective_mode: PromptAuditMode
   strategy: 'priority'
@@ -57,6 +74,7 @@ export interface PromptAuditUpdateRequest {
   blocked_keywords: string[]
   keyword_all_groups: boolean
   keyword_group_ids: number[]
+  keyword_whitelist_keys: PromptKeywordWhitelistKey[]
   store_pass_events: boolean
   strategy: 'priority'
   worker_count: number

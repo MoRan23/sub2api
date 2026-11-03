@@ -33,6 +33,7 @@ export function configToDraft(config: PromptAuditConfig): PromptAuditDraft {
     blocked_keywords: [...(config.blocked_keywords ?? [])],
     keyword_all_groups: config.keyword_all_groups ?? config.all_groups ?? true,
     keyword_group_ids: [...(config.keyword_group_ids ?? config.group_ids ?? [])],
+    keyword_whitelist_keys: (config.keyword_whitelist_keys ?? []).map(({ user_id, api_key_id }) => ({ user_id, api_key_id })),
     group_ids: [...(config.group_ids ?? [])],
     scanners: [...(config.scanners ?? [])],
     endpoints: (config.endpoints ?? []).map((endpoint) => ({
@@ -70,6 +71,7 @@ export function buildUpdateRequest(draft: PromptAuditDraft): PromptAuditUpdateRe
     blocked_keywords: draft.blocked_keywords.map((keyword) => keyword.trim()).filter(Boolean),
     keyword_all_groups: draft.keyword_all_groups,
     keyword_group_ids: draft.keyword_all_groups ? [] : [...draft.keyword_group_ids].sort((a, b) => a - b),
+    keyword_whitelist_keys: (draft.keyword_whitelist_keys ?? []).map(({ user_id, api_key_id }) => ({ user_id, api_key_id })),
     store_pass_events: draft.store_pass_events,
     strategy: 'priority',
     worker_count: Number(draft.worker_count),

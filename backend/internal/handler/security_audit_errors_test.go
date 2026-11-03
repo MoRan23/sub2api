@@ -3,12 +3,16 @@ package handler
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ctxkey"
 	"github.com/Wei-Shaw/sub2api/internal/securityaudit"
+	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
 )
@@ -156,4 +160,95 @@ func TestLegacyModerationErrorKeepsExistingClientPriority(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), "legacy exact message")
 	require.Contains(t, recorder.Body.String(), "content_policy_violation")
 	require.NotContains(t, recorder.Body.String(), securityaudit.ErrorCodeBlocked)
+}
+
+func keywordClientErrorDecision() *securityaudit.Decision {
+	decision := promptGuardDecision(securityaudit.DecisionBlock)
+	decision.ErrorCode = securityaudit.ErrorCodeKeywordBlocked
+	decision.ClientMessage = fmt.Sprintf("提示词包含禁止内容，请调整输入后重试（命中关键词：%q）", ".gov.\"\\中文\n\t")
+	decision.Prompt = &securityaudit.PromptDecision{
+		Kind: securityaudit.DecisionBlock, ErrorCode: securityaudit.ErrorCodeKeywordBlocked,
+		Result: &securityaudit.NormalizedResult{
+			ScannerEvidence: map[string]string{"keyword": "private-scanner-evidence"},
+			GuardEndpointID: "private-guard-endpoint", PolicyID: "private-policy-config",
+		},
+	}
+	return decision
+}
+
+func requireKeywordClientMessage(t *testing.T, raw []byte, message string) map[string]any {
+	t.Helper()
+	var payload map[string]any
+	require.NoError(t, json.Unmarshal(raw, &payload), "keyword punctuation must remain valid JSON")
+	errorObject := requireObject(t, payload["error"])
+	require.Equal(t, message, errorObject["message"])
+	for _, private := range []string{"private-full-prompt", "private-scanner-evidence", "private-guard-endpoint", "private-policy-config"} {
+		require.NotContains(t, string(raw), private)
+	}
+	return errorObject
+}
+
+func TestPromptKeywordClientMessageHTTPEnvelopes(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	for _, tc := range []struct {
+		name   string
+		write  func(*gin.Context, *securityaudit.Decision)
+		google bool
+	}{
+		{name: "openai", write: (&OpenAIGatewayHandler{}).openAISecurityAuditError},
+		{name: "chat", write: (&GatewayHandler{}).openAISecurityAuditError},
+		{name: "responses", write: (&GatewayHandler{}).responsesSecurityAuditError},
+		{name: "anthropic", write: (&GatewayHandler{}).anthropicSecurityAuditError},
+		{name: "openai-anthropic", write: (&OpenAIGatewayHandler{}).anthropicSecurityAuditError},
+		{name: "gemini", write: googleSecurityAuditError, google: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			decision := keywordClientErrorDecision()
+			c, recorder := securityAuditErrorTestContext(t)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(`{"stream":true,"input":"private-full-prompt"}`)).WithContext(c.Request.Context())
+			c.Request.Header.Set("Accept", "text/event-stream")
+			tc.write(c, decision)
+			require.Equal(t, http.StatusForbidden, recorder.Code)
+			require.Contains(t, recorder.Header().Get("Content-Type"), "application/json", "pre-dispatch rejection stays JSON for streaming requests")
+			errorObject := requireKeywordClientMessage(t, recorder.Body.Bytes(), decision.ClientMessage)
+			if tc.google {
+				require.Equal(t, float64(http.StatusForbidden), errorObject["code"])
+				require.Equal(t, "PERMISSION_DENIED", errorObject["status"])
+				details := requireArray(t, errorObject["details"])
+				require.Equal(t, securityaudit.ErrorCodeKeywordBlocked, requireObject(t, details[0])["reason"])
+			} else {
+				require.Equal(t, securityaudit.ErrorCodeKeywordBlocked, errorObject["code"])
+			}
+		})
+	}
+}
+
+func TestPromptKeywordClientMessageWebSocketFrame(t *testing.T) {
+	decision := keywordClientErrorDecision()
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		conn, err := coderws.Accept(w, r, nil)
+		if err != nil {
+			return
+		}
+		defer conn.CloseNow()
+		writeSecurityAuditWSError(r.Context(), conn, decision)
+		_ = conn.Close(securityAuditWSCloseStatus(decision), securityAuditWSCloseReason(decision))
+	}))
+	defer server.Close()
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	conn, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http"), nil)
+	require.NoError(t, err)
+	defer conn.CloseNow()
+	messageType, raw, err := conn.Read(ctx)
+	require.NoError(t, err)
+	require.Equal(t, coderws.MessageText, messageType)
+	errorObject := requireKeywordClientMessage(t, raw, decision.ClientMessage)
+	require.Equal(t, securityaudit.ErrorCodeKeywordBlocked, errorObject["code"])
+	require.Equal(t, "invalid_request_error", errorObject["type"])
+	_, _, err = conn.Read(ctx)
+	require.Equal(t, coderws.StatusCode(4403), coderws.CloseStatus(err))
+	var closeError coderws.CloseError
+	require.ErrorAs(t, err, &closeError)
+	require.Equal(t, securityaudit.ErrorCodeKeywordBlocked, closeError.Reason, "keep the potentially long keyword in the JSON frame, not the close reason")
 }

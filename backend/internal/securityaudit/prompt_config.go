@@ -68,25 +68,26 @@ type StorageEndpoint struct {
 }
 
 type storageConfig struct {
-	Enabled                bool              `json:"enabled"`
-	BlockingEnabled        bool              `json:"blocking_enabled"`
-	BlockingLatestTurnOnly bool              `json:"blocking_latest_turn_only"`
-	KeywordBlockingEnabled bool              `json:"keyword_blocking_enabled"`
-	BlockedKeywords        []string          `json:"blocked_keywords"`
-	KeywordAllGroups       bool              `json:"keyword_all_groups"`
-	KeywordGroupIDs        []int64           `json:"keyword_group_ids"`
-	StorePassEvents        bool              `json:"store_pass_events"`
-	Strategy               string            `json:"strategy"`
-	WorkerCount            int               `json:"worker_count"`
-	QueueCapacity          int               `json:"queue_capacity"`
-	Scanners               []string          `json:"scanners"`
-	AllGroups              bool              `json:"all_groups"`
-	GroupIDs               []int64           `json:"group_ids"`
-	Endpoints              []StorageEndpoint `json:"endpoints"`
-	ConfigVersion          int64             `json:"config_version"`
-	UpdatedAt              time.Time         `json:"updated_at"`
-	UpdatedBy              int64             `json:"updated_by"`
-	ChangeSummary          string            `json:"change_summary"`
+	Enabled                bool                  `json:"enabled"`
+	BlockingEnabled        bool                  `json:"blocking_enabled"`
+	BlockingLatestTurnOnly bool                  `json:"blocking_latest_turn_only"`
+	KeywordBlockingEnabled bool                  `json:"keyword_blocking_enabled"`
+	BlockedKeywords        []string              `json:"blocked_keywords"`
+	KeywordAllGroups       bool                  `json:"keyword_all_groups"`
+	KeywordGroupIDs        []int64               `json:"keyword_group_ids"`
+	KeywordWhitelistKeys   []KeywordWhitelistKey `json:"keyword_whitelist_keys"`
+	StorePassEvents        bool                  `json:"store_pass_events"`
+	Strategy               string                `json:"strategy"`
+	WorkerCount            int                   `json:"worker_count"`
+	QueueCapacity          int                   `json:"queue_capacity"`
+	Scanners               []string              `json:"scanners"`
+	AllGroups              bool                  `json:"all_groups"`
+	GroupIDs               []int64               `json:"group_ids"`
+	Endpoints              []StorageEndpoint     `json:"endpoints"`
+	ConfigVersion          int64                 `json:"config_version"`
+	UpdatedAt              time.Time             `json:"updated_at"`
+	UpdatedBy              int64                 `json:"updated_by"`
+	ChangeSummary          string                `json:"change_summary"`
 }
 
 type ActiveEndpoint struct {
@@ -115,6 +116,7 @@ type ActiveConfig struct {
 	BlockedKeywords        []string
 	KeywordAllGroups       bool
 	KeywordGroupIDs        []int64
+	KeywordWhitelistKeys   []KeywordWhitelistKey
 	StorePassEvents        bool
 	Strategy               string
 	WorkerCount            int
@@ -144,27 +146,28 @@ type PublicEndpoint struct {
 }
 
 type PublicConfig struct {
-	Enabled                bool             `json:"enabled"`
-	BlockingEnabled        bool             `json:"blocking_enabled"`
-	BlockingLatestTurnOnly bool             `json:"blocking_latest_turn_only"`
-	KeywordBlockingEnabled bool             `json:"keyword_blocking_enabled"`
-	KeywordBlockingActive  bool             `json:"keyword_blocking_active"`
-	BlockedKeywords        []string         `json:"blocked_keywords"`
-	KeywordAllGroups       bool             `json:"keyword_all_groups"`
-	KeywordGroupIDs        []int64          `json:"keyword_group_ids"`
-	StorePassEvents        bool             `json:"store_pass_events"`
-	EffectiveMode          Mode             `json:"effective_mode"`
-	Strategy               string           `json:"strategy"`
-	WorkerCount            int              `json:"worker_count"`
-	QueueCapacity          int              `json:"queue_capacity"`
-	Scanners               []string         `json:"scanners"`
-	AllGroups              bool             `json:"all_groups"`
-	GroupIDs               []int64          `json:"group_ids"`
-	Endpoints              []PublicEndpoint `json:"endpoints"`
-	ConfigVersion          int64            `json:"config_version"`
-	UpdatedAt              time.Time        `json:"updated_at"`
-	UpdatedBy              int64            `json:"updated_by"`
-	ChangeSummary          string           `json:"change_summary"`
+	Enabled                bool                  `json:"enabled"`
+	BlockingEnabled        bool                  `json:"blocking_enabled"`
+	BlockingLatestTurnOnly bool                  `json:"blocking_latest_turn_only"`
+	KeywordBlockingEnabled bool                  `json:"keyword_blocking_enabled"`
+	KeywordBlockingActive  bool                  `json:"keyword_blocking_active"`
+	BlockedKeywords        []string              `json:"blocked_keywords"`
+	KeywordAllGroups       bool                  `json:"keyword_all_groups"`
+	KeywordGroupIDs        []int64               `json:"keyword_group_ids"`
+	KeywordWhitelistKeys   []KeywordWhitelistKey `json:"keyword_whitelist_keys"`
+	StorePassEvents        bool                  `json:"store_pass_events"`
+	EffectiveMode          Mode                  `json:"effective_mode"`
+	Strategy               string                `json:"strategy"`
+	WorkerCount            int                   `json:"worker_count"`
+	QueueCapacity          int                   `json:"queue_capacity"`
+	Scanners               []string              `json:"scanners"`
+	AllGroups              bool                  `json:"all_groups"`
+	GroupIDs               []int64               `json:"group_ids"`
+	Endpoints              []PublicEndpoint      `json:"endpoints"`
+	ConfigVersion          int64                 `json:"config_version"`
+	UpdatedAt              time.Time             `json:"updated_at"`
+	UpdatedBy              int64                 `json:"updated_by"`
+	ChangeSummary          string                `json:"change_summary"`
 }
 
 type UpdateEndpoint struct {
@@ -181,22 +184,23 @@ type UpdateEndpoint struct {
 }
 
 type UpdateConfigRequest struct {
-	ExpectedConfigVersion  int64            `json:"expected_config_version" binding:"required"`
-	Enabled                bool             `json:"enabled"`
-	BlockingEnabled        bool             `json:"blocking_enabled"`
-	BlockingLatestTurnOnly bool             `json:"blocking_latest_turn_only"`
-	KeywordBlockingEnabled bool             `json:"keyword_blocking_enabled"`
-	BlockedKeywords        []string         `json:"blocked_keywords"`
-	KeywordAllGroups       *bool            `json:"keyword_all_groups"`
-	KeywordGroupIDs        []int64          `json:"keyword_group_ids"`
-	StorePassEvents        bool             `json:"store_pass_events"`
-	Strategy               string           `json:"strategy"`
-	WorkerCount            int              `json:"worker_count"`
-	QueueCapacity          int              `json:"queue_capacity"`
-	Scanners               []string         `json:"scanners"`
-	AllGroups              bool             `json:"all_groups"`
-	GroupIDs               []int64          `json:"group_ids"`
-	Endpoints              []UpdateEndpoint `json:"endpoints"`
+	ExpectedConfigVersion  int64                  `json:"expected_config_version" binding:"required"`
+	Enabled                bool                   `json:"enabled"`
+	BlockingEnabled        bool                   `json:"blocking_enabled"`
+	BlockingLatestTurnOnly bool                   `json:"blocking_latest_turn_only"`
+	KeywordBlockingEnabled bool                   `json:"keyword_blocking_enabled"`
+	BlockedKeywords        []string               `json:"blocked_keywords"`
+	KeywordAllGroups       *bool                  `json:"keyword_all_groups"`
+	KeywordGroupIDs        []int64                `json:"keyword_group_ids"`
+	KeywordWhitelistKeys   *[]KeywordWhitelistKey `json:"keyword_whitelist_keys"`
+	StorePassEvents        bool                   `json:"store_pass_events"`
+	Strategy               string                 `json:"strategy"`
+	WorkerCount            int                    `json:"worker_count"`
+	QueueCapacity          int                    `json:"queue_capacity"`
+	Scanners               []string               `json:"scanners"`
+	AllGroups              bool                   `json:"all_groups"`
+	GroupIDs               []int64                `json:"group_ids"`
+	Endpoints              []UpdateEndpoint       `json:"endpoints"`
 }
 
 func DefaultStorageConfig() storageConfig {
@@ -208,6 +212,7 @@ func DefaultStorageConfig() storageConfig {
 		BlockedKeywords:        []string{},
 		KeywordAllGroups:       true,
 		KeywordGroupIDs:        []int64{},
+		KeywordWhitelistKeys:   []KeywordWhitelistKey{},
 		StorePassEvents:        false,
 		Strategy:               "priority",
 		WorkerCount:            DefaultWorkerCount,
@@ -268,6 +273,7 @@ func normalizeStorageConfig(cfg *storageConfig) {
 	cfg.Scanners = canonicalScannerIDs(cfg.Scanners)
 	cfg.GroupIDs = canonicalInt64s(cfg.GroupIDs)
 	cfg.KeywordGroupIDs = canonicalInt64s(cfg.KeywordGroupIDs)
+	cfg.KeywordWhitelistKeys = canonicalKeywordWhitelistKeys(cfg.KeywordWhitelistKeys)
 	cfg.BlockedKeywords = canonicalBlockedKeywords(cfg.BlockedKeywords)
 	// Preserve an invalid blocking-without-audit combination so validation can
 	// reject it instead of silently changing administrator intent.
@@ -294,6 +300,9 @@ func normalizeStorageConfig(cfg *storageConfig) {
 }
 
 func validateStorageConfig(cfg storageConfig) error {
+	if err := validateKeywordWhitelistKeys(cfg.KeywordWhitelistKeys); err != nil {
+		return err
+	}
 	if cfg.BlockingEnabled && !cfg.Enabled {
 		return infraerrors.BadRequest(ErrorCodeRequiresEnabled, "开启同步阻止前必须先启用提示词审计")
 	}
@@ -354,6 +363,11 @@ func validateStorageConfig(cfg storageConfig) error {
 }
 
 func validateUpdateConfigRequest(req UpdateConfigRequest) error {
+	if req.KeywordWhitelistKeys != nil {
+		if err := validateKeywordWhitelistKeys(*req.KeywordWhitelistKeys); err != nil {
+			return err
+		}
+	}
 	keywords := canonicalBlockedKeywords(req.BlockedKeywords)
 	if err := validateBlockedKeywords(keywords); err != nil {
 		return err
@@ -506,7 +520,8 @@ func PublicFromStorage(cfg storageConfig, riskControlEnabled bool, invalidTokenE
 		KeywordBlockingActive:  riskControlEnabled && cfg.KeywordBlockingEnabled && len(cfg.BlockedKeywords) > 0,
 		BlockedKeywords:        append([]string(nil), cfg.BlockedKeywords...),
 		KeywordAllGroups:       cfg.KeywordAllGroups, KeywordGroupIDs: keywordGroupIDs, StorePassEvents: cfg.StorePassEvents,
-		EffectiveMode: active.EffectiveMode(), Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
+		KeywordWhitelistKeys: append([]KeywordWhitelistKey{}, cfg.KeywordWhitelistKeys...),
+		EffectiveMode:        active.EffectiveMode(), Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
 		QueueCapacity: cfg.QueueCapacity, Scanners: scanners, AllGroups: cfg.AllGroups,
 		GroupIDs: groupIDs, Endpoints: endpoints, ConfigVersion: cfg.ConfigVersion,
 		UpdatedAt: cfg.UpdatedAt, UpdatedBy: cfg.UpdatedBy, ChangeSummary: cfg.ChangeSummary,
@@ -521,6 +536,7 @@ func ActiveFromStorage(cfg storageConfig, riskControlEnabled bool, encryptor Sec
 		BlockedKeywords:        append([]string(nil), cfg.BlockedKeywords...),
 		KeywordAllGroups:       cfg.KeywordAllGroups,
 		KeywordGroupIDs:        append([]int64(nil), cfg.KeywordGroupIDs...),
+		KeywordWhitelistKeys:   append([]KeywordWhitelistKey{}, cfg.KeywordWhitelistKeys...),
 		StorePassEvents:        cfg.StorePassEvents, Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
 		QueueCapacity: cfg.QueueCapacity, Scanners: append([]string(nil), cfg.Scanners...), AllGroups: cfg.AllGroups,
 		GroupIDs: append([]int64(nil), cfg.GroupIDs...), ConfigVersion: cfg.ConfigVersion,
@@ -558,22 +574,23 @@ func ActiveFromStorage(cfg storageConfig, riskControlEnabled bool, encryptor Sec
 
 func changeSummary(cfg storageConfig) string {
 	summary := struct {
-		Enabled                bool   `json:"enabled"`
-		BlockingEnabled        bool   `json:"blocking_enabled"`
-		BlockingLatestTurnOnly bool   `json:"blocking_latest_turn_only"`
-		KeywordBlockingEnabled bool   `json:"keyword_blocking_enabled"`
-		KeywordCount           int    `json:"keyword_count"`
-		KeywordHash            string `json:"keyword_hash"`
-		KeywordAllGroups       bool   `json:"keyword_all_groups"`
-		KeywordGroupCount      int    `json:"keyword_group_count"`
-		KeywordGroupHash       string `json:"keyword_group_hash"`
-		StorePassEvents        bool   `json:"store_pass_events"`
-		EndpointCount          int    `json:"endpoint_count"`
-		ScannerCount           int    `json:"scanner_count"`
-		AllGroups              bool   `json:"all_groups"`
-		GroupCount             int    `json:"group_count"`
-		GroupHash              string `json:"group_hash"`
-	}{cfg.Enabled, cfg.BlockingEnabled, cfg.BlockingLatestTurnOnly, cfg.KeywordBlockingEnabled, len(cfg.BlockedKeywords), "", cfg.KeywordAllGroups, len(cfg.KeywordGroupIDs), "", cfg.StorePassEvents, len(cfg.Endpoints), len(cfg.Scanners), cfg.AllGroups, len(cfg.GroupIDs), ""}
+		Enabled                  bool   `json:"enabled"`
+		BlockingEnabled          bool   `json:"blocking_enabled"`
+		BlockingLatestTurnOnly   bool   `json:"blocking_latest_turn_only"`
+		KeywordBlockingEnabled   bool   `json:"keyword_blocking_enabled"`
+		KeywordCount             int    `json:"keyword_count"`
+		KeywordHash              string `json:"keyword_hash"`
+		KeywordAllGroups         bool   `json:"keyword_all_groups"`
+		KeywordGroupCount        int    `json:"keyword_group_count"`
+		KeywordGroupHash         string `json:"keyword_group_hash"`
+		KeywordWhitelistKeyCount int    `json:"keyword_whitelist_key_count"`
+		StorePassEvents          bool   `json:"store_pass_events"`
+		EndpointCount            int    `json:"endpoint_count"`
+		ScannerCount             int    `json:"scanner_count"`
+		AllGroups                bool   `json:"all_groups"`
+		GroupCount               int    `json:"group_count"`
+		GroupHash                string `json:"group_hash"`
+	}{cfg.Enabled, cfg.BlockingEnabled, cfg.BlockingLatestTurnOnly, cfg.KeywordBlockingEnabled, len(cfg.BlockedKeywords), "", cfg.KeywordAllGroups, len(cfg.KeywordGroupIDs), "", len(cfg.KeywordWhitelistKeys), cfg.StorePassEvents, len(cfg.Endpoints), len(cfg.Scanners), cfg.AllGroups, len(cfg.GroupIDs), ""}
 	summary.KeywordHash = blockedKeywordsHash(cfg.BlockedKeywords)
 	summary.KeywordGroupHash = groupIDsHash(cfg.KeywordGroupIDs)
 	summary.GroupHash = groupIDsHash(cfg.GroupIDs)

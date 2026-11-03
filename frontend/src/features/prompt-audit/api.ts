@@ -1,4 +1,5 @@
 import { apiClient } from '@/api/client'
+import type { PaginatedResponse } from '@/types'
 import type {
   PromptAuditConfig,
   PromptAuditEvent,
@@ -11,10 +12,27 @@ import type {
   PromptEventPage,
   PromptProbeResult,
   PromptAuditEndpointDraft,
+  PromptKeywordUserOption,
+  PromptKeywordKeyOption,
 } from './types'
 import { eventFilterPayload, eventQueryParams } from './viewModel'
 
 const basePath = '/admin/prompt-audit'
+
+export async function listKeywordWhitelistUsers(search: string, page = 1): Promise<PaginatedResponse<PromptKeywordUserOption>> {
+  const { data } = await apiClient.get<PaginatedResponse<PromptKeywordUserOption>>('/admin/users', {
+    params: { search, page, page_size: 20 },
+  })
+  return { ...data, items: data.items.map(({ id, email }) => ({ id, email })) }
+}
+
+export async function listKeywordWhitelistKeys(userId: number, page = 1): Promise<PaginatedResponse<PromptKeywordKeyOption>> {
+  const { data } = await apiClient.get<PaginatedResponse<PromptKeywordKeyOption>>(`/admin/users/${userId}/api-keys`, {
+    params: { page, page_size: 20 },
+  })
+  // The general admin API also returns key secrets. Keep only selection metadata.
+  return { ...data, items: data.items.map(({ id, user_id, name }) => ({ id, user_id, name })) }
+}
 
 export async function getConfig(): Promise<PromptAuditConfig> {
   const { data } = await apiClient.get<PromptAuditConfig>(`${basePath}/config`)

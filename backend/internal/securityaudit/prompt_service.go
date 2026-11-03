@@ -120,6 +120,9 @@ func (s *PromptService) CheckKeyword(ctx context.Context, req Request) (*PromptD
 	if !ok || !cfg.KeywordBlockingActive() || !cfg.KeywordIncludesGroup(req.GroupID) {
 		return &PromptDecision{Kind: DecisionAllow, AllowNextStage: true}, nil
 	}
+	if cfg.KeywordWhitelistsKey(req.UserID, req.APIKeyID) {
+		return &PromptDecision{Kind: DecisionAllow, AllowNextStage: true}, nil
+	}
 
 	clock := s.clock
 	if clock == nil {

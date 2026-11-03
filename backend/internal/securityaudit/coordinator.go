@@ -3,6 +3,7 @@ package securityaudit
 import (
 	"context"
 	"errors"
+	"fmt"
 	"net/http"
 	"sync"
 )
@@ -133,6 +134,9 @@ func prioritize(legacy *LegacyDecision, prompt *PromptDecision) Decision {
 		}
 		if code == ErrorCodeKeywordBlocked {
 			message = "提示词包含禁止内容，请调整输入后重试"
+			if result := prompt.Result; result != nil && result.ScannerBackend == "local-keyword" && result.PolicyID == "keyword-substring" && result.matchedKeyword != "" {
+				message += fmt.Sprintf("（命中关键词：%q）", result.matchedKeyword)
+			}
 		}
 		return Decision{Kind: DecisionBlock, HTTPStatus: http.StatusForbidden, ErrorCode: code,
 			ClientMessage: message, Legacy: legacy, Prompt: prompt}
