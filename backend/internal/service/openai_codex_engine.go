@@ -22,12 +22,14 @@ import (
 	"github.com/tidwall/sjson"
 )
 
-// A business error has already been relayed verbatim. It must never become an
-// account health signal or a request replay on another account.
+// A business error has already been relayed verbatim. Only explicit temporary
+// scheduling rules may use it; it must never trigger default account health
+// handling or a request replay on another account.
 type codexEngineResponseError struct {
 	status                          int
 	reportedStatus                  int
 	code, errorType, message, event string
+	tempUnschedBody                 []byte
 }
 
 var errCodexEngineFirstOutputTimeout = errors.New("Codex-Engine first output timeout")
@@ -95,7 +97,8 @@ func newCodexEngineResponseError(status int, payload []byte, event string) *code
 	if strings.TrimSpace(message) == "" {
 		message = firstNonEmpty(gjson.GetBytes(payload, "response.incomplete_details.reason").String(), event, http.StatusText(status))
 	}
-	return &codexEngineResponseError{status: status, reportedStatus: reportedStatus, code: failure.Get("code").String(), errorType: failure.Get("type").String(), message: message, event: event}
+	return &codexEngineResponseError{status: status, reportedStatus: reportedStatus, code: failure.Get("code").String(), errorType: failure.Get("type").String(), message: message, event: event,
+		tempUnschedBody: codexEngineTempUnschedBody(payload, failure, event)}
 }
 
 func recordCodexEngineError(c *gin.Context, account *Account, resp *http.Response, failure *codexEngineResponseError, usage *OpenAIUsage) {
@@ -413,6 +416,10 @@ func (s *OpenAIGatewayService) forwardCodexEngine(ctx context.Context, c *gin.Co
 	}
 	if errors.As(err, &failure) {
 		s.observeCodexEngineDeploymentUnavailable(account, resp, failure, time.Now())
+		// Match the scheduler's model dimension, including its ordinary mapping
+		// for compact/default wire-model overrides. Resolve the original once.
+		modelKey := modelRateLimitKeyForUpstreamModelNotFound(ctx, account, model)
+		s.observeCodexEngineTempUnschedulable(ctx, account, resp, failure, modelKey)
 		recordCodexEngineError(c, account, resp, failure, &result.Usage)
 	}
 	if err == nil && endpoint == "/v1/alpha/search" {
@@ -631,6 +638,7 @@ func (s *OpenAIGatewayService) relayCodexEngineStream(ctx, downstreamCtx context
 				if nextFailure.reportedStatus == 0 && streamFailure.reportedStatus != 0 {
 					nextFailure.reportedStatus, nextFailure.status = streamFailure.reportedStatus, streamFailure.status
 				}
+				nextFailure.tempUnschedBody = mergeCodexEngineTempUnschedBodies(nextFailure.tempUnschedBody, streamFailure.tempUnschedBody)
 			}
 			streamFailure = nextFailure
 			// A bare error can precede response.failed with the authoritative
