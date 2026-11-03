@@ -1,13 +1,14 @@
 import { describe, expect, test } from 'bun:test'
-import { loadDetector, readPinned, validateArtifacts } from './detector'
+import { loadDetector, readPinned, readPinnedBytes, validateArtifacts } from './detector'
 import { createHandler } from './server'
-import { analyzeSharedOutputs, type SharedDetector } from './vendor/shared/shared-detector'
+import { analyzeSharedOutputs } from './vendor/shared/shared-detector'
+import { decodeDetector } from './vendor/shared/detector-codec'
 import { parseReference, referenceSamples } from './vendor/shared/reference'
 import type { Bank, Output } from './vendor/shared/types'
 
 const detector = loadDetector()
 const bank: Bank = JSON.parse(readPinned('data/unified_bank.json'))
-const artifact: SharedDetector = JSON.parse(readPinned('data/shared_detector.json'))
+const artifact = decodeDetector(readPinnedBytes('data/shared_detector.bin'))
 const reference = readPinned('data/unified_reference.jsonl')
 const outputs: Output[] = [...referenceSamples(parseReference(reference))]
   .filter(s => s.batch.model.id === 'gpt-6-astra').slice(0, 3)
@@ -28,8 +29,10 @@ describe('pinned official detector', () => {
     expect(actual.diagnostics).toEqual(expected.diagnostics)
     expect(actual.probability).toBe(expected.probability)
     expect(actual.probability_status).toBe('reference_calibrated')
-    expect(actual.decision).toBe('not_confirmed')
+    expect(actual.decision).toBe(expected.decision)
     expect(actual.detector).toEqual(detector.info)
+    expect(actual.method).toBe('shared-detector-v2')
+    expect(detector.info.algorithm).toBe('shared-detector-v2')
   })
   test('keeps every character of answers and delegates validity to the official function', async () => {
     let received: Output[] | undefined
@@ -56,8 +59,8 @@ describe('pinned official detector', () => {
     const result = await (await handler(request('/api/challenges'))).json()
     expect(result.challenges).toHaveLength(3)
     expect(new Set(result.challenges.map((c: {prompt: string}) => c.prompt)).size).toBe(3)
-    expect(detector.models.some(m => m.id === 'gpt-6-astra')).toBe(true)
-    expect(detector.models.some(m => m.id === 'gpt-6.1-sol')).toBe(true)
+    expect(detector.models).toEqual(bank.models.map(m => ({ id: m.id })))
+    expect(detector.models.length).toBeGreaterThan(0)
   })
   test('fails closed for missing calibration, mismatched bank and altered references', () => {
     expect(() => validateArtifacts(bank, { ...artifact, calibration: null }, reference)).toThrow()
@@ -66,5 +69,17 @@ describe('pinned official detector', () => {
     const uncalibrated = analyzeSharedOutputs(outputs, bank, { ...artifact, calibration: null })
     expect(uncalibrated.probability).toBeNull()
     expect(uncalibrated.probability_status).toBe('unavailable')
+  })
+  test('preserves the official non-model sequence rejection without fabricating confidence', async () => {
+    const invalid = Array.from({ length: 3 }, () => ({
+      text: Array.from({ length: 300 }, (_, i) => String(i + 1)).join(' '), expected_count: 300,
+    }))
+    const expected = analyzeSharedOutputs(invalid, bank, artifact, { allowPartial: false })
+    const response = await createHandler(detector)(request('/api/analyze', { outputs: invalid }))
+    const actual = await response.json()
+    expect(actual).toEqual({ ...expected, detector: detector.info })
+    expect(actual.decision).toBe('not_model')
+    expect(actual.probability).toBeNull()
+    expect(actual.results).toEqual([])
   })
 })

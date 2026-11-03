@@ -1,7 +1,7 @@
-# Sub2API LM Fingerpoint Detector
+# Sub2API LM Fingerprint Detector
 
 Private analysis adapter for [Ikaleio/lm-detector](https://github.com/Ikaleio/lm-detector).
-Pinned revision: `d53d3f5b158249a87a895e4fc7aaa8a940dfd6d6`.
+Pinned revision: `e9bd7c545bf75f35aa02aaf0878b36b89fe7dfa4`.
 The vendored shared modules are unchanged; `vendor/LICENSE` retains the upstream MIT notice.
 Data files are gzip-compressed copies of the exact upstream bytes. `upstream.json` records
 the source revision and SHA-256 integrity values for every vendored file.
@@ -10,8 +10,9 @@ the source revision and SHA-256 integrity values for every vendored file.
 
 ```sh
 bun test
+python3 update_test.py
 bun run server.ts
-docker build -t sub2api-lm-detector:d53d3f5b1582 .
+docker build -t sub2api-lm-detector:e9bd7c545bf7 .
 ```
 
 Bun 1.4.2 is the pinned container runtime. No package install, remote model calls,
@@ -19,6 +20,9 @@ runtime downloads, tokenizer probing or training is needed. The service loads th
 bank, ranker and calibration once at startup. Code/data integrity, reference
 sample counts and the official ranker/calibration bindings must all match before
 the HTTP listener starts. There is no legacy-ranking fallback.
+The current official `shared-detector-v2` ranker is stored as
+`data/shared_detector.bin` and decoded by the unchanged official
+`shared/detector-codec.ts`; it is not converted through JSON or reimplemented.
 
 The service intentionally has no public authentication interface: attach it only
 to the private Sub2API container network and do not publish a host port.
@@ -44,7 +48,9 @@ joining revision, ranker SHA, reference SHA and calibration SHA with colons.
 Version mismatch returns 409 before any analysis.
 
 Confidence is the official calibrated closed-set probability, not an identity
-certificate. `decision: not_confirmed` is normal for this algorithm. All three
+certificate. Successful v2 results omit `decision`; older v1 results may use
+`decision: not_confirmed`. Both describe a reference-library ranking. The official
+`not_model` result has no ranking or confidence and remains unscorable. All three
 answers and matching calibration are required for a scored result; null
 probabilities remain null. Sub2API decides allowlist changes.
 
@@ -53,9 +59,18 @@ probabilities remain null. Sub2API decides allowlist changes.
 Update vendored modules and data together from one reviewed upstream commit;
 regenerate the integrity manifest, retain the license, run the adapter and
 Sub2API regression tests, and release a new fixed container tag. Never point
-runtime code at `main` or `latest`. Updating the container requires an administrator
-to check the connection and save the new detector version in Sub2API; the
-consecutive-pass baseline then starts again. Old history remains readable.
+runtime code at `main` or `latest`. Current Sub2API reads and freezes the live
+detector version for each new task; updating the container does not require saving
+a newly accepted version. A version change during an existing task still stops
+mixed-version analysis, and the consecutive-pass baseline starts again. Old
+history remains readable.
+
+This bundled reference library has 66 candidates. `gpt-6-astra` and `gpt-5.6-sol`
+remain available. OpenAI `gpt-6.1-sol` samples are grouped into the canonical
+`gpt-6-astra` candidate (`display_name: gpt-6-astra/6.1-sol`). Its 72 reference
+samples include 36 from `openrouter/openai` and 36 from `openai/direct`.
+`gpt-6.1-terra` is a separate candidate. Expected model matching continues to use exact canonical
+candidate IDs returned by `/api/banks`.
 
 ### Standalone server updater
 
@@ -64,6 +79,14 @@ For the standalone deployment at `/opt/lm-detector`, install `update.sh` and
 Docker Compose are required; no host Bun installation or Git checkout is needed.
 The existing Compose file must contain **only** `lm-detector`, use an external
 Sub2API network, and publish no host ports.
+
+The initial v1-to-v2 migration also needs the updated adapter and its tests in
+the release source: the v2 artifact is binary, while the old adapter reads JSON.
+The updater copies the adapter from the existing Compose build context, so
+replacing only `update.sh` and `update.py` does not migrate that adapter. Prepare
+and validate a complete v2 release, deploy a v2-compatible Sub2API build, then
+switch the detector. Keep the previous source and image for rollback. Subsequent
+updates can use the commands below with the installed v2 adapter.
 
 ```sh
 # Download the latest official main revision and check it without switching.
@@ -93,8 +116,12 @@ concurrent updates. Source releases, images, and Compose backups remain availabl
 there is no global Docker prune. `--check` retains its candidate source/image but
 removes its temporary container. At least 2 GiB free disk space is required.
 
-Pause automatic attribution before upgrading, then check the connection and save
-the new accepted detector version in the Sub2API admin page before re-enabling it.
+Use a Sub2API build that supports the official `shared-detector-v2` algorithm
+before deploying this version. Older Sub2API builds that still require an accepted
+detector version need a connection check and saved identity after an upgrade;
+the current build discovers it automatically for new tasks. Check expected model
+lists when the upstream reference library changes. Waiting tasks retain their
+original version and cannot mix old answers with a newer detector.
 The updater does not change admin settings, restart Sub2API/PostgreSQL/Redis,
 modify database records, or send model requests. The address stays
 `http://lm-detector:8080`. Use `--directory` or `--sub2api-container` for other

@@ -2,18 +2,22 @@ import { readFileSync } from 'node:fs'
 import { gunzipSync } from 'node:zlib'
 import { createHash } from 'node:crypto'
 import { generateChallenges } from './vendor/shared/challenge-browser.js'
+import { decodeDetector } from './vendor/shared/detector-codec'
 import { analyzeSharedOutputs, calibrateRanking, supportsSharedDetector, type SharedDetector } from './vendor/shared/shared-detector'
 import { parseReference, referenceSamples } from './vendor/shared/reference'
 import type { Bank, Output } from './vendor/shared/types'
 import upstream from './upstream.json'
 
 const digest = (bytes: string | Uint8Array) => createHash('sha256').update(bytes).digest('hex')
-export function readPinned(path: keyof typeof upstream.files): string {
+export function readPinnedBytes(path: keyof typeof upstream.files): Buffer {
   const compressed = path.startsWith('data/')
   const bytes = readFileSync(new URL('./vendor/' + path + (compressed ? '.gz' : ''), import.meta.url))
   const plain = compressed ? gunzipSync(bytes) : bytes
   if (digest(plain) !== upstream.files[path]) throw new Error('Pinned artifact integrity mismatch: ' + path)
-  return plain.toString('utf8')
+  return plain
+}
+export function readPinned(path: keyof typeof upstream.files): string {
+  return readPinnedBytes(path).toString('utf8')
 }
 export function validateArtifacts(bank: Bank, detector: SharedDetector, reference: string) {
   if (bank.reference_sha256 !== digest(reference) ||
@@ -36,7 +40,7 @@ export function loadDetector() {
     if (!path.startsWith('data/')) readPinned(path)
   }
   const bank: Bank = JSON.parse(readPinned('data/unified_bank.json'))
-  const artifact: SharedDetector = JSON.parse(readPinned('data/shared_detector.json'))
+  const artifact = decodeDetector(readPinnedBytes('data/shared_detector.bin'))
   validateArtifacts(bank, artifact, readPinned('data/unified_reference.jsonl'))
   const info = {
     provider: 'lm_fingerprint_detector', protocol: 1, revision: upstream.revision,

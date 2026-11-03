@@ -40,7 +40,8 @@ class UpdateTests(unittest.TestCase):
                 updater.validate_compose(candidate)
 
     def test_only_official_shared_code_and_data_are_vendored_together(self):
-        files = {p: (p + "\n").encode() for p in updater.DATA | {"LICENSE", "shared/shared-detector.ts", "shared/challenge-browser.js"}}
+        files = {p: (p + "\n").encode() for p in updater.DATA | {"LICENSE"} | updater.REQUIRED_SHARED}
+        files["data/shared_detector.bin"] = b"\x00\xff\x80\n\r\x00\x01"
         tree = {"tree": [{"path": p, "type": "blob", "mode": "100644"} for p in files] + [{"path": "research/large.bin", "type": "blob", "mode": "100644"}]}
         with tempfile.TemporaryDirectory() as tmp:
             template = Path(tmp) / "template"
@@ -67,10 +68,13 @@ class UpdateTests(unittest.TestCase):
                 updater.source_paths({"tree": tree["tree"] + [extra]})
         with self.assertRaises(ValueError):
             updater.source_paths({**tree, "truncated": True})
+        with self.assertRaisesRegex(ValueError, "missing"):
+            updater.source_paths({"tree": [entry for entry in tree["tree"] if entry["path"] != "shared/detector-codec.ts"]})
 
     def test_rejects_incompatible_protocol_and_missing_calibration(self):
         info = {"provider": "lm_fingerprint_detector", "protocol": 1, "algorithm": "shared-detector-v1", "revision": "a" * 40, "bank_built_at": "2026-10-03", "ranker_sha256": "b" * 64, "reference_sha256": "c" * 64, "calibration_sha256": "d" * 64}
         self.assertEqual(updater.validate_info(info, "a" * 40), ":".join(["a" * 40, "b" * 64, "c" * 64, "d" * 64]))
+        self.assertEqual(updater.validate_info({**info, "algorithm": "shared-detector-v2"}, "a" * 40), updater.validate_info(info, "a" * 40))
         for change in ({"protocol": 2}, {"algorithm": "new-algorithm"}, {"calibration_sha256": ""}, {"revision": "e" * 40}):
             with self.assertRaises(ValueError):
                 updater.validate_info({**info, **change}, "a" * 40)

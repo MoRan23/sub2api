@@ -22,7 +22,8 @@ import uuid
 REPOSITORY = "https://github.com/Ikaleio/lm-detector"
 API = "https://api.github.com/repos/Ikaleio/lm-detector"
 RAW = "https://raw.githubusercontent.com/Ikaleio/lm-detector"
-DATA = {"data/shared_detector.json", "data/unified_bank.json", "data/unified_reference.jsonl"}
+DATA = {"data/shared_detector.bin", "data/unified_bank.json", "data/unified_reference.jsonl"}
+REQUIRED_SHARED = {"shared/shared-detector.ts", "shared/detector-codec.ts", "shared/challenge-browser.js"}
 WRAPPER = ("Dockerfile", "package.json", "detector.ts", "server.ts", "detector.test.ts")
 HEX40 = re.compile(r"[a-f0-9]{40}\Z")
 HEX64 = re.compile(r"[a-f0-9]{64}\Z")
@@ -63,7 +64,7 @@ def source_paths(tree):
             if ".." in parts or "\\" in path or path.startswith("/") or entry.get("mode") not in ("100644", "100755"):
                 raise ValueError("Unsafe upstream file: " + path)
             files.append(path)
-    if not (DATA | {"LICENSE", "shared/shared-detector.ts", "shared/challenge-browser.js"}).issubset(files):
+    if not (DATA | {"LICENSE"} | REQUIRED_SHARED).issubset(files):
         raise ValueError("Official shared modules or bundled data are missing")
     if len(files) > 500:
         raise ValueError("Unexpected upstream module count")
@@ -106,7 +107,9 @@ def validate_compose(config):
 
 
 def validate_info(info, revision):
-    if info.get("provider") != "lm_fingerprint_detector" or info.get("protocol") != 1 or info.get("algorithm") != "shared-detector-v1":
+    # The previous v1 image remains a valid rollback target. New candidates use
+    # the official v2 decoder and are checked by their own pinned offline tests.
+    if info.get("provider") != "lm_fingerprint_detector" or info.get("protocol") != 1 or info.get("algorithm") not in ("shared-detector-v1", "shared-detector-v2"):
         raise ValueError("Detector protocol is incompatible with Sub2API; adapter update required")
     if info.get("revision") != revision or not HEX40.fullmatch(revision):
         raise ValueError("Unexpected running detector revision")
@@ -272,7 +275,8 @@ def main():
             deploy.switch(candidate, revision, previous, old_revision)
         print("Detector ready at revision " + revision)
         print("URL unchanged: http://lm-detector:8080")
-        print("In Sub2API: check the connection, verify expected models, and SAVE the newly accepted detector version before enabling automatic tests.")
+        print("Current Sub2API reads the live detector version when each new task starts; no accepted-version save is required.")
+        print("Older Sub2API versions still require checking the connection and saving the new detector identity before automatic tests resume.")
         print("Sub2API, PostgreSQL, Redis and administrator configuration were not modified.")
 
 
