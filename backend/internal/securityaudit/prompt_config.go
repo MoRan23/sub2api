@@ -437,9 +437,9 @@ func (cfg ActiveConfig) KeywordBlockingActive() bool {
 	return cfg.RiskControlEnabled && cfg.KeywordBlockingEnabled && len(cfg.BlockedKeywords) > 0 && cfg.keywordMatcher != nil
 }
 
-func (cfg ActiveConfig) MatchBlockedKeyword(text string) (string, bool) {
+func (cfg ActiveConfig) MatchBlockedKeyword(text string) (rule, content string, matched bool) {
 	if !cfg.KeywordBlockingActive() {
-		return "", false
+		return "", "", false
 	}
 	return cfg.keywordMatcher.Match(text)
 }

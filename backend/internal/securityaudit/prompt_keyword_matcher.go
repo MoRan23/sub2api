@@ -71,20 +71,66 @@ func compilePromptKeywordRegex(rule string, index int) (*regexp.Regexp, error) {
 	return nil, infraerrors.BadRequest("prompt_audit_invalid_keyword_regex", fmt.Sprintf("第 %d 条关键词规则的正则表达式无效，请使用 Go/RE2 支持的语法", index+1))
 }
 
-func (m *promptKeywordMatcher) Match(text string) (string, bool) {
+// Match returns the configured rule for auditing and separate client-visible
+// content. Regex content comes from the input, never from the expression.
+func (m *promptKeywordMatcher) Match(text string) (rule, content string, matched bool) {
 	if m == nil || text == "" {
-		return "", false
+		return "", "", false
 	}
 	literal, literalHit := m.literals.Match(text)
 	for _, candidate := range m.regexes {
 		if literalHit && candidate.index >= m.literalOrder[literal] {
 			break
 		}
-		if candidate.re.MatchString(text) {
-			return candidate.rule, true
+		if indexes := candidate.re.FindStringIndex(text); indexes != nil {
+			return candidate.rule, promptKeywordMatchedContent(text, indexes[0], indexes[1]), true
 		}
 	}
-	return literal, literalHit
+	return literal, literal, literalHit
+}
+
+func promptKeywordMatchedContent(text string, start, end int) string {
+	content := text[start:end]
+	// ScanText contains an internal boundary between prioritized prompt segments.
+	// Do not reflect that boundary, even when a regex matches only part of it.
+	var cleaned strings.Builder
+	position := start
+	for search := 0; search < end; {
+		relative := strings.Index(text[search:], promptAuditPrioritySeparator)
+		if relative < 0 {
+			break
+		}
+		boundary := search + relative
+		boundaryEnd := boundary + len(promptAuditPrioritySeparator)
+		search = boundaryEnd
+		if boundary >= end {
+			break
+		}
+		if boundaryEnd <= start {
+			continue
+		}
+		if boundary > position {
+			cleaned.WriteString(text[position:boundary])
+		}
+		if boundary > start && boundaryEnd < end {
+			cleaned.WriteString("\n\n")
+		}
+		position = min(boundaryEnd, end)
+	}
+	if position > start {
+		cleaned.WriteString(text[position:end])
+		content = cleaned.String()
+	}
+	// Match text may be much larger than the rule. Bound the response and avoid
+	// retaining the whole prompt through a small substring.
+	runes := 0
+	for index := range content {
+		if runes == MaxBlockedRegexRunes {
+			return content[:index] + "…"
+		}
+		runes++
+	}
+	return strings.Clone(content)
 }
 
 func promptKeywordEvidenceText(rule string) string {

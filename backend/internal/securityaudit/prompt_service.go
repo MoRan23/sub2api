@@ -139,7 +139,7 @@ func (s *PromptService) CheckKeyword(ctx context.Context, req Request) (*PromptD
 		}
 		return nil, &GuardError{Code: ErrorCodeInvalidResponse, Cause: err}
 	}
-	keyword, matched := cfg.MatchBlockedKeyword(snapshot.ScanText)
+	keyword, content, matched := cfg.MatchBlockedKeyword(snapshot.ScanText)
 	if !matched {
 		return &PromptDecision{Kind: DecisionAllow, AllowNextStage: true}, nil
 	}
@@ -153,7 +153,7 @@ func (s *PromptService) CheckKeyword(ctx context.Context, req Request) (*PromptD
 		ScannerScores: map[string]float64{"keyword": 1}, ScannerEvidence: map[string]string{"keyword": "sha256:" + keywordHash},
 		ScannerBackend: "local-keyword", ScannerVersion: "1", PolicyID: "keyword-substring", PolicyVersion: 1,
 		ChunkTotal: 1, LatencyMS: int(latency.Milliseconds()),
-		matchedKeyword: keyword,
+		matchedKeyword: keyword, matchedContent: content,
 	}
 	if s.metrics != nil {
 		s.metrics.Observe(DecisionBlock, latency)

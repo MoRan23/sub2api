@@ -2,6 +2,7 @@ package securityaudit
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"net/http"
@@ -145,8 +146,10 @@ func TestCoordinatorKeywordMessageRequiresLocalMatch(t *testing.T) {
 	}{
 		{name: "missing result"},
 		{name: "missing match", result: &NormalizedResult{ScannerBackend: "local-keyword", PolicyID: "keyword-substring"}},
-		{name: "guard evidence", result: &NormalizedResult{ScannerBackend: "qwen3guard-openai", PolicyID: "keyword-substring", matchedKeyword: "private guard text"}},
-		{name: "different policy", result: &NormalizedResult{ScannerBackend: "local-keyword", PolicyID: "other-policy", matchedKeyword: "private guard text"}},
+		{name: "guard evidence", result: &NormalizedResult{ScannerBackend: "qwen3guard-openai", PolicyID: "keyword-substring", matchedKeyword: "private guard text", matchedContent: "private guard content"}},
+		{name: "different policy", result: &NormalizedResult{ScannerBackend: "local-keyword", PolicyID: "other-policy", matchedKeyword: "private guard text", matchedContent: "private guard content"}},
+		{name: "rule without content", result: &NormalizedResult{ScannerBackend: "local-keyword", PolicyID: "keyword-substring", matchedKeyword: `regex:private-rule`}},
+		{name: "content without local rule", result: &NormalizedResult{ScannerBackend: "local-keyword", PolicyID: "keyword-substring", matchedContent: "private guard text"}},
 		{name: "evidence is not a match", result: &NormalizedResult{ScannerBackend: "local-keyword", PolicyID: "keyword-substring", ScannerEvidence: map[string]string{"keyword": "private guard text"}}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -154,17 +157,62 @@ func TestCoordinatorKeywordMessageRequiresLocalMatch(t *testing.T) {
 			require.Equal(t, `提示词包含禁止内容，请调整输入后重试`, decision.ClientMessage)
 		})
 	}
-	result := &NormalizedResult{ScannerBackend: "local-keyword", PolicyID: "keyword-substring", matchedKeyword: "private rule"}
+	result := &NormalizedResult{ScannerBackend: "local-keyword", PolicyID: "keyword-substring", matchedKeyword: "private rule", matchedContent: "private content"}
 	decision := prioritize(nil, &PromptDecision{Kind: DecisionBlock, ErrorCode: ErrorCodeBlocked, Result: result})
 	require.Equal(t, "提示词安全审计拒绝了该请求，请调整输入后重试", decision.ClientMessage)
 }
 
-func TestCoordinatorKeywordMessageQuotesConfiguredRule(t *testing.T) {
+func TestCoordinatorKeywordMessageQuotesMatchedContent(t *testing.T) {
 	decision := prioritize(nil, &PromptDecision{Kind: DecisionBlock, ErrorCode: ErrorCodeKeywordBlocked, Result: &NormalizedResult{
-		ScannerBackend: "local-keyword", PolicyID: "keyword-substring", matchedKeyword: "中文\"规则\\\n\t",
+		ScannerBackend: "local-keyword", PolicyID: "keyword-substring", matchedKeyword: "regex:(?s).*", matchedContent: "中文\"规则\\\n\t",
 	}})
 	require.Equal(t, `提示词包含禁止内容，请调整输入后重试（命中关键词："中文\"规则\\\n\t"）`, decision.ClientMessage)
 	require.NotContains(t, decision.ClientMessage, "\n")
+	require.NotContains(t, decision.ClientMessage, "regex:")
+}
+
+func TestCoordinatorRegexBlockReturnsMatchedContentAcrossProtocols(t *testing.T) {
+	const rule = `regex:(?i)blocked-[0-9]+|never-match-private-branch`
+	active, err := ActiveFromStorage(storageConfig{
+		KeywordBlockingEnabled: true, KeywordAllGroups: true, BlockedKeywords: []string{rule},
+	}, true, prefixEncryptor{})
+	require.NoError(t, err)
+	for _, tc := range []struct {
+		protocol, body string
+	}{
+		{"openai_responses", `{"input":"unrelated prefix BLOCKED-42 unrelated suffix"}`},
+		{"openai_chat_completions", `{"messages":[{"role":"user","content":"unrelated prefix BLOCKED-42 unrelated suffix"}]}`},
+		{"anthropic_messages", `{"messages":[{"role":"user","content":"unrelated prefix BLOCKED-42 unrelated suffix"}]}`},
+		{"gemini", `{"contents":[{"role":"user","parts":[{"text":"unrelated prefix BLOCKED-42 unrelated suffix"}]}]}`},
+		{"responses_websocket", `{"type":"response.create","response":{"input":"unrelated prefix BLOCKED-42 unrelated suffix"}}`},
+	} {
+		t.Run(tc.protocol, func(t *testing.T) {
+			prompt := &PromptService{config: &fakeConfigStore{active: true, cfg: active}}
+			decision := NewCoordinator(nil, prompt).Check(context.Background(), Request{Protocol: tc.protocol, Body: []byte(tc.body)})
+			require.Equal(t, DecisionBlock, decision.Kind)
+			require.Equal(t, http.StatusForbidden, decision.HTTPStatus)
+			require.Equal(t, ErrorCodeKeywordBlocked, decision.ErrorCode)
+			require.Equal(t, `提示词包含禁止内容，请调整输入后重试（命中关键词："BLOCKED-42"）`, decision.ClientMessage)
+			require.Equal(t, rule, decision.Prompt.Result.matchedKeyword, "administrator audit keeps the full rule")
+			encoded, err := json.Marshal(decision)
+			require.NoError(t, err)
+			require.NotContains(t, string(encoded), "regex:")
+			require.NotContains(t, string(encoded), "never-match-private-branch")
+			require.NotContains(t, string(encoded), "unrelated")
+		})
+	}
+}
+
+func TestCoordinatorRegexEmptyMatchKeepsGenericBlockMessage(t *testing.T) {
+	active, err := ActiveFromStorage(storageConfig{
+		KeywordBlockingEnabled: true, KeywordAllGroups: true, BlockedKeywords: []string{`regex:^`},
+	}, true, prefixEncryptor{})
+	require.NoError(t, err)
+	prompt := &PromptService{config: &fakeConfigStore{active: true, cfg: active}}
+	decision := NewCoordinator(nil, prompt).Check(context.Background(), Request{Protocol: "openai_responses", Body: []byte(`{"input":"hello"}`)})
+	require.Equal(t, DecisionBlock, decision.Kind)
+	require.Equal(t, `提示词包含禁止内容，请调整输入后重试`, decision.ClientMessage)
+	require.Equal(t, `regex:^`, decision.Prompt.Result.matchedKeyword)
 }
 
 func TestCoordinatorBlockingPriorityCoversBothEngineDecisionMatrix(t *testing.T) {

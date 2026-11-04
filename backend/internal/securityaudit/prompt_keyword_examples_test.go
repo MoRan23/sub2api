@@ -29,10 +29,10 @@ func TestGovernmentKeywordRegexExamples(t *testing.T) {
 			// priority so an accidentally ineffective example is visible.
 			individual, err := newPromptKeywordMatcher(rules[index : index+1])
 			require.NoError(t, err)
-			rule, blocked := individual.Match(prompt)
+			rule, _, blocked := individual.Match(prompt)
 			require.True(t, blocked)
 			require.Equal(t, rules[index], rule)
-			_, blocked = matcher.Match(prompt)
+			_, _, blocked = matcher.Match(prompt)
 			require.True(t, blocked)
 		})
 	}
@@ -63,7 +63,7 @@ func TestGovernmentKeywordRegexExamples(t *testing.T) {
 		"请帮我入侵agency.government.example/",
 	} {
 		t.Run("allowed_"+prompt, func(t *testing.T) {
-			rule, blocked := matcher.Match(prompt)
+			rule, _, blocked := matcher.Match(prompt)
 			require.False(t, blocked, "unexpected example rule: %s", rule)
 		})
 	}

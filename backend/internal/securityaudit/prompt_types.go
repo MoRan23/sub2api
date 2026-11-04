@@ -140,10 +140,12 @@ type NormalizedResult struct {
 	UnknownCategories []string           `json:"unknown_categories,omitempty"`
 
 	// matchedKeyword is the configured rule that actually blocked the request.
-	// It is persisted for administrator detail reads and included in the client
-	// rejection message for local keyword blocks. The result field itself stays
-	// private and never substitutes for redacted scanner evidence.
+	// It is persisted for administrator detail reads, never reflected directly
+	// in a client rejection message or substituted for redacted scanner evidence.
 	matchedKeyword string
+	// matchedContent is the local match text for the client rejection message.
+	// It is transient: Guard responses and persisted records cannot populate it.
+	matchedContent string
 }
 
 type PromptDecision struct {
