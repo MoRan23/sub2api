@@ -54,6 +54,8 @@ func lockAccountConfiguration(ctx context.Context, client *dbent.Client, id int6
 // the map being saved. Every target must have the same explicit intent.
 func accountConfigurationExtraPatch(ctx context.Context, ids []int64, updates map[string]any) map[string]any {
 	filtered := service.StripRetiredCodexStateExtra(updates)
+	// Capacity observations are owned exclusively by the conditional sync writer.
+	delete(filtered, service.CodexEngineCapacitySyncExtraKey)
 	delete(filtered, "openai_pinned_installation_id")
 	delete(filtered, "openai_installation_rotate_enabled")
 	for _, key := range []string{"openai_installation_pin_enabled", "enable_tls_fingerprint", "tls_fingerprint_profile_id", service.OpenAIDaybreakBlueEnabledKey, service.OpenAIDaybreakRedEnabledKey, service.OpenAIAPIKeyAutoAttributionEnabledExtraKey, service.OpenAIAttributionReplaceWhitelistEnabledExtraKey} {
@@ -107,8 +109,9 @@ func guardedAccountExtraExpression(expression string, credentialExpressions ...s
 	daybreakEligible := "(" + strings.Replace(openAIOAuthCredentialOwnerExpression(credentials), " AND parent_account_id IS NULL", "", 1) +
 		" OR (platform = 'openai' AND type = 'apikey' AND COALESCE((" + expression + ") ->> 'openai_api_key_mode', '') <> 'codex_engine'))"
 	expression = "CASE WHEN " + daybreakEligible + " THEN (" + expression + ") ELSE (" + expression + ") - 'openai_daybreak_blue_enabled' - 'openai_daybreak_red_enabled' END"
-	return "CASE WHEN " + installationOwnerSQL + " THEN (" + expression + ") - 'openai_installation_rotate_enabled'" +
+	expression = "CASE WHEN " + installationOwnerSQL + " THEN (" + expression + ") - 'openai_installation_rotate_enabled'" +
 		" ELSE (" + expression + ") - 'openai_installation_rotate_enabled' - 'openai_pinned_installation_id' - 'openai_installation_pin_enabled' END"
+	return guardedCodexEngineCapacityExtraExpression(expression)
 }
 
 // SQL UPDATE evaluates these expressions against the locked, latest row, so an

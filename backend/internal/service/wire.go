@@ -543,6 +543,16 @@ func ProvideAccountExpiryService(accountRepo AccountRepository) *AccountExpirySe
 	return svc
 }
 
+func ProvideCodexEngineCapacitySyncService(accountRepo AccountRepository, upstream HTTPUpstream, cfg *config.Config) *CodexEngineCapacitySyncService {
+	repo, ok := accountRepo.(CodexEngineCapacityRepository)
+	if !ok {
+		panic("account repository does not support Codex Engine capacity sync")
+	}
+	svc := NewCodexEngineCapacitySyncService(repo, upstream, cfg)
+	svc.Start()
+	return svc
+}
+
 // ProvideOpenAICodexVersionSyncService creates and starts OpenAICodexVersionSyncService.
 // 出站 Codex 身份的版本号靠它跟随官方发布，无需为了跟版本而发新版本；面板可关闭。
 func ProvideOpenAICodexVersionSyncService(
@@ -1104,6 +1114,7 @@ var ProviderSet = wire.NewSet(
 	ProvideTokenRefreshService,
 	wire.Bind(new(GrokOAuthReconciler), new(*TokenRefreshService)),
 	ProvideAccountExpiryService,
+	ProvideCodexEngineCapacitySyncService,
 	ProvideOpenAICodexVersionSyncService,
 	ProvideOpenAIOAuthOSProfileBackfill,
 	ProvideClaudeCodeVersionSyncService,

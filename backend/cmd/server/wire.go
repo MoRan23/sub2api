@@ -104,6 +104,7 @@ func provideCleanup(
 	schedulerSnapshot *service.SchedulerSnapshotService,
 	tokenRefresh *service.TokenRefreshService,
 	accountExpiry *service.AccountExpiryService,
+	codexEngineCapacitySync *service.CodexEngineCapacitySyncService,
 	cnProviderBalanceCheck *service.CNProviderBalanceCheckService,
 	codexVersionSync *service.OpenAICodexVersionSyncService,
 	openAIOAuthOSProfiles *service.OpenAIOAuthOSProfileBackfill,
@@ -311,6 +312,10 @@ func provideCleanup(
 			}},
 			{"AccountExpiryService", func() error {
 				accountExpiry.Stop()
+				return nil
+			}},
+			{"CodexEngineCapacitySyncService", func() error {
+				codexEngineCapacitySync.Stop()
 				return nil
 			}},
 			{"CNProviderBalanceCheckService", func() error {

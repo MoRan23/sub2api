@@ -144,6 +144,7 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	// paths, including external sync imports, begin with Daybreak disabled.
 	delete(account.Extra, service.OpenAIDaybreakBlueEnabledKey)
 	delete(account.Extra, service.OpenAIDaybreakRedEnabledKey)
+	delete(account.Extra, service.CodexEngineCapacitySyncExtraKey)
 	builder := client.Account.Create().
 		SetName(account.Name).
 		SetNillableNotes(account.Notes).
@@ -581,6 +582,9 @@ func (r *accountRepository) updateLockedAccount(
 		account.Credentials = service.PreserveOpenAIOAuthProviderCredentials(current.Credentials, account.Credentials)
 	}
 	if err := service.PreserveAccountConfiguration(current, account, service.AccountConfigurationIntentFromContext(ctx, account.ID)); err != nil {
+		return nil, err
+	}
+	if err := preserveCodexEngineCapacityLocked(ctx, client, current, account); err != nil {
 		return nil, err
 	}
 	if err := validateDaybreakPatchLocked(ctx, client, current, account, service.AccountConfigurationIntentFromContext(ctx, account.ID).Extra); err != nil {
