@@ -16,7 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func telemetryStoreFixture(t *testing.T) (service.CodexTelemetryStore, service.CodexTelemetryPoolKey, time.Time) {
+func telemetryStoreFixture(t testing.TB) (service.CodexTelemetryStore, service.CodexTelemetryPoolKey, time.Time) {
 	t.Helper()
 	ctx := context.Background()
 	store := NewCodexTelemetryStore(integrationDB)
