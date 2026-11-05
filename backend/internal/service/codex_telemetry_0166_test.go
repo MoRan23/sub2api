@@ -80,13 +80,14 @@ func TestCodexTelemetry0166RestoredUnsealedTurnUsesCurrentSchema(t *testing.T) {
 	require.NotContains(t, string(encoded), "critical_path", "old unsealed snapshots store facts, not event schema")
 	turn := codexTelemetryRuntimeTurn{Profile: encoded, Explicit: true, ThreadID: profile.threadID, LastSeen: now,
 		Attempts: 1, Samples: 1, Result: CodexTelemetryResult{Status: "completed", HTTPStatus: 200, FinishedAt: now.Add(time.Second)}}
-	tx := CodexTelemetryPoolTransaction{Policy: CodexTelemetryPolicy{Epoch: 1, Enabled: true, Simulation: true, Observation: true}, Activities: map[string]CodexTelemetryActivity{}}
+	tx := CodexTelemetryPoolTransaction{Policy: CodexTelemetryPolicy{Epoch: 1, Enabled: true, Simulation: true, Observation: true}, Activities: newMemoryCodexTelemetryActivities(nil, time.Time{})}
 	require.NoError(t, putRuntimeActivity(&tx, "turn", "old-turn", turn, now, now.Add(time.Hour)))
 	// A fresh in-memory runtime sees only serialized durable state.
-	snapshot, err := json.Marshal(tx)
+	snapshot, err := json.Marshal(runtimeTestActivityMap(&tx))
 	require.NoError(t, err)
-	var restored CodexTelemetryPoolTransaction
-	require.NoError(t, json.Unmarshal(snapshot, &restored))
+	var restoredActivities map[string]CodexTelemetryActivity
+	require.NoError(t, json.Unmarshal(snapshot, &restoredActivities))
+	restored := CodexTelemetryPoolTransaction{Policy: tx.Policy, Pool: tx.Pool, Activities: newMemoryCodexTelemetryActivities(restoredActivities, time.Time{})}
 	require.NoError(t, sealCodexTelemetryRuntime(&restored, "old-turn", now.Add(2*time.Second)))
 	require.Len(t, restored.Batches, 1)
 	batch := restored.Batches[0]

@@ -15,6 +15,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/google/uuid"
+	"github.com/lib/pq"
 )
 
 const codexTelemetryRuntimePolicyKey = "codex_telemetry_runtime_policy"
@@ -218,28 +219,22 @@ func (r *codexTelemetryStore) TransactPool(ctx context.Context, key service.Code
 	if err != nil {
 		return nil, err
 	}
-	activities, err := loadCodexTelemetryActivities(ctx, tx, pool.ID)
-	if err != nil {
-		return nil, err
-	}
-	original := make(map[string]service.CodexTelemetryActivity, len(activities))
-	for k, a := range activities {
-		a.Data = append(json.RawMessage(nil), a.Data...)
-		original[k] = a
-	}
+	activities := &codexTelemetryActivityTransaction{ctx: ctx, tx: tx, poolID: pool.ID, now: now,
+		cache: make(map[string]*service.CodexTelemetryActivity), original: make(map[string]*service.CodexTelemetryActivity),
+		persisted: make(map[string]*service.CodexTelemetryActivity), dirty: make(map[string]service.CodexTelemetryActivityKey)}
 	state := &service.CodexTelemetryPoolTransaction{Policy: policy, Pool: pool, Activities: activities}
 	if err := fn(state); err != nil {
 		return nil, err
 	}
 	// Identity and generation are immutable, even if a callback accidentally
 	// changes its copy. LastBusinessAt may only advance due to real traffic.
-	if state.Policy != policy || state.Pool.ID != pool.ID || state.Pool.Key != key || state.Pool.Seed != pool.Seed || state.Pool.TemplateVersion <= 0 {
+	if state.Policy != policy || state.Pool.ID != pool.ID || state.Pool.Key != key || state.Pool.Seed != pool.Seed || state.Pool.TemplateVersion <= 0 || state.Activities != activities {
 		return nil, service.ErrCodexTelemetryInvalidState
 	}
 	if state.Pool.LastBusinessAt.Before(pool.LastBusinessAt) {
 		state.Pool.LastBusinessAt = pool.LastBusinessAt
 	}
-	if err = saveCodexTelemetryActivities(ctx, tx, pool.ID, original, state.Activities, now); err != nil {
+	if err = activities.flush(); err != nil {
 		return nil, err
 	}
 	for i := range state.Batches {
@@ -247,17 +242,17 @@ func (r *codexTelemetryStore) TransactPool(ctx context.Context, key service.Code
 			return nil, err
 		}
 	}
-	var nextDue time.Time
-	for _, activity := range state.Activities {
-		if !activity.DueAt.IsZero() && (nextDue.IsZero() || activity.DueAt.Before(nextDue)) {
-			nextDue = activity.DueAt
-		}
+	var nextDue sql.NullTime
+	err = tx.QueryRowContext(ctx, `SELECT due_at FROM codex_telemetry_activities
+		WHERE pool_id=$1::uuid AND due_at IS NOT NULL ORDER BY due_at,kind COLLATE "C",activity_key COLLATE "C" LIMIT 1`, pool.ID).Scan(&nextDue)
+	if err != nil && !errors.Is(err, sql.ErrNoRows) {
+		return nil, err
 	}
 	// Keep the scheduling summary in the same transaction as activity changes.
 	// Pollers can then limit an indexed pool scan without aggregating all history.
 	result, err := tx.ExecContext(ctx, `UPDATE codex_telemetry_pools SET template_version=$2,
 		last_business_at=$3,version=version+1,updated_at=$4,next_due_at=$6 WHERE id=$1::uuid AND version=$5`, pool.ID,
-		state.Pool.TemplateVersion, nullableCodexTelemetryTime(state.Pool.LastBusinessAt), now, pool.Version, nullableCodexTelemetryTime(nextDue))
+		state.Pool.TemplateVersion, nullableCodexTelemetryTime(state.Pool.LastBusinessAt), now, pool.Version, nextDue)
 	if err != nil {
 		return nil, err
 	}
@@ -274,61 +269,344 @@ func (r *codexTelemetryStore) TransactPool(ctx context.Context, key service.Code
 	return &state.Pool, nil
 }
 
-func loadCodexTelemetryActivities(ctx context.Context, tx *sql.Tx, poolID string) (map[string]service.CodexTelemetryActivity, error) {
-	rows, err := tx.QueryContext(ctx, `SELECT kind,activity_key,state,due_at,updated_at FROM codex_telemetry_activities WHERE pool_id=$1::uuid`, poolID)
+// The pool row lock serializes this transaction's lazy cache. A nil cache entry
+// records a missing/deleted key; dirty contains only explicitly changed keys.
+type codexTelemetryActivityTransaction struct {
+	ctx              context.Context
+	tx               *sql.Tx
+	poolID           string
+	now              time.Time
+	cache            map[string]*service.CodexTelemetryActivity
+	original         map[string]*service.CodexTelemetryActivity
+	persisted        map[string]*service.CodexTelemetryActivity
+	dirty            map[string]service.CodexTelemetryActivityKey
+	runtimeValidated bool
+}
+
+func cloneCodexTelemetryActivity(a service.CodexTelemetryActivity) service.CodexTelemetryActivity {
+	a.Data = append(json.RawMessage(nil), a.Data...)
+	return a
+}
+
+func scanCodexTelemetryActivity(row interface{ Scan(...any) error }) (service.CodexTelemetryActivity, error) {
+	a, err := scanCodexTelemetryActivityRaw(row)
+	if err != nil {
+		return a, err
+	}
+	return a, service.ValidateCodexTelemetryRuntimeActivity(a)
+}
+
+func scanCodexTelemetryActivityRaw(row interface{ Scan(...any) error }) (service.CodexTelemetryActivity, error) {
+	var a service.CodexTelemetryActivity
+	var due sql.NullTime
+	if err := row.Scan(&a.Kind, &a.Key, &a.Data, &due, &a.UpdatedAt); err != nil {
+		return a, err
+	}
+	if due.Valid {
+		a.DueAt = due.Time
+	}
+	return a, nil
+}
+
+func (a *codexTelemetryActivityTransaction) remember(item service.CodexTelemetryActivity) {
+	mk := service.CodexTelemetryActivityMapKey(item.Kind, item.Key)
+	if _, known := a.original[mk]; !known {
+		original := cloneCodexTelemetryActivity(item)
+		a.original[mk] = &original
+	}
+	persisted := cloneCodexTelemetryActivity(item)
+	a.persisted[mk] = &persisted
+	a.cache[mk] = &item
+}
+
+func (a *codexTelemetryActivityTransaction) Get(kind, key string) (service.CodexTelemetryActivity, bool, error) {
+	items, err := a.GetMany([]service.CodexTelemetryActivityKey{{Kind: kind, Key: key}})
+	if err != nil {
+		return service.CodexTelemetryActivity{}, false, err
+	}
+	item, ok := items[service.CodexTelemetryActivityMapKey(kind, key)]
+	return item, ok, nil
+}
+
+func (a *codexTelemetryActivityTransaction) GetMany(keys []service.CodexTelemetryActivityKey) (map[string]service.CodexTelemetryActivity, error) {
+	var kinds, names []string
+	missing := make(map[string]bool)
+	for _, key := range keys {
+		mk := service.CodexTelemetryActivityMapKey(key.Kind, key.Key)
+		if _, known := a.cache[mk]; !known && !missing[mk] {
+			missing[mk] = true
+			kinds, names = append(kinds, key.Kind), append(names, key.Key)
+		}
+	}
+	if len(kinds) > 0 {
+		rows, err := a.tx.QueryContext(a.ctx, `SELECT activity.kind,activity.activity_key,activity.state,activity.due_at,activity.updated_at
+			FROM codex_telemetry_activities activity
+			JOIN unnest($2::text[],$3::text[]) wanted(kind,activity_key) USING(kind,activity_key)
+			WHERE activity.pool_id=$1::uuid`, a.poolID, pq.Array(kinds), pq.Array(names))
+		if err != nil {
+			return nil, err
+		}
+		defer func() { _ = rows.Close() }()
+		for rows.Next() {
+			item, err := scanCodexTelemetryActivity(rows)
+			if err != nil {
+				return nil, err
+			}
+			mk := service.CodexTelemetryActivityMapKey(item.Kind, item.Key)
+			a.remember(item)
+			delete(missing, mk)
+		}
+		if err := rows.Err(); err != nil {
+			return nil, err
+		}
+		for mk := range missing {
+			a.cache[mk] = nil
+			a.original[mk] = nil
+			a.persisted[mk] = nil
+		}
+	}
+	result := make(map[string]service.CodexTelemetryActivity, len(keys))
+	for _, key := range keys {
+		mk := service.CodexTelemetryActivityMapKey(key.Kind, key.Key)
+		if item := a.cache[mk]; item != nil {
+			result[mk] = cloneCodexTelemetryActivity(*item)
+		}
+	}
+	return result, nil
+}
+
+func (a *codexTelemetryActivityTransaction) Put(item service.CodexTelemetryActivity) error {
+	if item.Kind == "" || len(item.Kind) > 64 || item.Key == "" || len(item.Key) > 512 || strings.ContainsRune(item.Kind, '\x00') || strings.ContainsRune(item.Key, '\x00') {
+		return service.ErrCodexTelemetryInvalidState
+	}
+	if err := service.ValidateCodexTelemetryStoredJSON(item.Data); err != nil {
+		return err
+	}
+	if err := service.ValidateCodexTelemetryRuntimeActivity(item); err != nil {
+		return err
+	}
+	old, exists, err := a.Get(item.Kind, item.Key)
+	if err != nil {
+		return err
+	}
+	if exists && bytes.Equal(old.Data, item.Data) && old.DueAt.Equal(item.DueAt) {
+		return nil
+	}
+	item = cloneCodexTelemetryActivity(item)
+	item.UpdatedAt = a.now
+	mk := service.CodexTelemetryActivityMapKey(item.Kind, item.Key)
+	if original := a.original[mk]; original != nil && bytes.Equal(original.Data, item.Data) && original.DueAt.Equal(item.DueAt) {
+		item.UpdatedAt = original.UpdatedAt
+	}
+	a.cache[mk] = &item
+	a.dirty[mk] = service.CodexTelemetryActivityKey{Kind: item.Kind, Key: item.Key}
+	a.runtimeValidated = false
+	return nil
+}
+
+func (a *codexTelemetryActivityTransaction) Delete(kind, key string) error {
+	if _, _, err := a.Get(kind, key); err != nil {
+		return err
+	}
+	mk := service.CodexTelemetryActivityMapKey(kind, key)
+	a.cache[mk] = nil
+	a.dirty[mk] = service.CodexTelemetryActivityKey{Kind: kind, Key: key}
+	a.runtimeValidated = false
+	return nil
+}
+
+func (a *codexTelemetryActivityTransaction) flush() error {
+	keys := make([]string, 0, len(a.dirty))
+	for key := range a.dirty {
+		keys = append(keys, key)
+	}
+	sort.Strings(keys)
+	for _, mk := range keys {
+		key, item := a.dirty[mk], a.cache[mk]
+		old := a.persisted[mk]
+		if (item == nil && old == nil) || (item != nil && old != nil && bytes.Equal(item.Data, old.Data) && item.DueAt.Equal(old.DueAt) && item.UpdatedAt.Equal(old.UpdatedAt)) {
+			delete(a.dirty, mk)
+			continue
+		}
+		if item == nil {
+			if _, err := a.tx.ExecContext(a.ctx, `DELETE FROM codex_telemetry_activities WHERE pool_id=$1::uuid AND kind=$2 AND activity_key=$3`, a.poolID, key.Kind, key.Key); err != nil {
+				return err
+			}
+		} else {
+			if _, err := a.tx.ExecContext(a.ctx, `INSERT INTO codex_telemetry_activities(pool_id,kind,activity_key,state,due_at,updated_at)
+				VALUES($1::uuid,$2,$3,$4::jsonb,$5,$6) ON CONFLICT(pool_id,kind,activity_key) DO UPDATE SET
+				state=EXCLUDED.state,due_at=EXCLUDED.due_at,updated_at=EXCLUDED.updated_at`,
+				a.poolID, key.Kind, key.Key, []byte(item.Data), nullableCodexTelemetryTime(item.DueAt), item.UpdatedAt); err != nil {
+				return err
+			}
+		}
+		if item == nil {
+			a.persisted[mk] = nil
+		} else {
+			saved := cloneCodexTelemetryActivity(*item)
+			a.persisted[mk] = &saved
+		}
+		delete(a.dirty, mk)
+	}
+	return nil
+}
+
+// SQL only inspects these runtime fields. Missing/null fields have the same zero
+// values as encoding/json. Exact typed decoding also runs on touched rows.
+const codexTelemetryRuntimeShape = `CASE a.kind
+	WHEN 'turn' THEN jsonb_typeof(a.state) IN ('object','null')
+		AND COALESCE(jsonb_typeof(a.state->'sealed'),'null') IN ('boolean','null')
+		AND COALESCE(jsonb_typeof(a.state->'incomplete'),'null') IN ('boolean','null')
+		AND COALESCE(jsonb_typeof(a.state->'inflight'),'null') IN ('object','null')
+	WHEN 'attempt' THEN jsonb_typeof(a.state) IN ('object','null')
+		AND COALESCE(jsonb_typeof(a.state->'finished'),'null') IN ('boolean','null')
+		AND COALESCE(jsonb_typeof(a.state->'turn_key'),'null') IN ('string','null')
+	ELSE TRUE END`
+
+const codexTelemetryRuntimeActive = `COALESCE(a.state->'sealed','false'::jsonb) <> 'true'::jsonb
+	AND COALESCE(a.state->'incomplete','false'::jsonb) <> 'true'::jsonb`
+
+const codexTelemetryRuntimeCompleted = `(a.kind='sampling'
+	OR (a.kind='turn' AND (a.state->'sealed'='true'::jsonb OR a.state->'incomplete'='true'::jsonb))
+	OR (a.kind='attempt' AND (a.state->'finished'='true'::jsonb OR NOT EXISTS (
+		SELECT 1 FROM codex_telemetry_activities parent WHERE parent.pool_id=a.pool_id AND parent.kind='turn'
+		AND parent.activity_key=COALESCE(a.state->>'turn_key','')
+		AND COALESCE(parent.state->'sealed','false'::jsonb) <> 'true'::jsonb
+		AND COALESCE(parent.state->'incomplete','false'::jsonb) <> 'true'::jsonb))))`
+
+func (a *codexTelemetryActivityTransaction) validateRuntime() error {
+	if a.runtimeValidated {
+		return nil
+	}
+	var valid bool
+	if err := a.tx.QueryRowContext(a.ctx, `SELECT COALESCE(bool_and(`+codexTelemetryRuntimeShape+`),TRUE)
+		FROM codex_telemetry_activities a WHERE pool_id=$1::uuid AND kind IN ('turn','attempt','sampling')`, a.poolID).Scan(&valid); err != nil {
+		return err
+	}
+	if !valid {
+		return service.ErrCodexTelemetryInvalidState
+	}
+	a.runtimeValidated = true
+	return nil
+}
+
+func (a *codexTelemetryActivityTransaction) ListActiveTurns(dueBefore time.Time, limit int) ([]service.CodexTelemetryActivity, error) {
+	if limit < 0 {
+		return nil, service.ErrCodexTelemetryInvalidState
+	}
+	if err := a.flush(); err != nil {
+		return nil, err
+	}
+	query := `SELECT a.kind,a.activity_key,a.state,a.due_at,a.updated_at FROM codex_telemetry_activities a
+		WHERE a.pool_id=$1::uuid AND a.kind='turn' AND ` + codexTelemetryRuntimeActive
+	args := []any{a.poolID, limit}
+	if !dueBefore.IsZero() {
+		query += ` AND a.due_at <= $3`
+		args = append(args, dueBefore)
+	}
+	query += ` ORDER BY a.due_at,a.kind COLLATE "C",a.activity_key COLLATE "C" LIMIT NULLIF($2,0)`
+	rows, err := a.tx.QueryContext(a.ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
 	defer func() { _ = rows.Close() }()
-	activities := make(map[string]service.CodexTelemetryActivity)
+	var result []service.CodexTelemetryActivity
 	for rows.Next() {
-		var a service.CodexTelemetryActivity
-		var due sql.NullTime
-		if err := rows.Scan(&a.Kind, &a.Key, &a.Data, &due, &a.UpdatedAt); err != nil {
+		item, err := scanCodexTelemetryActivity(rows)
+		if err != nil {
 			return nil, err
 		}
-		if due.Valid {
-			a.DueAt = due.Time
-		}
-		activities[service.CodexTelemetryActivityMapKey(a.Kind, a.Key)] = a
+		a.remember(item)
+		result = append(result, cloneCodexTelemetryActivity(item))
 	}
-	return activities, rows.Err()
+	return result, rows.Err()
 }
 
-func saveCodexTelemetryActivities(ctx context.Context, tx *sql.Tx, poolID string, previous, current map[string]service.CodexTelemetryActivity, now time.Time) error {
-	for k, a := range previous {
-		if _, exists := current[k]; !exists {
-			if _, err := tx.ExecContext(ctx, `DELETE FROM codex_telemetry_activities WHERE pool_id=$1::uuid AND kind=$2 AND activity_key=$3`, poolID, a.Kind, a.Key); err != nil {
-				return err
-			}
-		}
+func (a *codexTelemetryActivityTransaction) RuntimeOccupancy() (int, error) {
+	if err := a.flush(); err != nil {
+		return 0, err
 	}
-	keys := make([]string, 0, len(current))
-	for k := range current {
-		keys = append(keys, k)
+	var count int
+	var valid bool
+	err := a.tx.QueryRowContext(a.ctx, `SELECT count(*)+COALESCE(sum(CASE WHEN a.kind='turn' AND `+codexTelemetryRuntimeActive+`
+		THEN (SELECT count(*) FROM jsonb_object_keys(CASE WHEN jsonb_typeof(a.state->'inflight')='object' THEN a.state->'inflight' ELSE '{}'::jsonb END)) ELSE 0 END),0),
+		COALESCE(bool_and(`+codexTelemetryRuntimeShape+`),TRUE)
+		FROM codex_telemetry_activities a WHERE pool_id=$1::uuid AND kind IN ('turn','attempt','sampling')`, a.poolID).Scan(&count, &valid)
+	if err != nil {
+		return 0, err
 	}
-	sort.Strings(keys)
-	for _, k := range keys {
-		a := current[k]
-		if a.Kind == "" || len(a.Kind) > 64 || a.Key == "" || len(a.Key) > 512 || k != service.CodexTelemetryActivityMapKey(a.Kind, a.Key) {
-			return service.ErrCodexTelemetryInvalidState
-		}
-		if old, ok := previous[k]; ok && bytes.Equal(old.Data, a.Data) && old.DueAt.Equal(a.DueAt) {
-			// These exact bytes already passed the storage boundary. Revalidating
-			// every untouched historical row makes each tiny update scale with JSON size.
-			continue
-		}
-		if err := service.ValidateCodexTelemetryStoredJSON(a.Data); err != nil {
-			return err
-		}
-		if _, err := tx.ExecContext(ctx, `INSERT INTO codex_telemetry_activities(pool_id,kind,activity_key,state,due_at,updated_at)
-			VALUES($1::uuid,$2,$3,$4::jsonb,$5,$6) ON CONFLICT(pool_id,kind,activity_key) DO UPDATE SET
-			state=EXCLUDED.state,due_at=EXCLUDED.due_at,updated_at=EXCLUDED.updated_at`,
-			poolID, a.Kind, a.Key, []byte(a.Data), nullableCodexTelemetryTime(a.DueAt), now); err != nil {
-			return err
-		}
+	if !valid {
+		return 0, service.ErrCodexTelemetryInvalidState
 	}
-	return nil
+	a.runtimeValidated = true
+	return count, nil
+}
+
+func (a *codexTelemetryActivityTransaction) deleted(rows *sql.Rows) (int, error) {
+	defer func() { _ = rows.Close() }()
+	count := 0
+	for rows.Next() {
+		item, err := scanCodexTelemetryActivityRaw(rows)
+		if err != nil {
+			return 0, err
+		}
+		mk := service.CodexTelemetryActivityMapKey(item.Kind, item.Key)
+		if _, known := a.original[mk]; !known {
+			original := cloneCodexTelemetryActivity(item)
+			a.original[mk] = &original
+		}
+		a.cache[mk] = nil
+		a.persisted[mk] = nil
+		delete(a.dirty, mk)
+		count++
+	}
+	return count, rows.Err()
+}
+
+func (a *codexTelemetryActivityTransaction) DeleteExpiredRuntime(cutoff time.Time) (int, error) {
+	if err := a.flush(); err != nil {
+		return 0, err
+	}
+	if err := a.validateRuntime(); err != nil {
+		return 0, err
+	}
+	rows, err := a.tx.QueryContext(a.ctx, `DELETE FROM codex_telemetry_activities a WHERE a.pool_id=$1::uuid
+		AND a.kind IN ('turn','attempt','sampling') AND a.updated_at <= $2 AND `+codexTelemetryRuntimeCompleted+`
+		RETURNING a.kind,a.activity_key,a.state,a.due_at,a.updated_at`, a.poolID, cutoff)
+	if err != nil {
+		return 0, err
+	}
+	return a.deleted(rows)
+}
+
+func (a *codexTelemetryActivityTransaction) EvictCompletedRuntime(limit int, protected []service.CodexTelemetryActivityKey) (int, error) {
+	if limit <= 0 {
+		return 0, nil
+	}
+	if err := a.flush(); err != nil {
+		return 0, err
+	}
+	if err := a.validateRuntime(); err != nil {
+		return 0, err
+	}
+	kinds, names := []string{}, []string{}
+	for _, key := range protected {
+		kinds = append(kinds, key.Kind)
+		names = append(names, key.Key)
+	}
+	rows, err := a.tx.QueryContext(a.ctx, `WITH victims AS (
+		SELECT a.kind,a.activity_key FROM codex_telemetry_activities a WHERE a.pool_id=$1::uuid
+		AND a.kind IN ('turn','attempt','sampling') AND `+codexTelemetryRuntimeCompleted+`
+		AND NOT EXISTS (SELECT 1 FROM unnest($3::text[],$4::text[]) protected(kind,activity_key)
+			WHERE protected.kind=a.kind AND protected.activity_key=a.activity_key)
+		ORDER BY a.updated_at,a.kind COLLATE "C",a.activity_key COLLATE "C" LIMIT $2)
+		DELETE FROM codex_telemetry_activities a USING victims v
+		WHERE a.pool_id=$1::uuid AND a.kind=v.kind AND a.activity_key=v.activity_key RETURNING a.kind,a.activity_key,a.state,a.due_at,a.updated_at`,
+		a.poolID, limit, pq.Array(kinds), pq.Array(names))
+	if err != nil {
+		return 0, err
+	}
+	return a.deleted(rows)
 }
 
 func insertCodexTelemetryBatch(ctx context.Context, tx *sql.Tx, b service.CodexTelemetryBatch, pool service.CodexTelemetryPool, policy service.CodexTelemetryPolicy, now time.Time) error {

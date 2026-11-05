@@ -41,7 +41,9 @@ func TestCodexTelemetryMaintenanceDeletedBacklogCannotStarveLiveOwner(t *testing
 	batchID := uuid.NewString()
 	_, err = store.TransactPool(ctx, live, now, func(tx *service.CodexTelemetryPoolTransaction) error {
 		a := telemetryStoreActivity("metrics", "current", `{"count":1}`, now)
-		tx.Activities[service.CodexTelemetryActivityMapKey(a.Kind, a.Key)] = a
+		if err := tx.Activities.Put(a); err != nil {
+			return err
+		}
 		tx.Batches = append(tx.Batches, telemetryStoreBatch(batchID, now))
 		return nil
 	})
@@ -80,7 +82,9 @@ func TestCodexTelemetryMaintenanceFiltersConvertedOwners(t *testing.T) {
 			ctx := context.Background()
 			_, err := store.TransactPool(ctx, key, now, func(tx *service.CodexTelemetryPoolTransaction) error {
 				a := telemetryStoreActivity("metrics", "current", `{}`, now)
-				tx.Activities[service.CodexTelemetryActivityMapKey(a.Kind, a.Key)] = a
+				if err := tx.Activities.Put(a); err != nil {
+					return err
+				}
 				tx.Batches = append(tx.Batches, telemetryStoreBatch(uuid.NewString(), now))
 				return nil
 			})
@@ -114,7 +118,9 @@ func TestCodexTelemetryMaintenanceDueSummaryIsAtomic(t *testing.T) {
 			telemetryStoreActivity("metrics", "first", `{"count":1}`, now),
 			telemetryStoreActivity("metrics", "later", `{"count":2}`, now.Add(time.Hour)),
 		} {
-			tx.Activities[service.CodexTelemetryActivityMapKey(a.Kind, a.Key)] = a
+			if err := tx.Activities.Put(a); err != nil {
+				return err
+			}
 		}
 		return nil
 	})
@@ -130,21 +136,26 @@ func TestCodexTelemetryMaintenanceDueSummaryIsAtomic(t *testing.T) {
 	}
 	assertDue(now)
 	_, err = store.TransactPool(ctx, key, now, func(tx *service.CodexTelemetryPoolTransaction) error {
-		clear(tx.Activities)
+		for _, key := range []string{"first", "later"} {
+			if err := tx.Activities.Delete("metrics", key); err != nil {
+				return err
+			}
+		}
 		return errors.New("rollback")
 	})
 	require.Error(t, err)
 	assertDue(now)
 	_, err = store.TransactPool(ctx, key, now, func(tx *service.CodexTelemetryPoolTransaction) error {
-		delete(tx.Activities, service.CodexTelemetryActivityMapKey("metrics", "first"))
-		return nil
+		return tx.Activities.Delete("metrics", "first")
 	})
 	require.NoError(t, err)
 	assertDue(now.Add(time.Hour))
 	keys, err := store.ListDuePools(ctx, now, 100)
 	require.NoError(t, err)
 	require.Empty(t, keys)
-	_, err = store.TransactPool(ctx, key, now, func(tx *service.CodexTelemetryPoolTransaction) error { clear(tx.Activities); return nil })
+	_, err = store.TransactPool(ctx, key, now, func(tx *service.CodexTelemetryPoolTransaction) error {
+		return tx.Activities.Delete("metrics", "later")
+	})
 	require.NoError(t, err)
 	assertDue(time.Time{})
 }
@@ -154,16 +165,29 @@ func TestCodexTelemetryMaintenanceRevalidatesInPlaceHistoryMutation(t *testing.T
 	ctx := context.Background()
 	pool, err := store.TransactPool(ctx, key, now, func(tx *service.CodexTelemetryPoolTransaction) error {
 		a := telemetryStoreActivity("metrics", "current", `{"counter":"value"}`, now)
-		tx.Activities[service.CodexTelemetryActivityMapKey(a.Kind, a.Key)] = a
-		return nil
+		return tx.Activities.Put(a)
 	})
 	require.NoError(t, err)
 	_, err = store.TransactPool(ctx, key, now, func(tx *service.CodexTelemetryPoolTransaction) error {
-		a := tx.Activities[service.CodexTelemetryActivityMapKey("metrics", "current")]
+		a, found, err := tx.Activities.Get("metrics", "current")
+		require.NoError(t, err)
+		require.True(t, found)
 		copy(a.Data, `{"api_key":"value"}`)
+		unchanged, found, err := tx.Activities.Get("metrics", "current")
+		require.NoError(t, err)
+		require.True(t, found)
+		require.JSONEq(t, `{"counter":"value"}`, string(unchanged.Data), "reads must not expose mutable cached bytes")
 		return nil
 	})
-	require.Error(t, err, "an in-place edit must not pass the unchanged-history shortcut")
+	require.NoError(t, err, "mutating a detached read must not mutate stored history")
+	_, err = store.TransactPool(ctx, key, now, func(tx *service.CodexTelemetryPoolTransaction) error {
+		a, found, err := tx.Activities.Get("metrics", "current")
+		require.NoError(t, err)
+		require.True(t, found)
+		copy(a.Data, `{"api_key":"value"}`)
+		return tx.Activities.Put(a)
+	})
+	require.Error(t, err, "explicit writes must revalidate edited history")
 	var original bool
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT state ? 'counter' AND NOT state ? 'api_key'
 		FROM codex_telemetry_activities WHERE pool_id=$1 AND kind='metrics' AND activity_key='current'`, pool.ID).Scan(&original))
@@ -175,8 +199,7 @@ func TestCodexTelemetryMaintenanceMigrationBackfillsSchedule(t *testing.T) {
 	ctx := context.Background()
 	pool, err := store.TransactPool(ctx, key, now, func(tx *service.CodexTelemetryPoolTransaction) error {
 		a := telemetryStoreActivity("metrics", "current", `{}`, now)
-		tx.Activities[service.CodexTelemetryActivityMapKey(a.Kind, a.Key)] = a
-		return nil
+		return tx.Activities.Put(a)
 	})
 	require.NoError(t, err)
 	tx := testTx(t)

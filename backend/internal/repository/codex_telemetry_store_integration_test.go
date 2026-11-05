@@ -227,8 +227,7 @@ func TestCodexTelemetryPostgresPoolConvergenceAndAtomicRollback(t *testing.T) {
 	first, err := store.TransactPool(ctx, key, now, func(tx *service.CodexTelemetryPoolTransaction) error {
 		tx.Pool.LastBusinessAt = now
 		a := telemetryStoreActivity("process", "startup", `{"count":1}`, time.Time{})
-		tx.Activities[service.CodexTelemetryActivityMapKey(a.Kind, a.Key)] = a
-		return nil
+		return tx.Activities.Put(a)
 	})
 	require.NoError(t, err)
 	require.EqualValues(t, 1, first.Version)
@@ -241,7 +240,13 @@ func TestCodexTelemetryPostgresPoolConvergenceAndAtomicRollback(t *testing.T) {
 			defer wg.Done()
 			// Independent repositories represent separate application instances.
 			_, err := NewCodexTelemetryStore(integrationDB).TransactPool(ctx, key, now.Add(time.Minute), func(tx *service.CodexTelemetryPoolTransaction) error {
-				a := tx.Activities[service.CodexTelemetryActivityMapKey("process", "startup")]
+				a, found, err := tx.Activities.Get("process", "startup")
+				if err != nil {
+					return err
+				}
+				if !found {
+					return errors.New("startup activity missing")
+				}
 				var current struct {
 					Count int `json:"count"`
 				}
@@ -250,8 +255,7 @@ func TestCodexTelemetryPostgresPoolConvergenceAndAtomicRollback(t *testing.T) {
 				}
 				current.Count++
 				a.Data, _ = json.Marshal(current)
-				tx.Activities[service.CodexTelemetryActivityMapKey(a.Kind, a.Key)] = a
-				return nil
+				return tx.Activities.Put(a)
 			})
 			errs <- err
 		}()
@@ -263,7 +267,10 @@ func TestCodexTelemetryPostgresPoolConvergenceAndAtomicRollback(t *testing.T) {
 	}
 	restarted := NewCodexTelemetryStore(integrationDB)
 	loaded, err := restarted.TransactPool(ctx, key, now.Add(time.Hour), func(tx *service.CodexTelemetryPoolTransaction) error {
-		require.JSONEq(t, fmt.Sprintf(`{"count":%d}`, writers+1), string(tx.Activities[service.CodexTelemetryActivityMapKey("process", "startup")].Data))
+		a, found, err := tx.Activities.Get("process", "startup")
+		require.NoError(t, err)
+		require.True(t, found)
+		require.JSONEq(t, fmt.Sprintf(`{"count":%d}`, writers+1), string(a.Data))
 		require.Equal(t, first.Seed, tx.Pool.Seed)
 		require.Equal(t, now, tx.Pool.LastBusinessAt, "maintenance must not extend real business activity")
 		return nil
@@ -287,7 +294,9 @@ func TestCodexTelemetryPostgresPoolConvergenceAndAtomicRollback(t *testing.T) {
 	batchID := uuid.NewString()
 	_, err = store.TransactPool(ctx, key, now, func(tx *service.CodexTelemetryPoolTransaction) error {
 		tx.Batches = append(tx.Batches, telemetryStoreBatch(batchID, now))
-		delete(tx.Activities, service.CodexTelemetryActivityMapKey("process", "startup"))
+		if err := tx.Activities.Delete("process", "startup"); err != nil {
+			return err
+		}
 		return errors.New("abort this transaction")
 	})
 	require.Error(t, err)
@@ -295,11 +304,12 @@ func TestCodexTelemetryPostgresPoolConvergenceAndAtomicRollback(t *testing.T) {
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM codex_telemetry_batches WHERE id=$1`, batchID).Scan(&count))
 	require.Zero(t, count)
 	_, err = store.TransactPool(ctx, key, now, func(tx *service.CodexTelemetryPoolTransaction) error {
-		require.Contains(t, tx.Activities, service.CodexTelemetryActivityMapKey("process", "startup"))
+		_, found, err := tx.Activities.Get("process", "startup")
+		require.NoError(t, err)
+		require.True(t, found)
 		tx.Batches = append(tx.Batches, telemetryStoreBatch(batchID, now))
 		a := telemetryStoreActivity("turn", "unsafe", `{"nested":{"access_token":"must-not-persist"}}`, time.Time{})
-		tx.Activities[service.CodexTelemetryActivityMapKey(a.Kind, a.Key)] = a
-		return nil
+		return tx.Activities.Put(a)
 	})
 	require.Error(t, err)
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT count(*) FROM codex_telemetry_batches WHERE id=$1`, batchID).Scan(&count))
@@ -311,8 +321,7 @@ func TestCodexTelemetryPostgresDueActivityAndBatchSealAreAtomic(t *testing.T) {
 	ctx := context.Background()
 	_, err := store.TransactPool(ctx, key, now, func(tx *service.CodexTelemetryPoolTransaction) error {
 		a := telemetryStoreActivity("metrics", "window", `{"count":3}`, now.Add(time.Minute))
-		tx.Activities[service.CodexTelemetryActivityMapKey(a.Kind, a.Key)] = a
-		return nil
+		return tx.Activities.Put(a)
 	})
 	require.NoError(t, err)
 	due, err := store.ListDuePools(ctx, now.Add(59*time.Second), 100)
@@ -323,7 +332,9 @@ func TestCodexTelemetryPostgresDueActivityAndBatchSealAreAtomic(t *testing.T) {
 	require.Contains(t, due, key)
 	batchID := uuid.NewString()
 	_, err = store.TransactPool(ctx, key, now.Add(time.Minute), func(tx *service.CodexTelemetryPoolTransaction) error {
-		delete(tx.Activities, service.CodexTelemetryActivityMapKey("metrics", "window"))
+		if err := tx.Activities.Delete("metrics", "window"); err != nil {
+			return err
+		}
 		tx.Batches = append(tx.Batches, telemetryStoreBatch(batchID, now.Add(time.Minute)))
 		return nil
 	})

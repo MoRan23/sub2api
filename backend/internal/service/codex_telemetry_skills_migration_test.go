@@ -97,7 +97,7 @@ func TestCodexTelemetryLegacySkillsMigrationPreservesPoolAndOtherData(t *testing
 				profile := attempt.profile
 				profile.poolID, profile.scenarioSeed = tx.Pool.ID, tx.Pool.Seed
 				original = telemetryLegacySkillsSnapshot(t, profile, version)
-				tx.Activities[CodexTelemetryActivityMapKey("metrics", "current")] = CodexTelemetryActivity{Kind: "metrics", Key: "current", Data: codexMetricMigrationEncode(t, original), DueAt: now.Add(time.Minute)}
+				require.NoError(t, tx.Activities.Put(CodexTelemetryActivity{Kind: "metrics", Key: "current", Data: codexMetricMigrationEncode(t, original), DueAt: now.Add(time.Minute)}))
 				if err := putRuntimeActivity(tx, "thread", "preserved", codexTelemetryRuntimeThread{Initialized: true}, now, time.Time{}); err != nil {
 					return err
 				}

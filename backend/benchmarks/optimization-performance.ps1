@@ -32,6 +32,9 @@ try {
     }
     & $taskBinary '-test.run=^TestOptimizationIntegrityReference$' '-test.count=1' *>&1 | Set-Content (Join-Path $ArtifactDirectory "$Label-reference.txt")
     if ($LASTEXITCODE -ne 0) { throw 'reference differential failed' }
+    $taskGatewayTests = '^(TestOpenAIIntegrityGatewayReportsEncryptedContentRecoveryPerPhysicalAttempt|TestOpenAIIntegrityGatewayFailoverRetainsBaselineAndFrozenSwitch|TestOpenAIIntegrityGatewayToggleDoesNotChangeSentBodyOrResponse|TestForwardOpenAIWSV2_ClientCancellationDrainsWithoutSyntheticFailure|TestOpenAIGatewayService_ProxyResponsesWebSocketFromClient_HTTPBridgeModeRelaysHTTPStream|TestOpenAIGatewayService_Forward_WSv2RetryFiveTimesThenFallbackHTTP)$'
+    & $taskBinary "-test.run=$taskGatewayTests" '-test.count=1' '-test.v' '-test.timeout=60s' *>&1 | Set-Content (Join-Path $ArtifactDirectory "$Label-gateway-regression.txt")
+    if ($LASTEXITCODE -ne 0) { throw 'mock gateway regression failed' }
     & $taskBinary '-test.run=^$' '-test.bench=^BenchmarkOptimization' '-test.benchmem' "-test.count=$Count" "-test.benchtime=$BenchTime" *>&1 | Set-Content (Join-Path $ArtifactDirectory "$Label-bench.txt")
     if ($LASTEXITCODE -ne 0) { throw 'benchmark execution failed' }
     $env:SUB2API_PERFORMANCE_PROCESS = '1'

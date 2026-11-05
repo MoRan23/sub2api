@@ -139,20 +139,20 @@ func TestCodexTelemetryRuntimeFailureLogsAreSanitizedAndThrottled(t *testing.T) 
 
 func TestCodexTelemetryRuntimePruneKeepsFreshRowsBelowCapacity(t *testing.T) {
 	now := time.Now()
-	tx := &CodexTelemetryPoolTransaction{Activities: map[string]CodexTelemetryActivity{}}
+	tx := &CodexTelemetryPoolTransaction{Activities: newMemoryCodexTelemetryActivities(nil, time.Time{})}
 	require.NoError(t, putRuntimeActivity(tx, "sampling", "old", map[string]bool{"completed": true}, now.Add(-codexTelemetryActivityRetention), now))
 	require.NoError(t, putRuntimeActivity(tx, "sampling", "fresh", map[string]bool{"completed": true}, now.Add(-time.Minute), now))
 	require.NoError(t, putRuntimeActivity(tx, "turn", "inflight", codexTelemetryRuntimeTurn{Inflight: map[string]time.Time{"active": now.Add(time.Minute)}}, now, now.Add(time.Minute)))
 	require.NoError(t, pruneCodexTelemetryRuntime(tx, now, 2))
-	require.NotContains(t, tx.Activities, CodexTelemetryActivityMapKey("sampling", "old"))
-	require.Contains(t, tx.Activities, CodexTelemetryActivityMapKey("sampling", "fresh"))
-	require.Contains(t, tx.Activities, CodexTelemetryActivityMapKey("turn", "inflight"))
+	require.NotContains(t, runtimeTestActivityMap(tx), CodexTelemetryActivityMapKey("sampling", "old"))
+	require.Contains(t, runtimeTestActivityMap(tx), CodexTelemetryActivityMapKey("sampling", "fresh"))
+	require.Contains(t, runtimeTestActivityMap(tx), CodexTelemetryActivityMapKey("turn", "inflight"))
 }
 
 func TestCodexTelemetryRuntimeExpiredLeaseWaitsForIdleDeadline(t *testing.T) {
 	now := time.Now().UTC()
 	idleAt := now.Add(10 * time.Minute)
-	tx := &CodexTelemetryPoolTransaction{Policy: CodexTelemetryPolicy{Epoch: 1, Enabled: true, Observation: true}, Activities: map[string]CodexTelemetryActivity{}}
+	tx := &CodexTelemetryPoolTransaction{Policy: CodexTelemetryPolicy{Epoch: 1, Enabled: true, Observation: true}, Activities: newMemoryCodexTelemetryActivities(nil, time.Time{})}
 	require.NoError(t, syncCodexTelemetryRuntimeEpoch(tx, now))
 	require.NoError(t, putRuntimeActivity(tx, "turn", "active", codexTelemetryRuntimeTurn{
 		LastSeen: idleAt.Add(-codexTelemetryStateTTL), Inflight: map[string]time.Time{"expired": now.Add(-time.Second)},
@@ -164,7 +164,7 @@ func TestCodexTelemetryRuntimeExpiredLeaseWaitsForIdleDeadline(t *testing.T) {
 	require.Empty(t, turn.Inflight)
 	require.False(t, turn.Incomplete)
 	require.False(t, turn.Sealed)
-	require.Equal(t, idleAt, tx.Activities[CodexTelemetryActivityMapKey("turn", "active")].DueAt)
+	require.Equal(t, idleAt, runtimeTestActivityMap(tx)[CodexTelemetryActivityMapKey("turn", "active")].DueAt)
 	require.Empty(t, tx.Batches, "expired leases do not synthesize completion telemetry")
 
 	require.NoError(t, tickCodexTelemetryRuntime(tx, idleAt))
@@ -173,15 +173,15 @@ func TestCodexTelemetryRuntimeExpiredLeaseWaitsForIdleDeadline(t *testing.T) {
 	require.True(t, turn.Incomplete)
 	require.False(t, turn.Sealed)
 	require.Empty(t, tx.Batches)
-	require.Equal(t, idleAt.Add(codexTelemetryActivityRetention), tx.Activities[CodexTelemetryActivityMapKey("turn", "active")].DueAt)
+	require.Equal(t, idleAt.Add(codexTelemetryActivityRetention), runtimeTestActivityMap(tx)[CodexTelemetryActivityMapKey("turn", "active")].DueAt)
 }
 
 func TestCodexTelemetryRuntimePruneStillRejectsInvalidStateBelowCapacity(t *testing.T) {
 	for _, kind := range []string{"attempt", "turn"} {
 		t.Run(kind, func(t *testing.T) {
-			tx := &CodexTelemetryPoolTransaction{Activities: map[string]CodexTelemetryActivity{
+			tx := &CodexTelemetryPoolTransaction{Activities: newMemoryCodexTelemetryActivities(map[string]CodexTelemetryActivity{
 				CodexTelemetryActivityMapKey(kind, "invalid"): {Kind: kind, Key: "invalid", Data: []byte(`{"unfinished":`), UpdatedAt: time.Now()},
-			}}
+			}, time.Time{})}
 			require.ErrorIs(t, pruneCodexTelemetryRuntime(tx, time.Now(), 0), ErrCodexTelemetryInvalidState)
 		})
 	}
@@ -189,10 +189,10 @@ func TestCodexTelemetryRuntimePruneStillRejectsInvalidStateBelowCapacity(t *test
 
 func BenchmarkCodexTelemetryRuntimePruneBelowCapacity(b *testing.B) {
 	now := time.Now()
-	tx := &CodexTelemetryPoolTransaction{Activities: map[string]CodexTelemetryActivity{}}
+	tx := &CodexTelemetryPoolTransaction{Activities: newMemoryCodexTelemetryActivities(nil, time.Time{})}
 	for i := range 3000 {
 		key := fmt.Sprintf("sample-%04d", i)
-		tx.Activities[key] = CodexTelemetryActivity{Kind: "sampling", Key: key, UpdatedAt: now.Add(-time.Duration(i) * time.Second)}
+		require.NoError(b, tx.Activities.Put(CodexTelemetryActivity{Kind: "sampling", Key: key, Data: []byte(`{}`), UpdatedAt: now.Add(-time.Duration(i) * time.Second)}))
 	}
 	b.ReportAllocs()
 	b.ResetTimer()

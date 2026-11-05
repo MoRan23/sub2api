@@ -5,7 +5,6 @@ import (
 	"encoding/json"
 	"errors"
 	"log/slog"
-	"sort"
 	"strings"
 	"time"
 
@@ -55,6 +54,7 @@ const codexTelemetryBusinessLease = 90 * time.Second
 const codexTelemetryActivityRetention = 7 * 24 * time.Hour
 const codexTelemetryDueScanInterval = time.Second
 const codexTelemetryRuntimeLogInterval = 30 * time.Second
+const codexTelemetryRuntimeTurnBatch = 128
 
 var errCodexTelemetryRuntimeCapacity = errors.New("Codex telemetry runtime capacity reached")
 
@@ -333,9 +333,9 @@ func (s *CodexTelemetryService) wakePersistentRuntime() {
 
 func runtimeActivity[T any](tx *CodexTelemetryPoolTransaction, kind, key string) (T, bool, error) {
 	var value T
-	activity, ok := tx.Activities[CodexTelemetryActivityMapKey(kind, key)]
-	if !ok {
-		return value, false, nil
+	activity, ok, err := tx.Activities.Get(kind, key)
+	if err != nil || !ok {
+		return value, ok, err
 	}
 	if err := json.Unmarshal(activity.Data, &value); err != nil {
 		return value, true, ErrCodexTelemetryInvalidState
@@ -348,7 +348,24 @@ func putRuntimeActivity(tx *CodexTelemetryPoolTransaction, kind, key string, val
 	if err != nil {
 		return err
 	}
-	tx.Activities[CodexTelemetryActivityMapKey(kind, key)] = CodexTelemetryActivity{Kind: kind, Key: key, Data: data, UpdatedAt: now, DueAt: due}
+	return tx.Activities.Put(CodexTelemetryActivity{Kind: kind, Key: key, Data: data, UpdatedAt: now, DueAt: due})
+}
+
+// ValidateCodexTelemetryRuntimeActivity validates the typed fields of accessed
+// runtime rows without reading or decoding unrelated historical activities.
+func ValidateCodexTelemetryRuntimeActivity(activity CodexTelemetryActivity) error {
+	var value any
+	switch activity.Kind {
+	case "turn":
+		value = &codexTelemetryRuntimeTurn{}
+	case "attempt":
+		value = &codexTelemetryRuntimeAttempt{}
+	default:
+		return nil
+	}
+	if err := json.Unmarshal(activity.Data, value); err != nil {
+		return ErrCodexTelemetryInvalidState
+	}
 	return nil
 }
 
@@ -366,8 +383,8 @@ func codexRuntimeTurnKey(profile codexTelemetryProfile, attemptID string) string
 }
 
 func beginCodexTelemetryRuntime(tx *CodexTelemetryPoolTransaction, a *CodexTelemetryAttempt) error {
-	if _, found := tx.Activities[CodexTelemetryActivityMapKey("attempt", a.attemptID)]; found {
-		return nil
+	if _, found, err := tx.Activities.Get("attempt", a.attemptID); err != nil || found {
+		return err
 	}
 	profile := a.profile
 	profile.poolID, profile.scenarioSeed = tx.Pool.ID, tx.Pool.Seed
@@ -379,11 +396,21 @@ func beginCodexTelemetryRuntime(tx *CodexTelemetryPoolTransaction, a *CodexTelem
 		tx.Pool.LastBusinessAt = now
 	}
 	key := codexRuntimeTurnKey(profile, a.attemptID)
+	if _, err := tx.Activities.GetMany([]CodexTelemetryActivityKey{{Kind: "turn", Key: key}, {Kind: "thread", Key: profile.threadID}, {Kind: "metrics", Key: "current"}}); err != nil {
+		return err
+	}
+	// Expiry can remove the referenced turn. Determine its reservation only
+	// afterwards, and protect a retained turn from pressure eviction.
+	if _, err := tx.Activities.DeleteExpiredRuntime(time.Now().Add(-codexTelemetryActivityRetention)); err != nil {
+		return err
+	}
 	needed := 2 // attempt and its reserved eventual sampling record
-	if _, exists := tx.Activities[CodexTelemetryActivityMapKey("turn", key)]; !exists {
+	if _, exists, err := tx.Activities.Get("turn", key); err != nil {
+		return err
+	} else if !exists {
 		needed++
 	}
-	if err := pruneCodexTelemetryRuntime(tx, time.Now(), needed); err != nil {
+	if err := reserveCodexTelemetryRuntime(tx, needed, []CodexTelemetryActivityKey{{Kind: "turn", Key: key}}); err != nil {
 		return err
 	}
 	thread, _, err := runtimeActivity[codexTelemetryRuntimeThread](tx, "thread", profile.threadID)
@@ -479,6 +506,9 @@ func finishCodexTelemetryRuntime(tx *CodexTelemetryPoolTransaction, a *CodexTele
 	if err != nil || !exists || attempt.Finished {
 		return err
 	}
+	if _, err := tx.Activities.GetMany([]CodexTelemetryActivityKey{{Kind: "turn", Key: attempt.TurnKey}, {Kind: "metrics", Key: "current"}}); err != nil {
+		return err
+	}
 	turn, exists, err := runtimeActivity[codexTelemetryRuntimeTurn](tx, "turn", attempt.TurnKey)
 	if err != nil || !exists {
 		return err
@@ -521,7 +551,9 @@ func finishCodexTelemetryRuntime(tx *CodexTelemetryPoolTransaction, a *CodexTele
 			sampleID = a.attemptID
 		}
 		sampleKey := attempt.TurnKey + ":" + sampleID
-		if _, seen := tx.Activities[CodexTelemetryActivityMapKey("sampling", sampleKey)]; !seen {
+		if _, seen, err := tx.Activities.Get("sampling", sampleKey); err != nil {
+			return err
+		} else if !seen {
 			turn.Samples++
 			mergeRuntimeResult(&turn.Result, result)
 			if err := putRuntimeActivity(tx, "sampling", sampleKey, struct {
@@ -653,7 +685,10 @@ func appendRuntimeBatch(tx *CodexTelemetryPoolTransaction, profile codexTelemetr
 }
 
 func loadRuntimeMetrics(tx *CodexTelemetryPoolTransaction) (*codexTelemetryMetricStore, error) {
-	activity, exists := tx.Activities[CodexTelemetryActivityMapKey("metrics", "current")]
+	activity, exists, err := tx.Activities.Get("metrics", "current")
+	if err != nil {
+		return nil, err
+	}
 	if !exists {
 		return newCodexTelemetryMetricStore(), nil
 	}
@@ -665,8 +700,7 @@ func saveRuntimeMetrics(tx *CodexTelemetryPoolTransaction, metrics *codexTelemet
 	if err != nil {
 		return err
 	}
-	tx.Activities[CodexTelemetryActivityMapKey("metrics", "current")] = CodexTelemetryActivity{Kind: "metrics", Key: "current", Data: data, UpdatedAt: now, DueAt: metrics.nextFlushAt()}
-	return nil
+	return tx.Activities.Put(CodexTelemetryActivity{Kind: "metrics", Key: "current", Data: data, UpdatedAt: now, DueAt: metrics.nextFlushAt()})
 }
 
 func (s *CodexTelemetryService) pollPersistentRuntime(now time.Time) {
@@ -770,10 +804,11 @@ func tickCodexTelemetryRuntime(tx *CodexTelemetryPoolTransaction, now time.Time)
 	if err := syncCodexTelemetryRuntimeEpoch(tx, now); err != nil {
 		return err
 	}
-	for _, activity := range tx.Activities {
-		if activity.Kind != "turn" || activity.DueAt.IsZero() || activity.DueAt.After(now) {
-			continue
-		}
+	activities, err := tx.Activities.ListActiveTurns(now, codexTelemetryRuntimeTurnBatch)
+	if err != nil {
+		return err
+	}
+	for _, activity := range activities {
 		var turn codexTelemetryRuntimeTurn
 		if err := json.Unmarshal(activity.Data, &turn); err != nil {
 			return ErrCodexTelemetryInvalidState
@@ -856,6 +891,28 @@ func (s *CodexTelemetryService) heartbeatRuntimeAttempts(ctx context.Context, st
 			break
 		}
 		_, err := store.TransactPool(ctx, key, now, func(tx *CodexTelemetryPoolTransaction) error {
+			keys := make([]CodexTelemetryActivityKey, 0, len(ids))
+			for _, id := range ids {
+				keys = append(keys, CodexTelemetryActivityKey{Kind: "attempt", Key: id})
+			}
+			if _, err := tx.Activities.GetMany(keys); err != nil {
+				return err
+			}
+			turnKeys := make(map[string]bool)
+			keys = keys[:0]
+			for _, id := range ids {
+				a, exists, err := runtimeActivity[codexTelemetryRuntimeAttempt](tx, "attempt", id)
+				if err != nil {
+					return err
+				}
+				if exists && !a.Finished && !turnKeys[a.TurnKey] {
+					turnKeys[a.TurnKey] = true
+					keys = append(keys, CodexTelemetryActivityKey{Kind: "turn", Key: a.TurnKey})
+				}
+			}
+			if _, err := tx.Activities.GetMany(keys); err != nil {
+				return err
+			}
 			for _, id := range ids {
 				a, exists, err := runtimeActivity[codexTelemetryRuntimeAttempt](tx, "attempt", id)
 				if err != nil {
@@ -905,10 +962,11 @@ func syncCodexTelemetryRuntimeEpoch(tx *CodexTelemetryPoolTransaction, now time.
 	if exists {
 		// Keep pool startup/thread markers, but never publish pre-toggle samples
 		// under a newer policy generation when telemetry is enabled again.
-		for mapKey, activity := range tx.Activities {
-			if activity.Kind != "turn" {
-				continue
-			}
+		activities, err := tx.Activities.ListActiveTurns(time.Time{}, 0)
+		if err != nil {
+			return err
+		}
+		for _, activity := range activities {
 			var turn codexTelemetryRuntimeTurn
 			if err := json.Unmarshal(activity.Data, &turn); err != nil {
 				return ErrCodexTelemetryInvalidState
@@ -922,7 +980,9 @@ func syncCodexTelemetryRuntimeEpoch(tx *CodexTelemetryPoolTransaction, now time.
 				return err
 			}
 			activity.Data, activity.DueAt, activity.UpdatedAt = data, now.Add(codexTelemetryActivityRetention), now
-			tx.Activities[mapKey] = activity
+			if err := tx.Activities.Put(activity); err != nil {
+				return err
+			}
 		}
 		metrics, err := loadRuntimeMetrics(tx)
 		if err != nil {
@@ -941,54 +1001,25 @@ func syncCodexTelemetryRuntimeEpoch(tx *CodexTelemetryPoolTransaction, now time.
 // Only short-lived aggregation/dedup rows participate in this cap. Stable pool
 // and thread initialization markers never expire because traffic went quiet.
 func pruneCodexTelemetryRuntime(tx *CodexTelemetryPoolTransaction, now time.Time, reserve int) error {
-	type candidate struct {
-		key     string
-		updated time.Time
+	if _, err := tx.Activities.DeleteExpiredRuntime(now.Add(-codexTelemetryActivityRetention)); err != nil {
+		return err
 	}
-	count := 0
-	for key, activity := range tx.Activities {
-		weight, completed, err := codexTelemetryRuntimeActivityOccupancy(tx, activity)
-		if err != nil {
-			return err
-		}
-		count += weight
-		if !completed {
-			continue
-		}
-		if !activity.UpdatedAt.Add(codexTelemetryActivityRetention).After(now) {
-			delete(tx.Activities, key)
-			count -= weight
-		}
+	return reserveCodexTelemetryRuntime(tx, reserve, nil)
+}
+
+func reserveCodexTelemetryRuntime(tx *CodexTelemetryPoolTransaction, reserve int, protected []CodexTelemetryActivityKey) error {
+	count, err := tx.Activities.RuntimeOccupancy()
+	if err != nil {
+		return err
 	}
 	if count+reserve <= codexTelemetryMaxStates {
 		return nil
 	}
-	// Most pools only need the retention pass. Build and sort eviction candidates
-	// only when capacity actually requires eviction, not for every business event.
-	var removable []candidate
-	for key, activity := range tx.Activities {
-		_, completed, err := codexTelemetryRuntimeActivityOccupancy(tx, activity)
-		if err != nil {
-			return err
-		}
-		if completed {
-			removable = append(removable, candidate{key: key, updated: activity.UpdatedAt})
-		}
+	removed, err := tx.Activities.EvictCompletedRuntime(count+reserve-codexTelemetryMaxStates, protected)
+	if err != nil {
+		return err
 	}
-	sort.Slice(removable, func(i, j int) bool {
-		if removable[i].updated.Equal(removable[j].updated) {
-			return removable[i].key < removable[j].key
-		}
-		return removable[i].updated.Before(removable[j].updated)
-	})
-	for _, entry := range removable {
-		if count+reserve <= codexTelemetryMaxStates {
-			break
-		}
-		delete(tx.Activities, entry.key)
-		count--
-	}
-	if count+reserve > codexTelemetryMaxStates {
+	if count-removed+reserve > codexTelemetryMaxStates {
 		return errCodexTelemetryRuntimeCapacity
 	}
 	return nil

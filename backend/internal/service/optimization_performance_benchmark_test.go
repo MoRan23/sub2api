@@ -156,11 +156,15 @@ func optimizationTelemetryFixture(tb testing.TB, markers int) (CodexTelemetrySto
 	_, err := store.TransactPool(context.Background(), key, now, func(tx *CodexTelemetryPoolTransaction) error {
 		for i := range markers {
 			key := fmt.Sprintf("thread-%09d", i)
-			tx.Activities[CodexTelemetryActivityMapKey("thread", key)] = CodexTelemetryActivity{Kind: "thread", Key: key, Data: json.RawMessage(`{"initialized":true}`), UpdatedAt: now}
+			if err := tx.Activities.Put(CodexTelemetryActivity{Kind: "thread", Key: key, Data: json.RawMessage(`{"initialized":true}`), UpdatedAt: now}); err != nil {
+				return err
+			}
 		}
 		for i := range 16 {
 			key := fmt.Sprintf("transient-%d", i)
-			tx.Activities[CodexTelemetryActivityMapKey("sampling", key)] = CodexTelemetryActivity{Kind: "sampling", Key: key, Data: json.RawMessage(`{"status":"active"}`), DueAt: now.Add(time.Hour), UpdatedAt: now}
+			if err := tx.Activities.Put(CodexTelemetryActivity{Kind: "sampling", Key: key, Data: json.RawMessage(`{"status":"active"}`), DueAt: now.Add(time.Hour), UpdatedAt: now}); err != nil {
+				return err
+			}
 		}
 		return nil
 	})

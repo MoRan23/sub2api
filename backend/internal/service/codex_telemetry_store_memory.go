@@ -40,6 +40,231 @@ func NewMemoryCodexTelemetryStore() CodexTelemetryStore {
 	}
 }
 
+// The committed map stays private to the store. A callback stages only changed
+// keys, so rollback and read-only transactions never clone the pool history.
+type memoryCodexTelemetryActivities struct {
+	base    map[string]CodexTelemetryActivity
+	puts    map[string]CodexTelemetryActivity
+	deleted map[string]bool
+	now     time.Time
+}
+
+func newMemoryCodexTelemetryActivities(base map[string]CodexTelemetryActivity, now time.Time) *memoryCodexTelemetryActivities {
+	return &memoryCodexTelemetryActivities{base: base, puts: make(map[string]CodexTelemetryActivity), deleted: make(map[string]bool), now: now}
+}
+
+func cloneCodexTelemetryActivity(a CodexTelemetryActivity) CodexTelemetryActivity {
+	a.Data = append(json.RawMessage(nil), a.Data...)
+	return a
+}
+
+func (a *memoryCodexTelemetryActivities) lookup(kind, key string) (CodexTelemetryActivity, bool) {
+	mapKey := CodexTelemetryActivityMapKey(kind, key)
+	if a.deleted[mapKey] {
+		return CodexTelemetryActivity{}, false
+	}
+	if value, ok := a.puts[mapKey]; ok {
+		return value, true
+	}
+	value, ok := a.base[mapKey]
+	return value, ok
+}
+
+func (a *memoryCodexTelemetryActivities) Get(kind, key string) (CodexTelemetryActivity, bool, error) {
+	value, ok := a.lookup(kind, key)
+	if ok {
+		if err := ValidateCodexTelemetryRuntimeActivity(value); err != nil {
+			return CodexTelemetryActivity{}, false, err
+		}
+	}
+	return cloneCodexTelemetryActivity(value), ok, nil
+}
+
+func (a *memoryCodexTelemetryActivities) GetMany(keys []CodexTelemetryActivityKey) (map[string]CodexTelemetryActivity, error) {
+	values := make(map[string]CodexTelemetryActivity, len(keys))
+	for _, key := range keys {
+		value, ok, err := a.Get(key.Kind, key.Key)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
+			values[CodexTelemetryActivityMapKey(key.Kind, key.Key)] = value
+		}
+	}
+	return values, nil
+}
+
+func (a *memoryCodexTelemetryActivities) Put(value CodexTelemetryActivity) error {
+	if value.Kind == "" || len(value.Kind) > 64 || strings.ContainsRune(value.Kind, '\x00') || value.Key == "" || len(value.Key) > 512 || strings.ContainsRune(value.Key, '\x00') {
+		return ErrCodexTelemetryInvalidState
+	}
+	if err := ValidateCodexTelemetryStoredJSON(value.Data); err != nil {
+		return err
+	}
+	if err := ValidateCodexTelemetryRuntimeActivity(value); err != nil {
+		return err
+	}
+	mapKey := CodexTelemetryActivityMapKey(value.Kind, value.Key)
+	if original, ok := a.base[mapKey]; ok && bytes.Equal(original.Data, value.Data) && original.DueAt.Equal(value.DueAt) {
+		delete(a.puts, mapKey)
+		delete(a.deleted, mapKey)
+		return nil
+	}
+	if previous, ok := a.lookup(value.Kind, value.Key); ok && bytes.Equal(previous.Data, value.Data) && previous.DueAt.Equal(value.DueAt) {
+		return nil
+	}
+	if !a.now.IsZero() {
+		value.UpdatedAt = a.now
+	}
+	a.puts[mapKey] = cloneCodexTelemetryActivity(value)
+	delete(a.deleted, mapKey)
+	return nil
+}
+
+func (a *memoryCodexTelemetryActivities) Delete(kind, key string) error {
+	mapKey := CodexTelemetryActivityMapKey(kind, key)
+	delete(a.puts, mapKey)
+	a.deleted[mapKey] = true
+	return nil
+}
+
+func (a *memoryCodexTelemetryActivities) each(fn func(CodexTelemetryActivity) error) error {
+	for key, value := range a.base {
+		if _, replaced := a.puts[key]; replaced || a.deleted[key] {
+			continue
+		}
+		if err := fn(value); err != nil {
+			return err
+		}
+	}
+	for _, value := range a.puts {
+		if err := fn(value); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
+func (a *memoryCodexTelemetryActivities) ListActiveTurns(dueBefore time.Time, limit int) ([]CodexTelemetryActivity, error) {
+	if limit < 0 {
+		return nil, ErrCodexTelemetryInvalidState
+	}
+	var values []CodexTelemetryActivity
+	err := a.each(func(value CodexTelemetryActivity) error {
+		if value.Kind != "turn" || (!dueBefore.IsZero() && (value.DueAt.IsZero() || value.DueAt.After(dueBefore))) {
+			return nil
+		}
+		var turn codexTelemetryRuntimeTurn
+		if json.Unmarshal(value.Data, &turn) != nil {
+			return ErrCodexTelemetryInvalidState
+		}
+		if !turn.Sealed && !turn.Incomplete {
+			values = append(values, value)
+		}
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	sort.Slice(values, func(i, j int) bool {
+		if !values[i].DueAt.Equal(values[j].DueAt) {
+			if values[i].DueAt.IsZero() {
+				return false
+			}
+			if values[j].DueAt.IsZero() {
+				return true
+			}
+			return values[i].DueAt.Before(values[j].DueAt)
+		}
+		return values[i].Key < values[j].Key
+	})
+	if limit > 0 && len(values) > limit {
+		values = values[:limit]
+	}
+	for i := range values {
+		values[i] = cloneCodexTelemetryActivity(values[i])
+	}
+	return values, nil
+}
+
+func (a *memoryCodexTelemetryActivities) RuntimeOccupancy() (int, error) {
+	tx := &CodexTelemetryPoolTransaction{Activities: a}
+	count := 0
+	err := a.each(func(value CodexTelemetryActivity) error {
+		weight, _, err := codexTelemetryRuntimeActivityOccupancy(tx, value)
+		count += weight
+		return err
+	})
+	return count, err
+}
+
+func (a *memoryCodexTelemetryActivities) completed(cutoff *time.Time, protected []CodexTelemetryActivityKey) ([]CodexTelemetryActivity, error) {
+	excluded := make(map[string]bool, len(protected))
+	for _, key := range protected {
+		excluded[CodexTelemetryActivityMapKey(key.Kind, key.Key)] = true
+	}
+	tx := &CodexTelemetryPoolTransaction{Activities: a}
+	var values []CodexTelemetryActivity
+	err := a.each(func(value CodexTelemetryActivity) error {
+		_, completed, err := codexTelemetryRuntimeActivityOccupancy(tx, value)
+		if err != nil {
+			return err
+		}
+		if completed && (cutoff == nil || !value.UpdatedAt.After(*cutoff)) && !excluded[CodexTelemetryActivityMapKey(value.Kind, value.Key)] {
+			values = append(values, value)
+		}
+		return nil
+	})
+	return values, err
+}
+
+func (a *memoryCodexTelemetryActivities) DeleteExpiredRuntime(cutoff time.Time) (int, error) {
+	values, err := a.completed(&cutoff, nil)
+	if err != nil {
+		return 0, err
+	}
+	for _, value := range values {
+		_ = a.Delete(value.Kind, value.Key)
+	}
+	return len(values), nil
+}
+
+func (a *memoryCodexTelemetryActivities) EvictCompletedRuntime(limit int, protected []CodexTelemetryActivityKey) (int, error) {
+	if limit <= 0 {
+		return 0, nil
+	}
+	values, err := a.completed(nil, protected)
+	if err != nil {
+		return 0, err
+	}
+	sort.Slice(values, func(i, j int) bool {
+		if values[i].UpdatedAt.Equal(values[j].UpdatedAt) {
+			return CodexTelemetryActivityMapKey(values[i].Kind, values[i].Key) < CodexTelemetryActivityMapKey(values[j].Kind, values[j].Key)
+		}
+		return values[i].UpdatedAt.Before(values[j].UpdatedAt)
+	})
+	if len(values) > limit {
+		values = values[:limit]
+	}
+	for _, value := range values {
+		_ = a.Delete(value.Kind, value.Key)
+	}
+	return len(values), nil
+}
+
+func (a *memoryCodexTelemetryActivities) commit() map[string]CodexTelemetryActivity {
+	if a.base == nil {
+		a.base = make(map[string]CodexTelemetryActivity, len(a.puts))
+	}
+	for key := range a.deleted {
+		delete(a.base, key)
+	}
+	for key, value := range a.puts {
+		a.base[key] = cloneCodexTelemetryActivity(value)
+	}
+	return a.base
+}
+
 func (s *MemoryCodexTelemetryStore) SyncPolicy(ctx context.Context, enabled, simulation, observation bool) (CodexTelemetryPolicy, error) {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -93,14 +318,15 @@ func (s *MemoryCodexTelemetryStore) TransactPool(ctx context.Context, key CodexT
 	if !exists {
 		pool = CodexTelemetryPool{Key: key, ID: uuid.NewString(), Seed: uuid.NewString(), TemplateVersion: 1, CreatedAt: now}
 	}
-	tx := CodexTelemetryPoolTransaction{Policy: s.policy, Pool: pool, Activities: memoryCodexTelemetryCloneActivities(s.activities[key])}
+	activities := newMemoryCodexTelemetryActivities(s.activities[key], now)
+	tx := CodexTelemetryPoolTransaction{Policy: s.policy, Pool: pool, Activities: activities}
 	if err := fn(&tx); err != nil {
 		return nil, err
 	}
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	if tx.Pool.TemplateVersion < 1 {
+	if tx.Pool.TemplateVersion < 1 || tx.Activities != activities {
 		return nil, ErrCodexTelemetryInvalidState
 	}
 	// Identity, seed, creation time and policy are immutable inside a callback.
@@ -109,20 +335,6 @@ func (s *MemoryCodexTelemetryStore) TransactPool(ctx context.Context, key CodexT
 		pool.LastBusinessAt = tx.Pool.LastBusinessAt
 	}
 	pool.Version++
-	for mapKey, activity := range tx.Activities {
-		if activity.Kind == "" || len(activity.Kind) > 64 || activity.Key == "" || len(activity.Key) > 512 || mapKey != CodexTelemetryActivityMapKey(activity.Kind, activity.Key) {
-			return nil, ErrCodexTelemetryInvalidState
-		}
-		if err := ValidateCodexTelemetryStoredJSON(activity.Data); err != nil {
-			return nil, err
-		}
-		if previous, ok := s.activities[key][mapKey]; ok && bytes.Equal(previous.Data, activity.Data) && previous.DueAt.Equal(activity.DueAt) {
-			activity.UpdatedAt = previous.UpdatedAt
-		} else {
-			activity.UpdatedAt = now
-		}
-		tx.Activities[mapKey] = activity
-	}
 	newBatches := make(map[string]CodexTelemetryBatch, len(tx.Batches))
 	nextSequence := s.nextSequence
 	for _, batch := range tx.Batches {
@@ -184,7 +396,7 @@ func (s *MemoryCodexTelemetryStore) TransactPool(ctx context.Context, key CodexT
 	}
 	s.pools[key] = pool
 	s.nextSequence = nextSequence
-	s.activities[key] = memoryCodexTelemetryCloneActivities(tx.Activities)
+	s.activities[key] = activities.commit()
 	for id, batch := range newBatches {
 		s.batches[id] = batch
 	}
@@ -385,15 +597,6 @@ func memoryCodexTelemetrySafeErrorCode(code string) bool {
 		}
 	}
 	return true
-}
-
-func memoryCodexTelemetryCloneActivities(src map[string]CodexTelemetryActivity) map[string]CodexTelemetryActivity {
-	dst := make(map[string]CodexTelemetryActivity, len(src))
-	for key, activity := range src {
-		activity.Data = append(json.RawMessage(nil), activity.Data...)
-		dst[key] = activity
-	}
-	return dst
 }
 
 func memoryCodexTelemetryCloneBatch(batch CodexTelemetryBatch) CodexTelemetryBatch {

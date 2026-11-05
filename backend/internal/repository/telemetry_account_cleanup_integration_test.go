@@ -16,7 +16,9 @@ func createAccountCleanupTelemetry(t *testing.T, store service.CodexTelemetrySto
 	t.Helper()
 	pool, err := store.TransactPool(context.Background(), key, now, func(tx *service.CodexTelemetryPoolTransaction) error {
 		activity := telemetryStoreActivity("maintenance", "cleanup", `{}`, now)
-		tx.Activities[service.CodexTelemetryActivityMapKey(activity.Kind, activity.Key)] = activity
+		if err := tx.Activities.Put(activity); err != nil {
+			return err
+		}
 		tx.Batches = append(tx.Batches, telemetryStoreBatch(uuid.NewString(), now))
 		return nil
 	})

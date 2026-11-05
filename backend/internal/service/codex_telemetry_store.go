@@ -82,14 +82,37 @@ type CodexTelemetryBatch struct {
 	ErrorCode     string             `json:"error_code"`
 }
 
+type CodexTelemetryActivityKey struct {
+	Kind string
+	Key  string
+}
+
+// CodexTelemetryActivityTransaction accesses only the current pool inside its
+// transaction. Reads return independent JSON copies; mutations require Put or
+// Delete. GetMany omits missing keys and uses CodexTelemetryActivityMapKey.
+// Queries include staged writes and never commit the surrounding transaction.
+type CodexTelemetryActivityTransaction interface {
+	Get(kind, key string) (CodexTelemetryActivity, bool, error)
+	GetMany([]CodexTelemetryActivityKey) (map[string]CodexTelemetryActivity, error)
+	Put(CodexTelemetryActivity) error
+	Delete(kind, key string) error
+	// Order by due time (unset last), then key. Zero dueBefore selects all
+	// active turns; zero limit is unlimited and a negative limit is invalid.
+	ListActiveTurns(dueBefore time.Time, limit int) ([]CodexTelemetryActivity, error)
+	RuntimeOccupancy() (int, error)
+	// Expiry includes completed rows whose updated_at equals cutoff.
+	DeleteExpiredRuntime(cutoff time.Time) (int, error)
+	EvictCompletedRuntime(limit int, protected []CodexTelemetryActivityKey) (int, error)
+}
+
 // The callback runs while holding the policy shared lock and pool update lock.
-// Mutate Activities (delete removes a row), Pool.LastBusinessAt/TemplateVersion,
+// Mutate Activities through its accessor, Pool.LastBusinessAt/TemplateVersion,
 // and append Batches. Everything commits atomically, or nothing does. It must
 // not perform network I/O or recursively call the store.
 type CodexTelemetryPoolTransaction struct {
 	Policy     CodexTelemetryPolicy
 	Pool       CodexTelemetryPool
-	Activities map[string]CodexTelemetryActivity
+	Activities CodexTelemetryActivityTransaction
 	Batches    []CodexTelemetryBatch
 }
 

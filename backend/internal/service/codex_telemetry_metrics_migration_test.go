@@ -190,10 +190,10 @@ func TestCodexTelemetryRuntimeMigratesPendingMetricsAndKeepsSealedPayload(t *tes
 		profile := attempt.profile
 		profile.poolID, profile.scenarioSeed = tx.Pool.ID, tx.Pool.Seed
 		legacy = codexMetricMigrationLegacySnapshot(t, profile)
-		tx.Activities[CodexTelemetryActivityMapKey("metrics", "current")] = CodexTelemetryActivity{
+		require.NoError(t, tx.Activities.Put(CodexTelemetryActivity{
 			Kind: "metrics", Key: "current", Data: codexMetricMigrationEncode(t, legacy),
 			UpdatedAt: now, DueAt: now.Add(time.Minute),
-		}
+		}))
 		if err := appendRuntimeBatch(tx, profile, "metrics", sealedPayload, now); err != nil {
 			return err
 		}

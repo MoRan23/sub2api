@@ -16,15 +16,16 @@ func TestMemoryCodexTelemetryStoreTransactionRollbackAndIsolation(t *testing.T) 
 	s := NewMemoryCodexTelemetryStore().(*MemoryCodexTelemetryStore)
 	now := time.Now().UTC()
 	key := CodexTelemetryPoolKey{OwnerAccountID: 42, OSFamily: "windows"}
-	activityKey := CodexTelemetryActivityMapKey("turn", "one")
-	var captured map[string]CodexTelemetryActivity
+	var captured CodexTelemetryActivityTransaction
 	batchID := uuid.NewString()
 	proxyID := int64(7)
 	payload := json.RawMessage(`{"input_tokens":5}`)
 	pool, err := s.TransactPool(ctx, key, now, func(tx *CodexTelemetryPoolTransaction) error {
 		captured = tx.Activities
 		tx.Pool.LastBusinessAt = now
-		tx.Activities[activityKey] = CodexTelemetryActivity{Kind: "turn", Key: "one", Data: json.RawMessage(`{"count":1}`), DueAt: now}
+		if err := tx.Activities.Put(CodexTelemetryActivity{Kind: "turn", Key: "one", Data: json.RawMessage(`{"count":1}`), DueAt: now}); err != nil {
+			return err
+		}
 		tx.Batches = append(tx.Batches, CodexTelemetryBatch{Type: "analytics", Source: "observed", ID: batchID, ProxyID: &proxyID, Payload: payload})
 		return nil
 	})
@@ -37,15 +38,19 @@ func TestMemoryCodexTelemetryStoreTransactionRollbackAndIsolation(t *testing.T) 
 	pool.ID = "caller mutation"
 	proxyID = 99
 	payload[16] = '9'
-	delete(captured, activityKey)
+	if err := captured.Delete("turn", "one"); err != nil {
+		t.Fatal(err)
+	}
 	rollback := errors.New("rollback")
 	_, err = s.TransactPool(ctx, key, now.Add(time.Second), func(tx *CodexTelemetryPoolTransaction) error {
-		if len(tx.Activities) != 1 {
-			t.Fatal("callback retained mutable committed state")
+		activity, exists, err := tx.Activities.Get("turn", "one")
+		if err != nil || !exists {
+			t.Fatalf("callback retained mutable committed state: %v", err)
 		}
-		activity := tx.Activities[activityKey]
 		activity.Data[9] = '9'
-		tx.Activities[activityKey] = activity
+		if err := tx.Activities.Put(activity); err != nil {
+			return err
+		}
 		tx.Pool.LastBusinessAt = now.Add(time.Hour)
 		return rollback
 	})
@@ -53,7 +58,8 @@ func TestMemoryCodexTelemetryStoreTransactionRollbackAndIsolation(t *testing.T) 
 		t.Fatalf("rollback error: %v", err)
 	}
 	_, err = s.TransactPool(ctx, key, now.Add(2*time.Second), func(tx *CodexTelemetryPoolTransaction) error {
-		if string(tx.Activities[activityKey].Data) != `{"count":1}` || tx.Pool.Version != 1 || tx.Pool.LastBusinessAt != now || tx.Pool.ID == "caller mutation" {
+		activity, _, err := tx.Activities.Get("turn", "one")
+		if err != nil || string(activity.Data) != `{"count":1}` || tx.Pool.Version != 1 || tx.Pool.LastBusinessAt != now || tx.Pool.ID == "caller mutation" {
 			t.Fatalf("transaction leaked: %+v", tx)
 		}
 		tx.Pool.LastBusinessAt = now.Add(-time.Hour)
@@ -227,13 +233,19 @@ func TestMemoryCodexTelemetryStoreConcurrentPoolAndClaim(t *testing.T) {
 			defer wg.Done()
 			_, err := s.TransactPool(ctx, key, now, func(tx *CodexTelemetryPoolTransaction) error {
 				var count int
-				if prior, ok := tx.Activities[activityKey]; ok {
+				prior, ok, err := tx.Activities.Get("counter", "shared")
+				if err != nil {
+					return err
+				}
+				if ok {
 					if err := json.Unmarshal(prior.Data, &count); err != nil {
 						return err
 					}
 				}
 				data, _ := json.Marshal(count + 1)
-				tx.Activities[activityKey] = CodexTelemetryActivity{Kind: "counter", Key: "shared", Data: data}
+				if err := tx.Activities.Put(CodexTelemetryActivity{Kind: "counter", Key: "shared", Data: data}); err != nil {
+					return err
+				}
 				tx.Batches = append(tx.Batches, CodexTelemetryBatch{Type: "analytics", Source: "observed", Payload: json.RawMessage(`{}`)})
 				return nil
 			})
@@ -323,7 +335,9 @@ func TestMemoryCodexTelemetryStoreDueAndRetention(t *testing.T) {
 	key := CodexTelemetryPoolKey{OwnerAccountID: 42, OSFamily: "linux"}
 	batchID := uuid.NewString()
 	_, err := s.TransactPool(ctx, key, now, func(tx *CodexTelemetryPoolTransaction) error {
-		tx.Activities[CodexTelemetryActivityMapKey("turn", "a")] = CodexTelemetryActivity{Kind: "turn", Key: "a", Data: json.RawMessage(`{}`), DueAt: now.Add(time.Minute)}
+		if err := tx.Activities.Put(CodexTelemetryActivity{Kind: "turn", Key: "a", Data: json.RawMessage(`{}`), DueAt: now.Add(time.Minute)}); err != nil {
+			return err
+		}
 		tx.Batches = append(tx.Batches, CodexTelemetryBatch{Type: "analytics", Source: "observed", ID: batchID, Payload: json.RawMessage(`{}`), NotBefore: now.Add(time.Hour)})
 		return nil
 	})

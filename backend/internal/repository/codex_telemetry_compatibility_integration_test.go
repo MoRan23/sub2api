@@ -95,8 +95,7 @@ func testCodexTelemetryPostgresMetricUpgrade(t *testing.T, legacyVersion int) {
 		require.NoError(t, err)
 		_, err = store.TransactPool(ctx, key, time.Now(), func(tx *service.CodexTelemetryPoolTransaction) error {
 			a := telemetryStoreActivity("metrics", "current", string(data), due)
-			tx.Activities[service.CodexTelemetryActivityMapKey(a.Kind, a.Key)] = a
-			return nil
+			return tx.Activities.Put(a)
 		})
 		require.NoError(t, err)
 	}

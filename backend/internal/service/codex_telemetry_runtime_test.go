@@ -26,6 +26,129 @@ func runtimeTestAttempt(at time.Time, os, turn, sample string) *CodexTelemetryAt
 		poolKey: CodexTelemetryPoolKey{OwnerAccountID: i.OwnerAccountID, OSFamily: os, InstallationID: i.InstallationID}}
 }
 
+func runtimeTestActivityMap(tx *CodexTelemetryPoolTransaction) map[string]CodexTelemetryActivity {
+	values := make(map[string]CodexTelemetryActivity)
+	_ = tx.Activities.(*memoryCodexTelemetryActivities).each(func(value CodexTelemetryActivity) error {
+		values[CodexTelemetryActivityMapKey(value.Kind, value.Key)] = cloneCodexTelemetryActivity(value)
+		return nil
+	})
+	return values
+}
+
+func TestCodexTelemetryRuntimeDueTurnBatchPreservesRemainingWork(t *testing.T) {
+	now := time.Now().UTC()
+	tx := &CodexTelemetryPoolTransaction{
+		Policy:     CodexTelemetryPolicy{Epoch: 1, Enabled: true, Observation: true},
+		Activities: newMemoryCodexTelemetryActivities(nil, time.Time{}),
+	}
+	require.NoError(t, syncCodexTelemetryRuntimeEpoch(tx, now))
+	for i := range codexTelemetryRuntimeTurnBatch + 1 {
+		require.NoError(t, putRuntimeActivity(tx, "turn", fmt.Sprintf("due-%03d", i), codexTelemetryRuntimeTurn{
+			LastSeen: now.Add(-codexTelemetryStateTTL - time.Minute),
+		}, now.Add(-time.Hour), now.Add(-time.Minute)))
+	}
+	require.NoError(t, tickCodexTelemetryRuntime(tx, now))
+	remaining, err := tx.Activities.ListActiveTurns(now, 0)
+	require.NoError(t, err)
+	require.Len(t, remaining, 1)
+	require.Equal(t, "due-128", remaining[0].Key)
+	require.NoError(t, tickCodexTelemetryRuntime(tx, now))
+	remaining, err = tx.Activities.ListActiveTurns(now, 0)
+	require.NoError(t, err)
+	require.Empty(t, remaining)
+}
+
+func TestCodexTelemetryRuntimeCapacityDoesNotEvictReferencedTurn(t *testing.T) {
+	now := time.Now().UTC()
+	a := runtimeTestAttempt(now, "windows", "existing", "sample-new")
+	tx := &CodexTelemetryPoolTransaction{
+		Policy:     CodexTelemetryPolicy{Epoch: 1, Enabled: true, Observation: true},
+		Pool:       CodexTelemetryPool{ID: uuid.NewString(), Seed: uuid.NewString()},
+		Activities: newMemoryCodexTelemetryActivities(nil, time.Time{}),
+	}
+	profile, err := marshalCodexTelemetryProfile(a.profile)
+	require.NoError(t, err)
+	key := codexRuntimeTurnKey(a.profile, a.attemptID)
+	require.NoError(t, putRuntimeActivity(tx, "turn", key, codexTelemetryRuntimeTurn{Sealed: true, Profile: profile}, now.Add(-time.Hour), now.Add(time.Hour)))
+	for i := range codexTelemetryMaxStates - 3 {
+		require.NoError(t, putRuntimeActivity(tx, "turn", fmt.Sprintf("active-%04d", i), codexTelemetryRuntimeTurn{}, now, time.Time{}))
+	}
+	for _, key := range []string{"evict-one", "evict-two"} {
+		require.NoError(t, putRuntimeActivity(tx, "sampling", key, map[string]bool{"completed": true}, now, time.Time{}))
+	}
+	require.NoError(t, beginCodexTelemetryRuntime(tx, a))
+	turn, exists, err := runtimeActivity[codexTelemetryRuntimeTurn](tx, "turn", key)
+	require.NoError(t, err)
+	require.True(t, exists)
+	require.True(t, turn.Sealed, "pressure eviction must not recreate a retained dedup turn")
+	occupancy, err := tx.Activities.RuntimeOccupancy()
+	require.NoError(t, err)
+	require.LessOrEqual(t, occupancy, codexTelemetryMaxStates)
+}
+
+func TestCodexTelemetryActivityTransactionReadsOwnChangesWithoutSharingJSON(t *testing.T) {
+	now := time.Now().UTC()
+	key := CodexTelemetryActivityMapKey("sampling", "sample")
+	original := CodexTelemetryActivity{Kind: "sampling", Key: "sample", Data: []byte(`{"completed":true}`), UpdatedAt: now.Add(-time.Hour)}
+	base := map[string]CodexTelemetryActivity{key: original}
+	activities := newMemoryCodexTelemetryActivities(base, now)
+	value, exists, err := activities.Get("sampling", "sample")
+	require.NoError(t, err)
+	require.True(t, exists)
+	value.Data[2] = 'x'
+	require.Equal(t, original.Data, base[key].Data)
+	require.NoError(t, activities.Put(original))
+	require.Empty(t, activities.puts, "unchanged rows do not become dirty")
+	require.NoError(t, activities.Delete("sampling", "sample"))
+	values, err := activities.GetMany([]CodexTelemetryActivityKey{{Kind: "sampling", Key: "sample"}, {Kind: "thread", Key: "missing"}})
+	require.NoError(t, err)
+	require.Empty(t, values)
+	require.Len(t, base, 1, "staged deletion must leave committed state untouched")
+	require.NoError(t, activities.Put(original))
+	values, err = activities.GetMany([]CodexTelemetryActivityKey{{Kind: "sampling", Key: "sample"}})
+	require.NoError(t, err)
+	require.Len(t, values, 1)
+	value = values[key]
+	value.Data[2] = 'x'
+	fresh, _, err := activities.Get("sampling", "sample")
+	require.NoError(t, err)
+	require.Equal(t, original.Data, fresh.Data)
+	require.Equal(t, original.UpdatedAt, fresh.UpdatedAt, "restoring the original row preserves retention age")
+	changed := original
+	changed.Data = []byte(`{"completed":false}`)
+	require.NoError(t, activities.Put(changed))
+	require.NoError(t, activities.Put(original))
+	require.Empty(t, activities.puts)
+}
+
+func TestCodexTelemetryActivityTransactionBoundaries(t *testing.T) {
+	now := time.Now().UTC()
+	activities := newMemoryCodexTelemetryActivities(nil, time.Time{})
+	for _, key := range []CodexTelemetryActivityKey{{Kind: "turn\x00", Key: "valid"}, {Kind: "turn", Key: "invalid\x00"}} {
+		require.ErrorIs(t, activities.Put(CodexTelemetryActivity{Kind: key.Kind, Key: key.Key, Data: []byte(`{}`)}), ErrCodexTelemetryInvalidState)
+	}
+	_, err := activities.ListActiveTurns(time.Time{}, -1)
+	require.ErrorIs(t, err, ErrCodexTelemetryInvalidState)
+	for _, value := range []CodexTelemetryActivity{
+		{Kind: "turn", Key: "a-unscheduled", Data: []byte(`{}`)},
+		{Kind: "turn", Key: "z-due", Data: []byte(`{}`), DueAt: now},
+		{Kind: "turn", Key: "b-later", Data: []byte(`{}`), DueAt: now.Add(time.Hour)},
+		{Kind: "sampling", Key: "expires", Data: []byte(`{}`), UpdatedAt: now},
+	} {
+		require.NoError(t, activities.Put(value))
+	}
+	turns, err := activities.ListActiveTurns(time.Time{}, 0)
+	require.NoError(t, err)
+	require.Len(t, turns, 3)
+	require.Equal(t, []string{"z-due", "b-later", "a-unscheduled"}, []string{turns[0].Key, turns[1].Key, turns[2].Key})
+	removed, err := activities.DeleteExpiredRuntime(time.Time{})
+	require.NoError(t, err)
+	require.Zero(t, removed)
+	removed, err = activities.DeleteExpiredRuntime(now)
+	require.NoError(t, err)
+	require.Equal(t, 1, removed, "retention includes rows exactly at cutoff")
+}
+
 func runtimeTestMutation(t *testing.T, store CodexTelemetryStore, a *CodexTelemetryAttempt, result *CodexTelemetryResult, retry bool) {
 	t.Helper()
 	_, err := store.TransactPool(context.Background(), a.poolKey, a.profile.started, func(tx *CodexTelemetryPoolTransaction) error {
@@ -259,36 +382,35 @@ func TestCodexTelemetryRuntimeBusinessNeverWaitsForStorage(t *testing.T) {
 
 func TestCodexTelemetryRuntimeCapacityPreservesActiveAndStableMarkers(t *testing.T) {
 	now := time.Now().UTC()
-	tx := &CodexTelemetryPoolTransaction{Activities: map[string]CodexTelemetryActivity{}}
+	tx := &CodexTelemetryPoolTransaction{Activities: newMemoryCodexTelemetryActivities(nil, time.Time{})}
 	require.NoError(t, putRuntimeActivity(tx, "thread", "stable", codexTelemetryRuntimeThread{Initialized: true}, now.Add(-30*24*time.Hour), time.Time{}))
 	for i := range codexTelemetryMaxStates {
 		key := fmt.Sprintf("turn-%05d", i)
 		require.NoError(t, putRuntimeActivity(tx, "turn", key, codexTelemetryRuntimeTurn{PendingTools: map[string]bool{"pending": true}}, now, time.Time{}))
 	}
 	require.ErrorIs(t, pruneCodexTelemetryRuntime(tx, now, 1), errCodexTelemetryRuntimeCapacity)
-	require.Len(t, tx.Activities, codexTelemetryMaxStates+1)
-	key := CodexTelemetryActivityMapKey("turn", "turn-00000")
-	delete(tx.Activities, key)
+	require.Len(t, runtimeTestActivityMap(tx), codexTelemetryMaxStates+1)
+	require.NoError(t, tx.Activities.Delete("turn", "turn-00000"))
 	require.NoError(t, putRuntimeActivity(tx, "sampling", "completed", map[string]bool{"completed": true}, now.Add(-time.Hour), time.Time{}))
 	require.NoError(t, pruneCodexTelemetryRuntime(tx, now, 1))
-	require.NotContains(t, tx.Activities, CodexTelemetryActivityMapKey("sampling", "completed"))
-	require.Contains(t, tx.Activities, CodexTelemetryActivityMapKey("thread", "stable"))
-	require.Contains(t, tx.Activities, CodexTelemetryActivityMapKey("turn", "turn-00001"))
+	require.NotContains(t, runtimeTestActivityMap(tx), CodexTelemetryActivityMapKey("sampling", "completed"))
+	require.Contains(t, runtimeTestActivityMap(tx), CodexTelemetryActivityMapKey("thread", "stable"))
+	require.Contains(t, runtimeTestActivityMap(tx), CodexTelemetryActivityMapKey("turn", "turn-00001"))
 }
 
 func TestCodexTelemetryRuntimeRetentionKeepsInitializationMarkers(t *testing.T) {
 	now := time.Now().UTC()
 	old := now.Add(-codexTelemetryActivityRetention - time.Minute)
-	tx := &CodexTelemetryPoolTransaction{Activities: map[string]CodexTelemetryActivity{}}
+	tx := &CodexTelemetryPoolTransaction{Activities: newMemoryCodexTelemetryActivities(nil, time.Time{})}
 	require.NoError(t, putRuntimeActivity(tx, "thread", "stable", codexTelemetryRuntimeThread{Initialized: true}, old, time.Time{}))
 	require.NoError(t, putRuntimeActivity(tx, "turn", "closed", codexTelemetryRuntimeTurn{Sealed: true}, old, now.Add(-time.Minute)))
 	require.NoError(t, putRuntimeActivity(tx, "turn", "active", codexTelemetryRuntimeTurn{PendingTools: map[string]bool{"pending": true}}, old, time.Time{}))
 	require.NoError(t, putRuntimeActivity(tx, "attempt", "finished", codexTelemetryRuntimeAttempt{Finished: true, TurnKey: "closed"}, old, now.Add(-time.Minute)))
 	require.NoError(t, putRuntimeActivity(tx, "sampling", "sample", map[string]bool{"completed": true}, old, now.Add(-time.Minute)))
 	require.NoError(t, pruneCodexTelemetryRuntime(tx, now, 0))
-	require.Len(t, tx.Activities, 2)
-	require.Contains(t, tx.Activities, CodexTelemetryActivityMapKey("thread", "stable"))
-	require.Contains(t, tx.Activities, CodexTelemetryActivityMapKey("turn", "active"))
+	require.Len(t, runtimeTestActivityMap(tx), 2)
+	require.Contains(t, runtimeTestActivityMap(tx), CodexTelemetryActivityMapKey("thread", "stable"))
+	require.Contains(t, runtimeTestActivityMap(tx), CodexTelemetryActivityMapKey("turn", "active"))
 }
 
 func TestCodexTelemetryRuntimePreservesIncompleteMeasurementStatus(t *testing.T) {

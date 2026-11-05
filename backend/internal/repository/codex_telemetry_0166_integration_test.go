@@ -41,16 +41,20 @@ func TestCodexTelemetryPostgres0166SnapshotAndFrozenBatchRecovery(t *testing.T) 
 			batch.ClientVersion = "0.165.0"
 			const oldUnsealed = `{"explicit":true,"sealed":false,"profile":{"version":"0.165.0","simulation_enabled":true,"first_thread":true},"result":{"Status":"completed"}}`
 			activity := telemetryStoreActivity("turn", "legacy-turn", oldUnsealed, now.Add(time.Minute))
-			activityKey := service.CodexTelemetryActivityMapKey(activity.Kind, activity.Key)
 			_, err = store.TransactPool(ctx, key, now, func(tx *service.CodexTelemetryPoolTransaction) error {
-				tx.Activities[activityKey] = activity
+				if err := tx.Activities.Put(activity); err != nil {
+					return err
+				}
 				tx.Batches = append(tx.Batches, batch)
 				return nil
 			})
 			require.NoError(t, err)
 			restarted := NewCodexTelemetryStore(integrationDB)
 			_, err = restarted.TransactPool(ctx, key, now.Add(time.Second), func(tx *service.CodexTelemetryPoolTransaction) error {
-				require.JSONEq(t, oldUnsealed, string(tx.Activities[activityKey].Data), "restoration leaves unsealed facts for the runtime generator")
+				restored, found, err := tx.Activities.Get(activity.Kind, activity.Key)
+				require.NoError(t, err)
+				require.True(t, found)
+				require.JSONEq(t, oldUnsealed, string(restored.Data), "restoration leaves unsealed facts for the runtime generator")
 				return nil
 			})
 			require.NoError(t, err)
