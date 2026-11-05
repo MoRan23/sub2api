@@ -45,7 +45,7 @@ func buildOpenAIImagesOAuthPayload(parsed *OpenAIImagesRequest, model string) ([
 	if parsed == nil {
 		return nil, "", fmt.Errorf("parsed images request is required")
 	}
-	if err := validateOpenAIImagesGIFOptions(parsed); err != nil {
+	if err := validateOpenAIImagesOutputOptions(parsed); err != nil {
 		return nil, "", err
 	}
 	if !usesCodexDirectImages(model) {
@@ -69,7 +69,7 @@ func buildOpenAIImagesOAuthPayload(parsed *OpenAIImagesRequest, model string) ([
 		key   string
 		value string
 	}{
-		{"size", parsed.Size}, {"quality", parsed.Quality},
+		{"size", parsed.Size}, {"quality", parsed.Quality}, {"complexity", parsed.Complexity},
 		{"background", parsed.Background}, {"output_format", parsed.OutputFormat},
 		{"moderation", parsed.Moderation}, {"input_fidelity", parsed.InputFidelity},
 		{"style", parsed.Style},

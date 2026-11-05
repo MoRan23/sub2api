@@ -89,6 +89,7 @@ type OpenAIImagesRequest struct {
 	SizeTier           string
 	ResponseFormat     string
 	Quality            string
+	Complexity         string
 	Background         string
 	OutputFormat       string
 	Moderation         string
@@ -178,6 +179,52 @@ func (r *OpenAIImagesRequest) IsEdits() bool {
 
 func (r *OpenAIImagesRequest) IsGIF() bool {
 	return r != nil && strings.EqualFold(strings.TrimSpace(r.OutputFormat), "gif")
+}
+
+func (r *OpenAIImagesRequest) IsSVG() bool {
+	return r != nil && strings.EqualFold(strings.TrimSpace(r.OutputFormat), "svg")
+}
+
+func validateOpenAIImagesOutputOptions(req *OpenAIImagesRequest) error {
+	if err := validateOpenAIImagesGIFOptions(req); err != nil {
+		return err
+	}
+	return validateOpenAIImagesSVGOptions(req)
+}
+
+func validateOpenAIImagesSVGOptions(req *OpenAIImagesRequest) error {
+	if !req.IsSVG() {
+		return nil
+	}
+	if req.IsEdits() {
+		return fmt.Errorf("SVG output is only supported by images/generations")
+	}
+	// Programmatic callers may leave N unset. For JSON, inspect the original
+	// number too: routing defaults/truncation must not turn n=0 or n=1.5 into 1.
+	if req.N != 0 && req.N != 1 {
+		return fmt.Errorf("SVG output requires n=1")
+	}
+	if !req.Multipart {
+		if n := gjson.GetBytes(req.Body, "n"); n.Exists() {
+			value, err := strconv.Atoi(n.Raw)
+			if n.Type != gjson.Number || err != nil || value != 1 {
+				return fmt.Errorf("SVG output requires n=1")
+			}
+		}
+	}
+	if req.Stream {
+		return fmt.Errorf("SVG output does not support streaming")
+	}
+	if req.PartialImages != nil {
+		return fmt.Errorf("SVG output does not support partial_images")
+	}
+	if req.OutputCompression != nil {
+		return fmt.Errorf("SVG output does not support output_compression")
+	}
+	if req.hasPromptRewriter || (!req.Multipart && gjson.GetBytes(req.Body, "prompt_rewriter").Exists()) {
+		return fmt.Errorf("SVG output does not support prompt_rewriter")
+	}
+	return nil
 }
 
 // Keep the original request body intact for compatible API-key providers. These
@@ -353,6 +400,7 @@ func parseOpenAIImagesJSONRequest(body []byte, req *OpenAIImagesRequest) error {
 	}
 	req.ResponseFormat = strings.ToLower(strings.TrimSpace(gjson.GetBytes(body, "response_format").String()))
 	req.Quality = strings.TrimSpace(gjson.GetBytes(body, "quality").String())
+	req.Complexity = strings.TrimSpace(gjson.GetBytes(body, "complexity").String())
 	req.Background = strings.TrimSpace(gjson.GetBytes(body, "background").String())
 	req.OutputFormat = strings.TrimSpace(gjson.GetBytes(body, "output_format").String())
 	req.Moderation = strings.TrimSpace(gjson.GetBytes(body, "moderation").String())
@@ -507,6 +555,9 @@ func parseOpenAIImagesMultipartRequest(body []byte, contentType string, req *Ope
 		case "quality":
 			req.Quality = value
 			req.HasNativeOptions = true
+		case "complexity":
+			req.Complexity = value
+			req.HasNativeOptions = true
 		case "background":
 			req.Background = value
 			req.HasNativeOptions = true
@@ -653,7 +704,7 @@ func classifyOpenAIImagesCapability(req *OpenAIImagesRequest) OpenAIImagesCapabi
 	if !strings.HasPrefix(model, "gpt-image-") {
 		return OpenAIImagesCapabilityNative
 	}
-	if req.Stream || req.N != 1 || req.HasMask || req.HasNativeOptions || req.IsGIF() || req.FrameCount != nil || req.FrameDurationMS != nil {
+	if req.Stream || req.N != 1 || req.HasMask || req.HasNativeOptions || req.IsGIF() || req.IsSVG() || req.Complexity != "" || req.FrameCount != nil || req.FrameDurationMS != nil {
 		return OpenAIImagesCapabilityNative
 	}
 	if req.IsEdits() && !req.Multipart {
@@ -669,6 +720,7 @@ func hasOpenAINativeImageOptions(exists func(path string) bool) bool {
 	for _, path := range []string{
 		"background",
 		"quality",
+		"complexity",
 		"style",
 		"output_format",
 		"output_compression",
@@ -687,7 +739,7 @@ func hasOpenAINativeImageOptions(exists func(path string) bool) bool {
 
 func isOpenAINativeImageOption(name string) bool {
 	switch strings.TrimSpace(strings.ToLower(name)) {
-	case "background", "quality", "style", "output_format", "output_compression", "moderation", "input_fidelity", "partial_images", "frame_count", "frame_duration_ms":
+	case "background", "quality", "complexity", "style", "output_format", "output_compression", "moderation", "input_fidelity", "partial_images", "frame_count", "frame_duration_ms":
 		return true
 	default:
 		return false
@@ -792,7 +844,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 		return nil, err
 	}
 	if IsGPTImageGenerationModel(upstreamModel) {
-		if err := validateOpenAIImagesGIFOptions(parsed); err != nil {
+		if err := validateOpenAIImagesOutputOptions(parsed); err != nil {
 			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"message": err.Error(), "type": "invalid_request_error"}})
 			return nil, err
 		}

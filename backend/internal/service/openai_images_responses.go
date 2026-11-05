@@ -322,6 +322,8 @@ func openAIImageOutputMIMEType(outputFormat string) string {
 		return "image/webp"
 	case "gif":
 		return "image/gif"
+	case "svg":
+		return "image/svg+xml"
 	default:
 		return "image/png"
 	}
@@ -358,21 +360,40 @@ func isOpenAIImagesSelfBuiltRequest(ctx context.Context) bool {
 	return selfBuilt
 }
 
+// These Images API options have no supported projection in our Responses tool
+// adapter. Preserve the native endpoint's error rather than retrying without them.
+func openAIImagesResponsesCompatibilityError(parsed *OpenAIImagesRequest) *OpenAIImagesUpstreamError {
+	if parsed == nil {
+		return nil
+	}
+	message, param := "", "output_format"
+	switch {
+	case parsed.IsGIF():
+		message = "GIF output requires a native Images generations model"
+	case parsed.IsSVG():
+		message = "SVG output requires a native Images generations model"
+	case strings.TrimSpace(parsed.Complexity) != "":
+		message, param = "complexity requires a native Images model", "complexity"
+	default:
+		return nil
+	}
+	return &OpenAIImagesUpstreamError{
+		StatusCode: http.StatusBadRequest, ErrorType: "invalid_request_error", Message: message, Param: param,
+	}
+}
+
 func buildOpenAIImagesResponsesRequest(parsed *OpenAIImagesRequest, toolModel string) ([]byte, error) {
 	if parsed == nil {
 		return nil, fmt.Errorf("parsed images request is required")
 	}
-	if err := validateOpenAIImagesGIFOptions(parsed); err != nil {
+	if err := validateOpenAIImagesOutputOptions(parsed); err != nil {
 		return nil, err
 	}
 	if strings.TrimSpace(parsed.Prompt) == "" {
 		return nil, fmt.Errorf("prompt is required")
 	}
-	// Animated GIFs are supported by the Images generations endpoint only.
-	// Do not silently turn them into a Responses tool request, which would
-	// discard frame controls or produce a non-animated result.
-	if parsed.IsGIF() {
-		return nil, fmt.Errorf("GIF output requires the Images generations endpoint")
+	if err := openAIImagesResponsesCompatibilityError(parsed); err != nil {
+		return nil, err
 	}
 	prompt := parsed.Prompt
 
@@ -1814,16 +1835,12 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 	if err := validateOpenAIImagesModel(upstreamModel); err != nil {
 		return nil, err
 	}
-	if err := validateOpenAIImagesGIFOptions(parsed); err != nil {
+	if err := validateOpenAIImagesOutputOptions(parsed); err != nil {
 		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
 		return nil, err
 	}
 	direct := usesCodexDirectImages(upstreamModel) && !isOpenAIImagesForceResponses(ctx)
-	if parsed.IsGIF() && !direct {
-		err := &OpenAIImagesUpstreamError{
-			StatusCode: http.StatusBadRequest, ErrorType: "invalid_request_error",
-			Message: "GIF output requires a native Images generations model", Param: "output_format",
-		}
+	if err := openAIImagesResponsesCompatibilityError(parsed); err != nil && !direct {
 		c.JSON(err.StatusCode, gin.H{"error": gin.H{"type": err.ErrorType, "message": err.Message, "param": err.Param}})
 		return nil, err
 	}
@@ -1911,7 +1928,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		respBody := s.readUpstreamErrorBody(resp)
 		_ = resp.Body.Close()
 		respBody = s.redactAgentIdentitySensitiveBody(upstreamCtx, account, respBody)
-		if direct && !parsed.IsGIF() && (resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed) {
+		if direct && openAIImagesResponsesCompatibilityError(parsed) == nil && (resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed) {
 			return s.forwardOpenAIImagesOAuth(withOpenAIImagesForceResponses(ctx), c, account, parsed, channelMappedModel)
 		}
 		if !agentIdentityTaskRecoveryWasTried(ctx) && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, respBody) {

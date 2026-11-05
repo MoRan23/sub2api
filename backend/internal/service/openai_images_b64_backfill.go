@@ -1,8 +1,10 @@
 package service
 
 import (
+	"bytes"
 	"context"
 	"encoding/base64"
+	"encoding/xml"
 	"errors"
 	"fmt"
 	"io"
@@ -64,7 +66,7 @@ func (s *OpenAIGatewayService) backfillOpenAIImagesB64JSON(
 		if rawURL == "" {
 			continue
 		}
-		encoded, err := s.fetchOpenAIImageURLBase64(ctx, account, rawURL)
+		encoded, err := s.fetchOpenAIImageURLBase64WithSVG(ctx, account, rawURL, parsed.IsSVG())
 		if err != nil {
 			logger.LegacyPrintf(
 				"service.openai_gateway",
@@ -96,6 +98,12 @@ func (s *OpenAIGatewayService) backfillOpenAIImagesB64JSON(
 // 再无条件拒绝回环、私网、链路本地等目的地（含重定向的每一跳），经账户代理下载，
 // 大小上限与 OAuth 路径的单图下载一致，且前 512 字节须嗅探为 png/jpeg/webp/gif。
 func (s *OpenAIGatewayService) fetchOpenAIImageURLBase64(ctx context.Context, account *Account, rawURL string) (string, error) {
+	return s.fetchOpenAIImageURLBase64WithSVG(ctx, account, rawURL, false)
+}
+
+// SVG downloads are accepted only for an explicit SVG output request. Content
+// validation does not render the document, resolve resources, or rewrite bytes.
+func (s *OpenAIGatewayService) fetchOpenAIImageURLBase64WithSVG(ctx context.Context, account *Account, rawURL string, allowSVG bool) (string, error) {
 	if strings.HasPrefix(strings.ToLower(rawURL), "data:") {
 		if encoded := normalizeOpenAIImageBase64(rawURL); encoded != "" {
 			return encoded, nil
@@ -141,7 +149,7 @@ func (s *OpenAIGatewayService) fetchOpenAIImageURLBase64(ctx context.Context, ac
 	if len(data) == 0 {
 		return "", errors.New("download image: empty body")
 	}
-	if !isBackfillImageContent(data) {
+	if !isBackfillImageContent(data) && !(allowSVG && isBackfillSVGContent(data)) {
 		return "", errors.New("download image: content is not an allowed image format")
 	}
 	return base64.StdEncoding.EncodeToString(data), nil
@@ -173,4 +181,40 @@ var openAIImageBackfillContentTypes = map[string]struct{}{
 func isBackfillImageContent(data []byte) bool {
 	_, ok := openAIImageBackfillContentTypes[detectedImageContentType(data)]
 	return ok
+}
+
+// isBackfillSVGContent validates a complete standalone SVG XML document. It is
+// a format check, not an SVG sanitizer; the result is returned only as base64.
+func isBackfillSVGContent(data []byte) bool {
+	decoder := xml.NewDecoder(bytes.NewReader(bytes.TrimPrefix(data, []byte{0xef, 0xbb, 0xbf})))
+	depth := 0
+	seenRoot := false
+	for {
+		token, err := decoder.Token()
+		if err == io.EOF {
+			return seenRoot && depth == 0
+		}
+		if err != nil {
+			return false
+		}
+		switch token := token.(type) {
+		case xml.StartElement:
+			if depth == 0 {
+				if seenRoot || token.Name.Local != "svg" || token.Name.Space != "http://www.w3.org/2000/svg" {
+					return false
+				}
+				seenRoot = true
+			}
+			depth++
+		case xml.EndElement:
+			depth--
+		case xml.CharData:
+			if depth == 0 && len(bytes.TrimSpace(token)) != 0 {
+				return false
+			}
+		case xml.Directive:
+			// Generated SVG needs no DTD or custom entity declarations.
+			return false
+		}
+	}
 }

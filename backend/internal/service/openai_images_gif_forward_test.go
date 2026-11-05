@@ -40,7 +40,9 @@ func encodeOpenAIImagesTestAnimation(t *testing.T) []byte {
 func TestOpenAIImagesGIFForwarding(t *testing.T) {
 	animation := encodeOpenAIImagesTestAnimation(t)
 	encoded := base64.StdEncoding.EncodeToString(animation)
-	for _, model := range []string{"gpt-image-2.6-sunburst", "gpt-image-2.6-flare"} {
+	// GIF is not version-gated by the gateway. Exercise the existing native
+	// Images routes as well as 2.6; each upstream decides actual availability.
+	for _, model := range []string{"gpt-image-1.5", "gpt-image-2", "gpt-image-2.5-sunburst", "gpt-image-2.5-flare", "gpt-image-2.6-sunburst", "gpt-image-2.6-flare"} {
 		for _, accountType := range []string{AccountTypeOAuth, AccountTypeAPIKey} {
 			for _, explicitFrames := range []bool{false, true} {
 				formats := []string{"b64_json"}
