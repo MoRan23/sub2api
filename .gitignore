@@ -143,6 +143,7 @@ docs/*
 !docs/PLUGIN_DEVELOPMENT.md
 !docs/channel-monitor-v2-safe-defaults.md
 !docs/OPENAI_PROMPTS_AND_TOOL_NAMES.md
+!docs/OPENAI_IMAGES_GIF.md
 !docs/CODEX_0165_COMPATIBILITY.md
 !docs/UPSTREAM_MERGE_V0_2_19.md
 !docs/OPENAI_OAUTH_OS_IDENTITIES.md

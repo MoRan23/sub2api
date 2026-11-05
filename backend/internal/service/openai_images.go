@@ -74,6 +74,8 @@ type OpenAIImagesUpload struct {
 
 type OpenAIImagesRequest struct {
 	deferCompatibility bool
+	gifOptionsError    error
+	hasPromptRewriter  bool
 	Endpoint           string
 	ContentType        string
 	Multipart          bool
@@ -94,6 +96,8 @@ type OpenAIImagesRequest struct {
 	Style              string
 	OutputCompression  *int
 	PartialImages      *int
+	FrameCount         *int
+	FrameDurationMS    *int
 	HasMask            bool
 	HasNativeOptions   bool
 	RequiredCapability OpenAIImagesCapability
@@ -170,6 +174,69 @@ func (u OpenAIImagesUpload) ModerationDataURL() string {
 
 func (r *OpenAIImagesRequest) IsEdits() bool {
 	return r != nil && r.Endpoint == openAIImagesEditsEndpoint
+}
+
+func (r *OpenAIImagesRequest) IsGIF() bool {
+	return r != nil && strings.EqualFold(strings.TrimSpace(r.OutputFormat), "gif")
+}
+
+// Keep the original request body intact for compatible API-key providers. These
+// constraints apply after model mapping, or when rebuilding OAuth requests.
+func validateOpenAIImagesGIFOptions(req *OpenAIImagesRequest) error {
+	if req == nil {
+		return nil
+	}
+	if req.gifOptionsError != nil {
+		return req.gifOptionsError
+	}
+	for _, field := range []struct {
+		name     string
+		value    *int
+		min, max int
+	}{
+		{"frame_count", req.FrameCount, 2, 64},
+		{"frame_duration_ms", req.FrameDurationMS, 20, 2000},
+	} {
+		if field.value == nil {
+			continue
+		}
+		if !req.IsGIF() {
+			return fmt.Errorf("%s is only supported with output_format gif", field.name)
+		}
+		if *field.value < field.min || *field.value > field.max {
+			return fmt.Errorf("%s must be an integer between %d and %d", field.name, field.min, field.max)
+		}
+	}
+	if !req.IsGIF() {
+		return nil
+	}
+	if req.IsEdits() {
+		return fmt.Errorf("GIF output is only supported by images/generations")
+	}
+	if req.Stream {
+		return fmt.Errorf("GIF output does not support streaming")
+	}
+	if req.PartialImages != nil {
+		return fmt.Errorf("GIF output does not support partial_images")
+	}
+	if req.OutputCompression != nil {
+		return fmt.Errorf("GIF output does not support output_compression")
+	}
+	if req.hasPromptRewriter || (!req.Multipart && gjson.GetBytes(req.Body, "prompt_rewriter").Exists()) {
+		return fmt.Errorf("GIF output does not support prompt_rewriter")
+	}
+	return nil
+}
+
+func (r *OpenAIImagesRequest) parseGIFInteger(name, value string, isNumber bool, target **int) {
+	n, err := strconv.Atoi(value)
+	if err != nil || !isNumber {
+		if r.gifOptionsError == nil {
+			r.gifOptionsError = fmt.Errorf("%s must be an integer", name)
+		}
+		return
+	}
+	*target = &n
 }
 
 func (r *OpenAIImagesRequest) StickySessionSeed() string {
@@ -291,6 +358,13 @@ func parseOpenAIImagesJSONRequest(body []byte, req *OpenAIImagesRequest) error {
 	req.Moderation = strings.TrimSpace(gjson.GetBytes(body, "moderation").String())
 	req.InputFidelity = strings.TrimSpace(gjson.GetBytes(body, "input_fidelity").String())
 	req.Style = strings.TrimSpace(gjson.GetBytes(body, "style").String())
+	req.hasPromptRewriter = gjson.GetBytes(body, "prompt_rewriter").Exists()
+	if frameCount := gjson.GetBytes(body, "frame_count"); frameCount.Exists() {
+		req.parseGIFInteger("frame_count", frameCount.Raw, frameCount.Type == gjson.Number, &req.FrameCount)
+	}
+	if frameDuration := gjson.GetBytes(body, "frame_duration_ms"); frameDuration.Exists() {
+		req.parseGIFInteger("frame_duration_ms", frameDuration.Raw, frameDuration.Type == gjson.Number, &req.FrameDurationMS)
+	}
 	req.HasMask = gjson.GetBytes(body, "mask").Exists()
 	if outputCompression := gjson.GetBytes(body, "output_compression"); outputCompression.Exists() {
 		if outputCompression.Type != gjson.Number {
@@ -462,6 +536,14 @@ func parseOpenAIImagesMultipartRequest(body []byte, contentType string, req *Ope
 			}
 			req.PartialImages = &n
 			req.HasNativeOptions = true
+		case "frame_count":
+			req.parseGIFInteger(name, value, true, &req.FrameCount)
+			req.HasNativeOptions = true
+		case "frame_duration_ms":
+			req.parseGIFInteger(name, value, true, &req.FrameDurationMS)
+			req.HasNativeOptions = true
+		case "prompt_rewriter":
+			req.hasPromptRewriter = true
 		default:
 			if isOpenAINativeImageOption(name) && value != "" {
 				req.HasNativeOptions = true
@@ -571,7 +653,7 @@ func classifyOpenAIImagesCapability(req *OpenAIImagesRequest) OpenAIImagesCapabi
 	if !strings.HasPrefix(model, "gpt-image-") {
 		return OpenAIImagesCapabilityNative
 	}
-	if req.Stream || req.N != 1 || req.HasMask || req.HasNativeOptions {
+	if req.Stream || req.N != 1 || req.HasMask || req.HasNativeOptions || req.IsGIF() || req.FrameCount != nil || req.FrameDurationMS != nil {
 		return OpenAIImagesCapabilityNative
 	}
 	if req.IsEdits() && !req.Multipart {
@@ -593,6 +675,8 @@ func hasOpenAINativeImageOptions(exists func(path string) bool) bool {
 		"moderation",
 		"input_fidelity",
 		"partial_images",
+		"frame_count",
+		"frame_duration_ms",
 	} {
 		if exists(path) {
 			return true
@@ -603,7 +687,7 @@ func hasOpenAINativeImageOptions(exists func(path string) bool) bool {
 
 func isOpenAINativeImageOption(name string) bool {
 	switch strings.TrimSpace(strings.ToLower(name)) {
-	case "background", "quality", "style", "output_format", "output_compression", "moderation", "input_fidelity", "partial_images":
+	case "background", "quality", "style", "output_format", "output_compression", "moderation", "input_fidelity", "partial_images", "frame_count", "frame_duration_ms":
 		return true
 	default:
 		return false
@@ -706,6 +790,12 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesAPIKey(
 	upstreamModel := account.GetMappedModel(requestModel)
 	if err := validateCompatibleImagesModel(upstreamModel); err != nil {
 		return nil, err
+	}
+	if IsGPTImageGenerationModel(upstreamModel) {
+		if err := validateOpenAIImagesGIFOptions(parsed); err != nil {
+			c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"message": err.Error(), "type": "invalid_request_error"}})
+			return nil, err
+		}
 	}
 	SetOpsUpstreamModel(c, upstreamModel)
 	logger.LegacyPrintf(

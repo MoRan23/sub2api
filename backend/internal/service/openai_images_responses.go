@@ -320,6 +320,8 @@ func openAIImageOutputMIMEType(outputFormat string) string {
 		return "image/jpeg"
 	case "webp":
 		return "image/webp"
+	case "gif":
+		return "image/gif"
 	default:
 		return "image/png"
 	}
@@ -360,8 +362,17 @@ func buildOpenAIImagesResponsesRequest(parsed *OpenAIImagesRequest, toolModel st
 	if parsed == nil {
 		return nil, fmt.Errorf("parsed images request is required")
 	}
+	if err := validateOpenAIImagesGIFOptions(parsed); err != nil {
+		return nil, err
+	}
 	if strings.TrimSpace(parsed.Prompt) == "" {
 		return nil, fmt.Errorf("prompt is required")
+	}
+	// Animated GIFs are supported by the Images generations endpoint only.
+	// Do not silently turn them into a Responses tool request, which would
+	// discard frame controls or produce a non-animated result.
+	if parsed.IsGIF() {
+		return nil, fmt.Errorf("GIF output requires the Images generations endpoint")
 	}
 	prompt := parsed.Prompt
 
@@ -1803,7 +1814,19 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 	if err := validateOpenAIImagesModel(upstreamModel); err != nil {
 		return nil, err
 	}
+	if err := validateOpenAIImagesGIFOptions(parsed); err != nil {
+		c.JSON(http.StatusBadRequest, gin.H{"error": gin.H{"type": "invalid_request_error", "message": err.Error()}})
+		return nil, err
+	}
 	direct := usesCodexDirectImages(upstreamModel) && !isOpenAIImagesForceResponses(ctx)
+	if parsed.IsGIF() && !direct {
+		err := &OpenAIImagesUpstreamError{
+			StatusCode: http.StatusBadRequest, ErrorType: "invalid_request_error",
+			Message: "GIF output requires a native Images generations model", Param: "output_format",
+		}
+		c.JSON(err.StatusCode, gin.H{"error": gin.H{"type": err.ErrorType, "message": err.Message, "param": err.Param}})
+		return nil, err
+	}
 	beginUpstreamResponseModelObservation(c)
 	SetOpsUpstreamModel(c, upstreamModel)
 	uploadParts := make([]string, 0, len(parsed.Uploads))
@@ -1888,7 +1911,7 @@ func (s *OpenAIGatewayService) forwardOpenAIImagesOAuth(
 		respBody := s.readUpstreamErrorBody(resp)
 		_ = resp.Body.Close()
 		respBody = s.redactAgentIdentitySensitiveBody(upstreamCtx, account, respBody)
-		if direct && (resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed) {
+		if direct && !parsed.IsGIF() && (resp.StatusCode == http.StatusNotFound || resp.StatusCode == http.StatusMethodNotAllowed) {
 			return s.forwardOpenAIImagesOAuth(withOpenAIImagesForceResponses(ctx), c, account, parsed, channelMappedModel)
 		}
 		if !agentIdentityTaskRecoveryWasTried(ctx) && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, respBody) {

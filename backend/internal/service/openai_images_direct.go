@@ -45,6 +45,9 @@ func buildOpenAIImagesOAuthPayload(parsed *OpenAIImagesRequest, model string) ([
 	if parsed == nil {
 		return nil, "", fmt.Errorf("parsed images request is required")
 	}
+	if err := validateOpenAIImagesGIFOptions(parsed); err != nil {
+		return nil, "", err
+	}
 	if !usesCodexDirectImages(model) {
 		body, err := buildOpenAIImagesResponsesRequest(parsed, model)
 		return body, chatgptCodexURL, err
@@ -83,6 +86,12 @@ func buildOpenAIImagesOAuthPayload(parsed *OpenAIImagesRequest, model string) ([
 	}
 	if parsed.PartialImages != nil {
 		payload["partial_images"] = *parsed.PartialImages
+	}
+	if parsed.FrameCount != nil {
+		payload["frame_count"] = *parsed.FrameCount
+	}
+	if parsed.FrameDurationMS != nil {
+		payload["frame_duration_ms"] = *parsed.FrameDurationMS
 	}
 	if parsed.Stream {
 		payload["stream"] = true
