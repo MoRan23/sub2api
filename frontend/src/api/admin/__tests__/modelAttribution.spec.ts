@@ -4,6 +4,10 @@ vi.mock('@/api/client', () => ({ apiClient: { post } }))
 import { attributionAPI } from '../modelAttribution'
 
 describe('attribution expected-model request', () => {
+  it('submits a spaced probe model as one unchanged JSON field', async () => {
+    await attributionAPI.create([1], '5.6 Cyber')
+    expect(post).toHaveBeenLastCalledWith('/admin/model-attribution/jobs', { account_ids: [1], model: '5.6 Cyber' })
+  })
   it('loads account probe catalogs separately from detector candidates', async () => {
     const result = { models: ['target'], accounts: [{ account_id: 2, account_name: 'Account', status: 'partial', models: ['target'], error: 'model_catalog_failed' }] }
     post.mockResolvedValueOnce({ data: result })

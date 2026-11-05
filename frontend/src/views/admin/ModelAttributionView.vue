@@ -64,7 +64,7 @@ import AppLayout from '@/components/layout/AppLayout.vue'
 import AttributionPolicyFields from '@/components/admin/account/AttributionPolicyFields.vue'
 import AttributionExpectedModels from '@/components/admin/account/AttributionExpectedModels.vue'
 import AttributionProbeModelField from '@/components/admin/account/AttributionProbeModelField.vue'
-import { cloneAttributionPolicy, validAttributionActions, validAttributionExpectedModels } from '@/utils/modelAttribution'
+import { cloneAttributionPolicy, validAttributionActions, validAttributionExpectedModels, validAttributionModel } from '@/utils/modelAttribution'
 import AttributionHistory from '@/components/admin/account/AttributionHistory.vue'
 import { attributionAPI, type AttributionConfig, type AttributionPolicy } from '@/api/admin/modelAttribution'
 import { getAllIncludingInactive } from '@/api/admin/groups'
@@ -113,7 +113,7 @@ function addGroup() {
   newGroup.value = 0
 }
 function validPolicy(p: AttributionPolicy) {
-  return [p.model, ...p.high_models, ...p.low_models].every(m => m.trim().length > 0 && !/[\s*]/.test(m)) && p.high_models.length > 0 && p.low_models.length > 0
+  return [p.model, ...p.high_models, ...p.low_models].every(validAttributionModel) && p.high_models.length > 0 && p.low_models.length > 0
 }
 async function save() {
   if (!config.value) return
@@ -122,11 +122,18 @@ async function save() {
       !validAttributionActions(config.value.default) || config.value.groups.some(group => !validAttributionActions(group))) {
     error.value = t('attribution.accountActions.invalid'); return
   }
-  const initialModels = [config.value.new_account_tests.attribution_model, config.value.new_account_tests.pelican_model].map(m => m.trim())
+  const initialAttributionModel = config.value.new_account_tests.attribution_model.trim()
+  const initialPelicanModel = config.value.new_account_tests.pelican_model.trim()
   const expectedLists = [config.value.default.expected_models, ...config.value.groups.map(g => g.expected_models), config.value.new_account_tests.attribution_expected_models]
   if (expectedLists.some(models => !validAttributionExpectedModels(models))) { error.value = t('attribution.invalidExpectedModels'); return }
-  if (initialModels.some(m => !m || m.length > 200 || /[\s*]/.test(m))) { error.value = t('attribution.newAccount.invalid'); return }
+  if (!validAttributionModel(initialAttributionModel) || !initialPelicanModel || initialPelicanModel.length > 200 || /[\s*]/.test(initialPelicanModel)) { error.value = t('attribution.newAccount.invalid'); return }
   if (config.value.enabled && (!/^https?:\/\//.test(config.value.base_url) || !validPolicy(config.value.default) || config.value.groups.some(g => g.enabled && !validPolicy(g)))) { error.value = t('attribution.invalid'); return }
+  for (const policy of [config.value.default, ...config.value.groups]) {
+    policy.model = policy.model.trim()
+    policy.high_models = policy.high_models.map(model => model.trim())
+    policy.low_models = policy.low_models.map(model => model.trim())
+  }
+  config.value.new_account_tests.attribution_model = initialAttributionModel
   saving.value = true
   try { config.value = await attributionAPI.save(config.value); message.value = t('attribution.saved') }
   catch (e) { error.value = e && typeof e === 'object' && 'status' in e && e.status === 409 ? t('attribution.conflict') : t('attribution.error') }

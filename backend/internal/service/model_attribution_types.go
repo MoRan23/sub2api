@@ -11,6 +11,7 @@ import (
 	"sort"
 	"strings"
 	"time"
+	"unicode"
 )
 
 const AttributionDefaultModel = "gpt-6-astra"
@@ -52,6 +53,15 @@ type AttributionProbeOptions struct {
 	ExpectedModels *[]string `json:"expected_models"`
 }
 
+// Upstream model IDs may contain ordinary spaces. Keep them intact instead of
+// treating them as separators; only leading and trailing whitespace is trimmed
+// by callers. Detector reference IDs retain their separate validation.
+func validAttributionRequestModel(model string) bool {
+	return model != "" && len(model) <= 200 && !strings.ContainsFunc(model, func(r rune) bool {
+		return r == '*' || unicode.IsControl(r) || (unicode.IsSpace(r) && r != ' ')
+	})
+}
+
 func NormalizeAttributionExpectedModels(models []string) ([]string, error) {
 	if len(models) > 500 {
 		return nil, ErrAttributionInvalid
@@ -74,7 +84,7 @@ func NormalizeAttributionExpectedModels(models []string) ([]string, error) {
 
 func NormalizeAttributionProbeOptions(o AttributionProbeOptions) (AttributionProbeOptions, error) {
 	o.Model = strings.TrimSpace(o.Model)
-	if len(o.Model) > 200 || strings.ContainsAny(o.Model, "*\r\n\t ") {
+	if o.Model != "" && !validAttributionRequestModel(o.Model) {
 		return o, ErrAttributionInvalid
 	}
 	if o.ExpectedModels != nil {
@@ -218,17 +228,22 @@ func NormalizeAttributionConfig(c AttributionConfig) (AttributionConfig, error) 
 		c.NewAccountTests.AttributionExpectedModels = &models
 	}
 	for _, field := range []struct {
-		model    *string
-		fallback string
+		model       *string
+		fallback    string
+		allowSpaces bool
 	}{
-		{&c.NewAccountTests.AttributionModel, AttributionDefaultModel},
-		{&c.NewAccountTests.PelicanModel, InitialPelicanDefaultModel},
+		{&c.NewAccountTests.AttributionModel, AttributionDefaultModel, true},
+		{&c.NewAccountTests.PelicanModel, InitialPelicanDefaultModel, false},
 	} {
 		*field.model = strings.TrimSpace(*field.model)
 		if *field.model == "" {
 			*field.model = field.fallback
 		}
-		if len(*field.model) > 200 || strings.ContainsAny(*field.model, "*\r\n\t ") {
+		valid := validAttributionRequestModel(*field.model)
+		if !field.allowSpaces {
+			valid = len(*field.model) <= 200 && !strings.ContainsAny(*field.model, "*\r\n\t ")
+		}
+		if !valid {
 			return c, fmt.Errorf("%w: 首测模型须为具体模型 ID", ErrAttributionInvalid)
 		}
 	}
@@ -246,8 +261,7 @@ func NormalizeAttributionConfig(c AttributionConfig) (AttributionConfig, error) 
 		if p.Model == "" {
 			p.Model = AttributionDefaultModel
 		}
-		valid := func(s string) bool { return len(s) > 0 && len(s) <= 200 && !strings.ContainsAny(s, "*\r\n\t ") }
-		if !valid(p.Model) {
+		if !validAttributionRequestModel(p.Model) {
 			return fmt.Errorf("%w: 探针模型须为具体模型 ID", ErrAttributionInvalid)
 		}
 		p.ExpectedModels, err = NormalizeAttributionExpectedModels(p.ExpectedModels)
@@ -262,7 +276,7 @@ func NormalizeAttributionConfig(c AttributionConfig) (AttributionConfig, error) 
 			}
 			for _, id := range *list {
 				id = strings.TrimSpace(id)
-				if !valid(id) {
+				if !validAttributionRequestModel(id) {
 					return fmt.Errorf("%w: 白名单须为具体模型 ID", ErrAttributionInvalid)
 				}
 				if !seen[id] {

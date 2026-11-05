@@ -28,7 +28,7 @@ export const attributionZh = {
   catalogStatus: { success: '上游目录读取成功', partial: '上游目录不可用，使用账号配置', error: '目录不可用' },
   modelsUnavailable: '部分账号目录读取失败，保留可用的账号配置候选，仍可输入模型 ID 发起测试。',
   expectedModelsUnavailable: '检测器参考库读取失败，仍可输入期望模型 ID；执行时会验证是否收录。',
-  invalidManualModel: '请输入具体模型 ID，不含空格或通配符。',
+  invalidManualModel: '请输入最多 200 字符的具体模型 ID，可含普通空格，不含通配符、制表符、换行或其他控制字符。',
   mappingHelp: '未开启“替换模型映射”时保留自定义别名及通配符映射；开启后使用该档白名单和映射整体替换。启用自动检测前请填好服务地址及两份非空白名单。',
   accountActions: {
     modeHelp: '以下动作仅用于账号的白名单模式，与高级／低级白名单同时应用。首次有效判定立即应用，此后升级需连续通过两次、不通过立即降级。保存配置不会立即修改账号。',
@@ -45,7 +45,7 @@ export const attributionZh = {
     help: '新建或导入的 OpenAI OAuth 实体账号自动开始测试，消耗上游额度。仅影响保存后新增的账号，不补测已有账号；停用、过期及自动透传账号跳过。关闭调度时，只有采用调度处理模式的归因首测可继续，鹈鹕首测仍跳过。关闭归因首测不影响每 10 分钟的周期检测。',
     requiresEnabled: '归因首测需先配置并启用上方自动检测；鹈鹕首测可独立开启。',
     modelHelp: '两种首测的模型可分别设置：归因默认 gpt-6-astra，鹈鹕默认 gpt-6.1-sol。归因首测仍按账户分组选择高低级白名单；后续周期检测使用分组或全局探针模型。',
-    invalid: '请输入具体的首测模型 ID，不含空格或通配符。'
+    invalid: '请输入最多 200 字符的具体首测模型 ID。归因模型可含普通空格；鹈鹕模型不含空白。两者均不支持通配符，归因模型也不支持其他空白或控制字符。'
   },
   initial: '新账号首测',
   invalid: '请填写有效服务地址、探针模型及两份非空白名单（具体模型 ID，不含通配符）。', conflict: '配置已被其他管理员更新，请重新加载后再保存。',
@@ -106,7 +106,7 @@ export const attributionEn = {
   catalogStatus: { success: 'Upstream catalog loaded', partial: 'Upstream unavailable; using account configuration', error: 'Catalog unavailable' },
   modelsUnavailable: 'Some account catalogs could not be loaded. Available configured candidates are retained; you can still enter a model ID.',
   expectedModelsUnavailable: 'Could not load the detector reference bank. You can still enter expected model IDs; enrollment is checked when the test runs.',
-  invalidManualModel: 'Enter a concrete model ID without whitespace or wildcards.',
+  invalidManualModel: 'Enter a concrete model ID of up to 200 characters. Ordinary spaces are allowed; wildcards, tabs, line breaks and other control characters are not.',
   mappingHelp: 'When mapping replacement is off, preserve custom aliases and wildcard mappings. When enabled, replace the complete model configuration with this tier’s allowlist and mappings. Configure the service and both nonempty allowlists before enabling automatic detection.',
   accountActions: {
     modeHelp: 'These actions apply only in account allowlist mode, together with the selected tier. Apply the first valid verdict immediately; later promotion requires two consecutive passes, while a mismatch applies the low tier immediately. Saving does not modify accounts.',
@@ -123,7 +123,7 @@ export const attributionEn = {
     help: 'Newly created or imported physical OpenAI OAuth accounts start tests automatically and consume upstream quota. Applies to new accounts after saving, without backfilling existing accounts. Inactive, expired and passthrough accounts are skipped. Paused scheduling only permits initial attribution in scheduling mode; initial pelican tests still skip. Disabling initial attribution does not disable the ten-minute periodic checks.',
     requiresEnabled: 'Initial attribution requires automatic detection to be configured and enabled above. Initial pelican tests can be enabled independently.',
     modelHelp: 'Set each initial model separately: attribution defaults to gpt-6-astra, pelican to gpt-6.1-sol. Attribution still uses the account group’s allowlists; later periodic tests use the group or global probe model.',
-    invalid: 'Enter a concrete initial model ID without whitespace or wildcards.'
+    invalid: 'Enter concrete initial model IDs of up to 200 characters. Attribution models allow ordinary spaces; pelican models require no whitespace. Neither allows wildcards, and attribution models also reject other whitespace and control characters.'
   },
   initial: 'New account',
   invalid: 'Enter a valid service URL, probe model and two nonempty allowlists (concrete model IDs, without wildcards).', conflict: 'Another administrator updated the configuration. Reload before saving.',

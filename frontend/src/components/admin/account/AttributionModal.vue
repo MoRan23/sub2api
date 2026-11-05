@@ -31,7 +31,7 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
 import AttributionHistory from './AttributionHistory.vue'
 import AttributionExpectedModels from './AttributionExpectedModels.vue'
-import { validAttributionExpectedModels } from '@/utils/modelAttribution'
+import { validAttributionExpectedModels, validAttributionModel } from '@/utils/modelAttribution'
 import { useAttributionProbeModels } from '@/composables/useAttributionProbeModels'
 const props = defineProps<{ show: boolean; accountIds: number[] }>()
 const emit = defineEmits<{ close: []; updated: [] }>()
@@ -75,7 +75,7 @@ async function create() {
   if (creating.value || !ready.value) return
   const selectedModel = model.value.trim()
   if (!validAttributionExpectedModels(expectedModels.value)) { error.value = t('attribution.invalidExpectedModels'); return }
-  if (selectedModel.length > 200 || /[\s*]/.test(selectedModel)) {
+  if (selectedModel && !validAttributionModel(selectedModel)) {
     error.value = t('attribution.invalidManualModel')
     return
   }

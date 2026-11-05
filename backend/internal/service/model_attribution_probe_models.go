@@ -110,7 +110,7 @@ func attributionProbeModelIDs(models []string) []string {
 	seen := make(map[string]bool, len(models))
 	for _, model := range models {
 		model = strings.TrimSpace(model)
-		if model == "" || len(model) > 200 || strings.ContainsAny(model, "*\r\n\t ") || seen[model] {
+		if !validAttributionRequestModel(model) || seen[model] {
 			continue
 		}
 		seen[model] = true

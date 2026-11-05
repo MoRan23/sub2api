@@ -473,6 +473,28 @@ describe('attribution account UI', () => {
     expect(wrapper.get('[data-testid="attribution-run"]').attributes('disabled')).toBeUndefined()
     wrapper.unmount()
   })
+  it('preserves spaces in catalog and typed manual probes while trimming their edges', async () => {
+    api.config.mockResolvedValue({ ...config(), base_url: 'http://detector.invalid' })
+    api.probeModels.mockResolvedValue({ models: ['5.6 Cyber'], accounts: [{ account_id: 42, account_name: 'Account', status: 'success', models: ['5.6 Cyber'] }] })
+    api.create.mockResolvedValue([job(3, 'running')])
+    const wrapper = mount(AttributionModal, { props: { show: true, accountIds: [42] }, global: { stubs } })
+    await flushPromises()
+    expect(wrapper.findComponent(Select).props('options')).toContainEqual({ value: '5.6 Cyber', label: '5.6 Cyber' })
+    wrapper.findComponent(Select).vm.$emit('update:modelValue', '  5.6 Cyber  ')
+    await flushPromises(); await wrapper.get('[data-testid="attribution-run"]').trigger('click'); await flushPromises()
+    expect(api.create).toHaveBeenCalledWith([42], '5.6 Cyber', undefined)
+    wrapper.unmount()
+  })
+  it.each(['5.6*', '5.6\tCyber', '5.6\nCyber', 'x'.repeat(201)])('rejects an invalid manual probe %j', async model => {
+    api.config.mockResolvedValue({ ...config(), base_url: 'http://detector.invalid' })
+    const wrapper = mount(AttributionModal, { props: { show: true, accountIds: [42] }, global: { stubs } })
+    await flushPromises()
+    wrapper.findComponent(Select).vm.$emit('update:modelValue', model)
+    await flushPromises(); await wrapper.get('[data-testid="attribution-run"]').trigger('click')
+    expect(api.create).not.toHaveBeenCalled()
+    expect(wrapper.get('[role="alert"]').text()).toBe('attribution.invalidManualModel')
+    wrapper.unmount()
+  })
   it('discards catalogs belonging to a previously selected batch', async () => {
     api.config.mockResolvedValue({ ...config(), base_url: 'http://detector.invalid' })
     let resolveOld!: (value: unknown) => void
@@ -670,6 +692,56 @@ describe('attribution configuration', () => {
     await initial.get('select').setValue('inherit')
     await wrapper.get('form').trigger('submit'); await flushPromises()
     expect(api.save).toHaveBeenLastCalledWith(expect.objectContaining({ new_account_tests: expect.objectContaining({ attribution_expected_models: null }) }))
+    wrapper.unmount()
+  })
+  it('saves spaced global, group and initial probe models and tier allowlists as whole IDs', async () => {
+    const c = config()
+    c.enabled = true
+    c.base_url = 'http://detector.invalid'
+    c.groups = [{ group_id: 10, enabled: true, ...structuredClone(policy) }]
+    api.config.mockResolvedValue(c)
+    api.save.mockImplementation(async (value: AttributionConfig) => ({ ...value, version: 2 }))
+    const wrapper = mount(ModelAttributionView, { global: { stubs } }); await flushPromises()
+    const policies = wrapper.findAllComponents(AttributionPolicyFields)
+    for (const fields of policies) {
+      await fields.findComponent(AttributionProbeModelField).get('input').setValue('  5.6 Cyber  ')
+      for (const tier of fields.findAllComponents(AttributionTierFields)) {
+        tier.findComponent(ModelWhitelistSelector).vm.$emit('update:modelValue', ['  5.6 Cyber  '])
+        await flushPromises()
+      }
+    }
+    await wrapper.get('[data-testid="initial-attribution-model"]').setValue('  5.6 Cyber  ')
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    const savedPolicy = { model: '5.6 Cyber', high_models: ['5.6 Cyber'], low_models: ['5.6 Cyber'] }
+    expect(api.save).toHaveBeenCalledWith(expect.objectContaining({
+      default: savedPolicy,
+      groups: [{ ...savedPolicy, group_id: 10, enabled: true }],
+      new_account_tests: expect.objectContaining({ attribution_model: '5.6 Cyber', pelican_model: 'gpt-6.1-sol' })
+    }))
+    wrapper.unmount()
+  })
+  it.each(['model', 'high_models', 'low_models'] as const)('still rejects control characters in configured %s', async field => {
+    const c = config()
+    c.enabled = true
+    c.base_url = 'http://detector.invalid'
+    if (field === 'model') c.default.model = '5.6\tCyber'
+    else c.default[field] = ['5.6\tCyber']
+    api.config.mockResolvedValue(c)
+    const wrapper = mount(ModelAttributionView, { global: { stubs } }); await flushPromises()
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(api.save).not.toHaveBeenCalled()
+    expect(wrapper.get('[role="alert"]').text()).toBe('attribution.invalid')
+    wrapper.unmount()
+  })
+  it.each(['expected', 'pelican'] as const)('keeps internal spaces invalid for %s models', async field => {
+    const c = config()
+    if (field === 'expected') c.default.expected_models = ['5.6 Cyber']
+    else c.new_account_tests.pelican_model = '5.6 Cyber'
+    api.config.mockResolvedValue(c)
+    const wrapper = mount(ModelAttributionView, { global: { stubs } }); await flushPromises()
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(api.save).not.toHaveBeenCalled()
+    expect(wrapper.get('[role="alert"]').text()).toBe(field === 'expected' ? 'attribution.invalidExpectedModels' : 'attribution.newAccount.invalid')
     wrapper.unmount()
   })
   it('saves group priority globally without changing independent policies', async () => {

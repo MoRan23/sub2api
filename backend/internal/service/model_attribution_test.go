@@ -69,7 +69,7 @@ func TestAttributionNewAccountConfig(t *testing.T) {
 	require.Equal(t, "gpt-6.1-sol", got.NewAccountTests.PelicanModel)
 	require.False(t, got.NewAccountTests.Attribution)
 	require.False(t, got.NewAccountTests.Pelican)
-	for _, model := range []string{"gpt-*", "two models", "gpt\n6", strings.Repeat("a", 201)} {
+	for _, model := range []string{"gpt-*", "gpt\n6", strings.Repeat("a", 201)} {
 		c.NewAccountTests = NewAccountTestConfig{AttributionModel: model}
 		_, err = NormalizeAttributionConfig(c)
 		require.ErrorIs(t, err, ErrAttributionInvalid)
@@ -270,14 +270,16 @@ func (r *attributionTestRepo) Enqueue(_ context.Context, ids []int64, manual boo
 func TestAttributionManualModelRequest(t *testing.T) {
 	repo := &attributionTestRepo{}
 	s := &ModelAttributionService{repo: repo}
-	jobs, err := s.Create(context.Background(), []int64{42}, " gpt-6.1-sol ")
-	require.NoError(t, err)
-	require.Equal(t, "gpt-6.1-sol", jobs[0].Snapshot.Policy.Model)
-	for _, invalid := range []string{"gpt-*", "gpt 6", "gpt\n6", strings.Repeat("x", 201)} {
+	for _, model := range []string{"gpt-6.1-sol", "5.6 Cyber", "5.6  Cyber"} {
+		jobs, err := s.Create(context.Background(), []int64{42}, " "+model+" ")
+		require.NoError(t, err)
+		require.Equal(t, model, jobs[0].Snapshot.Policy.Model)
+	}
+	for _, invalid := range []string{"gpt-*", "gpt\t6", "gpt\n6", strings.Repeat("x", 201)} {
 		_, err := s.Create(context.Background(), []int64{42}, invalid)
 		require.ErrorIs(t, err, ErrAttributionInvalid)
 	}
-	require.Equal(t, "gpt-6.1-sol", repo.createdModel)
+	require.Equal(t, "5.6  Cyber", repo.createdModel)
 }
 
 func (r *attributionTestRepo) Config(context.Context) (AttributionConfig, error) {

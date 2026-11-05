@@ -5,6 +5,15 @@ export function isAttributionActive(status: AttributionStatus): boolean {
   return status === 'queued' || status === 'running' || status === 'retry_wait'
 }
 
+/** Probe and tier model IDs may contain ordinary spaces, but no other whitespace. */
+export function validAttributionModel(model: string): boolean {
+  const id = model.trim()
+  return id.length > 0 && id.length <= 200 && !/[^\S ]|\*/.test(id) && [...id].every(char => {
+    const code = char.charCodeAt(0)
+    return code >= 0x20 && (code < 0x7f || code > 0x9f)
+  })
+}
+
 export function validAttributionExpectedModels(models?: string[] | null): boolean {
   return models == null || models.length <= 500 && models.every(model => {
     const id = model.trim()

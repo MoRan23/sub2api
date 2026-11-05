@@ -18,6 +18,15 @@ beforeEach(() => {
 })
 
 describe('attribution probe source', () => {
+  it('preserves an entire spaced model ID in the catalog and typed input', async () => {
+    mocks.probeModels.mockResolvedValue(catalog(1, ['5.6 Cyber']))
+    const wrapper = mount(AttributionProbeModelField, { props: { modelValue: '5.6 Cyber' } })
+    wrapper.findComponent(Select).vm.$emit('update:modelValue', 1); await flushPromises()
+    expect(wrapper.get('datalist option').attributes('value')).toBe('5.6 Cyber')
+    await wrapper.get('input').setValue('  5.6 Cyber  ')
+    expect(wrapper.emitted('update:modelValue')).toEqual([['  5.6 Cyber  ']])
+    wrapper.unmount()
+  })
   it('loads accounts on demand, keeps the model unchanged and offers account catalog IDs', async () => {
     const wrapper = mount(AttributionProbeModelField, { props: { modelValue: 'saved-unlisted-model' } })
     expect(mocks.list).not.toHaveBeenCalled()
