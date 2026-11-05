@@ -68,11 +68,18 @@ type OpenAIRequestIntegrityState struct {
 	stage    string
 	baseline []byte
 	parsed   map[string]any
+	nodes    int // Includes unobserved fields, for frozen timezone projection budgets.
 	reason   string
 	attempt  atomic.Int64
 }
 
 func NewOpenAIRequestIntegrityState(enabled bool, protocol string, baseline []byte) *OpenAIRequestIntegrityState {
+	return newOpenAIRequestIntegrityState(enabled, protocol, baseline, false)
+}
+
+// owned is used only for a fresh diagnostic marshal that has no other owner.
+// Public callers always receive an independent immutable snapshot.
+func newOpenAIRequestIntegrityState(enabled bool, protocol string, baseline []byte, owned bool) *OpenAIRequestIntegrityState {
 	s := &OpenAIRequestIntegrityState{enabled: enabled, protocol: "responses", stage: "ingress"}
 	switch protocol {
 	case "messages", "chat_completions":
@@ -88,9 +95,13 @@ func NewOpenAIRequestIntegrityState(enabled bool, protocol string, baseline []by
 		s.reason = "missing_baseline"
 		return s
 	}
-	s.parsed, s.reason = decodeRequestIntegrityBody(baseline)
+	s.parsed, s.nodes, s.reason = decodeRequestIntegrityDocument(baseline)
 	if s.reason == "" {
-		s.baseline = bytes.Clone(baseline)
+		if owned {
+			s.baseline = baseline
+		} else {
+			s.baseline = bytes.Clone(baseline)
+		}
 	} else {
 		s.reason = "baseline_" + s.reason
 	}
@@ -122,26 +133,28 @@ func (s *OpenAIRequestIntegrityState) Check(account *Account, wire []byte, opts 
 		result.Reason = s.reason
 		return result
 	}
+	// Only the validated, owned snapshot may authorize this parse-free path.
+	if bytes.Equal(wire, s.baseline) {
+		result.Status = "unchanged"
+		return result
+	}
 	after, reason := decodeRequestIntegrityBody(wire)
 	if reason != "" {
 		result.Reason = "outbound_" + reason
 		return result
 	}
-	before := cloneRequestIntegrityValue(s.parsed).(map[string]any)
+	before := s.parsed
 	if requestIntegrityFieldsEqual(before, after) {
 		result.Status = "unchanged"
 		return result
 	}
 	rules := make(map[string]bool)
-	if opts.TimezoneState != nil {
-		prepared, ok := opts.TimezoneState.ApplyToBody(s.baseline)
-		if ok && !bytes.Equal(prepared, s.baseline) {
-			if adjusted, failure := decodeRequestIntegrityBody(prepared); failure == "" {
-				before = adjusted
-				rules["frozen_timezone_patch"] = true
-			}
-		}
+	if adjusted, changed := s.projectTimezone(opts.TimezoneState); changed {
+		before = adjusted
+		rules["frozen_timezone_patch"] = true
 	}
+	// Semantic normalization owns the root and copies nested containers on write.
+	before = cloneRequestIntegrityObject(before)
 	if originalModel, ok := before["model"].(string); ok {
 		expected := strings.TrimSpace(opts.ExpectedModel)
 		if expected == "" && account != nil {
@@ -179,6 +192,10 @@ func (s *OpenAIRequestIntegrityState) Check(account *Account, wire []byte, opts 
 					break
 				}
 				insertAt++
+			}
+			// The guard's append/copy must not reuse a snapshot's backing array.
+			if input != nil {
+				before["input"] = append([]any{}, input...)
 			}
 			if appendOpenAICompatClaudeCodeTodoGuardToRequestBody(before) {
 				beforeInputIndices = append(beforeInputIndices, -1)
@@ -277,27 +294,34 @@ func requestIntegrityRecoveryRule(recovery string) string {
 // Decode with a token budget before allocating a full arbitrary-depth tree.
 // Duplicate keys are ambiguous even if encoding/json would accept them.
 func decodeRequestIntegrityBody(raw []byte) (map[string]any, string) {
+	body, _, reason := decodeRequestIntegrityDocument(raw)
+	return body, reason
+}
+
+func decodeRequestIntegrityDocument(raw []byte) (map[string]any, int, string) {
 	if len(raw) > requestIntegrityMaxBytes {
-		return nil, "body_too_large"
+		return nil, 0, "body_too_large"
 	}
 	decoder := json.NewDecoder(bytes.NewReader(raw))
 	decoder.UseNumber()
 	nodes := 0
-	value, reason := readRequestIntegrityJSON(decoder, 0, &nodes)
+	value, reason := readRequestIntegrityJSON(decoder, 0, &nodes, true, true)
 	if reason != "" {
-		return nil, reason
+		return nil, nodes, reason
 	}
 	if _, err := decoder.Token(); err != io.EOF {
-		return nil, "invalid_json"
+		return nil, nodes, "invalid_json"
 	}
 	body, ok := value.(map[string]any)
 	if !ok || body == nil {
-		return nil, "invalid_json"
+		return nil, nodes, "invalid_json"
 	}
-	return body, ""
+	return body, nodes, ""
 }
 
-func readRequestIntegrityJSON(decoder *json.Decoder, depth int, nodes *int) (any, string) {
+// Discarded fields still consume every token and enforce identical duplicate,
+// depth and node checks. Only their value containers are not materialized.
+func readRequestIntegrityJSON(decoder *json.Decoder, depth int, nodes *int, retain, selective bool) (any, string) {
 	if depth > requestIntegrityMaxDepth {
 		return nil, "depth_limit"
 	}
@@ -311,35 +335,55 @@ func readRequestIntegrityJSON(decoder *json.Decoder, depth int, nodes *int) (any
 	}
 	switch token {
 	case json.Delim('{'):
-		object := make(map[string]any)
+		var object map[string]any
+		if retain {
+			object = make(map[string]any)
+		}
+		var seen map[string]struct{}
+		if !retain || selective {
+			seen = make(map[string]struct{})
+		}
 		for decoder.More() {
 			keyToken, err := decoder.Token()
 			key, ok := keyToken.(string)
 			if err != nil || !ok {
 				return nil, "invalid_json"
 			}
-			if _, duplicate := object[key]; duplicate {
+			_, duplicate := object[key]
+			if seen != nil {
+				_, duplicate = seen[key]
+				seen[key] = struct{}{}
+			}
+			if duplicate {
 				return nil, "duplicate_key"
 			}
 			*nodes++
-			value, reason := readRequestIntegrityJSON(decoder, depth+1, nodes)
+			keep := retain && (!selective || requestIntegrityContentField(key))
+			value, reason := readRequestIntegrityJSON(decoder, depth+1, nodes, keep, false)
 			if reason != "" {
 				return nil, reason
 			}
-			object[key] = value
+			if keep {
+				object[key] = value
+			}
 		}
 		if end, err := decoder.Token(); err != nil || end != json.Delim('}') {
 			return nil, "invalid_json"
 		}
 		return object, ""
 	case json.Delim('['):
-		array := make([]any, 0)
+		var array []any
+		if retain {
+			array = make([]any, 0)
+		}
 		for decoder.More() {
-			value, reason := readRequestIntegrityJSON(decoder, depth+1, nodes)
+			value, reason := readRequestIntegrityJSON(decoder, depth+1, nodes, retain, false)
 			if reason != "" {
 				return nil, reason
 			}
-			array = append(array, value)
+			if retain {
+				array = append(array, value)
+			}
 		}
 		if end, err := decoder.Token(); err != nil || end != json.Delim(']') {
 			return nil, "invalid_json"
@@ -349,8 +393,28 @@ func readRequestIntegrityJSON(decoder *json.Decoder, depth int, nodes *int) (any
 		if _, delimiter := token.(json.Delim); delimiter {
 			return nil, "invalid_json"
 		}
-		return token, ""
+		if retain {
+			return token, ""
+		}
+		return nil, ""
 	}
+}
+
+func requestIntegrityContentField(key string) bool {
+	for _, field := range requestIntegrityContentFields {
+		if field == key {
+			return true
+		}
+	}
+	return false
+}
+
+func cloneRequestIntegrityObject(object map[string]any) map[string]any {
+	copy := make(map[string]any, len(object))
+	for key, value := range object {
+		copy[key] = value
+	}
+	return copy
 }
 
 func cloneRequestIntegrityValue(value any) any {

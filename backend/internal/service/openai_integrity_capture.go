@@ -77,7 +77,7 @@ func (s *OpenAIGatewayService) captureOpenAIAdapterIntegrity(ctx context.Context
 		// A failed diagnostic marshal is a missing baseline, never a gateway error.
 		body, _ = json.Marshal(response)
 	}
-	capture.state = NewOpenAIRequestIntegrityState(capture.enabled, protocol, body)
+	capture.state = newOpenAIRequestIntegrityState(capture.enabled, protocol, body, true)
 }
 
 func (s *OpenAIGatewayService) beginOpenAIWSRequestIntegrityTurn(ctx context.Context, c *gin.Context, raw []byte, newTurn bool) {
