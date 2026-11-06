@@ -1,0 +1,12 @@
+2026/11/06 14:44:58 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkUsageRecordQueueRetainedHeap/ws_replay/queued=32-4         	       1	  14603802 ns/op	   1049519 retained-B/task	         1.001 retained/payload	33618784 B/op	     571 allocs/op
+BenchmarkUsageRecordQueueRetainedHeap/ws_replay/queued=128-4        	       1	  11394746 ns/op	   1049515 retained-B/task	         1.001 retained/payload	134405600 B/op	    2106 allocs/op
+BenchmarkUsageRecordQueueRetainedHeap/systemone_response/queued=32-4         	       1	   5565768 ns/op	   1049267 retained-B/task	         1.001 retained/payload	33610160 B/op	     535 allocs/op
+BenchmarkUsageRecordQueueRetainedHeap/systemone_response/queued=128-4        	       1	   8683567 ns/op	   1049266 retained-B/task	         1.001 retained/payload	134373728 B/op	    1976 allocs/op
+BenchmarkUsageRecordQueueRetainedHeap/grok_request/queued=32-4               	       1	  23254027 ns/op	   1048867 retained-B/task	         1.000 retained/payload	33600496 B/op	     563 allocs/op
+BenchmarkUsageRecordQueueRetainedHeap/grok_request/queued=128-4              	       1	  75243477 ns/op	   1048866 retained-B/task	         1.000 retained/payload	134339024 B/op	    2105 allocs/op
+PASS

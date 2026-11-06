@@ -1,0 +1,91 @@
+2026/11/06 15:15:14 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestListSchedulableAccountLoadsMatchesListSchedulable
+--- PASS: TestListSchedulableAccountLoadsMatchesListSchedulable (0.06s)
+=== RUN   TestListSchedulableAccountLoadsUsesSingleProjectionQuery
+--- PASS: TestListSchedulableAccountLoadsUsesSingleProjectionQuery (0.00s)
+=== RUN   TestCodexEngineBillingStoreAtomicRecoveryIntegration
+--- PASS: TestCodexEngineBillingStoreAtomicRecoveryIntegration (0.50s)
+=== RUN   TestCodexEngineBillingStoreCanonicalAcrossAccountsIntegration
+--- PASS: TestCodexEngineBillingStoreCanonicalAcrossAccountsIntegration (0.04s)
+=== RUN   TestCodexEngineBillingStoreConcurrentClaimsAndEventsIntegration
+--- PASS: TestCodexEngineBillingStoreConcurrentClaimsAndEventsIntegration (0.04s)
+=== RUN   TestCodexEngineBillingStoreUndispatchedAndBlockedIntegration
+--- PASS: TestCodexEngineBillingStoreUndispatchedAndBlockedIntegration (0.02s)
+=== RUN   TestCodexEngineBillingStoreInboxPartialDoesNotBlockLaterPagesIntegration
+--- PASS: TestCodexEngineBillingStoreInboxPartialDoesNotBlockLaterPagesIntegration (0.12s)
+=== RUN   TestCodexEngineBillingStoreInboxConflictsRollBackCursorIntegration
+--- PASS: TestCodexEngineBillingStoreInboxConflictsRollBackCursorIntegration (0.02s)
+=== RUN   TestSchedulerOutbox_ListAfterAndReleaseDedup_AllowsSameKeyWhileEventInFlight
+--- PASS: TestSchedulerOutbox_ListAfterAndReleaseDedup_AllowsSameKeyWhileEventInFlight (0.01s)
+=== RUN   TestSchedulerCacheSnapshotUsesSlimMetadataButKeepsFullAccount
+--- PASS: TestSchedulerCacheSnapshotUsesSlimMetadataButKeepsFullAccount (0.01s)
+=== RUN   TestSchedulerCacheRetireAndReopenFencesOldEpochIntegration
+--- PASS: TestSchedulerCacheRetireAndReopenFencesOldEpochIntegration (0.01s)
+=== RUN   TestSchedulerCacheGroupLifecycleLeaseOwnerAndTTLIntegration
+--- PASS: TestSchedulerCacheGroupLifecycleLeaseOwnerAndTTLIntegration (0.51s)
+=== RUN   TestSchedulerMetadataAccountKeepsOpenAISubscriptionIdentity
+--- PASS: TestSchedulerMetadataAccountKeepsOpenAISubscriptionIdentity (0.00s)
+=== RUN   TestSchedulerMetadataAccountKeepsCodexEngineModeAcrossCacheRoundTrip
+--- PASS: TestSchedulerMetadataAccountKeepsCodexEngineModeAcrossCacheRoundTrip (0.00s)
+=== RUN   TestSchedulerMetadataAccountProjectsUpstreamBillingProbe
+--- PASS: TestSchedulerMetadataAccountProjectsUpstreamBillingProbe (0.00s)
+=== RUN   TestSchedulerMetadataAccountDropsInvalidUpstreamBillingProbe
+--- PASS: TestSchedulerMetadataAccountDropsInvalidUpstreamBillingProbe (0.00s)
+=== RUN   TestSchedulerOutboxRepositoryFirstCreatedAtAfter
+--- PASS: TestSchedulerOutboxRepositoryFirstCreatedAtAfter (0.00s)
+=== RUN   TestSchedulerOutboxRepositoryFirstCreatedAtAfterReturnsNotFound
+--- PASS: TestSchedulerOutboxRepositoryFirstCreatedAtAfterReturnsNotFound (0.00s)
+=== RUN   TestSchedulerOutboxRepositoryDeleteConsumedUpToUsesBoundedCTE
+--- PASS: TestSchedulerOutboxRepositoryDeleteConsumedUpToUsesBoundedCTE (0.00s)
+=== RUN   TestSchedulerOutboxRepositoryDeleteConsumedUpToSkipsNonPositiveWatermark
+--- PASS: TestSchedulerOutboxRepositoryDeleteConsumedUpToSkipsNonPositiveWatermark (0.00s)
+=== RUN   TestSchedulerOutboxRepositoryTryAcquireCleanupLock
+--- PASS: TestSchedulerOutboxRepositoryTryAcquireCleanupLock (0.00s)
+=== RUN   TestSchedulerOutboxRepositoryTryAcquireCleanupLockUnavailable
+--- PASS: TestSchedulerOutboxRepositoryTryAcquireCleanupLockUnavailable (0.01s)
+=== RUN   TestSchedulerSharedCacheCrossInstanceAuthorityIntegration
+--- PASS: TestSchedulerSharedCacheCrossInstanceAuthorityIntegration (0.03s)
+=== RUN   TestSchedulerSharedCacheRedisReconnectIntegration
+redis: 2026/11/06 15:15:21 pool.go:762: redis: connection pool: failed to dial after 5 attempts: fixture Redis link unavailable
+--- PASS: TestSchedulerSharedCacheRedisReconnectIntegration (1.44s)
+=== RUN   TestSchedulerSnapshotOutboxReplay
+2026/11/06 15:15:22 [Scheduler] rebuild startup failed: scheduler cache not ready
+--- PASS: TestSchedulerSnapshotOutboxReplay (0.05s)
+=== RUN   TestUsageBillingRepositoryApply_UsesBothWalletsAndReportsCombinedBalance
+--- PASS: TestUsageBillingRepositoryApply_UsesBothWalletsAndReportsCombinedBalance (0.01s)
+=== RUN   TestUsageBillingRepositoryApply_DeduplicatesBalanceBilling
+--- PASS: TestUsageBillingRepositoryApply_DeduplicatesBalanceBilling (0.02s)
+=== RUN   TestUsageBillingRepositoryApply_DeduplicatesSubscriptionBilling
+--- PASS: TestUsageBillingRepositoryApply_DeduplicatesSubscriptionBilling (0.02s)
+=== RUN   TestUsageBillingRepositoryApply_TotalQuotaSubscriptionFIFO
+--- PASS: TestUsageBillingRepositoryApply_TotalQuotaSubscriptionFIFO (0.01s)
+=== RUN   TestUsageBillingRepositoryApply_TotalQuotaSubscriptionAllowsOverflow
+--- PASS: TestUsageBillingRepositoryApply_TotalQuotaSubscriptionAllowsOverflow (0.01s)
+=== RUN   TestUsageBillingRepositoryApply_TotalQuotaSubscriptionUsesAdmissionSnapshotAfterExpiry
+--- PASS: TestUsageBillingRepositoryApply_TotalQuotaSubscriptionUsesAdmissionSnapshotAfterExpiry (0.01s)
+=== RUN   TestUsageBillingRepositoryApply_RequestFingerprintConflict
+--- PASS: TestUsageBillingRepositoryApply_RequestFingerprintConflict (0.01s)
+=== RUN   TestUsageBillingRepositoryApply_DeletedAPIKeyStillBillsBalance
+--- PASS: TestUsageBillingRepositoryApply_DeletedAPIKeyStillBillsBalance (0.01s)
+=== RUN   TestUsageBillingRepositoryApply_DeletedAccountStillBillsBalance
+--- PASS: TestUsageBillingRepositoryApply_DeletedAccountStillBillsBalance (0.02s)
+=== RUN   TestUsageBillingRepositoryApply_UpdatesAccountQuota
+--- PASS: TestUsageBillingRepositoryApply_UpdatesAccountQuota (0.01s)
+=== RUN   TestUsageBillingRepositoryApply_UpdatesServiceAccountQuota
+--- PASS: TestUsageBillingRepositoryApply_UpdatesServiceAccountQuota (0.01s)
+=== RUN   TestUsageBillingRepositoryApply_EnqueuesSchedulerOutboxOnQuotaCrossing
+=== RUN   TestUsageBillingRepositoryApply_EnqueuesSchedulerOutboxOnQuotaCrossing/daily_first_crossing_enqueues
+=== RUN   TestUsageBillingRepositoryApply_EnqueuesSchedulerOutboxOnQuotaCrossing/weekly_first_crossing_enqueues
+=== RUN   TestUsageBillingRepositoryApply_EnqueuesSchedulerOutboxOnQuotaCrossing/total_first_crossing_enqueues
+--- PASS: TestUsageBillingRepositoryApply_EnqueuesSchedulerOutboxOnQuotaCrossing (0.06s)
+    --- PASS: TestUsageBillingRepositoryApply_EnqueuesSchedulerOutboxOnQuotaCrossing/daily_first_crossing_enqueues (0.03s)
+    --- PASS: TestUsageBillingRepositoryApply_EnqueuesSchedulerOutboxOnQuotaCrossing/weekly_first_crossing_enqueues (0.01s)
+    --- PASS: TestUsageBillingRepositoryApply_EnqueuesSchedulerOutboxOnQuotaCrossing/total_first_crossing_enqueues (0.01s)
+=== RUN   TestUsageBillingRepositoryApply_DeduplicatesAgainstArchivedKey
+--- PASS: TestUsageBillingRepositoryApply_DeduplicatesAgainstArchivedKey (0.01s)
+=== RUN   TestUsageRecordSnapshotDetachedBillingIntegration
+2026/11/06 15:15:22 [OpenAI WS Mode][openai_ws_mode=true] bootstrap enabled=false oauth_enabled=false apikey_enabled=false force_http=false responses_websockets_v2=false responses_websockets=false payload_log_sample_rate=0.000 event_flush_batch_size=0 event_flush_interval_ms=0 prewarm_cooldown_ms=0 retry_backoff_initial_ms=0 retry_backoff_max_ms=0 retry_jitter_ratio=0.000 retry_total_budget_ms=0 ws_read_limit_bytes=16777216
+2026/11/06 15:15:22 [OpenAI WS Mode][openai_ws_mode=true] bootstrap enabled=false oauth_enabled=false apikey_enabled=false force_http=false responses_websockets_v2=false responses_websockets=false payload_log_sample_rate=0.000 event_flush_batch_size=0 event_flush_interval_ms=0 prewarm_cooldown_ms=0 retry_backoff_initial_ms=0 retry_backoff_max_ms=0 retry_jitter_ratio=0.000 retry_total_budget_ms=0 ws_read_limit_bytes=16777216
+2026/11/06 15:15:22 [Billing] Using fallback pricing for model: gpt-5.1
+--- PASS: TestUsageRecordSnapshotDetachedBillingIntegration (0.09s)
+PASS

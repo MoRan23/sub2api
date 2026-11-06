@@ -1,0 +1,74 @@
+[
+  {
+    "phase": "cache",
+    "round": 1,
+    "exit_code": 0,
+    "elapsed_seconds": 54.229,
+    "output": "baseline-cache-1.txt",
+    "resources": "baseline-cache-1-resources.txt"
+  },
+  {
+    "phase": "cache",
+    "round": 2,
+    "exit_code": 0,
+    "elapsed_seconds": 43.061,
+    "output": "baseline-cache-2.txt",
+    "resources": "baseline-cache-2-resources.txt"
+  },
+  {
+    "phase": "cache",
+    "round": 3,
+    "exit_code": 0,
+    "elapsed_seconds": 37.411,
+    "output": "baseline-cache-3.txt",
+    "resources": "baseline-cache-3-resources.txt"
+  },
+  {
+    "phase": "sse",
+    "round": 1,
+    "exit_code": 0,
+    "elapsed_seconds": 24.145,
+    "output": "baseline-sse-1.txt",
+    "resources": "baseline-sse-1-resources.txt"
+  },
+  {
+    "phase": "sse",
+    "round": 2,
+    "exit_code": 0,
+    "elapsed_seconds": 23.711,
+    "output": "baseline-sse-2.txt",
+    "resources": "baseline-sse-2-resources.txt"
+  },
+  {
+    "phase": "sse",
+    "round": 3,
+    "exit_code": 0,
+    "elapsed_seconds": 22.48,
+    "output": "baseline-sse-3.txt",
+    "resources": "baseline-sse-3-resources.txt"
+  },
+  {
+    "phase": "billing",
+    "round": 1,
+    "exit_code": 0,
+    "elapsed_seconds": 0.629,
+    "output": "baseline-billing-1.txt",
+    "resources": "baseline-billing-1-resources.txt"
+  },
+  {
+    "phase": "billing",
+    "round": 2,
+    "exit_code": 0,
+    "elapsed_seconds": 0.622,
+    "output": "baseline-billing-2.txt",
+    "resources": "baseline-billing-2-resources.txt"
+  },
+  {
+    "phase": "billing",
+    "round": 3,
+    "exit_code": 0,
+    "elapsed_seconds": 0.634,
+    "output": "baseline-billing-3.txt",
+    "resources": "baseline-billing-3-resources.txt"
+  }
+]

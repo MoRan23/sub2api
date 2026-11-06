@@ -1,0 +1,26 @@
+[
+  {
+    "phase": "authenticated",
+    "round": 1,
+    "exit_code": 0,
+    "elapsed_seconds": 35.845,
+    "output": "candidate-typed-final-authenticated-1.txt",
+    "resources": "candidate-typed-final-authenticated-1-resources.txt"
+  },
+  {
+    "phase": "authenticated",
+    "round": 2,
+    "exit_code": 0,
+    "elapsed_seconds": 41.563,
+    "output": "candidate-typed-final-authenticated-2.txt",
+    "resources": "candidate-typed-final-authenticated-2-resources.txt"
+  },
+  {
+    "phase": "authenticated",
+    "round": 3,
+    "exit_code": 0,
+    "elapsed_seconds": 32.221,
+    "output": "candidate-typed-final-authenticated-3.txt",
+    "resources": "candidate-typed-final-authenticated-3-resources.txt"
+  }
+]

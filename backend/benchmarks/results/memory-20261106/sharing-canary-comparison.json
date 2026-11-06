@@ -1,0 +1,87 @@
+{
+  "note": "Concurrent host workload observed; diagnostic canary only.",
+  "raw": {
+    "50_warm": {
+      "baseline": {
+        "ns/op": 137287569.0,
+        "p95-sweep-ns": 144452067.0,
+        "B/op": 87618440.0,
+        "allocs/op": 526812.0
+      },
+      "candidate": {
+        "ns/op": 102097022.0,
+        "p95-sweep-ns": 109318834.0,
+        "B/op": 21263144.0,
+        "allocs/op": 526712.0
+      }
+    },
+    "50_cold": {
+      "baseline": {
+        "ns/op": 8126258270.0,
+        "p95-sweep-ns": 9882813101.0,
+        "B/op": 5037385802.0,
+        "allocs/op": 8006075.0
+      },
+      "candidate": {
+        "ns/op": 2718334319.0,
+        "p95-sweep-ns": 2796577559.0,
+        "B/op": 2553162941.0,
+        "allocs/op": 2173756.0
+      }
+    },
+    "100_warm": {
+      "baseline": {
+        "ns/op": 256943435.0,
+        "p95-sweep-ns": 269982228.0,
+        "B/op": 174062818.0,
+        "allocs/op": 1037006.0
+      },
+      "candidate": {
+        "ns/op": 289247164.0,
+        "p95-sweep-ns": 311669345.0,
+        "B/op": 42172117.0,
+        "allocs/op": 1036911.0
+      }
+    },
+    "100_cold": {
+      "baseline": {
+        "ns/op": 17433136106.0,
+        "p95-sweep-ns": 19144575709.0,
+        "B/op": 10062191541.0,
+        "allocs/op": 15871411.0
+      },
+      "candidate": {
+        "ns/op": 4244113229.0,
+        "p95-sweep-ns": 4421622678.0,
+        "B/op": 5092838250.0,
+        "allocs/op": 4197243.0
+      }
+    }
+  },
+  "delta_percent": {
+    "50_warm": {
+      "ns/op": -25.633,
+      "p95-sweep-ns": -24.322,
+      "B/op": -75.732,
+      "allocs/op": -0.019
+    },
+    "50_cold": {
+      "ns/op": -66.549,
+      "p95-sweep-ns": -71.703,
+      "B/op": -49.316,
+      "allocs/op": -72.849
+    },
+    "100_warm": {
+      "ns/op": 12.572,
+      "p95-sweep-ns": 15.441,
+      "B/op": -75.772,
+      "allocs/op": -0.009
+    },
+    "100_cold": {
+      "ns/op": -75.655,
+      "p95-sweep-ns": -76.904,
+      "B/op": -49.386,
+      "allocs/op": -73.555
+    }
+  }
+}

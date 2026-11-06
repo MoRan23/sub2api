@@ -1,0 +1,14 @@
+{
+  "label": "candidate-packed",
+  "measurement_checkout_head": "7327a38ddf7006f5062afdde53a3b6e956b4f727",
+  "binary_source": "same candidate-packed lifecycle binary",
+  "go": "go1.27.3",
+  "goexperiment": "greenteagc,jsonv2",
+  "gomaxprocs": 4,
+  "rounds": 3,
+  "host": "Windows-11-10.0.26100-SP0",
+  "uses_preserved_binary": true,
+  "phases": [
+    "billing"
+  ]
+}

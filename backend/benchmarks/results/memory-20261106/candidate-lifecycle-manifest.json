@@ -1,0 +1,14 @@
+{
+  "label": "candidate",
+  "measurement_checkout_head": "d16e0b954d6a93c4aeed17f6e3f06b5cc4c378b9",
+  "binary_source": "billing projection before sparse account extra; from 8972274c2 with local memory changes",
+  "go": "go1.27.3",
+  "goexperiment": "greenteagc,jsonv2",
+  "gomaxprocs": 4,
+  "rounds": 3,
+  "host": "Windows-11-10.0.26100-SP0",
+  "uses_preserved_binary": true,
+  "phases": [
+    "lifecycle"
+  ]
+}

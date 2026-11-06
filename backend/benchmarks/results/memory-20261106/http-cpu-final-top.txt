@@ -1,0 +1,59 @@
+File: candidate-http-lifecycle.test
+Build ID: 641e90c2e2b31ac209d82bd678d319c4ce1a7d7f
+Type: cpu
+Time: 2026-11-07 01:47:49 CST
+Duration: 23.75s, Total samples = 89.70s (377.70%)
+Showing nodes accounting for 37.70s, 42.03% of 89.70s total
+Dropped 1853 nodes (cum <= 0.45s)
+Showing top 50 nodes out of 335
+      flat  flat%   sum%        cum   cum%
+     0.03s 0.033% 0.033%     69.12s 77.06%  net/http.(*conn).serve
+         0     0% 0.033%     65.65s 73.19%  net/http.serverHandler.ServeHTTP
+         0     0% 0.033%     60.71s 67.68%  github.com/gin-gonic/gin.(*Engine).ServeHTTP
+     0.02s 0.022% 0.056%     60.69s 67.66%  github.com/Wei-Shaw/sub2api/internal/server/middleware.ClientRequestID.func1
+     0.02s 0.022% 0.078%     60.69s 67.66%  github.com/gin-gonic/gin.(*Context).Next (partial-inline)
+         0     0% 0.078%     60.69s 67.66%  github.com/gin-gonic/gin.(*Engine).handleHTTPRequest
+     0.01s 0.011% 0.089%     60.35s 67.28%  github.com/Wei-Shaw/sub2api/internal/server/middleware.RequestBodyLimit.func1
+     0.02s 0.022%  0.11%     60.32s 67.25%  github.com/Wei-Shaw/sub2api/internal/server/middleware.apiKeyAuthWithSubscription.func1
+     0.06s 0.067%  0.18%     59.88s 66.76%  github.com/Wei-Shaw/sub2api/internal/handler.(*OpenAIGatewayHandler).Responses
+         0     0%  0.18%     48.95s 54.57%  github.com/Wei-Shaw/sub2api/internal/handler.(*OpenAIGatewayHandler).Responses.func1
+     0.02s 0.022%   0.2%     45.01s 50.18%  github.com/Wei-Shaw/sub2api/internal/service.(*OpenAIGatewayService).Forward
+     0.06s 0.067%  0.27%     38.85s 43.31%  github.com/Wei-Shaw/sub2api/internal/service.(*OpenAIGatewayService).forwardOpenAIPassthrough
+     0.07s 0.078%  0.35%     22.84s 25.46%  github.com/Wei-Shaw/sub2api/internal/service.(*OpenAIGatewayService).buildUpstreamRequestOpenAIPassthroughWithIdentityPlan
+     0.19s  0.21%  0.56%     18.95s 21.13%  github.com/tidwall/gjson.Get
+     0.01s 0.011%  0.57%     18.91s 21.08%  github.com/Wei-Shaw/sub2api/internal/service.(*OpenAIGatewayService).FinalizeOpenAIOAuthResponsesRequest
+     0.89s  0.99%  1.56%     18.75s 20.90%  github.com/tidwall/gjson.parseObject
+    17.77s 19.81% 21.37%     17.88s 19.93%  github.com/tidwall/gjson.parseString
+    15.39s 17.16% 38.53%     15.39s 17.16%  internal/runtime/syscall/linux.Syscall6
+     0.02s 0.022% 38.55%     15.32s 17.08%  syscall.RawSyscall6
+     0.03s 0.033% 38.58%     15.23s 16.98%  syscall.Syscall
+         0     0% 38.58%     15.01s 16.73%  internal/poll.ignoringEINTRIO (inline)
+     0.07s 0.078% 38.66%     14.61s 16.29%  github.com/tidwall/gjson.GetBytes (inline)
+     0.30s  0.33% 39.00%     14.54s 16.21%  github.com/tidwall/gjson.getBytes
+     0.06s 0.067% 39.06%     13.38s 14.92%  runtime.systemstack
+     0.01s 0.011% 39.07%     13.34s 14.87%  github.com/Wei-Shaw/sub2api/internal/service.ApplyOpenAIOAuthIdentityPlan
+         0     0% 39.07%     12.07s 13.46%  net.(*conn).Write
+     0.02s 0.022% 39.10%     12.07s 13.46%  net.(*netFD).Write
+     0.01s 0.011% 39.11%     12.03s 13.41%  internal/poll.(*FD).Write
+     0.04s 0.045% 39.15%     11.99s 13.37%  bufio.(*Writer).Flush
+     0.03s 0.033% 39.19%     11.98s 13.36%  syscall.Write (inline)
+     0.01s 0.011% 39.20%     11.95s 13.32%  syscall.write
+     0.03s 0.033% 39.23%     10.74s 11.97%  github.com/Wei-Shaw/sub2api/internal/service.mergeOpenAIOAuthPassthroughIdentityBody
+     0.03s 0.033% 39.26%      9.89s 11.03%  net/http.(*response).FlushError
+     0.16s  0.18% 39.44%      9.84s 10.97%  github.com/Wei-Shaw/sub2api/internal/service.(*OpenAIGatewayService).handleStreamingResponsePassthrough
+     0.03s 0.033% 39.48%      9.81s 10.94%  net/http.checkConnErrorWriter.Write
+     0.01s 0.011% 39.49%      9.24s 10.30%  net/http.(*chunkWriter).flush
+         0     0% 39.49%      8.30s  9.25%  runtime.gcBgMarkWorker
+     0.41s  0.46% 39.94%      7.69s  8.57%  runtime.mallocgc
+         0     0% 39.94%      7.56s  8.43%  runtime.gcBgMarkWorker.func2
+     0.02s 0.022% 39.97%      7.56s  8.43%  runtime.gcDrain
+         0     0% 39.97%      7.54s  8.41%  runtime.gcDrainMarkWorkerDedicated (inline)
+     0.01s 0.011% 39.98%      6.27s  6.99%  github.com/Wei-Shaw/sub2api/internal/service.(*OpenAIGatewayService).handleStreamingResponsePassthrough.func5
+     0.04s 0.045% 40.02%      5.48s  6.11%  github.com/Wei-Shaw/sub2api/internal/service.(*OpenAIGatewayService).handleStreamingResponsePassthrough.func4
+         0     0% 40.02%      5.44s  6.06%  github.com/gin-gonic/gin.(*responseWriter).Flush
+         0     0% 40.02%      5.44s  6.06%  net/http.(*response).Flush
+     0.01s 0.011% 40.03%      4.94s  5.51%  net/http.HandlerFunc.ServeHTTP
+     0.04s 0.045% 40.08%      4.93s  5.50%  github.com/Wei-Shaw/sub2api/internal/handler.newHTTPBillingEnvironment.func1
+     0.01s 0.011% 40.09%      4.46s  4.97%  net/http.(*ResponseController).Flush
+     0.04s 0.045% 40.13%      4.17s  4.65%  github.com/tidwall/gjson.Result.Get
+     1.70s  1.90% 42.03%      3.96s  4.41%  runtime.scanObject

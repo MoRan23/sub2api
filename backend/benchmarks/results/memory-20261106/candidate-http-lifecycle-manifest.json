@@ -1,0 +1,23 @@
+{
+  "label": "candidate",
+  "binary": "candidate-http-lifecycle.test",
+  "binary_source": "retained candidate source copy; see source_directory and retained diff/status",
+  "measurement_checkout_head": "5b2c9ed5fe847eefbf90301648bae4f1dfb47fc6",
+  "go": "go1.27.3",
+  "goexperiment": "greenteagc,jsonv2",
+  "gomaxprocs": 4,
+  "source_directory": "D:\\Code\\sub2api\\.git\\task-artifacts\\memory-20261106\\candidate-http-src-1793985224121614700\\backend",
+  "fixture": "internal\\handler\\http_billing_lifecycle_benchmark_test.go",
+  "build_command": [
+    "go",
+    "test",
+    "-tags=unit",
+    "-c",
+    "-o",
+    "D:\\Code\\sub2api\\.git\\task-artifacts\\memory-20261106\\candidate-http-lifecycle.test",
+    "./internal/handler"
+  ],
+  "build_elapsed_seconds": 39.428,
+  "scope": "Standard API-key auth plus HTTP Responses SSE forwarding and ordinary RecordUsage; loopback transports; fake storage boundaries only. Fixed 16 closed-loop client lifecycles, 4 workers, queue 128. HTTP EOF and persistence settlement p95/rates are separate; CPU is the combined process/path.",
+  "resource_scope": "GNU time CPU and MaxRSS cover the whole test process, both payloads, calibration and warmup. Benchmark runtime CPU covers the measured concurrent lifecycles through persistence settlement. The clients wait for both HTTP EOF and settlement before issuing their next request; both completion rates describe this same load."
+}

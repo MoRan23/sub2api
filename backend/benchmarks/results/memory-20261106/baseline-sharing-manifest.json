@@ -1,0 +1,13 @@
+{
+  "label": "baseline",
+  "source_head": "8972274c2871fd961dd5a01d0a4c63b76e358add",
+  "go": "go1.27.3",
+  "goexperiment": "greenteagc,jsonv2",
+  "gomaxprocs": 4,
+  "rounds": 3,
+  "host": "Windows-11-10.0.26100-SP0",
+  "uses_preserved_binary": true,
+  "phases": [
+    "sharing"
+  ]
+}

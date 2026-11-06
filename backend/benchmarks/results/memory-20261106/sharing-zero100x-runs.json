@@ -1,0 +1,44 @@
+[
+  {
+    "label": "baseline",
+    "round": 1,
+    "exit_code": 0,
+    "elapsed_seconds": 9.844,
+    "output": "baseline-sharing-zero100x-1.txt"
+  },
+  {
+    "label": "candidate",
+    "round": 1,
+    "exit_code": 0,
+    "elapsed_seconds": 10.095,
+    "output": "candidate-sharing-zero100x-1.txt"
+  },
+  {
+    "label": "candidate",
+    "round": 2,
+    "exit_code": 0,
+    "elapsed_seconds": 9.956,
+    "output": "candidate-sharing-zero100x-2.txt"
+  },
+  {
+    "label": "baseline",
+    "round": 2,
+    "exit_code": 0,
+    "elapsed_seconds": 9.873,
+    "output": "baseline-sharing-zero100x-2.txt"
+  },
+  {
+    "label": "baseline",
+    "round": 3,
+    "exit_code": 0,
+    "elapsed_seconds": 9.231,
+    "output": "baseline-sharing-zero100x-3.txt"
+  },
+  {
+    "label": "candidate",
+    "round": 3,
+    "exit_code": 0,
+    "elapsed_seconds": 11.447,
+    "output": "candidate-sharing-zero100x-3.txt"
+  }
+]

@@ -1,0 +1,74 @@
+[
+  {
+    "phase": "cache",
+    "round": 1,
+    "exit_code": 0,
+    "elapsed_seconds": 12.096,
+    "output": "candidate-cache-1.txt",
+    "resources": "candidate-cache-1-resources.txt"
+  },
+  {
+    "phase": "cache",
+    "round": 2,
+    "exit_code": 0,
+    "elapsed_seconds": 11.583,
+    "output": "candidate-cache-2.txt",
+    "resources": "candidate-cache-2-resources.txt"
+  },
+  {
+    "phase": "cache",
+    "round": 3,
+    "exit_code": 0,
+    "elapsed_seconds": 11.274,
+    "output": "candidate-cache-3.txt",
+    "resources": "candidate-cache-3-resources.txt"
+  },
+  {
+    "phase": "sse",
+    "round": 1,
+    "exit_code": 0,
+    "elapsed_seconds": 13.014,
+    "output": "candidate-sse-1.txt",
+    "resources": "candidate-sse-1-resources.txt"
+  },
+  {
+    "phase": "sse",
+    "round": 2,
+    "exit_code": 0,
+    "elapsed_seconds": 13.236,
+    "output": "candidate-sse-2.txt",
+    "resources": "candidate-sse-2-resources.txt"
+  },
+  {
+    "phase": "sse",
+    "round": 3,
+    "exit_code": 0,
+    "elapsed_seconds": 12.862,
+    "output": "candidate-sse-3.txt",
+    "resources": "candidate-sse-3-resources.txt"
+  },
+  {
+    "phase": "billing",
+    "round": 1,
+    "exit_code": 0,
+    "elapsed_seconds": 0.644,
+    "output": "candidate-billing-1.txt",
+    "resources": "candidate-billing-1-resources.txt"
+  },
+  {
+    "phase": "billing",
+    "round": 2,
+    "exit_code": 0,
+    "elapsed_seconds": 0.62,
+    "output": "candidate-billing-2.txt",
+    "resources": "candidate-billing-2-resources.txt"
+  },
+  {
+    "phase": "billing",
+    "round": 3,
+    "exit_code": 0,
+    "elapsed_seconds": 0.572,
+    "output": "candidate-billing-3.txt",
+    "resources": "candidate-billing-3-resources.txt"
+  }
+]

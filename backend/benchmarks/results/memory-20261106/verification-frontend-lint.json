@@ -1,0 +1,16 @@
+{
+  "command": [
+    "pnpm", "exec", "eslint",
+    "src/views/admin/ops/OpsDashboard.vue",
+    "src/views/admin/ops/components/OpsMemory.vue",
+    "src/views/admin/ops/components/__tests__/OpsMemory.spec.ts",
+    "src/api/admin/ops.ts",
+    "src/i18n/locales/en/admin/ops.ts",
+    "src/i18n/locales/zh/admin/ops.ts"
+  ],
+  "working_directory": "frontend",
+  "exit_code": 0,
+  "execution_record": "FastCtx job j-hhz78g; completed exit 0 reported by coordinating root agent",
+  "output_file": "frontend-lint.log",
+  "output_description": "Empty output; no diagnostics. This manifest records the completed command without modifying its raw output."
+}

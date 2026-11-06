@@ -1,0 +1,23 @@
+	Command being timed: "env GOMAXPROCS=4 GIN_MODE=release /mnt/d/Code/sub2api/.git/task-artifacts/memory-20261106/candidate-sharing.test -test.run=^$ -test.bench=^BenchmarkSchedulerCacheSharingModes$/accounts_2000_groups_100_shared_0_ -test.benchtime=100x -test.benchmem -test.count=1 -test.timeout=20m"
+	User time (seconds): 6.47
+	System time (seconds): 6.73
+	Percent of CPU this job got: 116%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:11.31
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 119176
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 838
+	Minor (reclaiming a frame) page faults: 49914
+	Voluntary context switches: 160187
+	Involuntary context switches: 2538
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 0
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

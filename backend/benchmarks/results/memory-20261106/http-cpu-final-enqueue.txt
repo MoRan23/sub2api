@@ -1,0 +1,30 @@
+File: candidate-http-lifecycle.test
+Build ID: 641e90c2e2b31ac209d82bd678d319c4ce1a7d7f
+Type: cpu
+Time: 2026-11-07 01:47:49 CST
+Duration: 23.75s, Total samples = 89.70s (377.70%)
+Active filters:
+   focus=submitFrozenOpenAIUsageRecord$|SnapshotOpenAIRecordUsageInput$
+Showing nodes accounting for 0.04s, 0.045% of 89.70s total
+Showing top 20 nodes out of 123
+      flat  flat%   sum%        cum   cum%
+         0     0%     0%      0.42s  0.47%  github.com/Wei-Shaw/sub2api/internal/handler.(*OpenAIGatewayHandler).Responses
+         0     0%     0%      0.42s  0.47%  github.com/Wei-Shaw/sub2api/internal/handler.(*OpenAIGatewayHandler).Responses.func2
+         0     0%     0%      0.42s  0.47%  github.com/Wei-Shaw/sub2api/internal/handler.(*OpenAIGatewayHandler).submitFrozenOpenAIUsageRecord
+         0     0%     0%      0.42s  0.47%  github.com/Wei-Shaw/sub2api/internal/server/middleware.ClientRequestID.func1
+         0     0%     0%      0.42s  0.47%  github.com/Wei-Shaw/sub2api/internal/server/middleware.RequestBodyLimit.func1
+         0     0%     0%      0.42s  0.47%  github.com/Wei-Shaw/sub2api/internal/server/middleware.apiKeyAuthWithSubscription.func1
+         0     0%     0%      0.42s  0.47%  github.com/gin-gonic/gin.(*Context).Next (partial-inline)
+         0     0%     0%      0.42s  0.47%  github.com/gin-gonic/gin.(*Engine).ServeHTTP
+         0     0%     0%      0.42s  0.47%  github.com/gin-gonic/gin.(*Engine).handleHTTPRequest
+         0     0%     0%      0.42s  0.47%  net/http.(*conn).serve
+         0     0%     0%      0.42s  0.47%  net/http.serverHandler.ServeHTTP
+     0.02s 0.022% 0.022%      0.25s  0.28%  github.com/Wei-Shaw/sub2api/internal/service.SnapshotOpenAIRecordUsageInput
+         0     0% 0.022%      0.16s  0.18%  github.com/Wei-Shaw/sub2api/internal/handler.(*OpenAIGatewayHandler).submitOpenAIUsageRecordTask
+         0     0% 0.022%      0.16s  0.18%  github.com/Wei-Shaw/sub2api/internal/handler.(*OpenAIGatewayHandler).submitUsageRecordTask
+         0     0% 0.022%      0.11s  0.12%  github.com/Wei-Shaw/sub2api/internal/service.(*UsageRecordWorkerPool).Submit
+     0.01s 0.011% 0.033%      0.10s  0.11%  github.com/alitto/pond/v2.(*pool).TrySubmit
+         0     0% 0.033%      0.09s   0.1%  github.com/alitto/pond/v2.(*pool).wrapAndSubmit
+     0.01s 0.011% 0.045%      0.07s 0.078%  runtime.mallocgc
+         0     0% 0.045%      0.07s 0.078%  runtime.systemstack
+         0     0% 0.045%      0.06s 0.067%  github.com/alitto/pond/v2.(*pool).submit

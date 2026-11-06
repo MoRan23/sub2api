@@ -1,0 +1,23 @@
+File: candidate-http-lifecycle.test
+Build ID: 641e90c2e2b31ac209d82bd678d319c4ce1a7d7f
+Type: cpu
+Time: 2026-11-07 01:47:49 CST
+Duration: 23.75s, Total samples = 89.70s (377.70%)
+Active filters:
+   focus=submitFrozen|Snapshot.*RecordUsage|UsageSnapshot
+Showing nodes accounting for 0.06s, 0.067% of 89.70s total
+Dropped 135 nodes (cum <= 0.45s)
+Showing top 12 nodes out of 223
+      flat  flat%   sum%        cum   cum%
+     0.01s 0.011% 0.011%      1.81s  2.02%  github.com/Wei-Shaw/sub2api/internal/handler.(*OpenAIGatewayHandler).submitFrozenOpenAIUsageRecord.func1
+         0     0% 0.011%      1.81s  2.02%  github.com/Wei-Shaw/sub2api/internal/handler.wrapUsageRecordTaskContext.func3
+         0     0% 0.011%      1.81s  2.02%  github.com/Wei-Shaw/sub2api/internal/service.(*UsageRecordWorkerPool).Submit.func1
+         0     0% 0.011%      1.81s  2.02%  github.com/Wei-Shaw/sub2api/internal/service.(*UsageRecordWorkerPool).execute
+         0     0% 0.011%      1.81s  2.02%  github.com/alitto/pond/v2.(*pool).worker
+         0     0% 0.011%      1.81s  2.02%  github.com/alitto/pond/v2.invokeTask[go.shape.interface {}]
+         0     0% 0.011%      1.81s  2.02%  github.com/alitto/pond/v2.invokeTask[go.shape.struct {}]
+         0     0% 0.011%      1.81s  2.02%  github.com/alitto/pond/v2.wrappedTask[go.shape.struct {},go.shape.func].Run
+     0.04s 0.045% 0.056%      1.80s  2.01%  github.com/Wei-Shaw/sub2api/internal/service.(*OpenAIGatewayService).RecordUsage
+         0     0% 0.056%      0.74s  0.82%  github.com/Wei-Shaw/sub2api/internal/service.(*OpenAIGatewayService).calculateOpenAIRecordUsageCost
+         0     0% 0.056%      0.73s  0.81%  github.com/Wei-Shaw/sub2api/internal/service.(*OpenAIGatewayService).calculateOpenAIRecordUsageTokenCost
+     0.01s 0.011% 0.067%      0.71s  0.79%  github.com/Wei-Shaw/sub2api/internal/service.(*BillingService).CalculateCostUnified

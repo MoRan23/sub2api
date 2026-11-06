@@ -1,0 +1,7 @@
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/handler
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkHTTPBillingLifecycle/request_bytes=8192-4         	    5024	    503303 ns/op	  16.28 MB/s	         0 auth-storage-reads	        16.00 clients	      1987 http-requests/s	  13999847 p95-http-ns	  13111500 p95-settled-ns	   2005379 runtime-cpu-ns/request	      1987 settled-requests/s	         4.000 workers	  811117 B/op	    2119 allocs/op
+BenchmarkHTTPBillingLifecycle/request_bytes=1048576-4      	     140	  14429210 ns/op	  72.67 MB/s	         0 auth-storage-reads	        16.00 clients	        69.31 http-requests/s	 346741740 p95-http-ns	 341825385 p95-settled-ns	  57335046 runtime-cpu-ns/request	        69.30 settled-requests/s	         4.000 workers	41784389 B/op	    2230 allocs/op
+PASS

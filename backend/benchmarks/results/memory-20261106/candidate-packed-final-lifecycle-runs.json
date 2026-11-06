@@ -1,0 +1,26 @@
+[
+  {
+    "phase": "lifecycle",
+    "round": 1,
+    "exit_code": 0,
+    "elapsed_seconds": 37.701,
+    "output": "candidate-packed-final-lifecycle-1.txt",
+    "resources": "candidate-packed-final-lifecycle-1-resources.txt"
+  },
+  {
+    "phase": "lifecycle",
+    "round": 2,
+    "exit_code": 0,
+    "elapsed_seconds": 31.018,
+    "output": "candidate-packed-final-lifecycle-2.txt",
+    "resources": "candidate-packed-final-lifecycle-2-resources.txt"
+  },
+  {
+    "phase": "lifecycle",
+    "round": 3,
+    "exit_code": 0,
+    "elapsed_seconds": 39.847,
+    "output": "candidate-packed-final-lifecycle-3.txt",
+    "resources": "candidate-packed-final-lifecycle-3-resources.txt"
+  }
+]

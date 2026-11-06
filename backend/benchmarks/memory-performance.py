@@ -24,6 +24,8 @@ SCENARIOS = {
     "sse": ("service", "^BenchmarkCodexEngineRelay$", "20x"),
     "billing": ("service", "^BenchmarkUsageRecordQueueRetainedHeap$", "1x"),
     "sharing": ("sharing", "^BenchmarkSchedulerCacheSharingModes$", "3x"),
+    "lifecycle": ("lifecycle", "^BenchmarkUsageRecordLifecycle$", "2s"),
+    "authenticated": ("lifecycle", "^BenchmarkUsageRecordLifecycleAuthenticated$", "2s"),
 }
 
 
@@ -40,6 +42,7 @@ def main():
     parser.add_argument("--skip-build", action="store_true")
     parser.add_argument("--phase", choices=["all", *SCENARIOS], default="all")
     parser.add_argument("--rounds", type=int, default=3)
+    parser.add_argument("--binary-source", help="Source revision/description of a preserved binary (not the current checkout)")
     args = parser.parse_args()
     if not re.fullmatch(r"[a-zA-Z0-9_-]+", args.label) or args.rounds < 1:
         parser.error("label must be a filename-safe token and rounds positive")
@@ -48,7 +51,8 @@ def main():
     phases = ["cache", "sse", "billing"] if args.phase == "all" else [args.phase]
     metadata = {
         "label": args.label,
-        "source_head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+        "measurement_checkout_head": subprocess.check_output(["git", "rev-parse", "HEAD"], cwd=ROOT, text=True).strip(),
+        "binary_source": args.binary_source or ("preserved; see build record" if args.skip_build else "current checkout including local changes"),
         "go": subprocess.check_output(["go", "env", "GOVERSION"], cwd=BACKEND, env=env, text=True).strip(),
         "goexperiment": env["GOEXPERIMENT"],
         "gomaxprocs": 4,
@@ -65,7 +69,7 @@ def main():
         build_env = dict(env, GOOS="linux", GOARCH="amd64", CGO_ENABLED="0")
         for package in sorted({SCENARIOS[p][0] for p in phases}):
             binary = ARTIFACTS / (args.label + "-" + package + ".test")
-            source_package = "repository" if package == "sharing" else package
+            source_package = "repository" if package == "sharing" else "service" if package == "lifecycle" else package
             subprocess.run(["go", "test", "-tags=unit", "-c", "-o", str(binary), "./internal/" + source_package],
                            cwd=BACKEND, env=build_env, check=True)
     summary = []

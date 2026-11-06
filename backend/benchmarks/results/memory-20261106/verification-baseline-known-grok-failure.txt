@@ -1,0 +1,15 @@
+['wsl.exe', '-d', 'Ubuntu-24.04', '--exec', 'env', 'GOMAXPROCS=4', '/mnt/d/Code/sub2api/.git/task-artifacts/memory-20261106/baseline-service.test', '-test.run=^TestGrokQuotaBillingStillRejectsUnavailableCredentialsDuringCooldown$', '-test.v']
+2026/11/06 16:18:22 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestGrokQuotaBillingStillRejectsUnavailableCredentialsDuringCooldown
+=== RUN   TestGrokQuotaBillingStillRejectsUnavailableCredentialsDuringCooldown/missing_refresh_token
+=== RUN   TestGrokQuotaBillingStillRejectsUnavailableCredentialsDuringCooldown/expired_access_token_without_refresh_service
+=== RUN   TestGrokQuotaBillingStillRejectsUnavailableCredentialsDuringCooldown/missing_configured_proxy
+    grok_quota_cooldown_test.go:78: 
+        	Error Trace:	D:/Code/sub2api/backend/internal/service/grok_quota_cooldown_test.go:78
+        	Error:      	Error "error: code=503 reason=\"ACCOUNT_PROXY_UNAVAILABLE\" message=\"configured account proxy is unavailable\" metadata=map[]" does not contain "GROK_QUOTA_TOKEN_UNAVAILABLE"
+        	Test:       	TestGrokQuotaBillingStillRejectsUnavailableCredentialsDuringCooldown/missing_configured_proxy
+--- FAIL: TestGrokQuotaBillingStillRejectsUnavailableCredentialsDuringCooldown (0.03s)
+    --- PASS: TestGrokQuotaBillingStillRejectsUnavailableCredentialsDuringCooldown/missing_refresh_token (0.02s)
+    --- PASS: TestGrokQuotaBillingStillRejectsUnavailableCredentialsDuringCooldown/expired_access_token_without_refresh_service (0.00s)
+    --- FAIL: TestGrokQuotaBillingStillRejectsUnavailableCredentialsDuringCooldown/missing_configured_proxy (0.00s)
+FAIL

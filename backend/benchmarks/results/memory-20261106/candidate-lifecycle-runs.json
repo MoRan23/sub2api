@@ -1,0 +1,26 @@
+[
+  {
+    "phase": "lifecycle",
+    "round": 1,
+    "exit_code": 0,
+    "elapsed_seconds": 34.545,
+    "output": "candidate-lifecycle-1.txt",
+    "resources": "candidate-lifecycle-1-resources.txt"
+  },
+  {
+    "phase": "lifecycle",
+    "round": 2,
+    "exit_code": 0,
+    "elapsed_seconds": 51.442,
+    "output": "candidate-lifecycle-2.txt",
+    "resources": "candidate-lifecycle-2-resources.txt"
+  },
+  {
+    "phase": "lifecycle",
+    "round": 3,
+    "exit_code": 0,
+    "elapsed_seconds": 37.268,
+    "output": "candidate-lifecycle-3.txt",
+    "resources": "candidate-lifecycle-3-resources.txt"
+  }
+]

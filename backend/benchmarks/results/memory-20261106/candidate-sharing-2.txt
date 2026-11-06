@@ -1,0 +1,11 @@
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/repository
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkSchedulerCacheSharingModes/accounts_2000_groups_100_shared_0_warm-4         	       3	  10088165 ns/op	      2000 account-views/op	       100.0 bucket-reads/op	  12432671 p95-sweep-ns	  642192 B/op	   18309 allocs/op
+BenchmarkSchedulerCacheSharingModes/accounts_2000_groups_100_shared_0_cold-4         	       3	  80110736 ns/op	      2000 account-views/op	       100.0 bucket-reads/op	  85514272 p95-sweep-ns	16837016 B/op	  161334 allocs/op
+BenchmarkSchedulerCacheSharingModes/accounts_2000_groups_100_shared_50_warm-4        	       3	 147836885 ns/op	    101000 account-views/op	       100.0 bucket-reads/op	 152627512 p95-sweep-ns	22082405 B/op	  526810 allocs/op
+BenchmarkSchedulerCacheSharingModes/accounts_2000_groups_100_shared_50_cold-4        	       3	2867629062 ns/op	    101000 account-views/op	       100.0 bucket-reads/op	2942249473 p95-sweep-ns	2567686722 B/op	 2183659 allocs/op
+BenchmarkSchedulerCacheSharingModes/accounts_2000_groups_100_shared_100_warm-4       	       3	 343398645 ns/op	    200000 account-views/op	       100.0 bucket-reads/op	 377978125 p95-sweep-ns	43810282 B/op	 1037008 allocs/op
+BenchmarkSchedulerCacheSharingModes/accounts_2000_groups_100_shared_100_cold-4       	       3	5814092858 ns/op	    200000 account-views/op	       100.0 bucket-reads/op	5945280755 p95-sweep-ns	5119296434 B/op	 4207095 allocs/op
+PASS

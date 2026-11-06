@@ -1,0 +1,14 @@
+{"command": ["go", "test", "-tags=unit", "./internal/service", "./internal/repository", "./internal/handler", "./internal/handler/admin", "./internal/server/routes", "-run", "Test(CodexEngine|OpenAIWSBodyObservation|OpenAIWSPassthroughBodyObservation|OpenAIWSNativeBodyObservation|OpenAIWSNativeInterrupt|OpenAIWSHTTPBridge|UsageRecord|UsageSnapshot|UsageBilling|APIKeyAuth|FrozenUsage|WrapUsage|InflightEstimate_AccountMapping|Scheduler|Candidate|SharedCandidate|AccountPrepareSharedSnapshot|SetAccountModelRateLimitSnapshot|ApplyAccountSchedulingThreshold|RuntimeMemory|RequestBodyScope|Counters|SettlementCounters|SSEBufferGauge|ReadSampleJSON|CollectorRing|ProfileGate|RedisHistory|RedisInstance|RedisUnavailable)", "-count=1", "-timeout=10m"], "GOEXPERIMENT": "greenteagc,jsonv2", "GOMAXPROCS": 4}
+ok  	github.com/Wei-Shaw/sub2api/internal/service	10.017s
+ok  	github.com/Wei-Shaw/sub2api/internal/repository	7.499s
+ok  	github.com/Wei-Shaw/sub2api/internal/handler	5.640s
+ok  	github.com/Wei-Shaw/sub2api/internal/handler/admin	0.102s
+ok  	github.com/Wei-Shaw/sub2api/internal/server/routes	11.144s
+
+exit_code=0
+{"command": ["go", "test", "-tags=unit", "./internal/pkg/runtimeobs", "./internal/pkg/httputil", "./internal/config", "-count=1", "-timeout=10m"], "GOEXPERIMENT": "greenteagc,jsonv2", "GOMAXPROCS": 4}
+ok  	github.com/Wei-Shaw/sub2api/internal/pkg/runtimeobs	0.561s
+ok  	github.com/Wei-Shaw/sub2api/internal/pkg/httputil	0.056s
+ok  	github.com/Wei-Shaw/sub2api/internal/config	0.795s
+
+exit_code=0

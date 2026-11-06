@@ -1,0 +1,26 @@
+[
+  {
+    "phase": "sharing",
+    "round": 1,
+    "exit_code": 0,
+    "elapsed_seconds": 57.02,
+    "output": "candidate-sharing-1.txt",
+    "resources": "candidate-sharing-1-resources.txt"
+  },
+  {
+    "phase": "sharing",
+    "round": 2,
+    "exit_code": 0,
+    "elapsed_seconds": 64.339,
+    "output": "candidate-sharing-2.txt",
+    "resources": "candidate-sharing-2-resources.txt"
+  },
+  {
+    "phase": "sharing",
+    "round": 3,
+    "exit_code": 0,
+    "elapsed_seconds": 78.583,
+    "output": "candidate-sharing-3.txt",
+    "resources": "candidate-sharing-3-resources.txt"
+  }
+]

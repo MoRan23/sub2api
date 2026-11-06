@@ -1,0 +1,18 @@
+2026/11/06 17:17:05 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkUsageRecordLifecycle/ws_replay/bytes=8192/legacy_capture-4         	  342074	      6121 ns/op	1338.25 MB/s	    266654 p95-e2e-ns	        16.00 producers	    163361 requests/s	     24094 runtime-cpu-ns/op	         4.000 workers	   13097 B/op	      97 allocs/op
+BenchmarkUsageRecordLifecycle/ws_replay/bytes=8192/owned_snapshot-4         	  290211	      7224 ns/op	1134.07 MB/s	    441345 p95-e2e-ns	        16.00 producers	    138437 requests/s	     28775 runtime-cpu-ns/op	         4.000 workers	   18970 B/op	     115 allocs/op
+BenchmarkUsageRecordLifecycle/ws_replay/bytes=1048576/legacy_capture-4      	    7920	    275175 ns/op	3810.58 MB/s	  19422614 p95-e2e-ns	        16.00 producers	      3634 requests/s	   1087065 runtime-cpu-ns/op	         4.000 workers	 1053552 B/op	      98 allocs/op
+BenchmarkUsageRecordLifecycle/ws_replay/bytes=1048576/owned_snapshot-4      	    7849	    291529 ns/op	3596.82 MB/s	  20376833 p95-e2e-ns	        16.00 producers	      3430 requests/s	   1157661 runtime-cpu-ns/op	         4.000 workers	 1059427 B/op	     116 allocs/op
+BenchmarkUsageRecordLifecycle/systemone_response/bytes=8192/legacy_capture-4         	  397190	      5520 ns/op	1483.96 MB/s	    231154 p95-e2e-ns	        16.00 producers	    181147 requests/s	     21491 runtime-cpu-ns/op	         4.000 workers	   12817 B/op	      96 allocs/op
+BenchmarkUsageRecordLifecycle/systemone_response/bytes=8192/owned_snapshot-4         	  337760	      8699 ns/op	 941.70 MB/s	    489966 p95-e2e-ns	        16.00 producers	    114954 requests/s	     34216 runtime-cpu-ns/op	         4.000 workers	   18466 B/op	     114 allocs/op
+BenchmarkUsageRecordLifecycle/systemone_response/bytes=1048576/legacy_capture-4      	    8504	    270473 ns/op	3876.83 MB/s	  17658121 p95-e2e-ns	        16.00 producers	      3697 requests/s	   1060017 runtime-cpu-ns/op	         4.000 workers	 1053275 B/op	      97 allocs/op
+BenchmarkUsageRecordLifecycle/systemone_response/bytes=1048576/owned_snapshot-4      	    7762	    282675 ns/op	3709.47 MB/s	  19433324 p95-e2e-ns	        16.00 producers	      3538 requests/s	   1116108 runtime-cpu-ns/op	         4.000 workers	 1058922 B/op	     115 allocs/op
+BenchmarkUsageRecordLifecycle/grok_request/bytes=8192/legacy_capture-4               	  367546	      6604 ns/op	1240.42 MB/s	    280767 p95-e2e-ns	        16.00 producers	    151419 requests/s	     25730 runtime-cpu-ns/op	         4.000 workers	   13441 B/op	      99 allocs/op
+BenchmarkUsageRecordLifecycle/grok_request/bytes=8192/owned_snapshot-4               	  298363	      7697 ns/op	1064.27 MB/s	    436856 p95-e2e-ns	        16.00 producers	    129916 requests/s	     30610 runtime-cpu-ns/op	         4.000 workers	   19394 B/op	     117 allocs/op
+BenchmarkUsageRecordLifecycle/grok_request/bytes=1048576/legacy_capture-4            	    5049	    396794 ns/op	2642.62 MB/s	  22970838 p95-e2e-ns	        16.00 producers	      2520 requests/s	   1569250 runtime-cpu-ns/op	         4.000 workers	 1053911 B/op	     100 allocs/op
+BenchmarkUsageRecordLifecycle/grok_request/bytes=1048576/owned_snapshot-4            	    5725	    368645 ns/op	2844.41 MB/s	  24914002 p95-e2e-ns	        16.00 producers	      2713 requests/s	   1457475 runtime-cpu-ns/op	         4.000 workers	 1059860 B/op	     118 allocs/op
+PASS

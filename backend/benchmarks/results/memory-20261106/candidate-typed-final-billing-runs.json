@@ -1,0 +1,26 @@
+[
+  {
+    "phase": "billing",
+    "round": 1,
+    "exit_code": 0,
+    "elapsed_seconds": 0.549,
+    "output": "candidate-typed-final-billing-1.txt",
+    "resources": "candidate-typed-final-billing-1-resources.txt"
+  },
+  {
+    "phase": "billing",
+    "round": 2,
+    "exit_code": 0,
+    "elapsed_seconds": 0.563,
+    "output": "candidate-typed-final-billing-2.txt",
+    "resources": "candidate-typed-final-billing-2-resources.txt"
+  },
+  {
+    "phase": "billing",
+    "round": 3,
+    "exit_code": 0,
+    "elapsed_seconds": 0.591,
+    "output": "candidate-typed-final-billing-3.txt",
+    "resources": "candidate-typed-final-billing-3-resources.txt"
+  }
+]

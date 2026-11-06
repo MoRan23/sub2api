@@ -1,0 +1,26 @@
+[
+  {
+    "phase": "sharing",
+    "round": 1,
+    "exit_code": 0,
+    "elapsed_seconds": 145.041,
+    "output": "baseline-sharing-1.txt",
+    "resources": "baseline-sharing-1-resources.txt"
+  },
+  {
+    "phase": "sharing",
+    "round": 2,
+    "exit_code": 0,
+    "elapsed_seconds": 159.286,
+    "output": "baseline-sharing-2.txt",
+    "resources": "baseline-sharing-2-resources.txt"
+  },
+  {
+    "phase": "sharing",
+    "round": 3,
+    "exit_code": 0,
+    "elapsed_seconds": 186.625,
+    "output": "baseline-sharing-3.txt",
+    "resources": "baseline-sharing-3-resources.txt"
+  }
+]

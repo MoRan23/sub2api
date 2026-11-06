@@ -1,0 +1,3 @@
+{"command": ["go", "build", "-o", "D:\\Code\\sub2api\\.git\\task-artifacts\\memory-20261106\\sub2api-verified.exe", "./cmd/server"], "GOEXPERIMENT": "greenteagc,jsonv2", "GOMAXPROCS": 4}
+
+exit_code=0
