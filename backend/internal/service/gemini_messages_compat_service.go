@@ -148,7 +148,7 @@ func (s *GeminiMessagesCompatService) SelectAccountForModelWithExclusions(ctx co
 
 	// 4. 按优先级 + LRU 选择最佳账号
 	// Select best account by priority + LRU
-	selected := s.selectBestGeminiAccount(ctx, accounts, requestedModel, excludedIDs, platform, useMixedScheduling)
+	selected := s.selectBestGeminiCandidate(ctx, accounts, requestedModel, excludedIDs, platform, useMixedScheduling)
 
 	if selected == nil {
 		if requestedModel != "" {
@@ -333,15 +333,15 @@ func (s *GeminiMessagesCompatService) passesRateLimitPreCheckWithCache(ctx conte
 //
 // selectBestGeminiAccount selects best account from candidates (priority + LRU + OAuth preferred).
 // Returns nil if no available account.
-func (s *GeminiMessagesCompatService) selectBestGeminiAccount(
+func (s *GeminiMessagesCompatService) selectBestGeminiCandidate(
 	ctx context.Context,
-	accounts []Account,
+	accounts CandidateSet,
 	requestedModel string,
 	excludedIDs map[int64]struct{},
 	platform string,
 	useMixedScheduling bool,
 ) *Account {
-	var selected *Account
+	var selected *CandidateView
 	precheckResult := s.buildPreCheckUsageResultMap(ctx, accounts, requestedModel)
 
 	for i := range accounts {
@@ -353,7 +353,7 @@ func (s *GeminiMessagesCompatService) selectBestGeminiAccount(
 		}
 
 		// 检查账号是否可用于当前请求
-		if !s.isAccountUsableForRequestWithPrecheck(ctx, acc, requestedModel, platform, useMixedScheduling, precheckResult) {
+		if !s.isAccountUsableForRequestWithPrecheck(ctx, acc.Ref(), requestedModel, platform, useMixedScheduling, precheckResult) {
 			continue
 		}
 
@@ -363,25 +363,30 @@ func (s *GeminiMessagesCompatService) selectBestGeminiAccount(
 			continue
 		}
 
-		if s.isBetterGeminiAccount(acc, selected) {
+		if isBetterGeminiCandidate(*acc, *selected) {
 			selected = acc
 		}
 	}
 
-	return selected
+	if selected == nil {
+		return nil
+	}
+	return selected.Ref()
 }
 
-func (s *GeminiMessagesCompatService) buildPreCheckUsageResultMap(ctx context.Context, accounts []Account, requestedModel string) map[int64]bool {
+func isBetterGeminiCandidate(candidate, current CandidateView) bool {
+	if candidate.Priority == current.Priority && candidate.LastUsedAt == nil && current.LastUsedAt == nil {
+		return candidate.Type == AccountTypeOAuth && current.Type != AccountTypeOAuth
+	}
+	return candidateViewPriorityLRULess(candidate, current)
+}
+
+func (s *GeminiMessagesCompatService) buildPreCheckUsageResultMap(ctx context.Context, accounts CandidateSet, requestedModel string) map[int64]bool {
 	if s.rateLimitService == nil || requestedModel == "" || len(accounts) == 0 {
 		return nil
 	}
 
-	candidates := make([]*Account, 0, len(accounts))
-	for i := range accounts {
-		candidates = append(candidates, &accounts[i])
-	}
-
-	result, err := s.rateLimitService.PreCheckUsageBatch(ctx, candidates, requestedModel)
+	result, err := s.rateLimitService.PreCheckUsageBatch(ctx, candidateAccountRefs(accounts), requestedModel)
 	if err != nil {
 		logger.LegacyPrintf("service.gemini_messages_compat", "[Gemini PreCheckBatch] failed: %v", err)
 	}
@@ -456,9 +461,9 @@ func (s *GeminiMessagesCompatService) hydrateSelectedAccount(ctx context.Context
 	return hydrated, nil
 }
 
-func (s *GeminiMessagesCompatService) listSchedulableAccountsOnce(ctx context.Context, groupID *int64, platform string, hasForcePlatform bool) ([]Account, error) {
+func (s *GeminiMessagesCompatService) listSchedulableAccountsOnce(ctx context.Context, groupID *int64, platform string, hasForcePlatform bool) (CandidateSet, error) {
 	if s.schedulerSnapshot != nil {
-		accounts, _, err := s.schedulerSnapshot.ListSchedulableAccounts(ctx, groupID, platform, hasForcePlatform)
+		accounts, _, err := s.schedulerSnapshot.ListSchedulableCandidates(ctx, groupID, platform, hasForcePlatform)
 		return accounts, err
 	}
 
@@ -468,13 +473,16 @@ func (s *GeminiMessagesCompatService) listSchedulableAccountsOnce(ctx context.Co
 		queryPlatforms = []string{platform, PlatformAntigravity}
 	}
 
+	var accounts []Account
+	var err error
 	if groupID != nil {
-		return s.accountRepo.ListSchedulableByGroupIDAndPlatforms(ctx, *groupID, queryPlatforms)
+		accounts, err = s.accountRepo.ListSchedulableByGroupIDAndPlatforms(ctx, *groupID, queryPlatforms)
+	} else if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
+		accounts, err = s.accountRepo.ListSchedulableByPlatforms(ctx, queryPlatforms)
+	} else {
+		accounts, err = s.accountRepo.ListSchedulableUngroupedByPlatforms(ctx, queryPlatforms)
 	}
-	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
-		return s.accountRepo.ListSchedulableByPlatforms(ctx, queryPlatforms)
-	}
-	return s.accountRepo.ListSchedulableUngroupedByPlatforms(ctx, queryPlatforms)
+	return CandidatesFromAccounts(accounts), err
 }
 
 func (s *GeminiMessagesCompatService) validateUpstreamBaseURL(raw string) (string, error) {
@@ -509,7 +517,7 @@ func (s *GeminiMessagesCompatService) AntigravityGeminiModelIDs(ctx context.Cont
 			continue
 		}
 		addModel := func(model string) {
-			if isAntigravityGeminiModel(model) && IsSafeGeminiModelPathSegment(model) && strings.TrimSpace(mapAntigravityModel(&account, model)) != "" {
+			if isAntigravityGeminiModel(model) && IsSafeGeminiModelPathSegment(model) && strings.TrimSpace(mapAntigravityModel(account.Ref(), model)) != "" {
 				seen[model] = struct{}{}
 			}
 		}

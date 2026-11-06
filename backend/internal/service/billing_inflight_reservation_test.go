@@ -498,3 +498,43 @@ func TestInflightEstimate_AccountMappingNoNegativeCaching(t *testing.T) {
 	require.True(t, priced, "new mapping (incl. wildcard) visible on next request")
 	require.Greater(t, est, 0.0)
 }
+
+type inflightCandidateSnapshotStub struct {
+	*inflightSnapshotCacheStub
+	candidates     CandidateSet
+	candidateReads atomic.Int64
+}
+
+func (s *inflightCandidateSnapshotStub) GetCandidateSnapshot(context.Context, SchedulerBucket) (CandidateSet, bool, error) {
+	s.candidateReads.Add(1)
+	return s.candidates, true, nil
+}
+
+func TestInflightEstimate_AccountMappingUsesCandidateViews(t *testing.T) {
+	for _, openAI := range []bool{false, true} {
+		t.Run(fmt.Sprintf("openai=%v", openAI), func(t *testing.T) {
+			cache := &inflightCandidateSnapshotStub{inflightSnapshotCacheStub: &inflightSnapshotCacheStub{},
+				candidates: CandidatesFromAccounts([]Account{
+					{ID: 1, Credentials: map[string]any{"model_mapping": map[string]any{"request-*": "gpt-5.1"}}},
+					{ID: 2, Credentials: map[string]any{"model_mapping": map[string]any{"request-model": "gpt-5.1"}}},
+					{ID: 3, Credentials: map[string]any{"model_mapping": map[string]any{"request-model": "gpt-5.2"}}},
+				})}
+			cache.candidates = append(cache.candidates, CandidateView{})
+			cfg := &config.Config{}
+			snapshot := NewSchedulerSnapshotService(cache, nil, nil, nil, cfg)
+			key := &APIKey{GroupID: usageSnapshotTestValue(int64(7)), Group: &Group{ID: 7, Platform: PlatformOpenAI}}
+			var lookup func(context.Context, *APIKey, string) []string
+			if openAI {
+				lookup = (&OpenAIGatewayService{cfg: cfg, schedulerSnapshot: snapshot}).inflightEstimateDeps().accountMappedModels
+			} else {
+				lookup = (&GatewayService{cfg: cfg, schedulerSnapshot: snapshot}).inflightEstimateDeps().accountMappedModels
+			}
+			first := cache.candidates[0].Ref()
+			require.Equal(t, []string{"gpt-5.1", "gpt-5.2"}, lookup(context.Background(), key, "request-model"))
+			require.EqualValues(t, 1, cache.candidateReads.Load())
+			require.Zero(t, cache.reads.Load(), "reservation estimates must not request the legacy account slab")
+			require.Same(t, first, cache.candidates[0].Ref())
+			require.False(t, cache.candidates[0].owned, "mapping lookup is read-only")
+		})
+	}
+}

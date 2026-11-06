@@ -86,6 +86,9 @@ type forceCacheBillingKeyType struct{}
 type accountWithLoad struct {
 	account  *Account
 	loadInfo *AccountLoadInfo
+	// The request-local view carries the live LastUsed sidecar without modifying the cached Account.
+	candidateLastUsed *time.Time
+	hasCandidateView  bool
 }
 
 var ForceCacheBillingContextKey = forceCacheBillingKeyType{}

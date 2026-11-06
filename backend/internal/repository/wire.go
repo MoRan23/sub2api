@@ -61,7 +61,11 @@ func ProvideSchedulerCache(rdb *redis.Client, cfg *config.Config) service.Schedu
 			writeChunkSize = cfg.Gateway.Scheduling.SnapshotWriteChunkSize
 		}
 	}
-	return newSchedulerCacheWithChunkSizes(rdb, mgetChunkSize, writeChunkSize)
+	cache := newSchedulerCacheWithChunkSizes(rdb, mgetChunkSize, writeChunkSize).(*schedulerCache)
+	if cfg != nil && cfg.Gateway.Scheduling.SnapshotCacheMaxBytes > 0 {
+		cache.cacheMaxBytes = cfg.Gateway.Scheduling.SnapshotCacheMaxBytes
+	}
+	return cache
 }
 
 // ProviderSet is the Wire provider set for all repositories

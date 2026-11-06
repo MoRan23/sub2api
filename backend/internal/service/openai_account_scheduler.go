@@ -701,14 +701,16 @@ func (s *defaultOpenAIAccountScheduler) shouldEscapeStickyAccount(accountID int6
 }
 
 type openAIAccountCandidateScore struct {
-	account   *Account
-	loadInfo  *AccountLoadInfo
-	loadKnown bool
-	score     float64
-	priority  int
-	errorRate float64
-	ttft      float64
-	hasTTFT   bool
+	account           *Account
+	candidateLastUsed *time.Time
+	hasCandidateView  bool
+	loadInfo          *AccountLoadInfo
+	loadKnown         bool
+	score             float64
+	priority          int
+	errorRate         float64
+	ttft              float64
+	hasTTFT           bool
 }
 
 type openAIAccountCandidateHeap []openAIAccountCandidateScore
@@ -909,8 +911,13 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 	filtered []*Account,
 	loadMap map[int64]*AccountLoadInfo,
 ) openAIAccountLoadPlan {
+	return s.buildOpenAICandidateLoadPlan(ctx, req, CandidatesFromAccountPointers(filtered), loadMap)
+}
+
+func (s *defaultOpenAIAccountScheduler) buildOpenAICandidateLoadPlan(ctx context.Context, req OpenAIAccountScheduleRequest, filtered CandidateSet, loadMap map[int64]*AccountLoadInfo) openAIAccountLoadPlan {
 	allCandidates := make([]openAIAccountCandidateScore, 0, len(filtered))
-	for _, account := range filtered {
+	for _, candidate := range filtered {
+		account := candidate.Ref()
 		loadInfo, loadKnown := loadMap[account.ID]
 		if !loadKnown || loadInfo == nil {
 			loadInfo = &AccountLoadInfo{AccountID: account.ID}
@@ -921,12 +928,14 @@ func (s *defaultOpenAIAccountScheduler) buildOpenAIAccountLoadPlan(
 			errorRate, ttft, hasTTFT = s.stats.snapshot(account.ID)
 		}
 		allCandidates = append(allCandidates, openAIAccountCandidateScore{
-			account:   account,
-			loadInfo:  loadInfo,
-			loadKnown: loadKnown,
-			errorRate: errorRate,
-			ttft:      ttft,
-			hasTTFT:   hasTTFT,
+			account:           account,
+			candidateLastUsed: candidate.LastUsedAt,
+			hasCandidateView:  true,
+			loadInfo:          loadInfo,
+			loadKnown:         loadKnown,
+			errorRate:         errorRate,
+			ttft:              ttft,
+			hasTTFT:           hasTTFT,
 		})
 	}
 
@@ -1192,14 +1201,14 @@ func sortOpenAICompactRetryCandidates(pool []openAIAccountCandidateScore) []open
 			return a.loadInfo.WaitingCount < b.loadInfo.WaitingCount
 		}
 		switch {
-		case a.account.LastUsedAt == nil && b.account.LastUsedAt != nil:
+		case a.lastUsedAt() == nil && b.lastUsedAt() != nil:
 			return true
-		case a.account.LastUsedAt != nil && b.account.LastUsedAt == nil:
+		case a.lastUsedAt() != nil && b.lastUsedAt() == nil:
 			return false
-		case a.account.LastUsedAt == nil && b.account.LastUsedAt == nil:
+		case a.lastUsedAt() == nil && b.lastUsedAt() == nil:
 			return false
 		default:
-			return a.account.LastUsedAt.Before(*b.account.LastUsedAt)
+			return a.lastUsedAt().Before(*b.lastUsedAt())
 		}
 	})
 	return ordered
@@ -1457,14 +1466,14 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 		return nil, 0, 0, 0, noAvailableOpenAISelectionError(req.RequestedModel, false, openAISelectionFilterStats{}.summary(""))
 	}
 	// Local free-tier soft gate on the Grok scheduling path only (not admin probe).
-	accounts = s.filterGrokFreeQuotaAccounts(ctx, accounts)
+	accounts = s.filterGrokFreeQuotaCandidates(ctx, accounts)
 	if len(accounts) == 0 {
 		return nil, 0, 0, 0, noAvailableOpenAISelectionError(req.RequestedModel, false, openAISelectionFilterStats{}.summary("grok_free_quota_soft_gate"))
 	}
 	// Team+model rate-limit cool: siblings of a 429'd team skip the hot model.
 	if req.Platform == PlatformGrok {
 		now := time.Now()
-		filtered := filterGrokTeamModelRateLimitedAccounts(accounts, req.RequestedModel, now)
+		filtered := filterGrokTeamModelRateLimitedCandidates(accounts, req.RequestedModel, now)
 		if len(filtered) == 0 && len(accounts) > 0 {
 			return nil, 0, 0, 0, noAvailableOpenAISelectionError(req.RequestedModel, false, openAISelectionFilterStats{}.summary("grok_team_model_rate_limit"))
 		}
@@ -1472,7 +1481,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 			accounts = filtered
 		}
 		// Per-account model free-usage soft-block (other models stay eligible).
-		modelFiltered := filterGrokModelQuotaBlockedAccounts(accounts, req.RequestedModel, now)
+		modelFiltered := filterGrokModelQuotaBlockedCandidates(accounts, req.RequestedModel, now)
 		if len(modelFiltered) == 0 && len(accounts) > 0 {
 			return nil, 0, 0, 0, noAvailableOpenAISelectionError(req.RequestedModel, false, openAISelectionFilterStats{}.summary("grok_model_quota_block"))
 		}
@@ -1486,10 +1495,10 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 	}
 
 	filterStats := openAISelectionFilterStats{pool: len(accounts)}
-	filtered := make([]*Account, 0, len(accounts))
+	filtered := make(CandidateSet, 0, len(accounts))
 	loadReq := make([]AccountWithConcurrency, 0, len(accounts))
 	for i := range accounts {
-		account := &accounts[i]
+		account := accounts[i].Ref()
 		if req.ExcludedIDs != nil {
 			if _, excluded := req.ExcludedIDs[account.ID]; excluded {
 				filterStats.exclude("excluded")
@@ -1523,7 +1532,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 			filterStats.exclude("transport_incompatible")
 			continue
 		}
-		filtered = append(filtered, account)
+		filtered = append(filtered, accounts[i])
 		loadReq = append(loadReq, AccountWithConcurrency{
 			ID:             account.ID,
 			MaxConcurrency: account.EffectiveLoadFactor(),
@@ -1541,7 +1550,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 	}
 
 	if req.SubscriptionPriority {
-		subscriptionAccounts, regularAccounts := partitionOpenAIChatGPTSubscriptionAccounts(filtered)
+		subscriptionAccounts, regularAccounts := partitionOpenAIChatGPTSubscriptionCandidates(filtered)
 		if len(subscriptionAccounts) > 0 {
 			attempt := s.trySelectByLoadBalancePool(ctx, req, subscriptionAccounts, loadMap, budget)
 			if attempt.err != nil && (!attempt.noCompactCandidates || len(regularAccounts) <= 0) {
@@ -1608,11 +1617,11 @@ func partitionOpenAIChatGPTSubscriptionAccounts(accounts []*Account) ([]*Account
 func (s *defaultOpenAIAccountScheduler) trySelectByLoadBalancePool(
 	ctx context.Context,
 	req OpenAIAccountScheduleRequest,
-	filtered []*Account,
+	filtered CandidateSet,
 	loadMap map[int64]*AccountLoadInfo,
 	budget *openAISelectionProbeBudget,
 ) openAIAccountLoadSelectionAttempt {
-	plan := s.buildOpenAIAccountLoadPlan(ctx, req, filtered, loadMap)
+	plan := s.buildOpenAICandidateLoadPlan(ctx, req, filtered, loadMap)
 	if openAICostOverflowExpanded(req, plan) {
 		budget.enableLimit()
 	}
@@ -1649,9 +1658,9 @@ func (s *defaultOpenAIAccountScheduler) trySelectByLoadBalancePool(
 	}
 
 	if s.service.concurrencyService != nil && !budget.acquireExhausted() {
-		loadReq := buildOpenAIAccountLoadRequest(filtered)
+		loadReq := buildOpenAICandidateLoadRequest(filtered)
 		if freshLoadMap, loadErr := s.service.concurrencyService.GetAccountsLoadBatchFresh(ctx, loadReq); loadErr == nil {
-			freshPlan := s.buildOpenAIAccountLoadPlan(ctx, req, filtered, freshLoadMap)
+			freshPlan := s.buildOpenAICandidateLoadPlan(ctx, req, filtered, freshLoadMap)
 			if openAICostOverflowExpanded(req, freshPlan) {
 				budget.enableLimit()
 			}

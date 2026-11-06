@@ -1589,6 +1589,8 @@ type GatewaySchedulingConfig struct {
 	SnapshotMGetChunkSize int `mapstructure:"snapshot_mget_chunk_size"`
 	// 快照重建时的缓存写入分块大小
 	SnapshotWriteChunkSize int `mapstructure:"snapshot_write_chunk_size"`
+	// Shared decoded scheduling metadata and bucket index soft budget per process.
+	SnapshotCacheMaxBytes int64 `mapstructure:"snapshot_cache_max_bytes"`
 
 	// 过期槽位清理周期（0 表示禁用）
 	SlotCleanupInterval time.Duration `mapstructure:"slot_cleanup_interval"`
@@ -2643,6 +2645,7 @@ func setDefaults() {
 	viper.SetDefault("gateway.scheduling.load_batch_cache_ttl_ms", 200)
 	viper.SetDefault("gateway.scheduling.snapshot_mget_chunk_size", 128)
 	viper.SetDefault("gateway.scheduling.snapshot_write_chunk_size", 256)
+	viper.SetDefault("gateway.scheduling.snapshot_cache_max_bytes", int64(64*1024*1024))
 	viper.SetDefault("gateway.scheduling.slot_cleanup_interval", 30*time.Second)
 	viper.SetDefault("gateway.scheduling.db_fallback_enabled", true)
 	viper.SetDefault("gateway.scheduling.db_fallback_timeout_seconds", 0)
@@ -3806,6 +3809,9 @@ func (c *Config) Validate() error {
 	}
 	if c.Gateway.Scheduling.SnapshotWriteChunkSize <= 0 {
 		return fmt.Errorf("gateway.scheduling.snapshot_write_chunk_size must be positive")
+	}
+	if c.Gateway.Scheduling.SnapshotCacheMaxBytes < 0 {
+		return fmt.Errorf("gateway.scheduling.snapshot_cache_max_bytes must be non-negative")
 	}
 	if c.Gateway.Scheduling.SlotCleanupInterval < 0 {
 		return fmt.Errorf("gateway.scheduling.slot_cleanup_interval must be non-negative")

@@ -122,6 +122,20 @@ func filterGrokModelQuotaBlockedAccounts(accounts []Account, model string, now t
 	return out
 }
 
+func filterGrokModelQuotaBlockedCandidates(accounts CandidateSet, model string, now time.Time) CandidateSet {
+	if len(accounts) == 0 || strings.TrimSpace(model) == "" {
+		return accounts
+	}
+	out := accounts[:0]
+	for i := range accounts {
+		upstreamModel := canonicalOpenAIAccountSchedulingModel(accounts[i].Ref(), model)
+		if !isGrokModelQuotaBlocked(accounts[i].ID, upstreamModel, now) {
+			out = append(out, accounts[i])
+		}
+	}
+	return out
+}
+
 // isGrokModelSpecificFreeUsage is true when free-usage exhaustion is scoped to
 // a named model (account may still serve other models).
 func isGrokModelSpecificFreeUsage(low, model string) bool {

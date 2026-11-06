@@ -89,7 +89,11 @@ type Account struct {
 	modelMappingCacheRuntimeVersion uint64
 	// modelMappingCacheShared 为 true 时缓存来自只读共享母本（见 PrepareSharedSnapshot），
 	// 指针、长度与运行时版本匹配即直接复用预解析结果，不计算签名。
-	modelMappingCacheShared bool
+	modelMappingCacheShared      bool
+	compactMappingCache          map[string]string
+	compactMappingCredentialsPtr uintptr
+	compactMappingRawPtr         uintptr
+	compactMappingRawLen         int
 
 	// header_overrides 热路径缓存（非持久化字段，同 model_mapping 缓存先例）
 	headerOverrideCache               map[string]string
@@ -680,6 +684,12 @@ func (a *Account) GetModelMapping() map[string]string {
 		}
 	}
 
+	// Published scheduling projections remain immutable even when a runtime
+	// mapping changes. The next snapshot refresh publishes a new prepared master.
+	if a.modelMappingCacheShared && a.modelMappingCacheCredentialsPtr == credentialsPtr && a.modelMappingCacheRawPtr == rawPtr {
+		return a.resolveModelMapping(rawMapping)
+	}
+
 	mapping := a.resolveModelMapping(rawMapping)
 	if !rawSigReady {
 		rawSig = modelMappingSignature(rawMapping)
@@ -707,6 +717,11 @@ func (a *Account) PrepareSharedSnapshot() {
 		return
 	}
 	a.GetModelMapping()
+	a.compactMappingCache = stringMappingFromRaw(a.Credentials["compact_model_mapping"])
+	a.compactMappingCredentialsPtr = mapPtr(a.Credentials)
+	compactRaw, _ := a.Credentials["compact_model_mapping"].(map[string]any)
+	a.compactMappingRawPtr = mapPtr(compactRaw)
+	a.compactMappingRawLen = len(compactRaw)
 	a.modelMappingCacheShared = true
 }
 
@@ -1144,6 +1159,10 @@ func (a *Account) AllowsOpenAIRemoteCompactionV2() bool {
 func (a *Account) GetCompactModelMapping() map[string]string {
 	if a == nil || a.Credentials == nil {
 		return nil
+	}
+	raw, _ := a.Credentials["compact_model_mapping"].(map[string]any)
+	if a.modelMappingCacheShared && a.compactMappingCredentialsPtr == mapPtr(a.Credentials) && a.compactMappingRawPtr == mapPtr(raw) && a.compactMappingRawLen == len(raw) {
+		return a.compactMappingCache
 	}
 	return stringMappingFromRaw(a.Credentials["compact_model_mapping"])
 }

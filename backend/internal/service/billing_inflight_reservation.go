@@ -401,7 +401,7 @@ type inflightEstimateDeps struct {
 }
 
 // inflightSnapshotLister 调度器快照读取（与账号选择同源：Redis 快照，未命中时由快照服务自身回源并回填）。
-type inflightSnapshotLister func(ctx context.Context, groupID *int64, platform string, hasForcePlatform bool) ([]Account, error)
+type inflightSnapshotLister func(ctx context.Context, groupID *int64, platform string, hasForcePlatform bool) (CandidateSet, error)
 
 // inflightAccountMappedModelsFromSnapshot 基于调度器快照在内存中匹配账号级映射（支持通配规则）。
 // resolvePlatform 返回与调度器一致的平台；无分组 API Key 使用调度器的未分组账号池（groupID=nil）。
@@ -426,10 +426,13 @@ func inflightAccountMappedModelsFromSnapshot(list inflightSnapshotLister, resolv
 	}
 }
 
-func accountMappedModelsFrom(accounts []Account, model string) []string {
+func accountMappedModelsFrom(accounts CandidateSet, model string) []string {
 	var seen map[string]struct{}
 	var out []string
 	for i := range accounts {
+		if accounts[i].Ref() == nil {
+			continue
+		}
 		mapped, matched := accounts[i].ResolveMappedModel(model)
 		mapped = strings.TrimSpace(mapped)
 		if !matched || mapped == "" || mapped == model {
@@ -720,8 +723,8 @@ func (s *GatewayService) inflightEstimateDeps() inflightEstimateDeps {
 	if s.schedulerSnapshot != nil {
 		snap := s.schedulerSnapshot
 		d.accountMappedModels = inflightAccountMappedModelsFromSnapshot(
-			func(ctx context.Context, groupID *int64, platform string, forced bool) ([]Account, error) {
-				accounts, _, err := snap.ListSchedulableAccounts(ctx, groupID, platform, forced)
+			func(ctx context.Context, groupID *int64, platform string, forced bool) (CandidateSet, error) {
+				accounts, _, err := snap.ListSchedulableCandidates(ctx, groupID, platform, forced)
 				return accounts, err
 			},
 			func(ctx context.Context, apiKey *APIKey, model string) (string, bool, bool) {
@@ -751,8 +754,8 @@ func (s *OpenAIGatewayService) inflightEstimateDeps() inflightEstimateDeps {
 	if s.schedulerSnapshot != nil {
 		snap := s.schedulerSnapshot
 		d.accountMappedModels = inflightAccountMappedModelsFromSnapshot(
-			func(ctx context.Context, groupID *int64, platform string, forced bool) ([]Account, error) {
-				accounts, _, err := snap.ListSchedulableAccounts(ctx, groupID, platform, forced)
+			func(ctx context.Context, groupID *int64, platform string, forced bool) (CandidateSet, error) {
+				accounts, _, err := snap.ListSchedulableCandidates(ctx, groupID, platform, forced)
 				return accounts, err
 			},
 			func(ctx context.Context, apiKey *APIKey, model string) (string, bool, bool) {

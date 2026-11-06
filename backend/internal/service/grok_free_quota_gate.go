@@ -137,6 +137,21 @@ func filterGrokFreeQuotaAccountsCore(
 	cache *sync.Map,
 	accounts []Account,
 ) []Account {
+	return filterGrokFreeQuotaViewsCore(ctx, cfg, usageLogRepo, cache, accounts, func(account *Account) *Account { return account })
+}
+
+func filterGrokFreeQuotaCandidatesCore(ctx context.Context, cfg *config.Config, usageLogRepo UsageLogRepository, cache *sync.Map, accounts CandidateSet) CandidateSet {
+	return filterGrokFreeQuotaViewsCore(ctx, cfg, usageLogRepo, cache, accounts, func(candidate *CandidateView) *Account { return candidate.Ref() })
+}
+
+func filterGrokFreeQuotaViewsCore[T any](
+	ctx context.Context,
+	cfg *config.Config,
+	usageLogRepo UsageLogRepository,
+	cache *sync.Map,
+	accounts []T,
+	accountRef func(*T) *Account,
+) []T {
 	if cache == nil {
 		return accounts
 	}
@@ -149,7 +164,7 @@ func filterGrokFreeQuotaAccountsCore(
 	missingIDs := make([]int64, 0, len(accounts))
 	seenMissing := make(map[int64]struct{})
 	for i := range accounts {
-		account := &accounts[i]
+		account := accountRef(&accounts[i])
 		if !isExplicitGrokFreeOAuthAccount(account) || account.ID <= 0 {
 			continue
 		}
@@ -179,17 +194,38 @@ func filterGrokFreeQuotaAccountsCore(
 		scheduleGrokFreeQuotaStatsRefresh(usageLogRepo, cache, settings, missingIDs)
 	}
 
-	filtered := make([]Account, 0, len(accounts))
+	filtered := make([]T, 0, len(accounts))
 	for i := range accounts {
-		account := &accounts[i]
+		account := accountRef(&accounts[i])
 		if isExplicitGrokFreeOAuthAccount(account) {
 			if tokens, known := tokensByID[account.ID]; known && tokens >= settings.gateTokens {
 				continue
 			}
 		}
-		filtered = append(filtered, *account)
+		filtered = append(filtered, accounts[i])
 	}
 	return filtered
+}
+
+func (s *GatewayService) filterGrokFreeQuotaCandidatesForGateway(ctx context.Context, accounts CandidateSet) CandidateSet {
+	if s == nil {
+		return accounts
+	}
+	return filterGrokFreeQuotaCandidatesCore(ctx, s.cfg, s.usageLogRepo, &gatewayGrokFreeQuotaGateCache, accounts)
+}
+
+func (s *OpenAIGatewayService) filterGrokFreeQuotaCandidatesForOpenAI(ctx context.Context, accounts CandidateSet) CandidateSet {
+	if s == nil {
+		return accounts
+	}
+	return filterGrokFreeQuotaCandidatesCore(ctx, s.cfg, s.usageLogRepo, &openaiGrokFreeQuotaGateCache, accounts)
+}
+
+func (s *defaultOpenAIAccountScheduler) filterGrokFreeQuotaCandidates(ctx context.Context, accounts CandidateSet) CandidateSet {
+	if s == nil || s.service == nil {
+		return accounts
+	}
+	return filterGrokFreeQuotaCandidatesCore(ctx, s.service.cfg, s.service.usageLogRepo, &s.grokFreeQuotaGateCache, accounts)
 }
 
 // scheduleGrokFreeQuotaStatsRefresh loads usage stats off the request path.

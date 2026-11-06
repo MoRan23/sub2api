@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/redis/go-redis/v9"
 	"github.com/tidwall/gjson"
@@ -250,6 +251,22 @@ type schedulerCache struct {
 
 	snapshotMu      sync.RWMutex
 	snapshotEntries map[string]*schedulerSnapshotEntry
+	accountEntries  map[schedulerAccountPoolKey]*schedulerAccountPoolEntry
+	accountFlights  schedulerAccountFlights
+	cacheMaxBytes   int64
+	accountBytes    int64
+	lastCleanup     time.Time
+	bucketBytes     int64
+	poolHits        atomic.Uint64
+	poolMisses      atomic.Uint64
+	poolEvictions   atomic.Uint64
+	bucketHits      atomic.Uint64
+	bucketMisses    atomic.Uint64
+	bucketEvictions atomic.Uint64
+	cleanupStart    sync.Once
+	cleanupStop     sync.Once
+	cleanupDone     chan struct{}
+	cleanupCancel   chan struct{}
 
 	// globalRevisionPending 与 globalRevisionWriting 合并写入出错后的后台全局修订号写入，见 scheduleGlobalAccountMetaRevision。
 	globalRevisionPending atomic.Bool
@@ -258,14 +275,17 @@ type schedulerCache struct {
 
 // schedulerSnapshotEntry 是一个 bucket 的已解码快照。
 // revisions 依次是全局修订号与该 bucket 成员可能涉及的各平台修订号（见 schedulerSnapshotTagKeys）。
-// accounts 是按快照顺序排列的母本，发布后只读，指针不外泄；
-// 每次读取都按值复制出本次请求独占的副本再套用 last_used。
+// accountKeys retain order and content identity without keeping evicted masters
+// alive. Request readers resolve immutable masters and keep LastUsed in sidecars.
 type schedulerSnapshotEntry struct {
-	active       string
-	revisions    []string
-	loadedAt     time.Time
-	accounts     []*service.Account
-	lastUsedKeys []string
+	active         string
+	revisions      []string
+	loadedAt       time.Time
+	accountKeys    []schedulerAccountPoolKey
+	lastUsedKeys   []string
+	runtimeVersion uint64
+	lastAccess     time.Time
+	estimatedBytes int64
 }
 
 func NewSchedulerCache(rdb *redis.Client) service.SchedulerCache {
@@ -285,14 +305,18 @@ func newSchedulerCacheWithChunkSizes(rdb *redis.Client, mgetChunkSize, writeChun
 		writeChunkSize:  writeChunkSize,
 		now:             time.Now,
 		snapshotEntries: make(map[string]*schedulerSnapshotEntry),
+		accountEntries:  make(map[schedulerAccountPoolKey]*schedulerAccountPoolEntry),
+		cacheMaxBytes:   defaultSchedulerCacheMaxBytes,
+		cleanupDone:     make(chan struct{}),
+		cleanupCancel:   make(chan struct{}),
 	}
 }
 
-// GetSnapshot 读取 bucket 的激活快照。解码后的精简记录按 bucket 常驻进程内存，
+// GetCandidateSnapshot 读取 bucket 的激活快照。解码后的精简记录按账号内容身份共享，
 // 只有 ready、active 版本、全局修订号与该 bucket 所涉平台的修订号都与 Redis 一致且未超过最长复用时长时才复用；
 // 否则重新从 Redis 加载。last_used 每次都从 Redis 读取。
-// 返回的账号对象由本次调用独占，可以修改其顶层字段；map、切片底层数组与指针指向的值与其它调用共享，不得原地修改。
-func (c *schedulerCache) GetSnapshot(ctx context.Context, bucket service.SchedulerBucket) ([]*service.Account, bool, error) {
+// 返回的候选 view 由本次调用独占，Account 母本发布后只读。
+func (c *schedulerCache) GetCandidateSnapshot(ctx context.Context, bucket service.SchedulerBucket) (service.CandidateSet, bool, error) {
 	bucketKey := bucket.String()
 	tagKeys := schedulerSnapshotTagKeys(bucket)
 	tags, err := c.rdb.MGet(ctx, tagKeys...).Result()
@@ -325,13 +349,18 @@ func (c *schedulerCache) GetSnapshot(ctx context.Context, bucket service.Schedul
 	}
 
 	now := c.now()
-	if entry := c.lookupSnapshotEntry(bucketKey); entry != nil && entry.matches(activeVal, revisions, now) {
-		accounts, err := c.snapshotAccountsFromEntry(ctx, entry)
+	runtimeVersion := xai.RuntimeModelMappingVersion()
+	if entry := c.lookupSnapshotEntry(bucketKey); entry != nil && entry.runtimeVersion == runtimeVersion && entry.matches(activeVal, revisions, now) {
+		accounts, err := c.snapshotCandidatesFromEntry(ctx, entry)
 		if err != nil {
 			return nil, false, err
 		}
-		return accounts, true, nil
+		if accounts != nil {
+			c.bucketHits.Add(1)
+			return accounts, true, nil
+		}
 	}
+	c.bucketMisses.Add(1)
 
 	ids, err := c.rdb.ZRange(ctx, schedulerSnapshotKey(bucket, activeVal), 0, -1).Result()
 	if err != nil {
@@ -356,34 +385,42 @@ func (c *schedulerCache) GetSnapshot(ctx context.Context, bucket service.Schedul
 	}
 
 	masters := make([]*service.Account, 0, len(values))
-	for _, val := range values {
+	accountKeys := make([]schedulerAccountPoolKey, 0, len(values))
+	cacheable := true
+	for i, val := range values {
 		if val == nil {
 			c.dropSnapshotEntry(bucketKey)
 			return nil, false, nil
 		}
-		account, err := decodeCachedAccount(val)
+		id, err := strconv.ParseInt(ids[i], 10, 64)
+		if err != nil {
+			return nil, false, err
+		}
+		account, key, retained, err := c.internSchedulerAccount(id, val, runtimeVersion, now)
 		if err != nil {
 			return nil, false, err
 		}
 		masters = append(masters, account)
-	}
-	// 母本发布进缓存前由本 goroutine 完成预处理，发布后只读。
-	for _, master := range masters {
-		master.PrepareSharedSnapshot()
+		accountKeys = append(accountKeys, key)
+		cacheable = cacheable && retained
 	}
 
 	// 条目记录的是加载前读到的 (active, 修订号) 与当时的时钟：精简记录读取晚于这组取值，
 	// 之后若再有改写，修订号或 active 必然不同，或在最长复用时长后过期。
 	entry := &schedulerSnapshotEntry{
-		active:       activeVal,
-		revisions:    revisions,
-		loadedAt:     now,
-		accounts:     masters,
-		lastUsedKeys: lastUsedKeys,
+		active:         activeVal,
+		revisions:      revisions,
+		loadedAt:       now,
+		accountKeys:    accountKeys,
+		lastUsedKeys:   lastUsedKeys,
+		runtimeVersion: runtimeVersion,
+		lastAccess:     now,
 	}
-	c.storeSnapshotEntry(bucketKey, entry)
+	if cacheable {
+		c.storeSnapshotEntry(bucketKey, entry)
+	}
 
-	accounts, err := c.snapshotAccountsFromEntry(ctx, entry)
+	accounts, err := c.snapshotCandidates(ctx, masters, lastUsedKeys)
 	if err != nil {
 		return nil, false, err
 	}
@@ -398,32 +435,58 @@ func (e *schedulerSnapshotEntry) matches(active string, revisions []string, now 
 	return age >= 0 && age < schedulerSnapshotCacheMaxAge
 }
 
-// snapshotAccountsFromEntry 读取最新 last_used，并为本次调用一次性分配一组母本副本。
-func (c *schedulerCache) snapshotAccountsFromEntry(ctx context.Context, entry *schedulerSnapshotEntry) ([]*service.Account, error) {
-	lastUsedValues, err := c.mgetChunked(ctx, entry.lastUsedKeys)
+func (c *schedulerCache) snapshotCandidatesFromEntry(ctx context.Context, entry *schedulerSnapshotEntry) (service.CandidateSet, error) {
+	masters := c.resolveSchedulerAccounts(entry.accountKeys, c.now())
+	if masters == nil {
+		return nil, nil
+	}
+	return c.snapshotCandidates(ctx, masters, entry.lastUsedKeys)
+}
+
+// Only hot LastUsed state and small views belong to the request.
+func (c *schedulerCache) snapshotCandidates(ctx context.Context, masters []*service.Account, lastUsedKeys []string) (service.CandidateSet, error) {
+	lastUsedValues, err := c.mgetChunked(ctx, lastUsedKeys)
 	if err != nil {
 		return nil, err
 	}
-	if len(lastUsedValues) != len(entry.accounts) {
-		return nil, fmt.Errorf("unexpected scheduler last_used value count: got %d, want %d", len(lastUsedValues), len(entry.accounts))
+	if len(lastUsedValues) != len(masters) {
+		return nil, fmt.Errorf("unexpected scheduler last_used value count: got %d, want %d", len(lastUsedValues), len(masters))
 	}
-	slab := make([]service.Account, len(entry.accounts))
-	accounts := make([]*service.Account, len(entry.accounts))
-	for i, master := range entry.accounts {
-		slab[i] = *master
-		account := &slab[i]
-		if err := applySchedulerLastUsed(account, lastUsedValues[i]); err != nil {
-			return nil, err
+	accounts := make(service.CandidateSet, len(masters))
+	var times []time.Time
+	for i, master := range masters {
+		lastUsed := master.LastUsedAt
+		if lastUsedValues[i] != nil {
+			value, err := schedulerCacheOptionalString(lastUsedValues[i])
+			if err != nil {
+				return nil, err
+			}
+			millis, err := strconv.ParseInt(value, 10, 64)
+			if err != nil {
+				return nil, fmt.Errorf("invalid last_used cache value %q: %w", value, err)
+			}
+			updated := time.UnixMilli(millis).UTC()
+			if lastUsed == nil || updated.After(*lastUsed) {
+				if times == nil {
+					times = make([]time.Time, len(masters))
+				}
+				times[i] = updated
+				lastUsed = &times[i]
+			}
 		}
-		accounts[i] = account
+		accounts[i] = service.NewCandidateView(master, lastUsed)
 	}
 	return accounts, nil
 }
 
 func (c *schedulerCache) lookupSnapshotEntry(bucketKey string) *schedulerSnapshotEntry {
-	c.snapshotMu.RLock()
-	defer c.snapshotMu.RUnlock()
-	return c.snapshotEntries[bucketKey]
+	c.snapshotMu.Lock()
+	defer c.snapshotMu.Unlock()
+	entry := c.snapshotEntries[bucketKey]
+	if entry != nil {
+		entry.lastAccess = c.now()
+	}
+	return entry
 }
 
 // storeSnapshotEntry 写入条目，并清除加载时间早于 schedulerSnapshotCacheEvictAge 的其它条目。
@@ -432,11 +495,27 @@ func (c *schedulerCache) storeSnapshotEntry(bucketKey string, entry *schedulerSn
 	c.snapshotMu.Lock()
 	defer c.snapshotMu.Unlock()
 	if current := c.snapshotEntries[bucketKey]; current == nil || !current.loadedAt.After(entry.loadedAt) {
+		if current != nil {
+			c.bucketBytes -= current.estimatedBytes
+			delete(c.snapshotEntries, bucketKey)
+		}
+		entry.estimatedBytes = schedulerBucketEstimatedBytes(bucketKey, entry)
+		if entry.lastAccess.IsZero() {
+			entry.lastAccess = entry.loadedAt
+		}
+		if entry.estimatedBytes > c.cacheMaxBytes {
+			delete(c.snapshotEntries, bucketKey)
+			return
+		}
+		c.evictSchedulerCacheLocked(entry.loadedAt, entry.estimatedBytes)
 		c.snapshotEntries[bucketKey] = entry
+		c.bucketBytes += entry.estimatedBytes
 	}
 	for key, other := range c.snapshotEntries {
-		if key != bucketKey && entry.loadedAt.Sub(other.loadedAt) > schedulerSnapshotCacheEvictAge {
+		if key != bucketKey && entry.loadedAt.Sub(other.lastAccess) > schedulerSnapshotCacheEvictAge {
+			c.bucketBytes -= other.estimatedBytes
 			delete(c.snapshotEntries, key)
+			c.bucketEvictions.Add(1)
 		}
 	}
 }
@@ -449,6 +528,9 @@ func (c *schedulerCache) dropSnapshotEntry(bucketKey string) {
 		return
 	}
 	c.snapshotMu.Lock()
+	if entry := c.snapshotEntries[bucketKey]; entry != nil {
+		c.bucketBytes -= entry.estimatedBytes
+	}
 	delete(c.snapshotEntries, bucketKey)
 	c.snapshotMu.Unlock()
 }

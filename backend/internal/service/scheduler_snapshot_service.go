@@ -172,6 +172,9 @@ func (s *SchedulerSnapshotService) Start() {
 	if s == nil || s.cache == nil {
 		return
 	}
+	if cache, ok := s.cache.(interface{ StartCacheCleanup() }); ok {
+		cache.StartCacheCleanup()
+	}
 
 	s.wg.Add(1)
 	go func() {
@@ -206,6 +209,9 @@ func (s *SchedulerSnapshotService) Stop() {
 		close(s.stopCh)
 	})
 	s.wg.Wait()
+	if cache, ok := s.cache.(interface{ StopCacheCleanup() }); ok {
+		cache.StopCacheCleanup()
+	}
 }
 
 func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, groupID *int64, platform string, hasForcePlatform bool) ([]Account, bool, error) {

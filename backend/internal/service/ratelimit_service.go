@@ -172,6 +172,10 @@ func (s *RateLimitService) ApplyAccountSchedulingThreshold(ctx context.Context, 
 
 	now := time.Now().UTC()
 	thresholds := s.settingService.GetAccountSchedulingThresholds(ctx)
+	return s.applyAccountSchedulingThreshold(ctx, account, thresholds, now)
+}
+
+func (s *RateLimitService) applyAccountSchedulingThreshold(ctx context.Context, account *Account, thresholds map[string]int, now time.Time) bool {
 	decision := EvaluateAccountSchedulingThreshold(account, thresholds, now)
 	if !decision.ShouldPause || decision.Until == nil || !decision.Until.After(now) {
 		s.applyAnthropicFableSchedulingThreshold(ctx, account, thresholds, now)

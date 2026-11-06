@@ -1216,7 +1216,7 @@ func (s *GatewayService) GeminiExplicitCacheExclusions(ctx context.Context, grou
 	}
 	excluded := make(map[int64]struct{}, len(accounts))
 	for i := range accounts {
-		account := &accounts[i]
+		account := accounts[i].Ref()
 		keep := IsGeminiExplicitCacheCandidate(account)
 		if boundAccountID > 0 {
 			keep = account.ID == boundAccountID

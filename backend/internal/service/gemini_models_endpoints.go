@@ -87,7 +87,15 @@ func (s *GeminiMessagesCompatService) SelectAccountForModelsEndpoints(ctx contex
 		return nil, errors.New("no available Gemini accounts")
 	}
 
-	var selected *Account
+	selected := selectBestGeminiModelsCandidate(accounts)
+	if selected == nil {
+		return nil, errors.New("no available Gemini accounts")
+	}
+	return s.hydrateSelectedAccount(ctx, selected)
+}
+
+func selectBestGeminiModelsCandidate(accounts CandidateSet) *Account {
+	var selected *CandidateView
 	for i := range accounts {
 		acc := &accounts[i]
 		if selected == nil {
@@ -95,7 +103,7 @@ func (s *GeminiMessagesCompatService) SelectAccountForModelsEndpoints(ctx contex
 			continue
 		}
 
-		r1, r2 := modelsEndpointAccountRank(acc), modelsEndpointAccountRank(selected)
+		r1, r2 := modelsEndpointAccountRank(acc.Ref()), modelsEndpointAccountRank(selected.Ref())
 		if r1 < r2 {
 			selected = acc
 			continue
@@ -125,9 +133,9 @@ func (s *GeminiMessagesCompatService) SelectAccountForModelsEndpoints(ctx contex
 	}
 
 	if selected == nil {
-		return nil, errors.New("no available Gemini accounts")
+		return nil
 	}
-	return s.hydrateSelectedAccount(ctx, selected)
+	return selected.Ref()
 }
 
 // modelsEndpointAccountRank 返回账号在模型接口选号中的优先级，数值越小越优先，顺序见 SelectAccountForModelsEndpoints。
