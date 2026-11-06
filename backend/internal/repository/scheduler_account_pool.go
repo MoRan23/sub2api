@@ -3,7 +3,8 @@ package repository
 import (
 	"context"
 	"crypto/sha256"
-	"fmt"
+	"encoding/binary"
+	"encoding/json"
 	"sort"
 	"time"
 	"unsafe"
@@ -57,19 +58,27 @@ func (c *schedulerCache) internSchedulerAccount(id int64, value any, version uin
 	if err != nil {
 		return nil, schedulerAccountPoolKey{}, false, err
 	}
-	key := schedulerAccountPoolKey{id: id, digest: sha256.Sum256([]byte(raw)), runtimeVersion: version}
+	// One conversion serves both the content identity and JSON decoder. Keeping
+	// raw as a string through decodeCachedAccount would copy the payload twice.
+	payload := []byte(raw)
+	key := schedulerAccountPoolKey{id: id, digest: sha256.Sum256(payload), runtimeVersion: version}
 	if account := c.lookupPooledAccount(key, now); account != nil {
 		c.poolHits.Add(1)
 		return account, key, true, nil
 	}
 	c.poolMisses.Add(1)
-	flightKey := fmt.Sprintf("%d:%x:%d", id, key.digest, version)
-	result, err, _ := c.accountFlights.Do(flightKey, func() (any, error) {
+	// The full fixed-width key is losslessly encoded; singleflight still merges
+	// exactly the same account/content/model-version tuple, without fmt/hex work.
+	var flightKey [48]byte
+	binary.LittleEndian.PutUint64(flightKey[:8], uint64(id))
+	copy(flightKey[8:40], key.digest[:])
+	binary.LittleEndian.PutUint64(flightKey[40:], version)
+	result, err, _ := c.accountFlights.Do(string(flightKey[:]), func() (any, error) {
 		if account := c.lookupPooledAccount(key, now); account != nil {
 			return schedulerInternedAccount{account, true}, nil
 		}
-		account, err := decodeCachedAccount(raw)
-		if err != nil {
+		account := new(service.Account)
+		if err := json.Unmarshal(payload, account); err != nil {
 			return nil, err
 		}
 		account.PrepareSharedSnapshot()
@@ -107,10 +116,10 @@ func (c *schedulerCache) lookupPooledAccount(key schedulerAccountPoolKey, now ti
 	return entry.account
 }
 
-func (c *schedulerCache) resolveSchedulerAccounts(keys []schedulerAccountPoolKey, now time.Time) []*service.Account {
+func (c *schedulerCache) resolveSchedulerCandidates(keys []schedulerAccountPoolKey, now time.Time) service.CandidateSet {
 	c.snapshotMu.Lock()
 	defer c.snapshotMu.Unlock()
-	accounts := make([]*service.Account, len(keys))
+	accounts := make(service.CandidateSet, len(keys))
 	for i, key := range keys {
 		entry := c.accountEntries[key]
 		if entry == nil || now.Sub(entry.lastAccess) > schedulerSnapshotCacheEvictAge {
@@ -118,7 +127,7 @@ func (c *schedulerCache) resolveSchedulerAccounts(keys []schedulerAccountPoolKey
 			return nil
 		}
 		entry.lastAccess = now
-		accounts[i] = entry.account
+		accounts[i] = service.NewCandidateView(entry.account, entry.account.LastUsedAt)
 	}
 	c.poolHits.Add(uint64(len(keys)))
 	return accounts

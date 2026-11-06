@@ -384,7 +384,7 @@ func (c *schedulerCache) GetCandidateSnapshot(ctx context.Context, bucket servic
 		return nil, false, err
 	}
 
-	masters := make([]*service.Account, 0, len(values))
+	accounts := make(service.CandidateSet, 0, len(values))
 	accountKeys := make([]schedulerAccountPoolKey, 0, len(values))
 	cacheable := true
 	for i, val := range values {
@@ -400,7 +400,7 @@ func (c *schedulerCache) GetCandidateSnapshot(ctx context.Context, bucket servic
 		if err != nil {
 			return nil, false, err
 		}
-		masters = append(masters, account)
+		accounts = append(accounts, service.NewCandidateView(account, account.LastUsedAt))
 		accountKeys = append(accountKeys, key)
 		cacheable = cacheable && retained
 	}
@@ -420,7 +420,7 @@ func (c *schedulerCache) GetCandidateSnapshot(ctx context.Context, bucket servic
 		c.storeSnapshotEntry(bucketKey, entry)
 	}
 
-	accounts, err := c.snapshotCandidates(ctx, masters, lastUsedKeys)
+	accounts, err = c.snapshotCandidates(ctx, accounts, lastUsedKeys)
 	if err != nil {
 		return nil, false, err
 	}
@@ -436,26 +436,25 @@ func (e *schedulerSnapshotEntry) matches(active string, revisions []string, now 
 }
 
 func (c *schedulerCache) snapshotCandidatesFromEntry(ctx context.Context, entry *schedulerSnapshotEntry) (service.CandidateSet, error) {
-	masters := c.resolveSchedulerAccounts(entry.accountKeys, c.now())
-	if masters == nil {
+	accounts := c.resolveSchedulerCandidates(entry.accountKeys, c.now())
+	if accounts == nil {
 		return nil, nil
 	}
-	return c.snapshotCandidates(ctx, masters, entry.lastUsedKeys)
+	return c.snapshotCandidates(ctx, accounts, entry.lastUsedKeys)
 }
 
 // Only hot LastUsed state and small views belong to the request.
-func (c *schedulerCache) snapshotCandidates(ctx context.Context, masters []*service.Account, lastUsedKeys []string) (service.CandidateSet, error) {
+func (c *schedulerCache) snapshotCandidates(ctx context.Context, accounts service.CandidateSet, lastUsedKeys []string) (service.CandidateSet, error) {
 	lastUsedValues, err := c.mgetChunked(ctx, lastUsedKeys)
 	if err != nil {
 		return nil, err
 	}
-	if len(lastUsedValues) != len(masters) {
-		return nil, fmt.Errorf("unexpected scheduler last_used value count: got %d, want %d", len(lastUsedValues), len(masters))
+	if len(lastUsedValues) != len(accounts) {
+		return nil, fmt.Errorf("unexpected scheduler last_used value count: got %d, want %d", len(lastUsedValues), len(accounts))
 	}
-	accounts := make(service.CandidateSet, len(masters))
 	var times []time.Time
-	for i, master := range masters {
-		lastUsed := master.LastUsedAt
+	for i := range accounts {
+		lastUsed := accounts[i].LastUsedAt
 		if lastUsedValues[i] != nil {
 			value, err := schedulerCacheOptionalString(lastUsedValues[i])
 			if err != nil {
@@ -468,13 +467,13 @@ func (c *schedulerCache) snapshotCandidates(ctx context.Context, masters []*serv
 			updated := time.UnixMilli(millis).UTC()
 			if lastUsed == nil || updated.After(*lastUsed) {
 				if times == nil {
-					times = make([]time.Time, len(masters))
+					times = make([]time.Time, len(accounts))
 				}
 				times[i] = updated
 				lastUsed = &times[i]
 			}
 		}
-		accounts[i] = service.NewCandidateView(master, lastUsed)
+		accounts[i].LastUsedAt = lastUsed
 	}
 	return accounts, nil
 }
