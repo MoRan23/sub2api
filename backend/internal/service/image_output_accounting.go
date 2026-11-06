@@ -15,6 +15,9 @@ type openAIImageOutputCounter struct {
 	dataSizes    []string
 	count        int
 	maxDataCount int
+	// Engine parses a large image frame once. Retained scalar metadata must
+	// not keep that temporary JSON string alive after the frame is released.
+	ownStrings bool
 }
 
 func newOpenAIImageOutputCounter() *openAIImageOutputCounter {
@@ -112,6 +115,9 @@ func (c *openAIImageOutputCounter) addDataArray(data gjson.Result) {
 		}
 		imageCount++
 		if size := strings.TrimSpace(item.Get("size").String()); size != "" {
+			if c.ownStrings {
+				size = strings.Clone(size)
+			}
 			sizes = append(sizes, size)
 		}
 	}
@@ -141,7 +147,13 @@ func (c *openAIImageOutputCounter) addImageOutputItem(item gjson.Result) {
 	if itemType != "" && itemType != "image_generation_call" && itemType != "image_generation.completed" && itemType != "image_edit.completed" {
 		return
 	}
-	if strings.Contains(strings.ToLower(item.Raw), "partial_image") {
+	partial := false
+	if c.ownStrings {
+		partial = codexEngineContainsPartialImage(item.Raw)
+	} else {
+		partial = strings.Contains(strings.ToLower(item.Raw), "partial_image")
+	}
+	if partial {
 		return
 	}
 	result := strings.TrimSpace(item.Get("result").String())
@@ -165,6 +177,9 @@ func (c *openAIImageOutputCounter) addImageOutputItem(item gjson.Result) {
 		return
 	}
 	size := strings.TrimSpace(item.Get("size").String())
+	if c.ownStrings {
+		key, size = strings.Clone(key), strings.Clone(size)
+	}
 	if _, exists := c.seen[key]; exists {
 		if size != "" && strings.TrimSpace(c.seenSizes[key]) == "" {
 			c.seenSizes[key] = size

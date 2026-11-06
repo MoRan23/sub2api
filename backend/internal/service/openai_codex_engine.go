@@ -1,7 +1,6 @@
 package service
 
 import (
-	"bufio"
 	"bytes"
 	"context"
 	"encoding/base64"
@@ -16,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/runtimeobs"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
@@ -465,6 +465,12 @@ func flushCodexEngineWriter(writer gin.ResponseWriter) error {
 }
 
 func observeCodexEnginePayload(result *OpenAIForwardResult, data []byte, event string) {
+	observeCodexEnginePayloadFields(result, data, event)
+	root := observeCodexEngineImages(result, data, nil)
+	observeCodexEngineUsageFinalityParsed(result, data, event, root)
+}
+
+func observeCodexEnginePayloadFields(result *OpenAIForwardResult, data []byte, event string) {
 	parseOpenAIResponseUsageInto(data, event, &result.Usage)
 	if usage, ok := openAIUsageFromGJSON(gjson.GetBytes(data, "message.usage")); ok {
 		mergeOpenAIUsageNonZero(&result.Usage, usage)
@@ -487,56 +493,16 @@ func observeCodexEnginePayload(result *OpenAIForwardResult, data []byte, event s
 			break
 		}
 	}
-	if sizes := collectOpenAIResponseImageOutputSizesFromJSONBytes(data); len(sizes) > 0 {
-		result.ImageOutputSizes = sizes
-	}
-	if count := extractOpenAIImagesBillableCountFromJSONBytes(data); count > result.ImageCount {
-		result.ImageCount = count
-	}
-	observeCodexEngineUsageFinality(result, data, event)
 }
 
 // Relay complete SSE frames without rewriting their bytes. A separate reader
 // keeps the existing idle/first-output deadlines effective even on a stalled body.
 func (s *OpenAIGatewayService) relayCodexEngineStream(ctx, downstreamCtx context.Context, c *gin.Context, resp *http.Response, result *OpenAIForwardResult, firstTimer *time.Timer, start time.Time, imageRequest bool, cancel context.CancelCauseFunc) error {
-	type readResult struct {
-		line []byte
-		err  error
-	}
-	lines := make(chan readResult, 1)
-	done := make(chan struct{})
-	defer close(done)
+	defer runtimeobs.Default.BeginSSE()()
 	maxLine := defaultMaxLineSize
 	if s.cfg != nil && s.cfg.Gateway.MaxLineSize > 0 {
 		maxLine = s.cfg.Gateway.MaxLineSize
 	}
-	go func() {
-		reader := bufio.NewReader(resp.Body)
-		for {
-			var line []byte
-			var err error
-			for {
-				var piece []byte
-				piece, err = reader.ReadSlice('\n')
-				line = append(line, piece...)
-				if len(line) > maxLine {
-					err = fmt.Errorf("upstream SSE line exceeds configured limit")
-					break
-				}
-				if err != bufio.ErrBufferFull {
-					break
-				}
-			}
-			select {
-			case lines <- readResult{line, err}:
-			case <-done:
-				return
-			}
-			if err != nil {
-				return
-			}
-		}
-	}()
 	idle := time.Duration(0)
 	if s.cfg != nil {
 		idle = time.Duration(s.cfg.Gateway.StreamDataIntervalTimeout) * time.Second
@@ -544,6 +510,8 @@ func (s *OpenAIGatewayService) relayCodexEngineStream(ctx, downstreamCtx context
 	if imageRequest {
 		idle = s.openAIImageStreamDataInterval()
 	}
+	reader := newCodexEngineSSEReader(resp.Body, maxLine, idle > 0)
+	defer reader.stop()
 	var timer *time.Timer
 	var timeout <-chan time.Time
 	if idle > 0 {
@@ -552,8 +520,7 @@ func (s *OpenAIGatewayService) relayCodexEngineStream(ctx, downstreamCtx context
 		timeout = timer.C
 	}
 	c.Status(resp.StatusCode)
-	var frame, payload []byte
-	event, terminal := "", false
+	terminal := false
 	var streamFailure *codexEngineResponseError
 	var clientDone <-chan struct{}
 	if downstreamCtx != nil {
@@ -568,18 +535,16 @@ func (s *OpenAIGatewayService) relayCodexEngineStream(ctx, downstreamCtx context
 		return err
 	}
 	imageCounter := newOpenAIImageOutputCounter()
-	flush := func() error {
+	flush := func(frame *codexEngineSSEFrame) error {
+		payload, event := frame.payload(), frame.eventName()
 		kind := event
 		if kind == "" {
 			kind = gjson.GetBytes(payload, "type").String()
 		}
-		observeCodexEnginePayload(result, payload, kind)
-		imageCounter.AddSSEData(payload)
-		result.ImageCount = max(result.ImageCount, imageCounter.Count())
-		if sizes := imageCounter.Sizes(); len(sizes) > 0 {
-			result.ImageOutputSizes = sizes
-		}
-		semantic := openAIStreamDataStartsSemanticTTFT(string(payload), kind)
+		observeCodexEnginePayloadFields(result, payload, kind)
+		root := observeCodexEngineImages(result, payload, imageCounter)
+		observeCodexEngineUsageFinalityParsed(result, payload, kind, root)
+		semantic := codexEngineStreamStartsSemanticTTFT(payload, kind)
 		if kind == "message_start" || kind == "ping" {
 			semantic = false
 		}
@@ -628,7 +593,14 @@ func (s *OpenAIGatewayService) relayCodexEngineStream(ctx, downstreamCtx context
 			return markClientDisconnected(downstreamCtx.Err())
 		}
 		c.Set("codex_engine_response_written", true)
-		if n, err := c.Writer.Write(frame); err != nil || n != len(frame) {
+		var n int
+		var err error
+		if writer, ok := c.Writer.(*codexEngineWSWriter); ok {
+			n, err = writer.writeSSEFrame(frame.raw, payload, event)
+		} else {
+			n, err = c.Writer.Write(frame.raw)
+		}
+		if err != nil || n != len(frame.raw) {
 			if err == nil {
 				err = io.ErrShortWrite
 			}
@@ -643,7 +615,6 @@ func (s *OpenAIGatewayService) relayCodexEngineStream(ctx, downstreamCtx context
 		if downstreamCtx != nil && downstreamCtx.Err() != nil {
 			return markClientDisconnected(downstreamCtx.Err())
 		}
-		frame, payload, event = nil, nil, ""
 		return nil
 	}
 	for {
@@ -659,11 +630,15 @@ func (s *OpenAIGatewayService) relayCodexEngineStream(ctx, downstreamCtx context
 		case <-clientDone:
 			return markClientDisconnected(downstreamCtx.Err())
 		case <-timeout:
+			if remaining := reader.idleRemaining(idle); remaining > 0 {
+				timer.Reset(remaining)
+				continue
+			}
 			if streamFailure != nil {
 				return streamFailure
 			}
 			return fmt.Errorf("Codex-Engine stream idle timeout")
-		case item := <-lines:
+		case <-reader.progress:
 			if timer != nil {
 				if !timer.Stop() {
 					select {
@@ -671,45 +646,45 @@ func (s *OpenAIGatewayService) relayCodexEngineStream(ctx, downstreamCtx context
 					default:
 					}
 				}
-				timer.Reset(idle)
-			}
-			frame = append(frame, item.line...)
-			line := bytes.TrimRight(item.line, "\r\n")
-			if bytes.HasPrefix(line, []byte("data:")) {
-				if len(payload) > 0 {
-					payload = append(payload, '\n')
+				remaining := reader.idleRemaining(idle)
+				if remaining <= 0 {
+					remaining = time.Nanosecond
 				}
-				payload = append(payload, bytes.TrimPrefix(line[5:], []byte(" "))...)
-			} else if bytes.HasPrefix(line, []byte("event:")) {
-				event = strings.TrimSpace(string(line[6:]))
+				timer.Reset(remaining)
 			}
-			if len(frame) > maxLine {
-				limitErr := fmt.Errorf("upstream SSE event exceeds configured limit")
+		case frame, ok := <-reader.frames:
+			if !ok {
+				return ErrOpenAIUpstreamStreamTruncated
+			}
+			runtimeobs.Default.ObserveSSEBuffer(int64(cap(frame.raw) + cap(frame.scratch)))
+			readErr := frame.err
+			if frame.oversized {
+				reader.release(frame)
 				if streamFailure != nil {
-					return errors.Join(streamFailure, limitErr)
+					return errors.Join(streamFailure, readErr)
 				}
-				return limitErr
+				return readErr
 			}
-			if len(line) == 0 || item.err != nil {
-				if err := flush(); err != nil {
-					return err
-				}
-				if terminal {
-					if firstTimer != nil {
-						firstTimer.Stop()
-					}
-					if streamFailure != nil {
-						return streamFailure
-					}
-					return nil
-				}
+			err := flush(frame)
+			reader.release(frame)
+			if err != nil {
+				return err
 			}
-			if item.err != nil {
+			if terminal {
+				if firstTimer != nil {
+					firstTimer.Stop()
+				}
 				if streamFailure != nil {
 					return streamFailure
 				}
-				if item.err != io.EOF {
-					return item.err
+				return nil
+			}
+			if readErr != nil {
+				if streamFailure != nil {
+					return streamFailure
+				}
+				if readErr != io.EOF {
+					return readErr
 				}
 				if !terminal {
 					return ErrOpenAIUpstreamStreamTruncated

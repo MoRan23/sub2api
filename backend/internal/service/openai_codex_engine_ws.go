@@ -191,7 +191,7 @@ func (s *OpenAIGatewayService) proxyCodexEngineWebSocket(ctx context.Context, c 
 }
 
 func prepareCodexEngineWSBody(payload []byte, fallbackModel string) ([]byte, string, error) {
-	if !gjson.ValidBytes(payload) || !gjson.ParseBytes(payload).IsObject() {
+	if !gjson.ValidBytes(payload) || len(bytes.TrimSpace(payload)) == 0 || bytes.TrimSpace(payload)[0] != '{' {
 		return nil, "", errors.New("response.create payload must be a JSON object")
 	}
 	if kind := gjson.GetBytes(payload, "type").String(); kind != "" && kind != "response.create" {
@@ -268,7 +268,26 @@ func (w *codexEngineWSWriter) Write(data []byte) (int, error) {
 			return len(data), nil
 		}
 	}
-	if !gjson.ValidBytes(payload) || !gjson.ParseBytes(payload).IsObject() {
+	return w.writePayload(data, payload, event)
+}
+
+// The relay has already parsed this frame. Its data view is borrowed until the
+// synchronous websocket write returns; only missing protocol fields allocate.
+func (w *codexEngineWSWriter) writeSSEFrame(data, payload []byte, event string) (int, error) {
+	if w.err != nil {
+		return 0, w.err
+	}
+	w.written = true
+	payload = bytes.TrimSpace(payload)
+	if len(payload) == 0 || bytes.Equal(payload, []byte("[DONE]")) {
+		w.size += len(data)
+		return len(data), nil
+	}
+	return w.writePayload(data, payload, event)
+}
+
+func (w *codexEngineWSWriter) writePayload(data, payload []byte, event string) (int, error) {
+	if len(payload) == 0 || payload[0] != '{' || !gjson.ValidBytes(payload) {
 		w.err = errors.New("invalid Engine response event")
 		return 0, w.err
 	}

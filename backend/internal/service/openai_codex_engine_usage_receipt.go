@@ -83,6 +83,12 @@ func newCodexEngineUsageReceipt(id string, input *OpenAIRecordUsageInput) *codex
 // settle from completed/incomplete usage; failed usage remains partial. Chat
 // needs [DONE]; Messages needs message_stop after a complete final delta.
 func observeCodexEngineUsageFinality(result *OpenAIForwardResult, data []byte, event string) {
+	observeCodexEngineUsageFinalityParsed(result, data, event, nil)
+}
+
+// An image observation may already own a validated JSON root for this frame.
+// Share it for receipt finality instead of materializing the same image again.
+func observeCodexEngineUsageFinalityParsed(result *OpenAIForwardResult, data []byte, event string, parsed *gjson.Result) {
 	if result == nil || codexEngineUsageIDFromHeaders(result.UpstreamHeaders) == "" {
 		return
 	}
@@ -111,7 +117,7 @@ func observeCodexEngineUsageFinality(result *OpenAIForwardResult, data []byte, e
 	if result.Stream && event != "message_stop" && !bytes.Contains(data, []byte(`"usage"`)) {
 		return
 	}
-	if !gjson.ValidBytes(data) {
+	if parsed == nil && !gjson.ValidBytes(data) {
 		// Do not let a malformed final usage frame settle the previous partial
 		// Chat/Messages candidate when its closing marker arrives.
 		result.codexEngineUsageChatObserved = false
@@ -120,7 +126,12 @@ func observeCodexEngineUsageFinality(result *OpenAIForwardResult, data []byte, e
 	}
 	complete := false
 	var completeUsage OpenAIUsage
-	root := gjson.ParseBytes(data)
+	var root gjson.Result
+	if parsed != nil {
+		root = *parsed
+	} else {
+		root = gjson.ParseBytes(data)
+	}
 	if event == "response.failed" || root.Get("type").String() == "response.failed" || root.Get("status").String() == "failed" || root.Get("response.status").String() == "failed" {
 		return
 	}
