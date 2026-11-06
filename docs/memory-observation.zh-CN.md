@@ -51,7 +51,7 @@ RSS 与 Go 运行时指标使用不同的内存统计口径，结合流量和缓
 
 ### 请求体与 SSE
 
-`activity.active_bodies`、`active_body_bytes` 表示正在处理的请求中已观察到的逻辑入站正文。开始读取字节后才计入，大小取累计 wire 读取量与解码、规范化后正文大小的最大值。预读取和重复读取同一正文共用计数，最外层请求中间件返回时释放数值统计。观测包装器只保存数字，原样转发底层读取结果和 Close；原有正文限额保持生效。
+`activity.active_bodies`、`active_body_bytes` 统计正在处理的逻辑 HTTP 正文和 WebSocket create 消息。HTTP 正文开始读取后计入，大小取累计 wire 读取量与解码、规范化后大小的最大值；预读取和重复读取共用计数，最外层中间件返回时释放。WebSocket 首帧在准入和槽位等待之前计入，后续 create 帧从实际读入开始计入，包含原生 WS 和 Engine bridge 的待处理队列。原生、透传、HTTP bridge 与 Sub2API 自身的专用 Engine bridge 均以数值租约跟随消息处理；重试和重放复用当前租约，终态、拒绝或连接清理时释放。租约只保存数字，原有读取限额、帧内容、调度和结算行为保持不变。
 
 该指标统计逻辑正文大小，正文副本和中间分配的内存另由堆/RSS 趋势反映。`active_large_bodies` 与 `active_large_body_bytes` 统计其中 **不小于 1 MiB** 的正文。每个非空请求作用域结束时，向 `body_size_bytes` 记录一次最终观察大小。
 

@@ -2666,6 +2666,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		return
 	}
 	firstTurnStartedAt := time.Now()
+	wsBodyObservation := service.StartOpenAIWSBodyObservation(c, len(firstMessage))
+	defer wsBodyObservation.Close()
 	if msgType != coderws.MessageText && msgType != coderws.MessageBinary {
 		closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, "unsupported websocket message type")
 		return

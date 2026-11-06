@@ -13,6 +13,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/runtimeobs"
 	openaiwsv2 "github.com/Wei-Shaw/sub2api/internal/service/openai_ws_v2"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
@@ -40,9 +41,10 @@ type openAIWSClientFrameConn struct {
 //     stops reading from the client.
 //   - _, _, err: a transport error other than block.
 type openAIWSPolicyEnforcingFrameConn struct {
-	inner   openaiwsv2.FrameConn
-	filter  func(msgType coderws.MessageType, payload []byte) ([]byte, *OpenAIFastBlockedError, error)
-	onBlock func(blocked *OpenAIFastBlockedError)
+	inner           openaiwsv2.FrameConn
+	bodyObservation *runtimeobs.BodyTracker
+	filter          func(msgType coderws.MessageType, payload []byte) ([]byte, *OpenAIFastBlockedError, error)
+	onBlock         func(blocked *OpenAIFastBlockedError)
 }
 
 var _ openaiwsv2.FrameConn = (*openAIWSPolicyEnforcingFrameConn)(nil)
@@ -55,19 +57,33 @@ func (c *openAIWSPolicyEnforcingFrameConn) ReadFrame(ctx context.Context) (coder
 	if err != nil {
 		return msgType, payload, err
 	}
+	var bodyLease *runtimeobs.BodyLease
+	if (msgType == coderws.MessageText || msgType == coderws.MessageBinary) && gjson.GetBytes(payload, "type").String() == "response.create" {
+		bodyLease = c.bodyObservation.Begin(int64(len(payload)))
+	}
 	if c.filter == nil {
+		c.bodyObservation.Activate(bodyLease)
 		return msgType, payload, nil
 	}
 	updated, blocked, filterErr := c.filter(msgType, payload)
 	if filterErr != nil {
+		var failover *UpstreamFailoverError
+		if errors.As(filterErr, &failover) {
+			c.bodyObservation.Activate(bodyLease)
+		} else {
+			bodyLease.Release()
+		}
 		return msgType, payload, filterErr
 	}
 	if blocked != nil {
+		bodyLease.Release()
 		if c.onBlock != nil {
 			c.onBlock(blocked)
 		}
 		return msgType, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, blocked.Message, blocked)
 	}
+	bodyLease.ObserveSize(int64(len(updated)))
+	c.bodyObservation.Activate(bodyLease)
 	return msgType, updated, nil
 }
 
@@ -744,6 +760,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if account == nil {
 		return errors.New("account is nil")
 	}
+	bodyObservation := openAIWSBodyObservation(c)
+	if bodyObservation == nil {
+		bodyObservation = StartOpenAIWSBodyObservation(c, len(firstClientMessage))
+		defer bodyObservation.Close()
+	}
 	firstAcceptedAt := time.Now()
 	ctx = s.freezeOpenAIRequestPolicy(ctx, c)
 	SetOpenAIClientTransport(c, OpenAIClientTransportWS)
@@ -1201,7 +1222,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		},
 	}
 	policyClientConn := &openAIWSPolicyEnforcingFrameConn{
-		inner: clientFrameConn,
+		inner:           clientFrameConn,
+		bodyObservation: bodyObservation,
 		// 注意线程安全：filter 仅在 runClientToUpstream 这一条
 		// goroutine 中被调用（passthrough_relay.go: ReadFrame loop），
 		// capturedSessionModel 的读写都发生在该 goroutine 内，因此无需
@@ -1494,6 +1516,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				)
 			},
 			OnTurnComplete: func(turn openaiwsv2.RelayTurnResult) {
+				bodyObservation.CompleteCurrent()
 				turnNo := int(completedTurns.Add(1))
 				if hooks != nil && hooks.TurnStarted != nil && !turn.StartedAt.IsZero() {
 					hooks.TurnStarted(turnNo, turn.StartedAt)
@@ -1553,6 +1576,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			AfterClientWrite: func(msgType coderws.MessageType, payload []byte, writeErr error) error {
 				isDataFrame := msgType == coderws.MessageText || msgType == coderws.MessageBinary
 				isTerminal := isDataFrame && openAIWSPassthroughIsTerminalOutput(payload)
+				if isTerminal {
+					bodyObservation.CompleteCurrent()
+				}
 				if writeErr != nil || isTerminal {
 					currentTelemetry().markDelivery(writeErr == nil)
 				}

@@ -334,7 +334,7 @@ func TestOpenAIWSNativeRetireWaitsForControlWrite(t *testing.T) {
 	pool.accounts.Store(int64(1), &openAIWSAccountPool{conns: map[string]*openAIWSConn{conn.id: conn}})
 	lease := &openAIWSConnLease{conn: conn, pool: pool, accountID: 1}
 	localAcks := make(chan []byte, 1)
-	control := &openAIWSNativeControl{creates: make(chan []byte, 1), writeTimeout: time.Second, writer: func(payload []byte) error { localAcks <- payload; return nil }}
+	control := &openAIWSNativeControl{creates: make(chan openAIWSObservedCreate, 1), writeTimeout: time.Second, writer: func(payload []byte) error { localAcks <- payload; return nil }}
 	control.begin(context.Background(), lease)
 	control.observeCreated("resp_barrier")
 	writeDone := make(chan error, 1)

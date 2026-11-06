@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/runtimeobs"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -22,6 +23,11 @@ import (
 // The original previous_response_id, tools, metadata, and opaque input are never
 // rebuilt from connection history or replayed after an ambiguous execution.
 func (s *OpenAIGatewayService) proxyCodexEngineWebSocket(ctx context.Context, c *gin.Context, conn *coderws.Conn, account *Account, first []byte, hooks *OpenAIWSIngressHooks) error {
+	bodyObservation := openAIWSBodyObservation(c)
+	if bodyObservation == nil {
+		bodyObservation = StartOpenAIWSBodyObservation(c, len(first))
+		defer bodyObservation.Close()
+	}
 	if s.cfg != nil && s.cfg.Gateway.OpenAIWS.ModeRouterV2Enabled && account.ResolveOpenAIResponsesWebSocketV2Mode(s.cfg.Gateway.OpenAIWS.IngressModeDefault) == OpenAIWSIngressModeOff {
 		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "websocket mode is disabled for this account", nil)
 	}
@@ -33,7 +39,11 @@ func (s *OpenAIGatewayService) proxyCodexEngineWebSocket(ctx context.Context, c 
 	}
 	SetOpenAIClientTransport(c, OpenAIClientTransportWS)
 	conn.SetReadLimit(ResolveOpenAIWSClientReadLimitBytes(s.cfg))
-	frames := make(chan openAIWSClientReadResult, 1)
+	type observedEngineFrame struct {
+		openAIWSClientReadResult
+		body *runtimeobs.BodyLease
+	}
+	frames := make(chan observedEngineFrame, 1)
 	readerDone := make(chan struct{})
 	write := func(payload []byte) error {
 		writeCtx, release := context.WithTimeout(ctx, s.openAIWSWriteTimeout())
@@ -66,11 +76,14 @@ func (s *OpenAIGatewayService) proxyCodexEngineWebSocket(ctx context.Context, c 
 				}
 				continue
 			}
+			frame := observedEngineFrame{openAIWSClientReadResult: openAIWSClientReadResult{messageType: kind, payload: payload}, body: bodyObservation.Begin(int64(len(payload)))}
 			select {
-			case frames <- openAIWSClientReadResult{messageType: kind, payload: payload}:
+			case frames <- frame:
 			case <-ctx.Done():
+				frame.body.Release()
 				return
 			default:
+				frame.body.Release()
 				// One pending create is enough; never stop reading a disconnected
 				// peer behind an unbounded request queue.
 				_ = conn.Close(coderws.StatusPolicyViolation, "only one pending response.create is allowed")
@@ -83,6 +96,14 @@ func (s *OpenAIGatewayService) proxyCodexEngineWebSocket(ctx context.Context, c 
 		cancel()
 		_ = conn.CloseNow()
 		<-readerDone
+		for {
+			select {
+			case frame := <-frames:
+				frame.body.Release()
+			default:
+				return
+			}
+		}
 	}()
 	model := ""
 	if hooks != nil {
@@ -156,6 +177,7 @@ func (s *OpenAIGatewayService) proxyCodexEngineWebSocket(ctx context.Context, c 
 			}
 			return err
 		}()
+		bodyObservation.CompleteCurrent()
 		if forwardErr != nil {
 			if ctx.Err() != nil {
 				return ctx.Err()
@@ -179,6 +201,7 @@ func (s *OpenAIGatewayService) proxyCodexEngineWebSocket(ctx context.Context, c 
 				timer.Stop()
 			}
 			payload = next.payload
+			bodyObservation.Activate(next.body)
 		case <-ctx.Done():
 			if timer != nil {
 				timer.Stop()

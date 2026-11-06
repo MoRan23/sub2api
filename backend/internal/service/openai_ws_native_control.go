@@ -9,6 +9,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/runtimeobs"
 	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/tidwall/gjson"
@@ -36,31 +37,37 @@ func NewOpenAIWSInterruptCleanupError() error {
 // Read would close it. detach synchronizes with all control writes before the
 // attempt releases its upstream lease. The handler's final close joins Read.
 type openAIWSNativeControl struct {
-	mu             sync.Mutex
-	writerMu       sync.Mutex
-	writer         func([]byte) error
-	conn           *coderws.Conn
-	readCtx        context.Context
-	readIOCtx      context.Context
-	cancelRead     context.CancelFunc
-	idleTimeout    time.Duration
-	writeTimeout   time.Duration
-	startOnce      sync.Once
-	started        atomic.Bool
-	creates        chan []byte
-	done           chan struct{}
-	readErr        error
-	lease          *openAIWSConnLease
-	responseID     string
-	pendingAck     bool
-	interrupted    bool
-	terminalSeen   bool
-	retire         bool
-	turnCtx        context.Context
-	turnCancel     context.CancelFunc
-	drainTimer     *time.Timer
-	idleTimer      *time.Timer
-	idleGeneration uint64
+	mu              sync.Mutex
+	writerMu        sync.Mutex
+	writer          func([]byte) error
+	conn            *coderws.Conn
+	readCtx         context.Context
+	readIOCtx       context.Context
+	cancelRead      context.CancelFunc
+	idleTimeout     time.Duration
+	writeTimeout    time.Duration
+	startOnce       sync.Once
+	started         atomic.Bool
+	creates         chan openAIWSObservedCreate
+	bodyObservation *runtimeobs.BodyTracker
+	done            chan struct{}
+	readErr         error
+	lease           *openAIWSConnLease
+	responseID      string
+	pendingAck      bool
+	interrupted     bool
+	terminalSeen    bool
+	retire          bool
+	turnCtx         context.Context
+	turnCancel      context.CancelFunc
+	drainTimer      *time.Timer
+	idleTimer       *time.Timer
+	idleGeneration  uint64
+}
+
+type openAIWSObservedCreate struct {
+	payload []byte
+	body    *runtimeobs.BodyLease
 }
 
 func getOpenAIWSNativeControl(c *gin.Context, ctx context.Context, conn *coderws.Conn, idleTimeout, writeTimeout time.Duration, writer func([]byte) error) *openAIWSNativeControl {
@@ -71,7 +78,8 @@ func getOpenAIWSNativeControl(c *gin.Context, ctx context.Context, conn *coderws
 	if control == nil || control.conn != conn {
 		control = &openAIWSNativeControl{
 			conn: conn, readCtx: ctx, idleTimeout: idleTimeout,
-			creates: make(chan []byte, 1), done: make(chan struct{}),
+			creates: make(chan openAIWSObservedCreate, 1), done: make(chan struct{}),
+			bodyObservation: openAIWSBodyObservation(c),
 		}
 		control.readIOCtx, control.cancelRead = context.WithCancel(context.Background())
 		c.Set(openAIWSNativeControlContextKey, control)
@@ -149,6 +157,16 @@ func (c *openAIWSNativeControl) readFrame() (coderws.MessageType, []byte, error)
 
 func (c *openAIWSNativeControl) readLoop() {
 	defer close(c.done)
+	defer func() {
+		for {
+			select {
+			case frame := <-c.creates:
+				frame.body.Release()
+			default:
+				return
+			}
+		}
+	}()
 	for {
 		kind, payload, err := c.readFrame()
 		if err != nil {
@@ -168,12 +186,14 @@ func (c *openAIWSNativeControl) readLoop() {
 		}
 		// Keep at most one next request without blocking control frames behind
 		// it. Admission, payload adaptation and hooks stay on the turn owner.
+		frame := openAIWSObservedCreate{payload: payload, body: c.bodyObservation.Begin(int64(len(payload)))}
 		select {
-		case c.creates <- payload:
+		case c.creates <- frame:
 			c.mu.Lock()
 			c.stopIdleLocked()
 			c.mu.Unlock()
 		default:
+			frame.body.Release()
 			c.readerStopped(NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "too many pending websocket requests", nil))
 			return
 		}
@@ -203,8 +223,9 @@ func (c *openAIWSNativeControl) next(ctx context.Context) ([]byte, error) {
 	default:
 	}
 	select {
-	case payload := <-c.creates:
-		return payload, nil
+	case frame := <-c.creates:
+		c.bodyObservation.Activate(frame.body)
+		return frame.payload, nil
 	case <-c.done:
 		c.mu.Lock()
 		defer c.mu.Unlock()

@@ -85,6 +85,14 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	if account == nil {
 		return errors.New("account is nil")
 	}
+	bodyObservation := openAIWSBodyObservation(c)
+	if bodyObservation == nil {
+		bodyObservation = StartOpenAIWSBodyObservation(c, len(firstClientMessage))
+		defer bodyObservation.Close()
+	} else {
+		bodyObservation.EnsureCurrent(int64(len(firstClientMessage)))
+	}
+	defer func() { finishOpenAIWSObservedTurn(bodyObservation, returnErr) }()
 	if account.IsCodexEngine() {
 		// Engine exposes HTTP/SSE, not a public Responses WebSocket endpoint.
 		// Keep its raw forwarding, durable metering and cancellation contract for
@@ -557,6 +565,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			}
 			return nil, readErr
 		}
+		bodyObservation.Activate(bodyObservation.Begin(int64(len(payload))))
 		if msgType != coderws.MessageText && msgType != coderws.MessageBinary {
 			return nil, NewOpenAIWSClientCloseError(
 				coderws.StatusPolicyViolation,
@@ -830,6 +839,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			if hooks != nil && hooks.AfterTurn != nil {
 				hooks.AfterTurn(turn, result, bridgeErr)
 			}
+			finishOpenAIWSObservedTurn(bodyObservation, bridgeErr)
 			if cyberRejected {
 				closeOpenAIWSCyberPolicyClient(clientConn)
 				return nil
@@ -2258,6 +2268,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if hooks != nil && hooks.AfterTurn != nil {
 			hooks.AfterTurn(turn, result, nil)
 		}
+		bodyObservation.CompleteCurrent()
 		if nativeControl.mustRetire() {
 			resetSessionLease(true)
 			if nativeControl.clientGone() {
