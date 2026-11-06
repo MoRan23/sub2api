@@ -1,14 +1,12 @@
 package handler
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"strconv"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/typesafe"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -258,30 +256,21 @@ func (h *GatewayHandler) recordSystemOneUsage(c *gin.Context, apiKey *service.AP
 	sessionID := service.ExtractClientSessionID(c)
 	requestPayloadHash := service.HashUsageRequestPayload(body)
 
-	h.submitMandatoryUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
-		if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
-			Result:             &result.ForwardResult,
-			APIKey:             apiKey,
-			User:               apiKey.User,
-			Account:            account,
-			Subscription:       subscription,
-			PricingAt:          pricingAt,
-			InboundEndpoint:    inboundEndpoint,
-			UpstreamEndpoint:   upstreamEndpoint,
-			UserAgent:          userAgent,
-			IPAddress:          clientIP,
-			SessionID:          sessionID,
-			RequestPayloadHash: requestPayloadHash,
-			APIKeyService:      h.apiKeyService,
-			QuotaPlatform:      quotaPlatform,
-			ChannelUsageFields: clientRequestedUsageFields(c, mapping, model, result.UpstreamModel),
-		}); err != nil {
-			logger.L().With(
-				zap.String("component", "handler.gateway.systemone"),
-				zap.Int64("user_id", userID),
-				zap.Int64("api_key_id", apiKey.ID),
-				zap.Int64("account_id", account.ID),
-			).Error("systemone.record_usage_failed", zap.Error(err))
-		}
-	})
+	h.submitFrozenUsageRecord(c.Request.Context(), &service.RecordUsageInput{
+		Result:             &result.ForwardResult,
+		APIKey:             apiKey,
+		User:               apiKey.User,
+		Account:            account,
+		Subscription:       subscription,
+		PricingAt:          pricingAt,
+		InboundEndpoint:    inboundEndpoint,
+		UpstreamEndpoint:   upstreamEndpoint,
+		UserAgent:          userAgent,
+		IPAddress:          clientIP,
+		SessionID:          sessionID,
+		RequestPayloadHash: requestPayloadHash,
+		APIKeyService:      h.apiKeyService,
+		QuotaPlatform:      quotaPlatform,
+		ChannelUsageFields: clientRequestedUsageFields(c, mapping, model, result.UpstreamModel),
+	}, usageRecordTaskOptions{component: "handler.gateway.systemone", failureEvent: "systemone.record_usage_failed", mandatory: true})
 }

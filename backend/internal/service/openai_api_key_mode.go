@@ -7,7 +7,7 @@ const OpenAIAPIKeyModeExtraKey = "openai_api_key_mode"
 // IsCodexEngine identifies the platform API adapter, independently of generic
 // passthrough and capability probe settings.
 func (a *Account) IsCodexEngine() bool {
-	return a != nil && a.IsOpenAIApiKey() && a.Extra[OpenAIAPIKeyModeExtraKey] == "codex_engine"
+	return a != nil && a.IsOpenAIApiKey() && a.GetExtraString(OpenAIAPIKeyModeExtraKey) == "codex_engine"
 }
 
 func ValidateOpenAIAPIKeyMode(platform, accountType string, extra map[string]any) error {

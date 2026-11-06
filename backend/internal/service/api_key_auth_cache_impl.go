@@ -218,6 +218,9 @@ func (s *APIKeyService) getAuthCacheEntry(ctx context.Context, cacheKey string) 
 	if err != nil {
 		return nil, false
 	}
+	if entry != nil {
+		prepareAPIKeyAuthBillingSnapshot(entry.Snapshot)
+	}
 	s.setAuthCacheL1(cacheKey, entry)
 	return entry, true
 }
@@ -442,6 +445,7 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			ProfitSafetyBuffer:              apiKey.Group.ProfitSafetyBuffer,
 		}
 	}
+	prepareAPIKeyAuthBillingSnapshot(snapshot)
 	return snapshot
 }
 
@@ -486,6 +490,7 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 	}
 	if snapshot.Group != nil {
 		apiKey.Group = &Group{
+			billingSnapshot:                 snapshot.Group.billingSnapshot,
 			ID:                              snapshot.Group.ID,
 			Name:                            snapshot.Group.Name,
 			Platform:                        snapshot.Group.Platform,

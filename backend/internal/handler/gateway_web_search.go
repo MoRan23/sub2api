@@ -240,34 +240,25 @@ func (h *GatewayHandler) WebSearch(c *gin.Context) {
 			).Info("gateway.web_search.search_price_per_1k_explicit_free")
 		}
 	}
-	h.submitMandatoryUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
-		if err := h.gatewayService.RecordUsage(ctx, &service.RecordUsageInput{
-			Result: &service.ForwardResult{
-				RequestID:   searchRequestID,
-				Model:       "grok-" + strings.ReplaceAll(searchLabel, "_", "-"),
-				SearchCount: 1,
-				Duration:    0,
-			},
-			APIKey:             apiKey,
-			User:               apiKey.User,
-			Account:            account,
-			Subscription:       subscription,
-			InboundEndpoint:    inboundEndpoint,
-			UpstreamEndpoint:   upstreamEndpoint,
-			UserAgent:          userAgent,
-			IPAddress:          clientIP,
-			RequestPayloadHash: requestPayloadHash,
-			APIKeyService:      h.apiKeyService,
-			QuotaPlatform:      quotaPlatform,
-		}); err != nil {
-			logger.L().With(
-				zap.String("component", "handler.gateway.web_search"),
-				zap.Int64("user_id", apiKey.User.ID),
-				zap.Int64("api_key_id", apiKey.ID),
-				zap.Int64("account_id", account.ID),
-			).Error("gateway.web_search.record_usage_failed", zap.Error(err))
-		}
-	})
+	h.submitFrozenUsageRecord(c.Request.Context(), &service.RecordUsageInput{
+		Result: &service.ForwardResult{
+			RequestID:   searchRequestID,
+			Model:       "grok-" + strings.ReplaceAll(searchLabel, "_", "-"),
+			SearchCount: 1,
+			Duration:    0,
+		},
+		APIKey:             apiKey,
+		User:               apiKey.User,
+		Account:            account,
+		Subscription:       subscription,
+		InboundEndpoint:    inboundEndpoint,
+		UpstreamEndpoint:   upstreamEndpoint,
+		UserAgent:          userAgent,
+		IPAddress:          clientIP,
+		RequestPayloadHash: requestPayloadHash,
+		APIKeyService:      h.apiKeyService,
+		QuotaPlatform:      quotaPlatform,
+	}, usageRecordTaskOptions{component: "handler.gateway.web_search", failureEvent: "gateway.web_search.record_usage_failed", mandatory: true})
 
 	c.JSON(http.StatusOK, gin.H{
 		"query":       req.Query,

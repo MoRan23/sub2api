@@ -163,6 +163,24 @@ func TestWrapUsageRecordTaskContext_HandsReservationToBillingTask(t *testing.T) 
 	require.Equal(t, 0, cache.count())
 }
 
+func TestWrapUsageRecordTaskContext_ReleasesReservationOnPanic(t *testing.T) {
+	cache := newHandlerInflightCache(1)
+	cfg := &config.Config{}
+	cfg.Billing.InflightReservation = config.InflightReservationConfig{Enabled: true, TTLSeconds: 60}
+	billing := service.NewBillingCacheService(cache, nil, nil, nil, nil, nil, cfg, nil)
+	t.Cleanup(billing.Stop)
+	c := newInflightTestGinContext()
+	done, err := reserveInflightBalance(c, billing, &countingEstimator{cost: 0.9, priced: true}, &service.APIKey{User: &service.User{ID: 5}}, nil, tokenInflightEstimate("m", nil))
+	require.NoError(t, err)
+	task, abandon := wrapUsageRecordTaskContext(c.Request.Context(), func(context.Context) { panic("billing failure") })
+	done()
+	require.Equal(t, 1, cache.count())
+	require.Panics(t, func() { task(context.Background()) })
+	require.Zero(t, cache.count())
+	abandon()
+	require.Zero(t, cache.count())
+}
+
 // 新接入的端点（独立 web_search）：在途预留超过余额时拒绝，且不残留预留。
 func TestWebSearch_RejectsWhenInflightExceedsBalance(t *testing.T) {
 	cache := newHandlerInflightCache(1.5)

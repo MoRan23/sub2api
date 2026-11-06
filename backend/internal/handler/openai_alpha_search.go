@@ -1,7 +1,6 @@
 package handler
 
 import (
-	"context"
 	"errors"
 	"net/http"
 	"strconv"
@@ -10,7 +9,6 @@ import (
 
 	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/ip"
-	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
@@ -305,33 +303,22 @@ func (h *OpenAIGatewayHandler) recordAlphaSearchUsage(
 	quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
 	cyberBlocked := service.GetOpsCyberPolicy(c) != nil
 
-	h.submitMandatoryUsageRecordTask(c.Request.Context(), func(ctx context.Context) {
-		if err := h.gatewayService.RecordUsage(ctx, &service.OpenAIRecordUsageInput{
-			Result:             result,
-			APIKey:             apiKey,
-			User:               apiKey.User,
-			Account:            account,
-			Subscription:       subscription,
-			InboundEndpoint:    inboundEndpoint,
-			UpstreamEndpoint:   upstreamEndpoint,
-			UserAgent:          userAgent,
-			IPAddress:          clientIP,
-			RequestPayloadHash: requestPayloadHash,
-			APIKeyService:      h.apiKeyService,
-			QuotaPlatform:      quotaPlatform,
-			SessionID:          sessionID,
-			ChannelUsageFields: channelMapping.ToUsageFields(requestedModel, result.UpstreamModel),
-			PricingAt:          service.OpenAIPricingAtFromContext(c.Request.Context()),
-			CyberBlocked:       cyberBlocked,
-		}); err != nil {
-			logger.L().With(
-				zap.String("component", "handler.openai_gateway.alpha_search"),
-				zap.Int64("user_id", userID),
-				zap.Int64("api_key_id", apiKey.ID),
-				zap.Any("group_id", apiKey.GroupID),
-				zap.String("model", requestedModel),
-				zap.Int64("account_id", account.ID),
-			).Error("openai_alpha_search.record_usage_failed", zap.Error(err))
-		}
-	})
+	h.submitFrozenOpenAIUsageRecord(c.Request.Context(), &service.OpenAIRecordUsageInput{
+		Result:             result,
+		APIKey:             apiKey,
+		User:               apiKey.User,
+		Account:            account,
+		Subscription:       subscription,
+		InboundEndpoint:    inboundEndpoint,
+		UpstreamEndpoint:   upstreamEndpoint,
+		UserAgent:          userAgent,
+		IPAddress:          clientIP,
+		RequestPayloadHash: requestPayloadHash,
+		APIKeyService:      h.apiKeyService,
+		QuotaPlatform:      quotaPlatform,
+		SessionID:          sessionID,
+		ChannelUsageFields: channelMapping.ToUsageFields(requestedModel, result.UpstreamModel),
+		PricingAt:          service.OpenAIPricingAtFromContext(c.Request.Context()),
+		CyberBlocked:       cyberBlocked,
+	}, usageRecordTaskOptions{component: "handler.openai_gateway.alpha_search", failureEvent: "openai_alpha_search.record_usage_failed", model: requestedModel, mandatory: true})
 }

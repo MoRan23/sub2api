@@ -58,6 +58,9 @@ type APIKeyAuthUserSnapshot struct {
 
 // APIKeyAuthGroupSnapshot 分组快照
 type APIKeyAuthGroupSnapshot struct {
+	// Rebuilt after Redis decoding, before publication; never part of the wire.
+	billingSnapshot *usageBillingGroupSnapshot
+
 	ID                              int64                         `json:"id"`
 	Name                            string                        `json:"name"`
 	Platform                        string                        `json:"platform"`

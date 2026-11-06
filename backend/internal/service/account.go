@@ -31,6 +31,7 @@ type Account struct {
 	Type                                 string
 	Credentials                          map[string]any
 	Extra                                map[string]any
+	usageBillingValues                   *usageAccountBillingValues
 	OpenAIOAuthOSProfiles                *OpenAIOAuthOSProfiles
 	OpenAIOAuthCredentialOS              string                    `json:"-"`
 	OpenAIOAuthCredentialOwnerID         int64                     `json:"-"`
@@ -400,6 +401,12 @@ func (a *Account) CanGetUsage() bool {
 }
 
 func (a *Account) GetCredential(key string) string {
+	if a.usageBillingValues != nil {
+		if key == "plan_type" {
+			return a.usageBillingValues.planType
+		}
+		return ""
+	}
 	if a.Credentials == nil {
 		return ""
 	}
@@ -1234,6 +1241,9 @@ func (a *Account) GetTypeSafeAPIKey() string {
 }
 
 func (a *Account) GetExtraString(key string) string {
+	if a.usageBillingValues != nil {
+		return a.usageBillingValues.extraString(key)
+	}
 	if a.Extra == nil {
 		return ""
 	}
@@ -1544,11 +1554,10 @@ func (a *Account) IsOpenAI() bool {
 }
 
 func (a *Account) IsOpenAILongContextBillingEnabled() bool {
-	if a == nil || !a.IsOpenAI() || a.Extra == nil {
+	if a == nil || !a.IsOpenAI() {
 		return false
 	}
-	enabled, ok := a.Extra[openAILongContextBillingEnabledKey].(bool)
-	return ok && enabled
+	return a.getExtraBool(openAILongContextBillingEnabledKey)
 }
 
 func (a *Account) IsAnthropic() bool {
@@ -2785,6 +2794,9 @@ func (a *Account) IsCacheTTLOverrideEnabled() bool {
 	if !a.IsAnthropicOAuthOrSetupToken() {
 		return false
 	}
+	if a.usageBillingValues != nil {
+		return a.usageBillingValues.cacheTTL
+	}
 	if a.Extra == nil {
 		return false
 	}
@@ -2799,6 +2811,9 @@ func (a *Account) IsCacheTTLOverrideEnabled() bool {
 // GetCacheTTLOverrideTarget 获取缓存 TTL 强制替换的目标类型
 // 返回 "5m" 或 "1h"，默认 "5m"
 func (a *Account) GetCacheTTLOverrideTarget() string {
+	if a.usageBillingValues != nil {
+		return a.usageBillingValues.cacheTarget
+	}
 	if a.Extra == nil {
 		return "5m"
 	}
@@ -2843,6 +2858,9 @@ func (a *Account) GetQuotaWeeklyUsed() float64 {
 
 // getExtraFloat64 从 Extra 中读取指定 key 的 float64 值
 func (a *Account) getExtraFloat64(key string) float64 {
+	if a.usageBillingValues != nil {
+		return a.usageBillingValues.extraFloat64(key)
+	}
 	if a.Extra == nil {
 		return 0
 	}
@@ -2872,6 +2890,9 @@ func (a *Account) getExtraTime(key string) time.Time {
 
 // getExtraBool 从 Extra 中读取指定 key 的 bool 值
 func (a *Account) getExtraBool(key string) bool {
+	if a.usageBillingValues != nil {
+		return a.usageBillingValues.extraBool(key)
+	}
 	if a.Extra == nil {
 		return false
 	}
@@ -2885,6 +2906,9 @@ func (a *Account) getExtraBool(key string) bool {
 
 // getExtraString 从 Extra 中读取指定 key 的字符串值
 func (a *Account) getExtraString(key string) string {
+	if a.usageBillingValues != nil {
+		return a.usageBillingValues.extraString(key)
+	}
 	if a.Extra == nil {
 		return ""
 	}

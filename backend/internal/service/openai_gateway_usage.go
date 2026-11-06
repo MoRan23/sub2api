@@ -33,7 +33,8 @@ type OpenAIRecordUsageInput struct {
 	SessionID          string // 客户端显式会话标识（session_id / X-Session-Id 等请求头），仅用于用量行会话关联
 	RequestPayloadHash string
 	APIKeyService      APIKeyQuotaUpdater
-	QuotaPlatform      string // user×platform quota platform resolved by the handler before async billing.
+	QuotaPlatform      string  // user×platform quota platform resolved by the handler before async billing.
+	upstreamRequestID  *string // detached queue snapshot; excludes full upstream headers
 	// PricingAt 是请求级定价时刻（请求开始捕获，与利润门的 D 同源）：高峰因子
 	// 按该时刻计算，保证同一请求从准入到扣费不中途变价。零值回退记录时刻
 	//（既有行为），供未装配的路径（图片/异步/cyber 等）沿用。
@@ -176,7 +177,7 @@ func resolveOpenAIUsageBillingAccount(ctx context.Context, repo AccountRepositor
 	// credential contract come from the physical request's frozen slot snapshot.
 	// No other slot (including a newly selected default) participates in billing.
 	billing := *parent
-	billing.Credentials = PreserveOpenAIOAuthProviderCredentials(account.Credentials, parent.Credentials)
+	billing.Credentials = PreserveOpenAIOAuthProviderCredentials(usageAccountProviderCredentials(account), parent.Credentials)
 	billing.OpenAIOAuthCredentialStateGeneration = account.OpenAIOAuthCredentialStateGeneration
 	billing.OpenAIOAuthCredentialEpoch = account.OpenAIOAuthCredentialEpoch
 	return &billing, nil
@@ -452,7 +453,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		APIKeyID:                 apiKey.ID,
 		AccountID:                account.ID,
 		RequestID:                requestID,
-		UpstreamRequestID:        usageUpstreamRequestIDPtr(account, result.UpstreamHeaders, result.OpenAIWSMode),
+		UpstreamRequestID:        usageRecordUpstreamRequestID(input.upstreamRequestID, func() *string { return usageUpstreamRequestIDPtr(account, result.UpstreamHeaders, result.OpenAIWSMode) }),
 		Model:                    result.Model,
 		RequestedModel:           requestedModel,
 		UpstreamModel:            optionalTrimmedStringPtr(result.UpstreamModel),

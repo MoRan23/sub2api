@@ -16,6 +16,10 @@ type GroupCodexModelsManifestConfig = domain.GroupCodexModelsManifestConfig
 type ReasoningEffortMapping = domain.ReasoningEffortMapping
 
 type Group struct {
+	// billingSnapshot belongs to an authentication-cache publication. Its billing
+	// projection is independently owned and remains read-only across requests.
+	billingSnapshot *usageBillingGroupSnapshot
+
 	ID             int64
 	Name           string
 	Description    string
