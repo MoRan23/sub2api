@@ -191,6 +191,11 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	if result == nil {
 		return errors.New("openai usage result is nil")
 	}
+	if input.Account != nil && input.Account.IsCodexEngine() {
+		// Engine's standard usage describes the client's current context. Only
+		// the durable, confirmed billing-event path can charge Engine consumption.
+		return nil
+	}
 	if s.rateLimitService != nil && input.Account != nil && input.Account.Platform == PlatformOpenAI {
 		s.rateLimitService.ResetOpenAI403Counter(ctx, input.Account.ID)
 	}
@@ -199,15 +204,6 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	user := input.User
 	account := input.Account
 	subscription := input.Subscription
-	var engineReceipt *codexEngineUsageReceipt
-	if receiptID := codexEngineUsageReceiptID(account, result.UpstreamHeaders); receiptID != "" {
-		if !result.CodexEngineUsageFinalized {
-			// A retry may deliver the final meter later. Do not close its durable
-			// receipt with incomplete counters, or bill it under a volatile key.
-			return nil
-		}
-		engineReceipt = newCodexEngineUsageReceipt(receiptID, input)
-	}
 	billingAccount, err := resolveOpenAIUsageBillingAccount(ctx, s.accountRepo, account)
 	if err != nil {
 		return err
@@ -426,9 +422,6 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 			requestID = stable
 		}
 	}
-	if engineReceipt != nil {
-		requestID = engineReceipt.requestID
-	}
 
 	// 确定 RequestedModel（渠道映射前的原始模型）
 	requestedModel := result.Model
@@ -580,14 +573,13 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		quotaPlatform = PlatformFromAPIKey(apiKey)
 	}
 
-	applied, billingErr := applyUsageBilling(ctx, requestID, usageLog, &postUsageBillingParams{
+	_, billingErr := applyUsageBilling(ctx, requestID, usageLog, &postUsageBillingParams{
 		Cost:                       cost,
 		User:                       user,
 		APIKey:                     apiKey,
 		Account:                    account,
 		Subscription:               subscription,
 		RequestPayloadHash:         resolveUsageBillingPayloadFingerprint(ctx, input.RequestPayloadHash),
-		engineUsageReceipt:         engineReceipt,
 		IsSubscriptionBill:         isSubscriptionBilling && !simpleModeKeyRateLimitOnly,
 		AccountRateMultiplier:      accountRateMultiplier,
 		APIKeyService:              input.APIKeyService,
@@ -596,19 +588,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}, s.billingDeps(), s.usageBillingRepo)
 
 	if billingErr != nil {
-		if engineReceipt != nil {
-			// Never let a failed/conflicting replay replace the original usage
-			// row, including when the first charge's log write was delayed.
-			return billingErr
-		}
 		usageLog.ActualCost = 0
 		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
 		return billingErr
-	}
-	if engineReceipt != nil && !applied {
-		// The first transaction owns the usage row as well as the charge. A
-		// replay must not fill a delayed/missing row using today's policy.
-		return nil
 	}
 	writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
 

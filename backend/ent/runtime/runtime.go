@@ -2628,6 +2628,18 @@ func init() {
 	userplatformquotaDescMonthlyUsageUsd := userplatformquotaFields[7].Descriptor()
 	// userplatformquota.DefaultMonthlyUsageUsd holds the default value on creation for the monthly_usage_usd field.
 	userplatformquota.DefaultMonthlyUsageUsd = userplatformquotaDescMonthlyUsageUsd.Default.(float64)
+	// userplatformquotaDescEngineDailyUsageUsd is the schema descriptor for engine_daily_usage_usd field.
+	userplatformquotaDescEngineDailyUsageUsd := userplatformquotaFields[8].Descriptor()
+	// userplatformquota.DefaultEngineDailyUsageUsd holds the default value on creation for the engine_daily_usage_usd field.
+	userplatformquota.DefaultEngineDailyUsageUsd = userplatformquotaDescEngineDailyUsageUsd.Default.(float64)
+	// userplatformquotaDescEngineWeeklyUsageUsd is the schema descriptor for engine_weekly_usage_usd field.
+	userplatformquotaDescEngineWeeklyUsageUsd := userplatformquotaFields[9].Descriptor()
+	// userplatformquota.DefaultEngineWeeklyUsageUsd holds the default value on creation for the engine_weekly_usage_usd field.
+	userplatformquota.DefaultEngineWeeklyUsageUsd = userplatformquotaDescEngineWeeklyUsageUsd.Default.(float64)
+	// userplatformquotaDescEngineMonthlyUsageUsd is the schema descriptor for engine_monthly_usage_usd field.
+	userplatformquotaDescEngineMonthlyUsageUsd := userplatformquotaFields[10].Descriptor()
+	// userplatformquota.DefaultEngineMonthlyUsageUsd holds the default value on creation for the engine_monthly_usage_usd field.
+	userplatformquota.DefaultEngineMonthlyUsageUsd = userplatformquotaDescEngineMonthlyUsageUsd.Default.(float64)
 	usersubscriptionMixin := schema.UserSubscription{}.Mixin()
 	usersubscriptionMixinHooks1 := usersubscriptionMixin[1].Hooks()
 	usersubscription.Hooks[0] = usersubscriptionMixinHooks1[0]

@@ -227,6 +227,69 @@ func (_u *UserPlatformQuotaUpdate) AddMonthlyUsageUsd(v float64) *UserPlatformQu
 	return _u
 }
 
+// SetEngineDailyUsageUsd sets the "engine_daily_usage_usd" field.
+func (_u *UserPlatformQuotaUpdate) SetEngineDailyUsageUsd(v float64) *UserPlatformQuotaUpdate {
+	_u.mutation.ResetEngineDailyUsageUsd()
+	_u.mutation.SetEngineDailyUsageUsd(v)
+	return _u
+}
+
+// SetNillableEngineDailyUsageUsd sets the "engine_daily_usage_usd" field if the given value is not nil.
+func (_u *UserPlatformQuotaUpdate) SetNillableEngineDailyUsageUsd(v *float64) *UserPlatformQuotaUpdate {
+	if v != nil {
+		_u.SetEngineDailyUsageUsd(*v)
+	}
+	return _u
+}
+
+// AddEngineDailyUsageUsd adds value to the "engine_daily_usage_usd" field.
+func (_u *UserPlatformQuotaUpdate) AddEngineDailyUsageUsd(v float64) *UserPlatformQuotaUpdate {
+	_u.mutation.AddEngineDailyUsageUsd(v)
+	return _u
+}
+
+// SetEngineWeeklyUsageUsd sets the "engine_weekly_usage_usd" field.
+func (_u *UserPlatformQuotaUpdate) SetEngineWeeklyUsageUsd(v float64) *UserPlatformQuotaUpdate {
+	_u.mutation.ResetEngineWeeklyUsageUsd()
+	_u.mutation.SetEngineWeeklyUsageUsd(v)
+	return _u
+}
+
+// SetNillableEngineWeeklyUsageUsd sets the "engine_weekly_usage_usd" field if the given value is not nil.
+func (_u *UserPlatformQuotaUpdate) SetNillableEngineWeeklyUsageUsd(v *float64) *UserPlatformQuotaUpdate {
+	if v != nil {
+		_u.SetEngineWeeklyUsageUsd(*v)
+	}
+	return _u
+}
+
+// AddEngineWeeklyUsageUsd adds value to the "engine_weekly_usage_usd" field.
+func (_u *UserPlatformQuotaUpdate) AddEngineWeeklyUsageUsd(v float64) *UserPlatformQuotaUpdate {
+	_u.mutation.AddEngineWeeklyUsageUsd(v)
+	return _u
+}
+
+// SetEngineMonthlyUsageUsd sets the "engine_monthly_usage_usd" field.
+func (_u *UserPlatformQuotaUpdate) SetEngineMonthlyUsageUsd(v float64) *UserPlatformQuotaUpdate {
+	_u.mutation.ResetEngineMonthlyUsageUsd()
+	_u.mutation.SetEngineMonthlyUsageUsd(v)
+	return _u
+}
+
+// SetNillableEngineMonthlyUsageUsd sets the "engine_monthly_usage_usd" field if the given value is not nil.
+func (_u *UserPlatformQuotaUpdate) SetNillableEngineMonthlyUsageUsd(v *float64) *UserPlatformQuotaUpdate {
+	if v != nil {
+		_u.SetEngineMonthlyUsageUsd(*v)
+	}
+	return _u
+}
+
+// AddEngineMonthlyUsageUsd adds value to the "engine_monthly_usage_usd" field.
+func (_u *UserPlatformQuotaUpdate) AddEngineMonthlyUsageUsd(v float64) *UserPlatformQuotaUpdate {
+	_u.mutation.AddEngineMonthlyUsageUsd(v)
+	return _u
+}
+
 // SetDailyWindowStart sets the "daily_window_start" field.
 func (_u *UserPlatformQuotaUpdate) SetDailyWindowStart(v time.Time) *UserPlatformQuotaUpdate {
 	_u.mutation.SetDailyWindowStart(v)
@@ -426,6 +489,24 @@ func (_u *UserPlatformQuotaUpdate) sqlSave(ctx context.Context) (_node int, err 
 	}
 	if value, ok := _u.mutation.AddedMonthlyUsageUsd(); ok {
 		_spec.AddField(userplatformquota.FieldMonthlyUsageUsd, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.EngineDailyUsageUsd(); ok {
+		_spec.SetField(userplatformquota.FieldEngineDailyUsageUsd, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedEngineDailyUsageUsd(); ok {
+		_spec.AddField(userplatformquota.FieldEngineDailyUsageUsd, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.EngineWeeklyUsageUsd(); ok {
+		_spec.SetField(userplatformquota.FieldEngineWeeklyUsageUsd, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedEngineWeeklyUsageUsd(); ok {
+		_spec.AddField(userplatformquota.FieldEngineWeeklyUsageUsd, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.EngineMonthlyUsageUsd(); ok {
+		_spec.SetField(userplatformquota.FieldEngineMonthlyUsageUsd, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedEngineMonthlyUsageUsd(); ok {
+		_spec.AddField(userplatformquota.FieldEngineMonthlyUsageUsd, field.TypeFloat64, value)
 	}
 	if value, ok := _u.mutation.DailyWindowStart(); ok {
 		_spec.SetField(userplatformquota.FieldDailyWindowStart, field.TypeTime, value)
@@ -692,6 +773,69 @@ func (_u *UserPlatformQuotaUpdateOne) AddMonthlyUsageUsd(v float64) *UserPlatfor
 	return _u
 }
 
+// SetEngineDailyUsageUsd sets the "engine_daily_usage_usd" field.
+func (_u *UserPlatformQuotaUpdateOne) SetEngineDailyUsageUsd(v float64) *UserPlatformQuotaUpdateOne {
+	_u.mutation.ResetEngineDailyUsageUsd()
+	_u.mutation.SetEngineDailyUsageUsd(v)
+	return _u
+}
+
+// SetNillableEngineDailyUsageUsd sets the "engine_daily_usage_usd" field if the given value is not nil.
+func (_u *UserPlatformQuotaUpdateOne) SetNillableEngineDailyUsageUsd(v *float64) *UserPlatformQuotaUpdateOne {
+	if v != nil {
+		_u.SetEngineDailyUsageUsd(*v)
+	}
+	return _u
+}
+
+// AddEngineDailyUsageUsd adds value to the "engine_daily_usage_usd" field.
+func (_u *UserPlatformQuotaUpdateOne) AddEngineDailyUsageUsd(v float64) *UserPlatformQuotaUpdateOne {
+	_u.mutation.AddEngineDailyUsageUsd(v)
+	return _u
+}
+
+// SetEngineWeeklyUsageUsd sets the "engine_weekly_usage_usd" field.
+func (_u *UserPlatformQuotaUpdateOne) SetEngineWeeklyUsageUsd(v float64) *UserPlatformQuotaUpdateOne {
+	_u.mutation.ResetEngineWeeklyUsageUsd()
+	_u.mutation.SetEngineWeeklyUsageUsd(v)
+	return _u
+}
+
+// SetNillableEngineWeeklyUsageUsd sets the "engine_weekly_usage_usd" field if the given value is not nil.
+func (_u *UserPlatformQuotaUpdateOne) SetNillableEngineWeeklyUsageUsd(v *float64) *UserPlatformQuotaUpdateOne {
+	if v != nil {
+		_u.SetEngineWeeklyUsageUsd(*v)
+	}
+	return _u
+}
+
+// AddEngineWeeklyUsageUsd adds value to the "engine_weekly_usage_usd" field.
+func (_u *UserPlatformQuotaUpdateOne) AddEngineWeeklyUsageUsd(v float64) *UserPlatformQuotaUpdateOne {
+	_u.mutation.AddEngineWeeklyUsageUsd(v)
+	return _u
+}
+
+// SetEngineMonthlyUsageUsd sets the "engine_monthly_usage_usd" field.
+func (_u *UserPlatformQuotaUpdateOne) SetEngineMonthlyUsageUsd(v float64) *UserPlatformQuotaUpdateOne {
+	_u.mutation.ResetEngineMonthlyUsageUsd()
+	_u.mutation.SetEngineMonthlyUsageUsd(v)
+	return _u
+}
+
+// SetNillableEngineMonthlyUsageUsd sets the "engine_monthly_usage_usd" field if the given value is not nil.
+func (_u *UserPlatformQuotaUpdateOne) SetNillableEngineMonthlyUsageUsd(v *float64) *UserPlatformQuotaUpdateOne {
+	if v != nil {
+		_u.SetEngineMonthlyUsageUsd(*v)
+	}
+	return _u
+}
+
+// AddEngineMonthlyUsageUsd adds value to the "engine_monthly_usage_usd" field.
+func (_u *UserPlatformQuotaUpdateOne) AddEngineMonthlyUsageUsd(v float64) *UserPlatformQuotaUpdateOne {
+	_u.mutation.AddEngineMonthlyUsageUsd(v)
+	return _u
+}
+
 // SetDailyWindowStart sets the "daily_window_start" field.
 func (_u *UserPlatformQuotaUpdateOne) SetDailyWindowStart(v time.Time) *UserPlatformQuotaUpdateOne {
 	_u.mutation.SetDailyWindowStart(v)
@@ -921,6 +1065,24 @@ func (_u *UserPlatformQuotaUpdateOne) sqlSave(ctx context.Context) (_node *UserP
 	}
 	if value, ok := _u.mutation.AddedMonthlyUsageUsd(); ok {
 		_spec.AddField(userplatformquota.FieldMonthlyUsageUsd, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.EngineDailyUsageUsd(); ok {
+		_spec.SetField(userplatformquota.FieldEngineDailyUsageUsd, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedEngineDailyUsageUsd(); ok {
+		_spec.AddField(userplatformquota.FieldEngineDailyUsageUsd, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.EngineWeeklyUsageUsd(); ok {
+		_spec.SetField(userplatformquota.FieldEngineWeeklyUsageUsd, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedEngineWeeklyUsageUsd(); ok {
+		_spec.AddField(userplatformquota.FieldEngineWeeklyUsageUsd, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.EngineMonthlyUsageUsd(); ok {
+		_spec.SetField(userplatformquota.FieldEngineMonthlyUsageUsd, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedEngineMonthlyUsageUsd(); ok {
+		_spec.AddField(userplatformquota.FieldEngineMonthlyUsageUsd, field.TypeFloat64, value)
 	}
 	if value, ok := _u.mutation.DailyWindowStart(); ok {
 		_spec.SetField(userplatformquota.FieldDailyWindowStart, field.TypeTime, value)

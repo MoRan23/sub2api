@@ -267,6 +267,7 @@ func (h *OpenAIGatewayHandler) Images(c *gin.Context) {
 					accountReleaseFunc()
 				}
 			}()
+			h.setCodexEngineBillingInput(c, account, apiKey, subscription, channelMapping, requestModel, body)
 			return h.gatewayService.ForwardImages(requestCtx, c, account, body, parsed, channelMapping.MappedModel)
 		}()
 		cyberMarked := service.GetOpsCyberPolicy(c) != nil

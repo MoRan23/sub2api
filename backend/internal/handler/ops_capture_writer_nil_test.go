@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"io"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -11,6 +12,18 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+type failedFlushOpsWriter struct{ *httptest.ResponseRecorder }
+
+func (*failedFlushOpsWriter) FlushError() error { return io.ErrClosedPipe }
+
+func TestOpsCaptureWriter_FlushErrorPreservesSocketErrorAndLease(t *testing.T) {
+	c, _ := gin.CreateTestContext(&failedFlushOpsWriter{ResponseRecorder: httptest.NewRecorder()})
+	w := acquireOpsCaptureWriter(c.Writer)
+	require.ErrorIs(t, w.FlushError(), io.ErrClosedPipe)
+	releaseOpsCaptureWriter(w)
+	require.ErrorContains(t, w.FlushError(), "released")
+}
 
 type blockingOpsResponseWriter struct {
 	gin.ResponseWriter

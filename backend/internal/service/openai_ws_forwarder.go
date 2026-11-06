@@ -308,7 +308,11 @@ type OpenAIWSIngressHooks struct {
 	// MapRequestModel resolves the current turn's client model to the model
 	// that must be written into the upstream response.create frame.
 	MapRequestModel func(turn int, originalModel string) (string, error)
-	AfterTurn       func(turn int, result *OpenAIForwardResult, turnErr error)
+	// BeforeEngineDispatch freezes the current turn's authenticated billing input
+	// after BeforeTurn has refreshed its pricing and API-key policy. It runs for
+	// every physical Engine HTTP request, never once per WebSocket handshake.
+	BeforeEngineDispatch func(turn int, payload []byte, originalModel string) error
+	AfterTurn            func(turn int, result *OpenAIForwardResult, turnErr error)
 }
 
 func (s *OpenAIGatewayService) getOpenAIWSConnPool() *openAIWSConnPool {

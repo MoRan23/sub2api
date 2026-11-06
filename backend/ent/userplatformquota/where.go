@@ -110,6 +110,21 @@ func MonthlyUsageUsd(v float64) predicate.UserPlatformQuota {
 	return predicate.UserPlatformQuota(sql.FieldEQ(FieldMonthlyUsageUsd, v))
 }
 
+// EngineDailyUsageUsd applies equality check predicate on the "engine_daily_usage_usd" field. It's identical to EngineDailyUsageUsdEQ.
+func EngineDailyUsageUsd(v float64) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldEQ(FieldEngineDailyUsageUsd, v))
+}
+
+// EngineWeeklyUsageUsd applies equality check predicate on the "engine_weekly_usage_usd" field. It's identical to EngineWeeklyUsageUsdEQ.
+func EngineWeeklyUsageUsd(v float64) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldEQ(FieldEngineWeeklyUsageUsd, v))
+}
+
+// EngineMonthlyUsageUsd applies equality check predicate on the "engine_monthly_usage_usd" field. It's identical to EngineMonthlyUsageUsdEQ.
+func EngineMonthlyUsageUsd(v float64) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldEQ(FieldEngineMonthlyUsageUsd, v))
+}
+
 // DailyWindowStart applies equality check predicate on the "daily_window_start" field. It's identical to DailyWindowStartEQ.
 func DailyWindowStart(v time.Time) predicate.UserPlatformQuota {
 	return predicate.UserPlatformQuota(sql.FieldEQ(FieldDailyWindowStart, v))
@@ -608,6 +623,126 @@ func MonthlyUsageUsdLT(v float64) predicate.UserPlatformQuota {
 // MonthlyUsageUsdLTE applies the LTE predicate on the "monthly_usage_usd" field.
 func MonthlyUsageUsdLTE(v float64) predicate.UserPlatformQuota {
 	return predicate.UserPlatformQuota(sql.FieldLTE(FieldMonthlyUsageUsd, v))
+}
+
+// EngineDailyUsageUsdEQ applies the EQ predicate on the "engine_daily_usage_usd" field.
+func EngineDailyUsageUsdEQ(v float64) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldEQ(FieldEngineDailyUsageUsd, v))
+}
+
+// EngineDailyUsageUsdNEQ applies the NEQ predicate on the "engine_daily_usage_usd" field.
+func EngineDailyUsageUsdNEQ(v float64) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldNEQ(FieldEngineDailyUsageUsd, v))
+}
+
+// EngineDailyUsageUsdIn applies the In predicate on the "engine_daily_usage_usd" field.
+func EngineDailyUsageUsdIn(vs ...float64) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldIn(FieldEngineDailyUsageUsd, vs...))
+}
+
+// EngineDailyUsageUsdNotIn applies the NotIn predicate on the "engine_daily_usage_usd" field.
+func EngineDailyUsageUsdNotIn(vs ...float64) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldNotIn(FieldEngineDailyUsageUsd, vs...))
+}
+
+// EngineDailyUsageUsdGT applies the GT predicate on the "engine_daily_usage_usd" field.
+func EngineDailyUsageUsdGT(v float64) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldGT(FieldEngineDailyUsageUsd, v))
+}
+
+// EngineDailyUsageUsdGTE applies the GTE predicate on the "engine_daily_usage_usd" field.
+func EngineDailyUsageUsdGTE(v float64) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldGTE(FieldEngineDailyUsageUsd, v))
+}
+
+// EngineDailyUsageUsdLT applies the LT predicate on the "engine_daily_usage_usd" field.
+func EngineDailyUsageUsdLT(v float64) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldLT(FieldEngineDailyUsageUsd, v))
+}
+
+// EngineDailyUsageUsdLTE applies the LTE predicate on the "engine_daily_usage_usd" field.
+func EngineDailyUsageUsdLTE(v float64) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldLTE(FieldEngineDailyUsageUsd, v))
+}
+
+// EngineWeeklyUsageUsdEQ applies the EQ predicate on the "engine_weekly_usage_usd" field.
+func EngineWeeklyUsageUsdEQ(v float64) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldEQ(FieldEngineWeeklyUsageUsd, v))
+}
+
+// EngineWeeklyUsageUsdNEQ applies the NEQ predicate on the "engine_weekly_usage_usd" field.
+func EngineWeeklyUsageUsdNEQ(v float64) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldNEQ(FieldEngineWeeklyUsageUsd, v))
+}
+
+// EngineWeeklyUsageUsdIn applies the In predicate on the "engine_weekly_usage_usd" field.
+func EngineWeeklyUsageUsdIn(vs ...float64) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldIn(FieldEngineWeeklyUsageUsd, vs...))
+}
+
+// EngineWeeklyUsageUsdNotIn applies the NotIn predicate on the "engine_weekly_usage_usd" field.
+func EngineWeeklyUsageUsdNotIn(vs ...float64) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldNotIn(FieldEngineWeeklyUsageUsd, vs...))
+}
+
+// EngineWeeklyUsageUsdGT applies the GT predicate on the "engine_weekly_usage_usd" field.
+func EngineWeeklyUsageUsdGT(v float64) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldGT(FieldEngineWeeklyUsageUsd, v))
+}
+
+// EngineWeeklyUsageUsdGTE applies the GTE predicate on the "engine_weekly_usage_usd" field.
+func EngineWeeklyUsageUsdGTE(v float64) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldGTE(FieldEngineWeeklyUsageUsd, v))
+}
+
+// EngineWeeklyUsageUsdLT applies the LT predicate on the "engine_weekly_usage_usd" field.
+func EngineWeeklyUsageUsdLT(v float64) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldLT(FieldEngineWeeklyUsageUsd, v))
+}
+
+// EngineWeeklyUsageUsdLTE applies the LTE predicate on the "engine_weekly_usage_usd" field.
+func EngineWeeklyUsageUsdLTE(v float64) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldLTE(FieldEngineWeeklyUsageUsd, v))
+}
+
+// EngineMonthlyUsageUsdEQ applies the EQ predicate on the "engine_monthly_usage_usd" field.
+func EngineMonthlyUsageUsdEQ(v float64) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldEQ(FieldEngineMonthlyUsageUsd, v))
+}
+
+// EngineMonthlyUsageUsdNEQ applies the NEQ predicate on the "engine_monthly_usage_usd" field.
+func EngineMonthlyUsageUsdNEQ(v float64) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldNEQ(FieldEngineMonthlyUsageUsd, v))
+}
+
+// EngineMonthlyUsageUsdIn applies the In predicate on the "engine_monthly_usage_usd" field.
+func EngineMonthlyUsageUsdIn(vs ...float64) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldIn(FieldEngineMonthlyUsageUsd, vs...))
+}
+
+// EngineMonthlyUsageUsdNotIn applies the NotIn predicate on the "engine_monthly_usage_usd" field.
+func EngineMonthlyUsageUsdNotIn(vs ...float64) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldNotIn(FieldEngineMonthlyUsageUsd, vs...))
+}
+
+// EngineMonthlyUsageUsdGT applies the GT predicate on the "engine_monthly_usage_usd" field.
+func EngineMonthlyUsageUsdGT(v float64) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldGT(FieldEngineMonthlyUsageUsd, v))
+}
+
+// EngineMonthlyUsageUsdGTE applies the GTE predicate on the "engine_monthly_usage_usd" field.
+func EngineMonthlyUsageUsdGTE(v float64) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldGTE(FieldEngineMonthlyUsageUsd, v))
+}
+
+// EngineMonthlyUsageUsdLT applies the LT predicate on the "engine_monthly_usage_usd" field.
+func EngineMonthlyUsageUsdLT(v float64) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldLT(FieldEngineMonthlyUsageUsd, v))
+}
+
+// EngineMonthlyUsageUsdLTE applies the LTE predicate on the "engine_monthly_usage_usd" field.
+func EngineMonthlyUsageUsdLTE(v float64) predicate.UserPlatformQuota {
+	return predicate.UserPlatformQuota(sql.FieldLTE(FieldEngineMonthlyUsageUsd, v))
 }
 
 // DailyWindowStartEQ applies the EQ predicate on the "daily_window_start" field.

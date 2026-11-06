@@ -278,6 +278,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 					accountReleaseFunc()
 				}
 			}()
+			h.setCodexEngineBillingInput(c, account, apiKey, subscription, channelMapping, reqModel, body)
 			return h.gatewayService.ForwardAsChatCompletions(c.Request.Context(), c, account, forwardBody, promptCacheKey, "")
 		}()
 		// A conversion failure is a client error, including if the user queue has

@@ -74,6 +74,14 @@ func (UserPlatformQuota) Fields() []ent.Field {
 		field.Float("monthly_usage_usd").
 			Default(0).
 			SchemaType(map[string]string{dialect.Postgres: "decimal(20,10)"}),
+		// Transactional Engine contribution included in the corresponding total.
+		// Redis snapshots subtract their observed contribution before merging.
+		field.Float("engine_daily_usage_usd").Default(0).
+			SchemaType(map[string]string{dialect.Postgres: "decimal(20,10)"}),
+		field.Float("engine_weekly_usage_usd").Default(0).
+			SchemaType(map[string]string{dialect.Postgres: "decimal(20,10)"}),
+		field.Float("engine_monthly_usage_usd").Default(0).
+			SchemaType(map[string]string{dialect.Postgres: "decimal(20,10)"}),
 
 		// 窗口起点（NULL = 首次还未初始化，由 InitWindowStarts 用 COALESCE 兜底）
 		field.Time("daily_window_start").

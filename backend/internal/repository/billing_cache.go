@@ -406,16 +406,21 @@ func (c *billingCache) InvalidateAPIKeyRateLimit(ctx context.Context, keyID int6
 // user × platform quota 缓存
 // ============================================
 
-// userPlatformQuotaCacheKey 构造 Redis key
+// V2 isolates microsecond window identities and Engine components from the old
+// second-precision hashes. Upgrade only after old requests and dirty snapshots
+// have drained; never copy a V1 hash into this namespace.
+const userPlatformQuotaCacheNamespace = "billing:upq:v2"
+
+// userPlatformQuotaCacheKey includes all window fields and Engine-only markers.
 func userPlatformQuotaCacheKey(userID int64, platform string) string {
-	return fmt.Sprintf("billing:user_platform_quota:%d:%s", userID, platform)
+	return fmt.Sprintf("%s:%d:%s", userPlatformQuotaCacheNamespace, userID, platform)
 }
 
 // parseUserPlatformQuotaHash 将 Redis HGETALL 返回的 map[string]string 反序列化为
 // *service.UserPlatformQuotaCacheEntry。空 map（key 不存在）返回 nil。
 // GetUserPlatformQuotaCache 和 BatchGetUserPlatformQuotaCache 共用此函数，确保解析逻辑一致。
 func parseUserPlatformQuotaHash(m map[string]string) *service.UserPlatformQuotaCacheEntry {
-	if len(m) == 0 {
+	if len(m) == 0 || m["engine_only"] == "1" {
 		return nil
 	}
 	parseFloat := func(s string) float64 {
@@ -454,18 +459,30 @@ func parseUserPlatformQuotaHash(m map[string]string) *service.UserPlatformQuotaC
 		n, _ := strconv.ParseInt(s, 10, 64)
 		return n
 	}
+	parseWindow := func(name string) *time.Time {
+		if raw := m[name+"_us"]; raw != "" {
+			if micros, err := strconv.ParseInt(raw, 10, 64); err == nil {
+				t := time.UnixMicro(micros).UTC()
+				return &t
+			}
+		}
+		return parseTimePtr(m[name])
+	}
 	return &service.UserPlatformQuotaCacheEntry{
-		DailyUsageUSD:      parseFloat(m["daily_usage"]),
-		WeeklyUsageUSD:     parseFloat(m["weekly_usage"]),
-		MonthlyUsageUSD:    parseFloat(m["monthly_usage"]),
-		Version:            parseInt64(m["version"]),
-		SchemaVersion:      parseInt64(m["schema_version"]),
-		DailyLimitUSD:      parseFloatPtr(m["daily_limit"]),
-		WeeklyLimitUSD:     parseFloatPtr(m["weekly_limit"]),
-		MonthlyLimitUSD:    parseFloatPtr(m["monthly_limit"]),
-		DailyWindowStart:   parseTimePtr(m["daily_window_start"]),
-		WeeklyWindowStart:  parseTimePtr(m["weekly_window_start"]),
-		MonthlyWindowStart: parseTimePtr(m["monthly_window_start"]),
+		DailyUsageUSD:         parseFloat(m["daily_usage"]),
+		WeeklyUsageUSD:        parseFloat(m["weekly_usage"]),
+		MonthlyUsageUSD:       parseFloat(m["monthly_usage"]),
+		EngineDailyUsageUSD:   parseFloat(m["engine_daily_usage"]),
+		EngineWeeklyUsageUSD:  parseFloat(m["engine_weekly_usage"]),
+		EngineMonthlyUsageUSD: parseFloat(m["engine_monthly_usage"]),
+		Version:               parseInt64(m["version"]),
+		SchemaVersion:         parseInt64(m["schema_version"]),
+		DailyLimitUSD:         parseFloatPtr(m["daily_limit"]),
+		WeeklyLimitUSD:        parseFloatPtr(m["weekly_limit"]),
+		MonthlyLimitUSD:       parseFloatPtr(m["monthly_limit"]),
+		DailyWindowStart:      parseWindow("daily_window_start"),
+		WeeklyWindowStart:     parseWindow("weekly_window_start"),
+		MonthlyWindowStart:    parseWindow("monthly_window_start"),
 	}
 }
 
@@ -484,11 +501,61 @@ func (c *billingCache) GetUserPlatformQuotaCache(ctx context.Context, userID int
 }
 
 func (c *billingCache) SetUserPlatformQuotaCache(ctx context.Context, userID int64, platform string, entry *service.UserPlatformQuotaCacheEntry, ttl time.Duration) error {
+	return c.mergeUserPlatformQuotaCache(ctx, userID, platform, entry, ttl, false)
+}
+
+// MergeUserPlatformQuotaEngineUsage refreshes only the committed Engine
+// component. It must not remove or replace unflushed ordinary consumption.
+func (c *billingCache) MergeUserPlatformQuotaEngineUsage(ctx context.Context, userID int64, platform string, entry *service.UserPlatformQuotaCacheEntry, ttl time.Duration) error {
+	return c.mergeUserPlatformQuotaCache(ctx, userID, platform, entry, ttl, true)
+}
+
+const mergeUserPlatformQuotaCacheScript = `
+local exists = redis.call('EXISTS', KEYS[1]) == 1
+local engineOnly = ARGV[1] == '1'
+local partial = exists and redis.call('HGET',KEYS[1],'engine_only') == '1'
+local valid = exists and (partial or tonumber(redis.call('HGET',KEYS[1],'schema_version')) == tonumber(ARGV[3]))
+if engineOnly and not valid then redis.call('HSET',KEYS[1],'engine_only','1') end
+local windows = {'daily','weekly','monthly'}
+for i,window in ipairs(windows) do
+    local offset = 4+(i-1)*4
+    local total,engine,start = tonumber(ARGV[offset]),tonumber(ARGV[offset+1]),tonumber(ARGV[offset+2])
+    local currentStart = tonumber(redis.call('HGET',KEYS[1],window..'_window_start_us'))
+    if not currentStart then
+        local seconds = tonumber(redis.call('HGET',KEYS[1],window..'_window_start'))
+        if seconds then currentStart = seconds*1000000 end
+    end
+    local currentTotal = tonumber(redis.call('HGET',KEYS[1],window..'_usage')) or 0
+    local currentEngine = tonumber(redis.call('HGET',KEYS[1],'engine_'..window..'_usage')) or 0
+    if valid and currentStart and start and currentStart == start then
+        local ordinary = math.max(0,currentTotal-currentEngine)
+        if not engineOnly then ordinary = math.max(ordinary,total-engine) end
+        engine = math.max(engine,currentEngine)
+        total = ordinary+engine
+    elseif valid and currentStart and (not start or currentStart > start) then
+        total,engine,start = currentTotal,currentEngine,currentStart
+    elseif engineOnly then
+        total = engine
+    end
+    redis.call('HSET',KEYS[1],window..'_usage',total,'engine_'..window..'_usage',engine,
+        window..'_window_start_us',start or '',window..'_window_start',start and math.floor(start/1000000) or '')
+    if not engineOnly then redis.call('HSET',KEYS[1],window..'_limit',ARGV[offset+3]) end
+end
+if not engineOnly then
+    redis.call('HSET',KEYS[1],'schema_version',ARGV[3])
+    redis.call('HDEL',KEYS[1],'engine_only')
+end
+if valid then redis.call('HINCRBY',KEYS[1],'version',1)
+else redis.call('HSET',KEYS[1],'version',ARGV[16]) end
+redis.call('EXPIRE',KEYS[1],ARGV[2])
+return 1
+`
+
+func (c *billingCache) mergeUserPlatformQuotaCache(ctx context.Context, userID int64, platform string, entry *service.UserPlatformQuotaCacheEntry, ttl time.Duration, engineOnly bool) error {
 	if entry == nil {
 		return nil
 	}
 	key := userPlatformQuotaCacheKey(userID, platform)
-	pipe := c.rdb.TxPipeline()
 
 	// 浮点可空字段：nil → 空字符串（读取时 parseFloatPtr 返回 nil，表示无限额）
 	fmtFloatPtr := func(p *float64) string {
@@ -502,24 +569,19 @@ func (c *billingCache) SetUserPlatformQuotaCache(ctx context.Context, userID int
 		if p == nil {
 			return ""
 		}
-		return strconv.FormatInt(p.Unix(), 10)
+		return strconv.FormatInt(p.UnixMicro(), 10)
 	}
-
-	pipe.HSet(ctx, key,
-		"daily_usage", entry.DailyUsageUSD,
-		"weekly_usage", entry.WeeklyUsageUSD,
-		"monthly_usage", entry.MonthlyUsageUSD,
-		"version", entry.Version,
-		"schema_version", entry.SchemaVersion,
-		"daily_limit", fmtFloatPtr(entry.DailyLimitUSD),
-		"weekly_limit", fmtFloatPtr(entry.WeeklyLimitUSD),
-		"monthly_limit", fmtFloatPtr(entry.MonthlyLimitUSD),
-		"daily_window_start", fmtTimePtr(entry.DailyWindowStart),
-		"weekly_window_start", fmtTimePtr(entry.WeeklyWindowStart),
-		"monthly_window_start", fmtTimePtr(entry.MonthlyWindowStart),
-	)
-	pipe.Expire(ctx, key, ttl)
-	_, err := pipe.Exec(ctx)
+	mode := "0"
+	if engineOnly {
+		mode = "1"
+	}
+	_, err := c.rdb.Eval(ctx, mergeUserPlatformQuotaCacheScript, []string{key},
+		mode, int(ttl.Seconds()), entry.SchemaVersion,
+		entry.DailyUsageUSD, entry.EngineDailyUsageUSD, fmtTimePtr(entry.DailyWindowStart), fmtFloatPtr(entry.DailyLimitUSD),
+		entry.WeeklyUsageUSD, entry.EngineWeeklyUsageUSD, fmtTimePtr(entry.WeeklyWindowStart), fmtFloatPtr(entry.WeeklyLimitUSD),
+		entry.MonthlyUsageUSD, entry.EngineMonthlyUsageUSD, fmtTimePtr(entry.MonthlyWindowStart), fmtFloatPtr(entry.MonthlyLimitUSD),
+		entry.Version,
+	).Result()
 	return err
 }
 
@@ -559,8 +621,8 @@ return 1
 `
 
 // userPlatformQuotaDirtySetKey 返回脏集（dirty set）的 Redis key。
-// 使用与 userPlatformQuotaCacheKey 相同的前缀 "billing:"。
-func userPlatformQuotaDirtySetKey() string { return "billing:" + "upq:dirty" }
+// Dirty keys must share the versioned namespace with their snapshot hashes.
+func userPlatformQuotaDirtySetKey() string { return userPlatformQuotaCacheNamespace + ":dirty" }
 
 // userPlatformQuotaDirtyTTLSeconds 脏集兜底 TTL（秒）：初始 SADD（Lua）与 Readd 共用，
 // 确保 flusher 长期停摆时脏集最终过期；正常运行因持续 SADD 不断续期。

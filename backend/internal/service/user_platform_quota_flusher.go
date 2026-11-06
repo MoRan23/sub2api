@@ -40,15 +40,15 @@ type FlusherMetrics struct {
 // flusherMaxBatchesPerTick 单次 tick 最多消费的批数，防止 tick 执行时间过长。
 const flusherMaxBatchesPerTick = 16
 
-// maxFlushBatchSize 限制单批行数,必须 ≤ repository.BatchSnapshotUsage 的 batchRows(6000),
+// maxFlushBatchSize 限制单批行数,必须 ≤ repository.BatchSnapshotUsage 的 batchRows(5000),
 // 以保证单次 flush 的 snapshots 仅生成一条 UPSERT(单事务原子)。两处需手动保持一致。
-const maxFlushBatchSize = 6000
+const maxFlushBatchSize = 5000
 
 // defaultFlushBatchSize 是配置 flush_batch_size 非法(≤0)时的回退值。
 const defaultFlushBatchSize = 1000
 
 // UserPlatformQuotaUsageFlusher 将 Redis 脏集快照定期批量写入 DB。
-// 不维护任何 delta/in-process 状态；每批读取 Redis 当前绝对值覆盖写入。
+// 不维护 delta/in-process 状态；DB 合并普通消费快照并保留 Engine 事务分量。
 type UserPlatformQuotaUsageFlusher struct {
 	cache       quotaDirtyCache
 	quotaRepo   quotaSnapshotWriter
@@ -154,14 +154,17 @@ func (s *UserPlatformQuotaUsageFlusher) flushOneBatch(parentCtx context.Context)
 			continue
 		}
 		snaps = append(snaps, UserPlatformQuotaSnapshot{
-			UserID:             key.UserID,
-			Platform:           key.Platform,
-			DailyUsageUSD:      e.DailyUsageUSD,
-			WeeklyUsageUSD:     e.WeeklyUsageUSD,
-			MonthlyUsageUSD:    e.MonthlyUsageUSD,
-			DailyWindowStart:   *e.DailyWindowStart,
-			WeeklyWindowStart:  *e.WeeklyWindowStart,
-			MonthlyWindowStart: *e.MonthlyWindowStart,
+			UserID:                key.UserID,
+			Platform:              key.Platform,
+			DailyUsageUSD:         e.DailyUsageUSD,
+			WeeklyUsageUSD:        e.WeeklyUsageUSD,
+			MonthlyUsageUSD:       e.MonthlyUsageUSD,
+			EngineDailyUsageUSD:   e.EngineDailyUsageUSD,
+			EngineWeeklyUsageUSD:  e.EngineWeeklyUsageUSD,
+			EngineMonthlyUsageUSD: e.EngineMonthlyUsageUSD,
+			DailyWindowStart:      *e.DailyWindowStart,
+			WeeklyWindowStart:     *e.WeeklyWindowStart,
+			MonthlyWindowStart:    *e.MonthlyWindowStart,
 		})
 	}
 
@@ -175,17 +178,8 @@ func (s *UserPlatformQuotaUsageFlusher) flushOneBatch(parentCtx context.Context)
 		return true
 	}
 
-	// 已知竞态(admin 写 × flusher 刷,仅 flusher_enabled=true 时存在):
-	// admin ResetExpiredWindow/UpsertForUser 是"先写 DB 再 DeleteCache"。若本批已 SPOP + BatchGet
-	// 读到旧 usage 快照(此刻 member 已离开脏集),而 admin 随后写 DB、本行 UPSERT 又在 admin 写之后落库,
-	// 则旧快照会覆盖 admin 刚写入的值;DeleteCache 后 Redis MISS,下次 preflight 从 DB 重载被覆盖的旧值。
-	// 因 member 已被 SPOP,admin 侧 SREM/清脏标记无法拦截本批(故未做)。影响有限,暂列为已知取舍:
-	//   - UpsertForUser 改 limit,而本 UPDATE 只写既有活跃行的 usage/window 列 → limit 配置不受影响,
-	//     被软删的行不会被本 UPDATE 复活或重建;
-	//   - ResetExpiredWindow 改 usage,但 preflight windowExpired 会在窗口真正过期时自愈重置,
-	//     仅"强制重置未过期窗口"且与本批精确交错时短暂失效;
-	//   - 低频 admin 操作 + 默认 flusher_enabled=false。彻底消除需 version OCC(DB 加 version 列条件 UPSERT),
-	//     成本高;启用 flusher 后如需强一致再评估。
+	// The repository merges under the row lock taken by UPDATE. A snapshot read
+	// before Engine billing or an administrator reset cannot roll that write back.
 
 	// 5. 写入 DB
 	start := time.Now()
@@ -233,7 +227,7 @@ func (s *UserPlatformQuotaUsageFlusher) flush() {
 	}
 	// 连续消费满 flusherMaxBatchesPerTick 批仍未取空脏集:本 tick 主动让出,剩余积压留待下一 tick。
 	// 记一条 log 便于 oncall 发现 distinct 活跃 key 远超 maxBatchesPerTick×batchSize(DB 镜像延迟上升);
-	// 可配合 Redis SCARD billing:upq:dirty 观察脏集存量。
+	// 可配合 Redis SCARD billing:upq:v2:dirty 观察脏集存量。
 	logger.LegacyPrintf("quota_flusher",
 		"[QuotaFlusher] 单 tick 达到 max batches 上限(%d × batchSize=%d),脏集仍非空,积压顺延至下一 tick",
 		flusherMaxBatchesPerTick, s.batchSize)

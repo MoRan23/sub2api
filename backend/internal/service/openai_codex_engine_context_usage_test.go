@@ -15,7 +15,7 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-// Standard terminal Responses usage is authoritative for this external request.
+// Standard terminal Responses usage is authoritative for the client's context.
 // Cached input is included in input_tokens, rather than added to it.
 const engineContextUsageFixture = `{"input_tokens":1200,"input_tokens_details":{"cached_tokens":960},"output_tokens":83,"total_tokens":1283}`
 
@@ -65,11 +65,18 @@ func TestCodexEngineStandardContextUsageForwardingAndBilling(t *testing.T) {
 			input := engineReceiptTestInput(engineReceiptTestID("a"))
 			input.Result = result
 			require.NoError(t, svc.RecordUsage(context.Background(), input))
-			require.Equal(t, 1, billing.applied)
-			require.Equal(t, 1, logs.calls)
-			require.Equal(t, 240, billing.commands[0].InputTokens)
-			require.Equal(t, 960, billing.commands[0].CacheReadTokens)
-			require.Equal(t, 83, billing.commands[0].OutputTokens)
+			require.Zero(t, billing.applied)
+			require.Zero(t, logs.calls)
+			job, _ := engineFrozenTestSnapshot(t)
+			event := engineFrozenTestModelEvent()
+			event.Usage = OpenAIUsage{InputTokens: 2400, CacheReadInputTokens: 1920, OutputTokens: 166}
+			store := &engineFrozenStoreStub{}
+			require.NoError(t, svc.SettleCodexEngineBillingEvent(context.Background(), store, job, event))
+			require.Equal(t, 1, store.applied)
+			require.Equal(t, 480, store.received.Command.InputTokens)
+			require.Equal(t, 1920, store.received.Command.CacheReadTokens)
+			require.Equal(t, 166, store.received.Command.OutputTokens)
+			require.Equal(t, OpenAIUsage{InputTokens: 1200, CacheReadInputTokens: 960, OutputTokens: 83}, result.Usage)
 		})
 	}
 }
@@ -77,21 +84,22 @@ func TestCodexEngineStandardContextUsageForwardingAndBilling(t *testing.T) {
 func TestCodexEngineStandardContextUsageReplayDeduplicates(t *testing.T) {
 	logs, billing := &openAIRecordUsageLogRepoStub{inserted: true}, &engineReceiptBillingRepo{}
 	svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(logs, billing, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
+	job, _ := engineFrozenTestSnapshot(t)
+	event, store := engineFrozenTestModelEvent(), &engineFrozenStoreStub{}
 	for _, stream := range []bool{true, false, false} {
 		input := engineReceiptTestInput(engineReceiptTestID("a"))
 		input.Result = forwardEngineContextUsage(t, "/v1/responses", stream, true)
 		require.True(t, input.Result.CodexEngineUsageFinalized)
 		require.NoError(t, svc.RecordUsage(context.Background(), input))
+		require.NoError(t, svc.SettleCodexEngineBillingEvent(context.Background(), store, job, event))
 	}
-	require.Equal(t, 1, billing.applied)
-	require.Equal(t, 1, logs.calls)
-	require.Len(t, billing.commands, 3)
-	for _, command := range billing.commands {
-		require.Equal(t, billing.commands[0].RequestFingerprint, command.RequestFingerprint)
-		require.Equal(t, 240, command.InputTokens)
-		require.Equal(t, 960, command.CacheReadTokens)
-		require.Equal(t, 83, command.OutputTokens)
-	}
+	require.Zero(t, billing.applied)
+	require.Zero(t, logs.calls)
+	require.Empty(t, billing.commands)
+	require.Equal(t, 1, store.applied, "confirmed event replay does not create another settlement")
+	require.Equal(t, 80, store.received.Command.InputTokens)
+	require.Equal(t, 20, store.received.Command.CacheReadTokens)
+	require.Equal(t, 10, store.received.Command.OutputTokens)
 }
 
 func TestCodexEngineClientToolTurnsForwardAndBillIndependently(t *testing.T) {
@@ -106,6 +114,7 @@ func TestCodexEngineClientToolTurnsForwardAndBillIndependently(t *testing.T) {
 			logs, billing := &openAIRecordUsageLogRepoStub{inserted: true}, &engineReceiptBillingRepo{}
 			svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(logs, billing, &openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
 			svc.httpUpstream = upstream
+			store := &engineFrozenStoreStub{}
 			account := engineAccount()
 			account.ID = 3001
 			turns := []struct {
@@ -162,22 +171,25 @@ func TestCodexEngineClientToolTurnsForwardAndBillIndependently(t *testing.T) {
 				input.Account, input.Result = account, result
 				input.RequestPayloadHash = fmt.Sprintf("external-request-%d", attempt)
 				require.NoError(t, svc.RecordUsage(context.Background(), input))
-				require.Equal(t, min(attempt+1, 2), billing.applied)
-				require.Equal(t, min(attempt+1, 2), logs.calls)
-				require.Len(t, billing.commands, attempt+1)
-				command := billing.commands[attempt]
-				require.Equal(t, turn.usage.InputTokens-turn.usage.CacheReadInputTokens, command.InputTokens)
+				require.Zero(t, billing.applied)
+				require.Zero(t, logs.calls)
+				require.Empty(t, billing.commands)
+				job, _ := engineFrozenTestSnapshot(t)
+				job.ID += int64(turnIndex)
+				event := engineFrozenTestModelEvent()
+				event.EventID, event.Usage = turn.receipt, turn.usage
+				event.Usage.InputTokens += 500
+				require.NoError(t, svc.SettleCodexEngineBillingEvent(context.Background(), store, job, event))
+				require.Equal(t, min(attempt+1, 2), store.applied)
+				command := store.received.Command
+				require.Equal(t, turn.usage.InputTokens+500-turn.usage.CacheReadInputTokens, command.InputTokens)
 				require.Equal(t, turn.usage.CacheReadInputTokens, command.CacheReadTokens)
 				require.Equal(t, turn.usage.OutputTokens, command.OutputTokens)
 				results = append(results, result)
 			}
-			require.NotEqual(t, billing.commands[0].RequestID, billing.commands[1].RequestID)
+			require.Len(t, store.seen, 2)
 			for index, result := range results {
 				require.Equal(t, turns[index%2].usage, result.Usage, "later rounds and billing must not mutate earlier usage")
-				if index >= 2 {
-					require.Equal(t, billing.commands[index-2].RequestID, billing.commands[index].RequestID)
-					require.Equal(t, billing.commands[index-2].RequestFingerprint, billing.commands[index].RequestFingerprint)
-				}
 			}
 		})
 	}

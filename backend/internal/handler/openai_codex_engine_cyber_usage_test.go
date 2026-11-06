@@ -3,8 +3,10 @@
 package handler
 
 import (
+	"context"
 	"io"
 	"net/http"
+	"net/http/httptest"
 	"strings"
 	"testing"
 	"time"
@@ -12,12 +14,14 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	coderws "github.com/coder/websocket"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
-// Exercise the real Engine forwarder and handler settlement together: a failed
-// response may carry a complete result, which must not race a reduced cyber bill.
+// Exercise the real Engine forwarder and cyber audit together. Public usage on
+// a failure never creates a second bill; confirmed receipt events settle later.
 func TestCodexEngineCyberPolicyRecordsUsageOnce(t *testing.T) {
 	const failedResponse = `{"id":"resp_engine_cyber","model":"gpt-5.1","service_tier":"priority","status":"failed","error":{"code":"cyber_policy","type":"invalid_request_error","message":"upstream policy refusal","status_code":400},"usage":{"input_tokens":1200,"output_tokens":300,"input_tokens_details":{"cached_tokens":700,"cache_write_tokens":100,"image_tokens":80},"output_tokens_details":{"image_tokens":25}}}`
 	for _, tc := range []struct {
@@ -59,31 +63,75 @@ func TestCodexEngineCyberPolicyRecordsUsageOnce(t *testing.T) {
 			case <-time.After(3 * time.Second):
 				t.Fatal("cyber record did not finish")
 			}
-			require.Len(t, usageRepo.created, 1, "a partial result and cyber marker must produce exactly one bill")
-			usage := <-usageRepo.created
-			require.Equal(t, service.RequestTypeCyberBlocked, usage.RequestType)
-			require.Equal(t, "req_engine_cyber_usage", usage.RequestID)
-			require.Equal(t, "gpt-5.1", usage.Model)
-			require.Equal(t, tc.stream, usage.Stream)
-			if !tc.metered {
-				require.Zero(t, usage.TotalTokens())
-				require.Zero(t, usage.TotalCost)
-				return
+			require.Empty(t, usageRepo.created, "public usage and the cyber marker must not bypass independent receipt-event settlement")
+		})
+	}
+}
+
+func TestCodexEngineWSCyberAuditUsesCurrentTurnRequestID(t *testing.T) {
+	for _, requestID := range []string{"req_engine_cyber_round_2", ""} {
+		name := "explicit_round_id"
+		if requestID == "" {
+			name = "missing_round_id"
+		}
+		t.Run(name, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			setupOpsErrorLogTestQueue(t, 4)
+			failureHeaders := http.Header{"Content-Type": {"text/event-stream"}}
+			if requestID != "" {
+				failureHeaders.Set("X-Request-Id", requestID)
 			}
-			require.Equal(t, 400, usage.InputTokens, "cached and cache-write tokens must not be billed as uncached input")
-			require.Equal(t, 700, usage.CacheReadTokens)
-			require.Equal(t, 100, usage.CacheCreationTokens)
-			require.Equal(t, 300, usage.OutputTokens)
-			require.Equal(t, 80, usage.ImageInputTokens)
-			require.Equal(t, 25, usage.ImageOutputTokens)
-			require.NotNil(t, usage.UpstreamModel)
-			require.Equal(t, "gpt-5.1", *usage.UpstreamModel)
-			require.NotNil(t, usage.UpstreamResponseModel)
-			require.Equal(t, "gpt-5.1", *usage.UpstreamResponseModel)
-			require.NotNil(t, usage.ServiceTier)
-			require.Equal(t, "priority", *usage.ServiceTier)
-			require.NotNil(t, usage.ReasoningEffort)
-			require.Equal(t, "high", *usage.ReasoningEffort)
+			upstream := newAstraProCapturedUpstream(
+				&http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}, "X-Request-Id": {"req_engine_round_1"}}, Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_engine_round_1\",\"usage\":{\"input_tokens\":10,\"output_tokens\":1}}}\n\n"))},
+				&http.Response{StatusCode: http.StatusOK, Header: failureHeaders, Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.failed\",\"response\":{\"id\":\"resp_engine_round_2\",\"error\":{\"code\":\"cyber_policy\",\"message\":\"policy refusal\",\"status_code\":400},\"usage\":{\"input_tokens\":20,\"output_tokens\":2}}}\n\n"))},
+			)
+			usageRepo := &openAIWSUsageHandlerUsageLogRepoStub{created: make(chan *service.UsageLog, 4)}
+			h := newEngineCyberUsageHandler(t, upstream, usageRepo)
+			h.cfg.Gateway.OpenAIWS.ModeRouterV2Enabled = true
+			h.cfg.Gateway.OpenAIWS.IngressModeDefault = service.OpenAIWSIngressModeHTTPBridge
+			authContext, _ := newAstraProFailoverContext(t, `{}`)
+			key, ok := middleware.GetAPIKeyFromContext(authContext)
+			require.True(t, ok)
+			done := make(chan string, 1)
+			router := gin.New()
+			router.GET("/v1/responses", func(c *gin.Context) {
+				c.Set(string(middleware.ContextKeyAPIKey), key)
+				c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 100})
+				c.Writer.Header().Set("X-Request-Id", "req_handshake")
+				h.ResponsesWebSocket(c)
+				done <- c.Writer.Header().Get("X-Request-Id")
+			})
+			server := httptest.NewServer(router)
+			defer server.Close()
+			ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+			defer cancel()
+			client, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/v1/responses", nil)
+			require.NoError(t, err)
+			defer client.CloseNow()
+			for _, eventType := range []string{"response.completed", "response.failed"} {
+				require.NoError(t, client.Write(ctx, coderws.MessageText, []byte(`{"type":"response.create","model":"gpt-5.1","input":"hello"}`)))
+				_, event, err := client.Read(ctx)
+				require.NoError(t, err)
+				require.Equal(t, eventType, gjson.GetBytes(event, "type").String())
+			}
+			select {
+			case job := <-opsErrorLogQueue:
+				require.Equal(t, "cyber_policy", job.entry.ErrorType)
+				require.Equal(t, requestID, job.entry.RequestID, "audit must not reuse handshake or previous turn headers")
+			case <-ctx.Done():
+				t.Fatal("WS cyber audit did not finish")
+			}
+			_ = client.CloseNow()
+			select {
+			case restoredID := <-done:
+				require.Equal(t, "req_handshake", restoredID, "the HTTP handshake writer must be restored after the callback")
+			case <-ctx.Done():
+				t.Fatal("WS handler did not finish")
+			}
+			_, attempts, _ := upstream.snapshot()
+			require.Equal(t, []int64{1, 1}, attempts)
+			require.Empty(t, opsErrorLogQueue, "one refused turn must produce exactly one cyber audit")
+			require.Empty(t, usageRepo.created, "WS audit must not produce a second charge outside receipt settlement")
 		})
 	}
 }
@@ -98,11 +146,7 @@ func newEngineCyberUsageHandler(t *testing.T, upstream service.HTTPUpstream, usa
 	}}
 	cfg := &config.Config{RunMode: config.RunModeSimple}
 	cfg.Default.RateMultiplier = 1
-	gateway := service.NewOpenAIGatewayService(
-		openAIImagesFailoverAccountRepo{accounts: accounts}, usageRepo, nil, nil, nil, nil, nil, cfg, nil, nil,
-		service.NewBillingService(cfg, nil), nil, nil, upstream, &service.DeferredService{},
-		nil, nil, nil, nil, nil, nil, nil,
-	)
+	gateway := newEngineBillingHandlerGateway(t, openAIImagesFailoverAccountRepo{accounts: accounts}, usageRepo, cfg, upstream)
 	billing := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
 	t.Cleanup(billing.Stop)
 	h := NewOpenAIGatewayHandler(gateway, service.NewConcurrencyService(nil), billing,
@@ -117,19 +161,18 @@ func TestCodexEngineAuxiliaryCyberPolicyRecordsWithoutReplay(t *testing.T) {
 	for _, tc := range []struct {
 		name, path, body string
 		run              func(*OpenAIGatewayHandler, *gin.Context)
-		usageRows        int
 		metered          bool
 	}{
-		{"chat", "/v1/chat/completions", `{"model":"gpt-5.1","messages":[{"role":"user","content":"test"}]}`, (*OpenAIGatewayHandler).ChatCompletions, 1, false},
-		{"chat with usage", "/v1/chat/completions", `{"model":"gpt-5.1","messages":[{"role":"user","content":"test"}]}`, (*OpenAIGatewayHandler).ChatCompletions, 1, true},
-		{"messages", "/v1/messages", `{"model":"gpt-5.1","max_tokens":100,"messages":[{"role":"user","content":"test"}]}`, (*OpenAIGatewayHandler).Messages, 1, false},
-		{"messages with usage", "/v1/messages", `{"model":"gpt-5.1","max_tokens":100,"messages":[{"role":"user","content":"test"}]}`, (*OpenAIGatewayHandler).Messages, 1, true},
-		{"images", "/v1/images/generations", `{"model":"gpt-image-1","prompt":"test"}`, (*OpenAIGatewayHandler).Images, 1, false},
-		{"images with usage", "/v1/images/generations", `{"model":"gpt-image-1","prompt":"test"}`, (*OpenAIGatewayHandler).Images, 1, true},
-		{"search", "/v1/alpha/search", `{"model":"gpt-5.1","query":"test"}`, (*OpenAIGatewayHandler).AlphaSearch, 1, false},
-		{"search with usage", "/v1/alpha/search", `{"model":"gpt-5.1","query":"test"}`, (*OpenAIGatewayHandler).AlphaSearch, 1, true},
-		{"count tokens", "/v1/messages/count_tokens", `{"model":"gpt-5.1","messages":[{"role":"user","content":"test"}]}`, (*OpenAIGatewayHandler).CountTokens, 0, false},
-		{"count tokens with usage", "/v1/messages/count_tokens", `{"model":"gpt-5.1","messages":[{"role":"user","content":"test"}]}`, (*OpenAIGatewayHandler).CountTokens, 0, true},
+		{"chat", "/v1/chat/completions", `{"model":"gpt-5.1","messages":[{"role":"user","content":"test"}]}`, (*OpenAIGatewayHandler).ChatCompletions, false},
+		{"chat with usage", "/v1/chat/completions", `{"model":"gpt-5.1","messages":[{"role":"user","content":"test"}]}`, (*OpenAIGatewayHandler).ChatCompletions, true},
+		{"messages", "/v1/messages", `{"model":"gpt-5.1","max_tokens":100,"messages":[{"role":"user","content":"test"}]}`, (*OpenAIGatewayHandler).Messages, false},
+		{"messages with usage", "/v1/messages", `{"model":"gpt-5.1","max_tokens":100,"messages":[{"role":"user","content":"test"}]}`, (*OpenAIGatewayHandler).Messages, true},
+		{"images", "/v1/images/generations", `{"model":"gpt-image-1","prompt":"test"}`, (*OpenAIGatewayHandler).Images, false},
+		{"images with usage", "/v1/images/generations", `{"model":"gpt-image-1","prompt":"test"}`, (*OpenAIGatewayHandler).Images, true},
+		{"search", "/v1/alpha/search", `{"model":"gpt-5.1","query":"test"}`, (*OpenAIGatewayHandler).AlphaSearch, false},
+		{"search with usage", "/v1/alpha/search", `{"model":"gpt-5.1","query":"test"}`, (*OpenAIGatewayHandler).AlphaSearch, true},
+		{"count tokens", "/v1/messages/count_tokens", `{"model":"gpt-5.1","messages":[{"role":"user","content":"test"}]}`, (*OpenAIGatewayHandler).CountTokens, false},
+		{"count tokens with usage", "/v1/messages/count_tokens", `{"model":"gpt-5.1","messages":[{"role":"user","content":"test"}]}`, (*OpenAIGatewayHandler).CountTokens, true},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			gin.SetMode(gin.TestMode)
@@ -162,19 +205,7 @@ func TestCodexEngineAuxiliaryCyberPolicyRecordsWithoutReplay(t *testing.T) {
 			case <-time.After(3 * time.Second):
 				t.Fatal("auxiliary cyber record did not finish")
 			}
-			require.Len(t, usageRepo.created, tc.usageRows)
-			if tc.usageRows > 0 {
-				usage := <-usageRepo.created
-				require.Equal(t, service.RequestTypeCyberBlocked, usage.RequestType)
-				if tc.metered {
-					require.Equal(t, 30, usage.InputTokens)
-					require.Equal(t, 60, usage.CacheReadTokens)
-					require.Equal(t, 10, usage.CacheCreationTokens)
-					require.Equal(t, 30, usage.OutputTokens)
-				} else {
-					require.Zero(t, usage.TotalCost, "an unmetered rejection must not fabricate image/search charges")
-				}
-			}
+			require.Empty(t, usageRepo.created, "only the persisted receipt path may bill Engine requests; count_tokens remains free")
 		})
 	}
 }

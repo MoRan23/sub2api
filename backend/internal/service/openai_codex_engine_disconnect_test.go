@@ -69,8 +69,8 @@ func engineDisconnectTestContext(t *testing.T, path string, failWrite bool) (con
 	return ctx, c, rec, writer
 }
 
-func TestCodexEngineDisconnectCollectsDelayedUsageWithoutCancelingUpstream(t *testing.T) {
-	for _, path := range []string{"/v1/responses", "/v1/chat/completions", "/v1/messages"} {
+func TestCodexEngineDisconnectCancelsUpstreamWithoutReplaying(t *testing.T) {
+	for _, path := range []string{"/v1/responses", "/v1/chat/completions", "/v1/messages", "/v1/images/generations"} {
 		for _, writeFailure := range []bool{false, true} {
 			t.Run(path+map[bool]string{false: "/cancel", true: "/write_failure"}[writeFailure], func(t *testing.T) {
 				ctx, c, rec, writer := engineDisconnectTestContext(t, path, writeFailure)
@@ -113,16 +113,20 @@ func TestCodexEngineDisconnectCollectsDelayedUsageWithoutCancelingUpstream(t *te
 				cfg.Security.URLAllowlist.AllowInsecureHTTP = true
 				svc := &OpenAIGatewayService{cfg: cfg, httpUpstream: &engineDisconnectUpstream{do: server.Client().Do}}
 				result, err := svc.forwardCodexEngine(ctx, c, account, []byte(`{"model":"alias","stream":true}`), path, "")
-				require.NoError(t, err)
-				require.NoError(t, <-upstreamOutcome, "downstream cancellation must not cancel the unfinished upstream")
+				require.Error(t, err)
+				require.ErrorIs(t, <-upstreamOutcome, context.Canceled, "downstream cancellation must cancel execution, not wait for metering")
 				require.True(t, result.ClientDisconnect)
-				require.Equal(t, 11, result.Usage.InputTokens)
-				require.Equal(t, 4, result.Usage.OutputTokens)
+				if path == "/v1/messages" {
+					require.Equal(t, 11, result.Usage.InputTokens, "preserve usage already received before cancellation")
+				} else {
+					require.Zero(t, result.Usage.InputTokens)
+				}
+				require.Zero(t, result.Usage.OutputTokens)
 				require.Equal(t, int32(1), attempts.Load(), "a disconnected attempt must never replay")
 				require.Equal(t, 1, writer.writes)
 				require.Zero(t, writer.flushes, "do not flush after downstream cancellation")
 				if writeFailure {
-					require.NoError(t, ctx.Err(), "write failure must drain even before request context cancellation")
+					require.NoError(t, ctx.Err(), "socket failure must cancel upstream even before caller context cancellation")
 					require.Empty(t, rec.Body.String())
 				} else {
 					require.Equal(t, preamble, rec.Body.String(), "stop writing before the delayed terminal")
@@ -220,7 +224,7 @@ func TestCodexEngineTerminalEndsWithoutWaitingForEOF(t *testing.T) {
 	}
 }
 
-func TestCodexEngineDisconnectDrainWindowIsBoundedDespiteHeartbeats(t *testing.T) {
+func TestCodexEngineDisconnectImmediatelyClosesHeartbeatStream(t *testing.T) {
 	ctx, c, _, writer := engineDisconnectTestContext(t, "/v1/responses", false)
 	reader, upstreamWriter := io.Pipe()
 	t.Cleanup(func() { _ = upstreamWriter.Close() })
@@ -241,8 +245,8 @@ func TestCodexEngineDisconnectDrainWindowIsBoundedDespiteHeartbeats(t *testing.T
 	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{StreamDataIntervalTimeout: 1}}, httpUpstream: upstream}
 	start := time.Now()
 	result, err := svc.Forward(ctx, c, engineAccount(), []byte(`{"model":"alias","stream":true}`))
-	require.ErrorIs(t, err, errCodexEngineUsageDrainTimeout)
-	require.Less(t, time.Since(start), 2*time.Second)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Less(t, time.Since(start), 500*time.Millisecond)
 	require.True(t, result.ClientDisconnect)
 	require.Zero(t, result.Usage.InputTokens)
 	require.Zero(t, result.Usage.OutputTokens)
@@ -251,11 +255,10 @@ func TestCodexEngineDisconnectDrainWindowIsBoundedDespiteHeartbeats(t *testing.T
 	select {
 	case <-producerDone:
 	case <-time.After(time.Second):
-		t.Fatal("drain timeout did not close the upstream reader")
+		t.Fatal("cancellation did not close the upstream reader")
 	}
-	events := c.MustGet(OpsUpstreamErrorsKey).([]*OpsUpstreamErrorEvent)
-	require.Len(t, events, 1)
-	require.Equal(t, "usage_drain_timeout", events[0].Kind)
+	_, recorded := c.Get(OpsUpstreamErrorsKey)
+	require.False(t, recorded, "client cancellation is not an upstream timeout")
 }
 
 func TestCodexEngineFirstOutputTimeoutHasDistinctCause(t *testing.T) {
@@ -292,7 +295,7 @@ func TestCodexEngineFirstOutputTimeoutHasDistinctCause(t *testing.T) {
 	}
 }
 
-func TestCodexEngineDisconnectDrainWindowAlsoBoundsResponseHeaderWait(t *testing.T) {
+func TestCodexEngineDisconnectCancelsResponseHeaderWait(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	upstream := &engineDisconnectUpstream{do: func(req *http.Request) (*http.Response, error) {
@@ -307,14 +310,13 @@ func TestCodexEngineDisconnectDrainWindowAlsoBoundsResponseHeaderWait(t *testing
 	start := time.Now()
 	result, err := svc.Forward(ctx, c, engineAccount(), []byte(`{"model":"alias","stream":true}`))
 	require.Nil(t, result)
-	require.ErrorIs(t, err, errCodexEngineUsageDrainTimeout)
-	require.Less(t, time.Since(start), 2*time.Second)
-	events := c.MustGet(OpsUpstreamErrorsKey).([]*OpsUpstreamErrorEvent)
-	require.Len(t, events, 1)
-	require.Equal(t, "usage_drain_timeout", events[0].Kind)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Less(t, time.Since(start), 500*time.Millisecond)
+	_, recorded := c.Get(OpsUpstreamErrorsKey)
+	require.False(t, recorded)
 }
 
-func TestCodexEngineBareErrorSurvivesDisconnectedDrainTimeout(t *testing.T) {
+func TestCodexEngineBareErrorSurvivesClientCancellation(t *testing.T) {
 	ctx, c, rec, _ := engineDisconnectTestContext(t, "/v1/responses", false)
 	reader, writer := io.Pipe()
 	t.Cleanup(func() { _ = writer.Close() })
@@ -323,13 +325,14 @@ func TestCodexEngineBareErrorSurvivesDisconnectedDrainTimeout(t *testing.T) {
 	upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: reader}}
 	svc := &OpenAIGatewayService{cfg: &config.Config{Gateway: config.GatewayConfig{StreamDataIntervalTimeout: 1}}, httpUpstream: upstream}
 	result, err := svc.Forward(ctx, c, engineAccount(), []byte(`{"model":"alias","stream":true}`))
-	require.Nil(t, result, "unmetered business rejection must not enter billing after a drain timeout")
+	require.Nil(t, result, "unmetered business rejection without receipt must not enter billing")
 	var failure *codexEngineResponseError
 	require.ErrorAs(t, err, &failure)
 	require.Equal(t, "native_error", failure.code)
 	require.Equal(t, "original failure", failure.message)
 	require.Equal(t, 409, failure.status)
-	require.Equal(t, 409, c.GetInt(OpsUpstreamStatusCodeKey), "business diagnosis keeps precedence over collection timeout")
+	require.ErrorIs(t, err, context.Canceled)
+	require.Equal(t, 409, c.GetInt(OpsUpstreamStatusCodeKey), "business diagnosis survives cancellation")
 	require.Equal(t, prefix, rec.Body.String())
 }
 
@@ -365,4 +368,127 @@ func TestCodexEngineAlreadyDisconnectedStreamDoesNotStartUpstream(t *testing.T) 
 	result, err := svc.Forward(ctx, c, engineAccount(), []byte(`{"model":"alias","stream":true}`))
 	require.Nil(t, result)
 	require.ErrorIs(t, err, context.Canceled)
+}
+
+type engineShortWriter struct{ gin.ResponseWriter }
+
+func (w *engineShortWriter) Write(data []byte) (int, error) {
+	return len(data) - 1, nil
+}
+
+type engineFlushFailureWriter struct{ *httptest.ResponseRecorder }
+
+func (w *engineFlushFailureWriter) FlushError() error { return io.ErrClosedPipe }
+
+func TestCodexEngineWriteAndFlushFailureCancelExecutionAndKeepReceivedUsage(t *testing.T) {
+	for _, mode := range []string{"json_write", "image_write", "json_short_write", "sse_short_write", "sse_flush"} {
+		t.Run(mode, func(t *testing.T) {
+			ctx := context.Background()
+			rec := httptest.NewRecorder()
+			var downstream http.ResponseWriter = rec
+			if mode == "sse_flush" {
+				downstream = &engineFlushFailureWriter{ResponseRecorder: rec}
+			}
+			c, _ := gin.CreateTestContext(downstream)
+			endpoint := "/v1/responses"
+			if mode == "image_write" {
+				endpoint = "/v1/images/generations"
+			}
+			c.Request = httptest.NewRequest(http.MethodPost, endpoint, nil)
+			if strings.HasSuffix(mode, "short_write") {
+				c.Writer = &engineShortWriter{ResponseWriter: c.Writer}
+			} else if strings.HasSuffix(mode, "write") {
+				c.Writer = &engineDisconnectWriter{ResponseWriter: c.Writer, failWrite: true}
+			}
+			stream := strings.HasPrefix(mode, "sse_")
+			payload := `{"usage":{"input_tokens":23,"output_tokens":7}}`
+			contentType := "application/json"
+			if stream {
+				contentType = "text/event-stream"
+				payload = "data: {\"type\":\"response.completed\",\"response\":" + payload + "}\n\n"
+			}
+			var upstreamCtx context.Context
+			upstream := &engineDisconnectUpstream{do: func(req *http.Request) (*http.Response, error) {
+				upstreamCtx = req.Context()
+				return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {contentType}}, Body: io.NopCloser(strings.NewReader(payload))}, nil
+			}}
+			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+			result, err := svc.forwardCodexEngine(ctx, c, engineAccount(), []byte(`{"model":"alias"}`), endpoint, "")
+			require.Error(t, err)
+			if strings.HasSuffix(mode, "short_write") {
+				require.ErrorIs(t, err, io.ErrShortWrite)
+			} else {
+				require.ErrorIs(t, err, io.ErrClosedPipe)
+			}
+			require.True(t, result.ClientDisconnect)
+			require.ErrorIs(t, upstreamCtx.Err(), context.Canceled)
+			require.Equal(t, 23, result.Usage.InputTokens)
+			require.Equal(t, 7, result.Usage.OutputTokens)
+			require.True(t, CodexEngineResponseWritten(c))
+		})
+	}
+}
+
+func TestCodexEngineAcceptedAsyncImageUsesTaskContext(t *testing.T) {
+	submissionCtx, cancelSubmission := context.WithCancel(context.Background())
+	cancelSubmission()
+	taskCtx := context.Background()
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil).WithContext(submissionCtx)
+	upstream := &engineDisconnectUpstream{do: func(req *http.Request) (*http.Response, error) {
+		require.NoError(t, req.Context().Err())
+		return &http.Response{StatusCode: 200, Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"data":[]}`))}, nil
+	}}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	result, err := svc.forwardCodexEngine(taskCtx, c, engineAccount(), []byte(`{"model":"alias"}`), "/v1/images/generations", "")
+	require.NoError(t, err)
+	require.False(t, result.ClientDisconnect)
+}
+
+func TestCodexEngineUnmeteredFailureKeepsAcceptedReceipt(t *testing.T) {
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", nil)
+	receipt := "ceu_" + strings.Repeat("a", 43)
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusServiceUnavailable,
+		Header:     http.Header{"Content-Type": {"application/json"}, codexEngineUsageIDHeader: {receipt}},
+		Body:       io.NopCloser(strings.NewReader(`{"error":{"code":"scheduler_unavailable","message":"lease lost"}}`)),
+	}}
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	result, err := svc.Forward(context.Background(), c, engineAccount(), []byte(`{"model":"alias","stream":true}`))
+	require.True(t, isCodexEngineResponseError(err))
+	require.NotNil(t, result, "accepted execution still needs durable metering reconciliation")
+	require.Equal(t, receipt, codexEngineUsageIDFromHeaders(result.UpstreamHeaders))
+	require.Zero(t, result.Usage.InputTokens)
+	require.Zero(t, result.Usage.OutputTokens)
+}
+
+func TestCodexEngineSynchronousImageCancellationInterruptsBodyRead(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	reader, writer := io.Pipe()
+	defer writer.Close()
+	upstream := &engineDisconnectUpstream{do: func(req *http.Request) (*http.Response, error) {
+		cancel()
+		return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"application/json"}}, Body: reader}, nil
+	}}
+	c, _ := gin.CreateTestContext(httptest.NewRecorder())
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/images/generations", nil).WithContext(ctx)
+	svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream}
+	type outcome struct {
+		result *OpenAIForwardResult
+		err    error
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		result, err := svc.forwardCodexEngine(ctx, c, engineAccount(), []byte(`{"model":"alias"}`), "/v1/images/generations", "")
+		done <- outcome{result, err}
+	}()
+	select {
+	case out := <-done:
+		require.ErrorIs(t, out.err, context.Canceled)
+		require.True(t, out.result.ClientDisconnect)
+	case <-time.After(time.Second):
+		t.Fatal("client cancellation left synchronous image body read running")
+	}
 }

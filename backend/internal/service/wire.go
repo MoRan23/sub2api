@@ -309,6 +309,9 @@ func ProvideOpenAIGatewayService(
 	dailySessionRepo OAuthDailySessionRepository,
 	codexTelemetry *CodexTelemetryService,
 	egressLocation *OpenAIEgressLocationService,
+	engineBilling *CodexEngineBillingService,
+	engineBillingStore CodexEngineBillingStore,
+	apiKeyService *APIKeyService,
 ) *OpenAIGatewayService {
 	svc := NewOpenAIGatewayService(
 		accountRepo, usageLogRepo, usageBillingRepo, userRepo, userSubRepo, userGroupRateRepo,
@@ -320,6 +323,12 @@ func ProvideOpenAIGatewayService(
 	svc.SetOAuthDailySessionRepository(dailySessionRepo)
 	svc.SetCodexTelemetryService(codexTelemetry)
 	svc.egressLocationService = egressLocation
+	svc.codexEngineBilling = engineBilling
+	svc.engineBillingAPIKeys = apiKeyService
+	engineBilling.SetSettler(func(ctx context.Context, job *CodexEngineBillingJob, event *CodexEngineBillingUsageEvent) error {
+		return svc.SettleCodexEngineBillingEvent(ctx, engineBillingStore, job, event)
+	})
+	engineBilling.Start()
 	return svc
 }
 
@@ -1037,6 +1046,7 @@ var ProviderSet = wire.NewSet(
 	ProvideOpenAIEgressLocationService,
 	NewGatewayService,
 	ProvideOpenAIGatewayService,
+	NewCodexEngineBillingService,
 	ProvideCodexTelemetryService,
 	ProvideOpenAIOutboundSessionV1CleanupWorker,
 	ProvideImageStorageSettingService,

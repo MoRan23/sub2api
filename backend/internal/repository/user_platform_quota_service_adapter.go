@@ -48,17 +48,20 @@ func (a *userPlatformQuotaServiceAdapter) ListByUser(ctx context.Context, userID
 	out := make([]service.UserPlatformQuotaRecord, len(rows))
 	for i, r := range rows {
 		out[i] = service.UserPlatformQuotaRecord{
-			UserID:             r.UserID,
-			Platform:           r.Platform,
-			DailyLimitUSD:      r.DailyLimitUSD,
-			WeeklyLimitUSD:     r.WeeklyLimitUSD,
-			MonthlyLimitUSD:    r.MonthlyLimitUSD,
-			DailyUsageUSD:      r.DailyUsageUSD,
-			WeeklyUsageUSD:     r.WeeklyUsageUSD,
-			MonthlyUsageUSD:    r.MonthlyUsageUSD,
-			DailyWindowStart:   r.DailyWindowStart,
-			WeeklyWindowStart:  r.WeeklyWindowStart,
-			MonthlyWindowStart: r.MonthlyWindowStart,
+			UserID:                r.UserID,
+			Platform:              r.Platform,
+			DailyLimitUSD:         r.DailyLimitUSD,
+			WeeklyLimitUSD:        r.WeeklyLimitUSD,
+			MonthlyLimitUSD:       r.MonthlyLimitUSD,
+			DailyUsageUSD:         r.DailyUsageUSD,
+			WeeklyUsageUSD:        r.WeeklyUsageUSD,
+			MonthlyUsageUSD:       r.MonthlyUsageUSD,
+			EngineDailyUsageUSD:   r.EngineDailyUsageUSD,
+			EngineWeeklyUsageUSD:  r.EngineWeeklyUsageUSD,
+			EngineMonthlyUsageUSD: r.EngineMonthlyUsageUSD,
+			DailyWindowStart:      r.DailyWindowStart,
+			WeeklyWindowStart:     r.WeeklyWindowStart,
+			MonthlyWindowStart:    r.MonthlyWindowStart,
 		}
 	}
 	return out, nil
@@ -100,14 +103,17 @@ func (a *userPlatformQuotaServiceAdapter) BatchSnapshotUsage(ctx context.Context
 	repoSnaps := make([]UserPlatformQuotaSnapshot, len(snapshots))
 	for i, s := range snapshots {
 		repoSnaps[i] = UserPlatformQuotaSnapshot{
-			UserID:             s.UserID,
-			Platform:           s.Platform,
-			DailyUsageUSD:      s.DailyUsageUSD,
-			WeeklyUsageUSD:     s.WeeklyUsageUSD,
-			MonthlyUsageUSD:    s.MonthlyUsageUSD,
-			DailyWindowStart:   s.DailyWindowStart,
-			WeeklyWindowStart:  s.WeeklyWindowStart,
-			MonthlyWindowStart: s.MonthlyWindowStart,
+			UserID:                s.UserID,
+			Platform:              s.Platform,
+			DailyUsageUSD:         s.DailyUsageUSD,
+			WeeklyUsageUSD:        s.WeeklyUsageUSD,
+			MonthlyUsageUSD:       s.MonthlyUsageUSD,
+			EngineDailyUsageUSD:   s.EngineDailyUsageUSD,
+			EngineWeeklyUsageUSD:  s.EngineWeeklyUsageUSD,
+			EngineMonthlyUsageUSD: s.EngineMonthlyUsageUSD,
+			DailyWindowStart:      s.DailyWindowStart,
+			WeeklyWindowStart:     s.WeeklyWindowStart,
+			MonthlyWindowStart:    s.MonthlyWindowStart,
 		}
 	}
 	err := a.inner.BatchSnapshotUsage(ctx, repoSnaps, now)
@@ -144,17 +150,20 @@ func (a *genericUserPlatformQuotaAdapter) ListByUser(ctx context.Context, userID
 	out := make([]service.UserPlatformQuotaRecord, len(rows))
 	for i, r := range rows {
 		out[i] = service.UserPlatformQuotaRecord{
-			UserID:             r.UserID,
-			Platform:           r.Platform,
-			DailyLimitUSD:      r.DailyLimitUSD,
-			WeeklyLimitUSD:     r.WeeklyLimitUSD,
-			MonthlyLimitUSD:    r.MonthlyLimitUSD,
-			DailyUsageUSD:      r.DailyUsageUSD,
-			WeeklyUsageUSD:     r.WeeklyUsageUSD,
-			MonthlyUsageUSD:    r.MonthlyUsageUSD,
-			DailyWindowStart:   r.DailyWindowStart,
-			WeeklyWindowStart:  r.WeeklyWindowStart,
-			MonthlyWindowStart: r.MonthlyWindowStart,
+			UserID:                r.UserID,
+			Platform:              r.Platform,
+			DailyLimitUSD:         r.DailyLimitUSD,
+			WeeklyLimitUSD:        r.WeeklyLimitUSD,
+			MonthlyLimitUSD:       r.MonthlyLimitUSD,
+			DailyUsageUSD:         r.DailyUsageUSD,
+			WeeklyUsageUSD:        r.WeeklyUsageUSD,
+			MonthlyUsageUSD:       r.MonthlyUsageUSD,
+			EngineDailyUsageUSD:   r.EngineDailyUsageUSD,
+			EngineWeeklyUsageUSD:  r.EngineWeeklyUsageUSD,
+			EngineMonthlyUsageUSD: r.EngineMonthlyUsageUSD,
+			DailyWindowStart:      r.DailyWindowStart,
+			WeeklyWindowStart:     r.WeeklyWindowStart,
+			MonthlyWindowStart:    r.MonthlyWindowStart,
 		}
 	}
 	return out, nil
@@ -196,14 +205,17 @@ func (a *genericUserPlatformQuotaAdapter) BatchSnapshotUsage(ctx context.Context
 	repoSnaps := make([]UserPlatformQuotaSnapshot, len(snapshots))
 	for i, s := range snapshots {
 		repoSnaps[i] = UserPlatformQuotaSnapshot{
-			UserID:             s.UserID,
-			Platform:           s.Platform,
-			DailyUsageUSD:      s.DailyUsageUSD,
-			WeeklyUsageUSD:     s.WeeklyUsageUSD,
-			MonthlyUsageUSD:    s.MonthlyUsageUSD,
-			DailyWindowStart:   s.DailyWindowStart,
-			WeeklyWindowStart:  s.WeeklyWindowStart,
-			MonthlyWindowStart: s.MonthlyWindowStart,
+			UserID:                s.UserID,
+			Platform:              s.Platform,
+			DailyUsageUSD:         s.DailyUsageUSD,
+			WeeklyUsageUSD:        s.WeeklyUsageUSD,
+			MonthlyUsageUSD:       s.MonthlyUsageUSD,
+			EngineDailyUsageUSD:   s.EngineDailyUsageUSD,
+			EngineWeeklyUsageUSD:  s.EngineWeeklyUsageUSD,
+			EngineMonthlyUsageUSD: s.EngineMonthlyUsageUSD,
+			DailyWindowStart:      s.DailyWindowStart,
+			WeeklyWindowStart:     s.WeeklyWindowStart,
+			MonthlyWindowStart:    s.MonthlyWindowStart,
 		}
 	}
 	err := a.inner.BatchSnapshotUsage(ctx, repoSnaps, now)
@@ -216,17 +228,20 @@ func (a *genericUserPlatformQuotaAdapter) BatchSnapshotUsage(ctx context.Context
 // toServiceRecord 将 repository.UserPlatformQuotaRecord 转换为 service.UserPlatformQuotaRecord。
 func toServiceRecord(rec *UserPlatformQuotaRecord) *service.UserPlatformQuotaRecord {
 	return &service.UserPlatformQuotaRecord{
-		UserID:             rec.UserID,
-		Platform:           rec.Platform,
-		DailyLimitUSD:      rec.DailyLimitUSD,
-		WeeklyLimitUSD:     rec.WeeklyLimitUSD,
-		MonthlyLimitUSD:    rec.MonthlyLimitUSD,
-		DailyUsageUSD:      rec.DailyUsageUSD,
-		WeeklyUsageUSD:     rec.WeeklyUsageUSD,
-		MonthlyUsageUSD:    rec.MonthlyUsageUSD,
-		DailyWindowStart:   rec.DailyWindowStart,
-		WeeklyWindowStart:  rec.WeeklyWindowStart,
-		MonthlyWindowStart: rec.MonthlyWindowStart,
+		UserID:                rec.UserID,
+		Platform:              rec.Platform,
+		DailyLimitUSD:         rec.DailyLimitUSD,
+		WeeklyLimitUSD:        rec.WeeklyLimitUSD,
+		MonthlyLimitUSD:       rec.MonthlyLimitUSD,
+		DailyUsageUSD:         rec.DailyUsageUSD,
+		WeeklyUsageUSD:        rec.WeeklyUsageUSD,
+		MonthlyUsageUSD:       rec.MonthlyUsageUSD,
+		EngineDailyUsageUSD:   rec.EngineDailyUsageUSD,
+		EngineWeeklyUsageUSD:  rec.EngineWeeklyUsageUSD,
+		EngineMonthlyUsageUSD: rec.EngineMonthlyUsageUSD,
+		DailyWindowStart:      rec.DailyWindowStart,
+		WeeklyWindowStart:     rec.WeeklyWindowStart,
+		MonthlyWindowStart:    rec.MonthlyWindowStart,
 	}
 }
 
@@ -235,17 +250,20 @@ func toRepoRecords(records []service.UserPlatformQuotaRecord) []UserPlatformQuot
 	out := make([]UserPlatformQuotaRecord, len(records))
 	for i, r := range records {
 		out[i] = UserPlatformQuotaRecord{
-			UserID:             r.UserID,
-			Platform:           r.Platform,
-			DailyLimitUSD:      r.DailyLimitUSD,
-			WeeklyLimitUSD:     r.WeeklyLimitUSD,
-			MonthlyLimitUSD:    r.MonthlyLimitUSD,
-			DailyUsageUSD:      r.DailyUsageUSD,
-			WeeklyUsageUSD:     r.WeeklyUsageUSD,
-			MonthlyUsageUSD:    r.MonthlyUsageUSD,
-			DailyWindowStart:   r.DailyWindowStart,
-			WeeklyWindowStart:  r.WeeklyWindowStart,
-			MonthlyWindowStart: r.MonthlyWindowStart,
+			UserID:                r.UserID,
+			Platform:              r.Platform,
+			DailyLimitUSD:         r.DailyLimitUSD,
+			WeeklyLimitUSD:        r.WeeklyLimitUSD,
+			MonthlyLimitUSD:       r.MonthlyLimitUSD,
+			DailyUsageUSD:         r.DailyUsageUSD,
+			WeeklyUsageUSD:        r.WeeklyUsageUSD,
+			MonthlyUsageUSD:       r.MonthlyUsageUSD,
+			EngineDailyUsageUSD:   r.EngineDailyUsageUSD,
+			EngineWeeklyUsageUSD:  r.EngineWeeklyUsageUSD,
+			EngineMonthlyUsageUSD: r.EngineMonthlyUsageUSD,
+			DailyWindowStart:      r.DailyWindowStart,
+			WeeklyWindowStart:     r.WeeklyWindowStart,
+			MonthlyWindowStart:    r.MonthlyWindowStart,
 		}
 	}
 	return out

@@ -16,17 +16,20 @@ import (
 // UserPlatformQuotaRecord 是 repository 层的传输结构体，
 // 与 ent.UserPlatformQuota 实体解耦，供业务层使用。
 type UserPlatformQuotaRecord struct {
-	UserID             int64
-	Platform           string
-	DailyLimitUSD      *float64
-	WeeklyLimitUSD     *float64
-	MonthlyLimitUSD    *float64
-	DailyUsageUSD      float64
-	WeeklyUsageUSD     float64
-	MonthlyUsageUSD    float64
-	DailyWindowStart   *time.Time
-	WeeklyWindowStart  *time.Time
-	MonthlyWindowStart *time.Time
+	UserID                int64
+	Platform              string
+	DailyLimitUSD         *float64
+	WeeklyLimitUSD        *float64
+	MonthlyLimitUSD       *float64
+	DailyUsageUSD         float64
+	WeeklyUsageUSD        float64
+	MonthlyUsageUSD       float64
+	EngineDailyUsageUSD   float64
+	EngineWeeklyUsageUSD  float64
+	EngineMonthlyUsageUSD float64
+	DailyWindowStart      *time.Time
+	WeeklyWindowStart     *time.Time
+	MonthlyWindowStart    *time.Time
 }
 
 // HasAnyLimit 报告该记录是否至少配置了一档限额（0 也算配置）。
@@ -42,16 +45,19 @@ var ErrUserPlatformQuotaNotFound = fmt.Errorf("user platform quota record not fo
 var ErrUserPlatformQuotaFKViolation = errors.New("user platform quota snapshot FK violation")
 
 // UserPlatformQuotaSnapshot 是 BatchSnapshotUsage 的输入结构体，
-// 表示 Redis 当前窗口快照（用于绝对值覆盖写入 DB）。
+// 表示 Redis 当前窗口快照，Engine 分量已包含在总用量中。
 type UserPlatformQuotaSnapshot struct {
-	UserID             int64
-	Platform           string
-	DailyUsageUSD      float64
-	WeeklyUsageUSD     float64
-	MonthlyUsageUSD    float64
-	DailyWindowStart   time.Time
-	WeeklyWindowStart  time.Time
-	MonthlyWindowStart time.Time
+	UserID                int64
+	Platform              string
+	DailyUsageUSD         float64
+	WeeklyUsageUSD        float64
+	MonthlyUsageUSD       float64
+	EngineDailyUsageUSD   float64
+	EngineWeeklyUsageUSD  float64
+	EngineMonthlyUsageUSD float64
+	DailyWindowStart      time.Time
+	WeeklyWindowStart     time.Time
+	MonthlyWindowStart    time.Time
 }
 
 // UserPlatformQuotaRepository 定义用户平台配额的数据访问接口。
@@ -68,8 +74,8 @@ type UserPlatformQuotaRepository interface {
 	ResetExpiredWindow(ctx context.Context, userID int64, platform string, window string, newStart time.Time) error
 	// UpsertForUser 全量替换该用户所有平台限额配置；三档全空的记录视为未配置（详见实现注释）。
 	UpsertForUser(ctx context.Context, userID int64, records []UserPlatformQuotaRecord) error
-	// BatchSnapshotUsage 把整批 usage 以绝对值覆盖写入既有活跃行(非累加)；行不存在或已软删的 (user,platform) 跳过。
-	// usage/window_start 直接取 Redis 当前窗口快照。整批共用 now 作 updated_at。要求 snapshots 内 (user,platform) 不重复。
+	// BatchSnapshotUsage 合并普通消费快照，保留 DB 事务提交的 Engine 分量；旧窗口不覆盖新窗口。
+	// 行不存在或已软删时跳过。要求 snapshots 内 (user,platform) 不重复。
 	BatchSnapshotUsage(ctx context.Context, snapshots []UserPlatformQuotaSnapshot, now time.Time) error
 }
 
@@ -199,13 +205,19 @@ func (r *userPlatformQuotaRepository) IncrementUsageWithReset(ctx context.Contex
 		newWeekly := maybeReset(existing.WeeklyUsageUsd, existing.WeeklyWindowStart, timezone.StartOfWeek(now), cost)
 		// 30 天滚动月度窗口：过期时重置为 cost 并以 now 为新起始，否则累加保留原起始
 		newMonthly, newMonthlyStart := monthlyMaybeReset(existing.MonthlyUsageUsd, existing.MonthlyWindowStart, cost, now)
+		day := quotaCalendarStart(existing.DailyWindowStart, timezone.StartOfDay(now))
+		week := quotaCalendarStart(existing.WeeklyWindowStart, timezone.StartOfWeek(now))
+		engineMonthly, _ := monthlyMaybeReset(existing.EngineMonthlyUsageUsd, existing.MonthlyWindowStart, 0, now)
 
 		_, e := existing.Update().
 			SetDailyUsageUsd(newDaily).
 			SetWeeklyUsageUsd(newWeekly).
 			SetMonthlyUsageUsd(newMonthly).
-			SetDailyWindowStart(timezone.StartOfDay(now)).
-			SetWeeklyWindowStart(timezone.StartOfWeek(now)).
+			SetEngineDailyUsageUsd(maybeReset(existing.EngineDailyUsageUsd, existing.DailyWindowStart, day, 0)).
+			SetEngineWeeklyUsageUsd(maybeReset(existing.EngineWeeklyUsageUsd, existing.WeeklyWindowStart, week, 0)).
+			SetEngineMonthlyUsageUsd(engineMonthly).
+			SetDailyWindowStart(day).
+			SetWeeklyWindowStart(week).
 			SetMonthlyWindowStart(newMonthlyStart). // 30 天滚动：仅过期时更新起始
 			Save(txCtx)
 		return e
@@ -235,11 +247,11 @@ func (r *userPlatformQuotaRepository) ResetExpiredWindow(ctx context.Context, us
 		)
 	switch window {
 	case "daily":
-		upd = upd.SetDailyUsageUsd(0).SetDailyWindowStart(newStart)
+		upd = upd.SetDailyUsageUsd(0).SetEngineDailyUsageUsd(0).SetDailyWindowStart(newStart)
 	case "weekly":
-		upd = upd.SetWeeklyUsageUsd(0).SetWeeklyWindowStart(newStart)
+		upd = upd.SetWeeklyUsageUsd(0).SetEngineWeeklyUsageUsd(0).SetWeeklyWindowStart(newStart)
 	case "monthly":
-		upd = upd.SetMonthlyUsageUsd(0).SetMonthlyWindowStart(newStart)
+		upd = upd.SetMonthlyUsageUsd(0).SetEngineMonthlyUsageUsd(0).SetMonthlyWindowStart(newStart)
 	default:
 		return fmt.Errorf("unknown window %q", window)
 	}
@@ -280,17 +292,20 @@ func (r *userPlatformQuotaRepository) withTx(ctx context.Context, fn func(txCtx 
 // 注意 ent 生成字段名为 DailyLimitUsd（非 DailyLimitUSD）。
 func entQuotaToRecord(e *dbent.UserPlatformQuota) *UserPlatformQuotaRecord {
 	return &UserPlatformQuotaRecord{
-		UserID:             e.UserID,
-		Platform:           e.Platform,
-		DailyLimitUSD:      e.DailyLimitUsd,
-		WeeklyLimitUSD:     e.WeeklyLimitUsd,
-		MonthlyLimitUSD:    e.MonthlyLimitUsd,
-		DailyUsageUSD:      e.DailyUsageUsd,
-		WeeklyUsageUSD:     e.WeeklyUsageUsd,
-		MonthlyUsageUSD:    e.MonthlyUsageUsd,
-		DailyWindowStart:   e.DailyWindowStart,
-		WeeklyWindowStart:  e.WeeklyWindowStart,
-		MonthlyWindowStart: e.MonthlyWindowStart,
+		UserID:                e.UserID,
+		Platform:              e.Platform,
+		DailyLimitUSD:         e.DailyLimitUsd,
+		WeeklyLimitUSD:        e.WeeklyLimitUsd,
+		MonthlyLimitUSD:       e.MonthlyLimitUsd,
+		DailyUsageUSD:         e.DailyUsageUsd,
+		WeeklyUsageUSD:        e.WeeklyUsageUsd,
+		MonthlyUsageUSD:       e.MonthlyUsageUsd,
+		EngineDailyUsageUSD:   e.EngineDailyUsageUsd,
+		EngineWeeklyUsageUSD:  e.EngineWeeklyUsageUsd,
+		EngineMonthlyUsageUSD: e.EngineMonthlyUsageUsd,
+		DailyWindowStart:      e.DailyWindowStart,
+		WeeklyWindowStart:     e.WeeklyWindowStart,
+		MonthlyWindowStart:    e.MonthlyWindowStart,
 	}
 }
 
@@ -298,10 +313,19 @@ func entQuotaToRecord(e *dbent.UserPlatformQuota) *UserPlatformQuotaRecord {
 // - 若 prevStart 为 nil 或与 currStart 不同，表示窗口已过期，返回 cost（重置）
 // - 否则返回 prevUsage + cost（累加）
 func maybeReset(prevUsage float64, prevStart *time.Time, currStart time.Time, cost float64) float64 {
-	if prevStart == nil || !prevStart.Equal(currStart) {
+	if prevStart == nil || prevStart.Before(currStart) {
 		return cost
 	}
 	return prevUsage + cost
+}
+
+// An explicit administrator reset can start inside the calendar day/week.
+// Never move that window backwards during subsequent increments.
+func quotaCalendarStart(previous *time.Time, current time.Time) time.Time {
+	if previous != nil && previous.After(current) {
+		return *previous
+	}
+	return current
 }
 
 // monthlyMaybeReset 判断 30 天滚动月度窗口是否需要重置。
@@ -424,18 +448,17 @@ func insertLimitsRow(ctx context.Context, client *dbent.Client, userID int64, re
 	return nil
 }
 
-// batchRows 是 BatchSnapshotUsage 每批最大行数（8 参/行 × 6000 + 1 ≈ 48001 参,低于 Postgres 65535 上限）。
-const batchRows = 6000
+// batchRows keeps eleven per-row parameters plus the timestamp below PostgreSQL's 65535 limit.
+const batchRows = 5000
 
-// BatchSnapshotUsage 用一条多行 UPDATE ... FROM (VALUES ...) 把整批 usage 以绝对值覆盖写入既有活跃行（非累加）。
-// 每批最多 batchRows 行；$1=now 共用；每行 8 个 per-row 参（user_id, platform, 3×usage, 3×window_start）。
+// BatchSnapshotUsage merges the ordinary snapshot with the current transactional
+// Engine component. A snapshot never adds its Engine component a second time.
+// Each window advances monotonically, so late flushes cannot undo a reset.
 // 只命中 deleted_at IS NULL 的既有行：行不存在或已软删的 (user, platform) 直接跳过，不建行。
 //
 // 注意:snapshots 超过 batchRows 会分多条 SQL 执行且【非单事务】——若某子批失败,
 // 先前子批已写入无法回滚。调用方(flusher)应保证单次 batchSize ≤ batchRows
-// (默认 flush_batch_size=1000 < 6000,安全)。
-// 另注:启用 flusher 后,本绝对值覆盖与 admin 直写 DB(ResetExpiredWindow/UpsertForUser)存在覆盖竞态,
-// 详见 service/user_platform_quota_flusher.go 中 flushOneBatch 的"已知竞态"注释。
+// (默认 flush_batch_size=1000 < 5000,安全)。
 func (r *userPlatformQuotaRepository) BatchSnapshotUsage(ctx context.Context, snapshots []UserPlatformQuotaSnapshot, now time.Time) error {
 	if len(snapshots) == 0 {
 		return nil
@@ -451,18 +474,21 @@ func (r *userPlatformQuotaRepository) BatchSnapshotUsage(ctx context.Context, sn
 		batch := snapshots[start:end]
 
 		var sb strings.Builder
-		_, _ = sb.WriteString(
-			"UPDATE user_platform_quotas AS q SET" +
-				"  daily_usage_usd      = v.daily_usage_usd," +
-				"  weekly_usage_usd     = v.weekly_usage_usd," +
-				"  monthly_usage_usd    = v.monthly_usage_usd," +
-				"  daily_window_start   = v.daily_window_start," +
-				"  weekly_window_start  = v.weekly_window_start," +
-				"  monthly_window_start = v.monthly_window_start," +
-				"  updated_at           = $1" +
-				" FROM (VALUES ")
+		_, _ = sb.WriteString("UPDATE user_platform_quotas AS q SET ")
+		for _, window := range []string{"daily", "weekly", "monthly"} {
+			// The Engine component is authoritative in PostgreSQL. A snapshot
+			// contributes only its ordinary portion. Same-window maxima also
+			// make reordered flusher batches harmless.
+			fmt.Fprintf(&sb, `%[1]s_usage_usd = CASE
+				WHEN q.%[1]s_window_start IS NULL OR q.%[1]s_window_start < v.%[1]s_window_start THEN GREATEST(0, v.%[1]s_usage_usd-v.engine_%[1]s_usage_usd)
+				WHEN q.%[1]s_window_start = v.%[1]s_window_start THEN GREATEST(q.%[1]s_usage_usd-q.engine_%[1]s_usage_usd, v.%[1]s_usage_usd-v.engine_%[1]s_usage_usd, 0)+q.engine_%[1]s_usage_usd
+				ELSE q.%[1]s_usage_usd END,
+				engine_%[1]s_usage_usd = CASE WHEN q.%[1]s_window_start IS NULL OR q.%[1]s_window_start < v.%[1]s_window_start THEN 0 ELSE q.engine_%[1]s_usage_usd END,
+				%[1]s_window_start = GREATEST(q.%[1]s_window_start, v.%[1]s_window_start),`, window)
+		}
+		_, _ = sb.WriteString("updated_at=$1 FROM (VALUES ")
 
-		// $1 = now（共用）；每行 8 个 per-row 参，从 $2 起连续编号。
+		// $1 = now（共用）；每行 11 个 per-row 参，从 $2 起连续编号。
 		// VALUES 里的占位符显式转型，避免 Postgres 对多行 VALUES 推断不出参数类型。
 		args := []any{now}
 		for i, s := range batch {
@@ -470,18 +496,19 @@ func (r *userPlatformQuotaRepository) BatchSnapshotUsage(ctx context.Context, sn
 				_, _ = sb.WriteString(",")
 			}
 			b := len(args) // 当前 per-row 第一个参数的 0-based 索引，实际占位符 = b+1
-			fmt.Fprintf(&sb, "($%d::bigint,$%d::varchar,$%d::numeric,$%d::numeric,$%d::numeric,$%d::timestamptz,$%d::timestamptz,$%d::timestamptz)",
-				b+1, b+2, b+3, b+4, b+5, b+6, b+7, b+8)
+			fmt.Fprintf(&sb, "($%d::bigint,$%d::varchar,$%d::numeric,$%d::numeric,$%d::numeric,$%d::timestamptz,$%d::timestamptz,$%d::timestamptz,$%d::numeric,$%d::numeric,$%d::numeric)",
+				b+1, b+2, b+3, b+4, b+5, b+6, b+7, b+8, b+9, b+10, b+11)
 			args = append(args,
 				s.UserID, s.Platform,
 				s.DailyUsageUSD, s.WeeklyUsageUSD, s.MonthlyUsageUSD,
 				s.DailyWindowStart, s.WeeklyWindowStart, s.MonthlyWindowStart,
+				s.EngineDailyUsageUSD, s.EngineWeeklyUsageUSD, s.EngineMonthlyUsageUSD,
 			)
 		}
 
 		_, _ = sb.WriteString(
 			") AS v(user_id, platform, daily_usage_usd, weekly_usage_usd, monthly_usage_usd," +
-				" daily_window_start, weekly_window_start, monthly_window_start)" +
+				" daily_window_start, weekly_window_start, monthly_window_start, engine_daily_usage_usd, engine_weekly_usage_usd, engine_monthly_usage_usd)" +
 				" WHERE q.user_id = v.user_id AND q.platform = v.platform AND q.deleted_at IS NULL")
 
 		if _, err := client.ExecContext(ctx, sb.String(), args...); err != nil {

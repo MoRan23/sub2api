@@ -44,11 +44,14 @@ type UserPlatformQuotaKey struct {
 const UserPlatformQuotaCacheSchemaV1 = int64(1)
 
 type UserPlatformQuotaCacheEntry struct {
-	DailyUsageUSD   float64
-	WeeklyUsageUSD  float64
-	MonthlyUsageUSD float64
-	Version         int64
-	SchemaVersion   int64
+	EngineDailyUsageUSD   float64
+	EngineWeeklyUsageUSD  float64
+	EngineMonthlyUsageUSD float64
+	DailyUsageUSD         float64
+	WeeklyUsageUSD        float64
+	MonthlyUsageUSD       float64
+	Version               int64
+	SchemaVersion         int64
 
 	// 以下字段仅在 SchemaVersion >= 1 时有效
 	DailyLimitUSD   *float64

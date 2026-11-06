@@ -105,6 +105,7 @@ func provideCleanup(
 	tokenRefresh *service.TokenRefreshService,
 	accountExpiry *service.AccountExpiryService,
 	codexEngineCapacitySync *service.CodexEngineCapacitySyncService,
+	codexEngineBilling *service.CodexEngineBillingService,
 	cnProviderBalanceCheck *service.CNProviderBalanceCheckService,
 	codexVersionSync *service.OpenAICodexVersionSyncService,
 	openAIOAuthOSProfiles *service.OpenAIOAuthOSProfileBackfill,
@@ -158,6 +159,9 @@ func provideCleanup(
 		}
 		if attribution != nil {
 			attribution.Stop()
+		}
+		if codexEngineBilling != nil {
+			codexEngineBilling.Stop()
 		}
 		if maintenance, ok := adminService.(interface{ StopProxyGeoBackfill() }); ok {
 			maintenance.StopProxyGeoBackfill()

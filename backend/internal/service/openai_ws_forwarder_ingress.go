@@ -85,6 +85,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	if account == nil {
 		return errors.New("account is nil")
 	}
+	if account.IsCodexEngine() {
+		// Engine exposes HTTP/SSE, not a public Responses WebSocket endpoint.
+		// Keep its raw forwarding, durable metering and cancellation contract for
+		// each client WS turn instead of applying the generic OAuth/API-key relay.
+		return s.proxyCodexEngineWebSocket(ctx, c, clientConn, account, firstClientMessage, hooks)
+	}
 	firstAcceptedAt := time.Now()
 	ctx = s.freezeOpenAIRequestPolicy(ctx, c)
 	SetOpenAIClientTransport(c, OpenAIClientTransportWS)

@@ -821,6 +821,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				stopKeepalive := service.StartOpenAICompactSSEKeepalive(c, h.openAICompactKeepaliveInterval())
 				defer stopKeepalive()
 			}
+			h.setCodexEngineBillingInput(c, account, apiKey, subscription, channelMapping, reqModel, body)
 			return h.gatewayService.Forward(c.Request.Context(), c, account, attemptBody)
 		}()
 		if attemptRejected {
@@ -1521,6 +1522,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 					accountReleaseFunc()
 				}
 			}()
+			h.setCodexEngineBillingInput(c, account, apiKey, subscription, channelMappingMsg, reqModel, body)
 			return h.gatewayService.ForwardAsAnthropic(c.Request.Context(), c, account, forwardBody, promptCacheKey, defaultMappedModel)
 		}()
 		var cyberBlockBodyMsg []byte
@@ -3253,6 +3255,15 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				currentAccountRelease = wrapReleaseOnDone(ctx, accountReleaseFunc)
 				return checkSimpleModeTurnBilling()
 			},
+			BeforeEngineDispatch: func(turn int, payload []byte, model string) error {
+				key := turnBillingAPIKeys.forTurn(turn, apiKey)
+				var mapping service.ChannelMappingResult
+				if snapshot := turnChannelMapping.Load(); snapshot != nil && snapshot.turn == turn {
+					mapping = snapshot.mapping
+				}
+				h.setCodexEngineBillingInputAt(c, account, key, subscription, mapping, model, payload, turnPricing.currentOr(getTurnStart(turn)))
+				return nil
+			},
 			AfterTurn: func(turn int, result *service.OpenAIForwardResult, turnErr error) {
 				if result != nil || turn > 1 {
 					wsAttemptAdvanced.Store(true)
@@ -3300,6 +3311,14 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					cyberMarked && !h.cyberPolicyLogOnly(c, apiKey),
 					turnErr,
 				)
+				if account.IsCodexEngine() {
+					// Durable per-turn receipts own settlement even after disconnect or
+					// failure; public context usage must never enter the legacy queue.
+					if result != nil && !cyberMarked {
+						h.gatewayService.ReportOpenAIAccountScheduleResult(account, turnUpstreamModel, openAIForwardSucceededForScheduling(result), result.FirstTokenMs)
+					}
+					return
+				}
 				if turnErr != nil && !cyberMarked {
 					if result == nil || result.ImageCount <= 0 {
 						return
@@ -3371,7 +3390,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 		// 说明该会话链不属于本次调度到的账号，原样转发会触发上游会话链鉴权失败（“鉴权失败，请检查 API Key”）。
 		// 故剥离首包里的 previous_response_id，改用首包内 input 重建上下文；带 function_call_output 的
 		// 工具续链无法重建，保持原样。仅作用于首轮首包，后续 turn 的续链由 WS 转发层既有逻辑处理。
-		if previousResponseID != "" && !scheduleDecision.StickyPreviousHit && previousResponseCanMove {
+		if !account.IsCodexEngine() && previousResponseID != "" && !scheduleDecision.StickyPreviousHit && previousResponseCanMove {
 			wsFirstMessage = service.RemovePreviousResponseIDFromBody(wsFirstMessage)
 			reqLog.Debug("openai.websocket_previous_response_id_stripped_cross_group",
 				zap.Int64("account_id", account.ID),

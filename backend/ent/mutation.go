@@ -57430,34 +57430,40 @@ func (m *UserAttributeValueMutation) ResetEdge(name string) error {
 // UserPlatformQuotaMutation represents an operation that mutates the UserPlatformQuota nodes in the graph.
 type UserPlatformQuotaMutation struct {
 	config
-	op                   Op
-	typ                  string
-	id                   *int64
-	created_at           *time.Time
-	updated_at           *time.Time
-	deleted_at           *time.Time
-	platform             *string
-	daily_limit_usd      *float64
-	adddaily_limit_usd   *float64
-	weekly_limit_usd     *float64
-	addweekly_limit_usd  *float64
-	monthly_limit_usd    *float64
-	addmonthly_limit_usd *float64
-	daily_usage_usd      *float64
-	adddaily_usage_usd   *float64
-	weekly_usage_usd     *float64
-	addweekly_usage_usd  *float64
-	monthly_usage_usd    *float64
-	addmonthly_usage_usd *float64
-	daily_window_start   *time.Time
-	weekly_window_start  *time.Time
-	monthly_window_start *time.Time
-	clearedFields        map[string]struct{}
-	user                 *int64
-	cleareduser          bool
-	done                 bool
-	oldValue             func(context.Context) (*UserPlatformQuota, error)
-	predicates           []predicate.UserPlatformQuota
+	op                          Op
+	typ                         string
+	id                          *int64
+	created_at                  *time.Time
+	updated_at                  *time.Time
+	deleted_at                  *time.Time
+	platform                    *string
+	daily_limit_usd             *float64
+	adddaily_limit_usd          *float64
+	weekly_limit_usd            *float64
+	addweekly_limit_usd         *float64
+	monthly_limit_usd           *float64
+	addmonthly_limit_usd        *float64
+	daily_usage_usd             *float64
+	adddaily_usage_usd          *float64
+	weekly_usage_usd            *float64
+	addweekly_usage_usd         *float64
+	monthly_usage_usd           *float64
+	addmonthly_usage_usd        *float64
+	engine_daily_usage_usd      *float64
+	addengine_daily_usage_usd   *float64
+	engine_weekly_usage_usd     *float64
+	addengine_weekly_usage_usd  *float64
+	engine_monthly_usage_usd    *float64
+	addengine_monthly_usage_usd *float64
+	daily_window_start          *time.Time
+	weekly_window_start         *time.Time
+	monthly_window_start        *time.Time
+	clearedFields               map[string]struct{}
+	user                        *int64
+	cleareduser                 bool
+	done                        bool
+	oldValue                    func(context.Context) (*UserPlatformQuota, error)
+	predicates                  []predicate.UserPlatformQuota
 }
 
 var _ ent.Mutation = (*UserPlatformQuotaMutation)(nil)
@@ -58129,6 +58135,174 @@ func (m *UserPlatformQuotaMutation) ResetMonthlyUsageUsd() {
 	m.addmonthly_usage_usd = nil
 }
 
+// SetEngineDailyUsageUsd sets the "engine_daily_usage_usd" field.
+func (m *UserPlatformQuotaMutation) SetEngineDailyUsageUsd(f float64) {
+	m.engine_daily_usage_usd = &f
+	m.addengine_daily_usage_usd = nil
+}
+
+// EngineDailyUsageUsd returns the value of the "engine_daily_usage_usd" field in the mutation.
+func (m *UserPlatformQuotaMutation) EngineDailyUsageUsd() (r float64, exists bool) {
+	v := m.engine_daily_usage_usd
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldEngineDailyUsageUsd returns the old "engine_daily_usage_usd" field's value of the UserPlatformQuota entity.
+// If the UserPlatformQuota object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserPlatformQuotaMutation) OldEngineDailyUsageUsd(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldEngineDailyUsageUsd is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldEngineDailyUsageUsd requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldEngineDailyUsageUsd: %w", err)
+	}
+	return oldValue.EngineDailyUsageUsd, nil
+}
+
+// AddEngineDailyUsageUsd adds f to the "engine_daily_usage_usd" field.
+func (m *UserPlatformQuotaMutation) AddEngineDailyUsageUsd(f float64) {
+	if m.addengine_daily_usage_usd != nil {
+		*m.addengine_daily_usage_usd += f
+	} else {
+		m.addengine_daily_usage_usd = &f
+	}
+}
+
+// AddedEngineDailyUsageUsd returns the value that was added to the "engine_daily_usage_usd" field in this mutation.
+func (m *UserPlatformQuotaMutation) AddedEngineDailyUsageUsd() (r float64, exists bool) {
+	v := m.addengine_daily_usage_usd
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetEngineDailyUsageUsd resets all changes to the "engine_daily_usage_usd" field.
+func (m *UserPlatformQuotaMutation) ResetEngineDailyUsageUsd() {
+	m.engine_daily_usage_usd = nil
+	m.addengine_daily_usage_usd = nil
+}
+
+// SetEngineWeeklyUsageUsd sets the "engine_weekly_usage_usd" field.
+func (m *UserPlatformQuotaMutation) SetEngineWeeklyUsageUsd(f float64) {
+	m.engine_weekly_usage_usd = &f
+	m.addengine_weekly_usage_usd = nil
+}
+
+// EngineWeeklyUsageUsd returns the value of the "engine_weekly_usage_usd" field in the mutation.
+func (m *UserPlatformQuotaMutation) EngineWeeklyUsageUsd() (r float64, exists bool) {
+	v := m.engine_weekly_usage_usd
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldEngineWeeklyUsageUsd returns the old "engine_weekly_usage_usd" field's value of the UserPlatformQuota entity.
+// If the UserPlatformQuota object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserPlatformQuotaMutation) OldEngineWeeklyUsageUsd(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldEngineWeeklyUsageUsd is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldEngineWeeklyUsageUsd requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldEngineWeeklyUsageUsd: %w", err)
+	}
+	return oldValue.EngineWeeklyUsageUsd, nil
+}
+
+// AddEngineWeeklyUsageUsd adds f to the "engine_weekly_usage_usd" field.
+func (m *UserPlatformQuotaMutation) AddEngineWeeklyUsageUsd(f float64) {
+	if m.addengine_weekly_usage_usd != nil {
+		*m.addengine_weekly_usage_usd += f
+	} else {
+		m.addengine_weekly_usage_usd = &f
+	}
+}
+
+// AddedEngineWeeklyUsageUsd returns the value that was added to the "engine_weekly_usage_usd" field in this mutation.
+func (m *UserPlatformQuotaMutation) AddedEngineWeeklyUsageUsd() (r float64, exists bool) {
+	v := m.addengine_weekly_usage_usd
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetEngineWeeklyUsageUsd resets all changes to the "engine_weekly_usage_usd" field.
+func (m *UserPlatformQuotaMutation) ResetEngineWeeklyUsageUsd() {
+	m.engine_weekly_usage_usd = nil
+	m.addengine_weekly_usage_usd = nil
+}
+
+// SetEngineMonthlyUsageUsd sets the "engine_monthly_usage_usd" field.
+func (m *UserPlatformQuotaMutation) SetEngineMonthlyUsageUsd(f float64) {
+	m.engine_monthly_usage_usd = &f
+	m.addengine_monthly_usage_usd = nil
+}
+
+// EngineMonthlyUsageUsd returns the value of the "engine_monthly_usage_usd" field in the mutation.
+func (m *UserPlatformQuotaMutation) EngineMonthlyUsageUsd() (r float64, exists bool) {
+	v := m.engine_monthly_usage_usd
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldEngineMonthlyUsageUsd returns the old "engine_monthly_usage_usd" field's value of the UserPlatformQuota entity.
+// If the UserPlatformQuota object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UserPlatformQuotaMutation) OldEngineMonthlyUsageUsd(ctx context.Context) (v float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldEngineMonthlyUsageUsd is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldEngineMonthlyUsageUsd requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldEngineMonthlyUsageUsd: %w", err)
+	}
+	return oldValue.EngineMonthlyUsageUsd, nil
+}
+
+// AddEngineMonthlyUsageUsd adds f to the "engine_monthly_usage_usd" field.
+func (m *UserPlatformQuotaMutation) AddEngineMonthlyUsageUsd(f float64) {
+	if m.addengine_monthly_usage_usd != nil {
+		*m.addengine_monthly_usage_usd += f
+	} else {
+		m.addengine_monthly_usage_usd = &f
+	}
+}
+
+// AddedEngineMonthlyUsageUsd returns the value that was added to the "engine_monthly_usage_usd" field in this mutation.
+func (m *UserPlatformQuotaMutation) AddedEngineMonthlyUsageUsd() (r float64, exists bool) {
+	v := m.addengine_monthly_usage_usd
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ResetEngineMonthlyUsageUsd resets all changes to the "engine_monthly_usage_usd" field.
+func (m *UserPlatformQuotaMutation) ResetEngineMonthlyUsageUsd() {
+	m.engine_monthly_usage_usd = nil
+	m.addengine_monthly_usage_usd = nil
+}
+
 // SetDailyWindowStart sets the "daily_window_start" field.
 func (m *UserPlatformQuotaMutation) SetDailyWindowStart(t time.Time) {
 	m.daily_window_start = &t
@@ -58337,7 +58511,7 @@ func (m *UserPlatformQuotaMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UserPlatformQuotaMutation) Fields() []string {
-	fields := make([]string, 0, 14)
+	fields := make([]string, 0, 17)
 	if m.created_at != nil {
 		fields = append(fields, userplatformquota.FieldCreatedAt)
 	}
@@ -58370,6 +58544,15 @@ func (m *UserPlatformQuotaMutation) Fields() []string {
 	}
 	if m.monthly_usage_usd != nil {
 		fields = append(fields, userplatformquota.FieldMonthlyUsageUsd)
+	}
+	if m.engine_daily_usage_usd != nil {
+		fields = append(fields, userplatformquota.FieldEngineDailyUsageUsd)
+	}
+	if m.engine_weekly_usage_usd != nil {
+		fields = append(fields, userplatformquota.FieldEngineWeeklyUsageUsd)
+	}
+	if m.engine_monthly_usage_usd != nil {
+		fields = append(fields, userplatformquota.FieldEngineMonthlyUsageUsd)
 	}
 	if m.daily_window_start != nil {
 		fields = append(fields, userplatformquota.FieldDailyWindowStart)
@@ -58410,6 +58593,12 @@ func (m *UserPlatformQuotaMutation) Field(name string) (ent.Value, bool) {
 		return m.WeeklyUsageUsd()
 	case userplatformquota.FieldMonthlyUsageUsd:
 		return m.MonthlyUsageUsd()
+	case userplatformquota.FieldEngineDailyUsageUsd:
+		return m.EngineDailyUsageUsd()
+	case userplatformquota.FieldEngineWeeklyUsageUsd:
+		return m.EngineWeeklyUsageUsd()
+	case userplatformquota.FieldEngineMonthlyUsageUsd:
+		return m.EngineMonthlyUsageUsd()
 	case userplatformquota.FieldDailyWindowStart:
 		return m.DailyWindowStart()
 	case userplatformquota.FieldWeeklyWindowStart:
@@ -58447,6 +58636,12 @@ func (m *UserPlatformQuotaMutation) OldField(ctx context.Context, name string) (
 		return m.OldWeeklyUsageUsd(ctx)
 	case userplatformquota.FieldMonthlyUsageUsd:
 		return m.OldMonthlyUsageUsd(ctx)
+	case userplatformquota.FieldEngineDailyUsageUsd:
+		return m.OldEngineDailyUsageUsd(ctx)
+	case userplatformquota.FieldEngineWeeklyUsageUsd:
+		return m.OldEngineWeeklyUsageUsd(ctx)
+	case userplatformquota.FieldEngineMonthlyUsageUsd:
+		return m.OldEngineMonthlyUsageUsd(ctx)
 	case userplatformquota.FieldDailyWindowStart:
 		return m.OldDailyWindowStart(ctx)
 	case userplatformquota.FieldWeeklyWindowStart:
@@ -58539,6 +58734,27 @@ func (m *UserPlatformQuotaMutation) SetField(name string, value ent.Value) error
 		}
 		m.SetMonthlyUsageUsd(v)
 		return nil
+	case userplatformquota.FieldEngineDailyUsageUsd:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetEngineDailyUsageUsd(v)
+		return nil
+	case userplatformquota.FieldEngineWeeklyUsageUsd:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetEngineWeeklyUsageUsd(v)
+		return nil
+	case userplatformquota.FieldEngineMonthlyUsageUsd:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetEngineMonthlyUsageUsd(v)
+		return nil
 	case userplatformquota.FieldDailyWindowStart:
 		v, ok := value.(time.Time)
 		if !ok {
@@ -58586,6 +58802,15 @@ func (m *UserPlatformQuotaMutation) AddedFields() []string {
 	if m.addmonthly_usage_usd != nil {
 		fields = append(fields, userplatformquota.FieldMonthlyUsageUsd)
 	}
+	if m.addengine_daily_usage_usd != nil {
+		fields = append(fields, userplatformquota.FieldEngineDailyUsageUsd)
+	}
+	if m.addengine_weekly_usage_usd != nil {
+		fields = append(fields, userplatformquota.FieldEngineWeeklyUsageUsd)
+	}
+	if m.addengine_monthly_usage_usd != nil {
+		fields = append(fields, userplatformquota.FieldEngineMonthlyUsageUsd)
+	}
 	return fields
 }
 
@@ -58606,6 +58831,12 @@ func (m *UserPlatformQuotaMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedWeeklyUsageUsd()
 	case userplatformquota.FieldMonthlyUsageUsd:
 		return m.AddedMonthlyUsageUsd()
+	case userplatformquota.FieldEngineDailyUsageUsd:
+		return m.AddedEngineDailyUsageUsd()
+	case userplatformquota.FieldEngineWeeklyUsageUsd:
+		return m.AddedEngineWeeklyUsageUsd()
+	case userplatformquota.FieldEngineMonthlyUsageUsd:
+		return m.AddedEngineMonthlyUsageUsd()
 	}
 	return nil, false
 }
@@ -58656,6 +58887,27 @@ func (m *UserPlatformQuotaMutation) AddField(name string, value ent.Value) error
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddMonthlyUsageUsd(v)
+		return nil
+	case userplatformquota.FieldEngineDailyUsageUsd:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddEngineDailyUsageUsd(v)
+		return nil
+	case userplatformquota.FieldEngineWeeklyUsageUsd:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddEngineWeeklyUsageUsd(v)
+		return nil
+	case userplatformquota.FieldEngineMonthlyUsageUsd:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddEngineMonthlyUsageUsd(v)
 		return nil
 	}
 	return fmt.Errorf("unknown UserPlatformQuota numeric field %s", name)
@@ -58761,6 +59013,15 @@ func (m *UserPlatformQuotaMutation) ResetField(name string) error {
 		return nil
 	case userplatformquota.FieldMonthlyUsageUsd:
 		m.ResetMonthlyUsageUsd()
+		return nil
+	case userplatformquota.FieldEngineDailyUsageUsd:
+		m.ResetEngineDailyUsageUsd()
+		return nil
+	case userplatformquota.FieldEngineWeeklyUsageUsd:
+		m.ResetEngineWeeklyUsageUsd()
+		return nil
+	case userplatformquota.FieldEngineMonthlyUsageUsd:
+		m.ResetEngineMonthlyUsageUsd()
 		return nil
 	case userplatformquota.FieldDailyWindowStart:
 		m.ResetDailyWindowStart()

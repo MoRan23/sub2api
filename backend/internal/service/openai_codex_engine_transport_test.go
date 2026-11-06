@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"crypto/tls"
 	"errors"
 	"io"
 	"net"
@@ -16,6 +17,7 @@ import (
 
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestCodexEngineTransportClosedPortIsDefinitelyUnsent(t *testing.T) {
@@ -137,4 +139,47 @@ func TestCodexEngineTransportClientCancellationRecordsNoUpstreamFailure(t *testi
 	require.ErrorIs(t, err, context.Canceled)
 	_, exists := c.Get(OpsUpstreamErrorsKey)
 	require.False(t, exists)
+}
+
+func TestCodexEngineTransportDiagnosticStagesDoNotStoreSensitiveTraceValues(t *testing.T) {
+	attempt := &codexEngineTransportAttempt{}
+	req := attempt.traceRequest(httptest.NewRequest(http.MethodPost, "/", nil))
+	trace := httptrace.ContextClientTrace(req.Context())
+	trace.GetConn("secret-destination:443")
+	trace.DNSStart(httptrace.DNSStartInfo{Host: "secret-destination"})
+	trace.DNSDone(httptrace.DNSDoneInfo{})
+	trace.ConnectStart("tcp", "secret-address:443")
+	trace.ConnectDone("tcp", "secret-address:443", nil)
+	trace.TLSHandshakeStart()
+	trace.TLSHandshakeDone(tls.ConnectionState{ServerName: "secret-destination"}, nil)
+	trace.GotConn(httptrace.GotConnInfo{Reused: true})
+	trace.WroteHeaderField("Authorization", []string{"Bearer secret-key"})
+	trace.WroteHeaders()
+	trace.WroteRequest(httptrace.WroteRequestInfo{})
+	trace.GotFirstResponseByte()
+	detail := attempt.diagnostics(io.ErrUnexpectedEOF)
+	require.NotContains(t, detail, "secret")
+	require.Equal(t, "first_response_byte", gjson.Get(detail, "transport.phase").String())
+	require.True(t, gjson.Get(detail, "transport.connection_reused").Bool())
+	for _, stage := range []string{"connection_wait", "dns_start", "dns_done", "tcp_start", "tcp_done", "tls_start", "tls_done", "connection_acquired", "headers_written", "request_written", "first_response_byte"} {
+		require.True(t, gjson.Get(detail, "transport.stage_elapsed_ms."+stage).Exists(), stage)
+	}
+}
+
+func TestCodexEngineTransportConcurrentDiagnosticSnapshots(t *testing.T) {
+	attempt := &codexEngineTransportAttempt{}
+	req := attempt.traceRequest(httptest.NewRequest(http.MethodPost, "/", nil))
+	trace := httptrace.ContextClientTrace(req.Context())
+	var wg sync.WaitGroup
+	for range 20 {
+		wg.Add(1)
+		go func() {
+			defer wg.Done()
+			trace.GetConn("engine.example")
+			trace.GotConn(httptrace.GotConnInfo{Reused: true})
+			trace.WroteRequest(httptrace.WroteRequestInfo{})
+			_ = attempt.diagnostics(io.EOF)
+		}()
+	}
+	wg.Wait()
 }

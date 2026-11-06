@@ -251,20 +251,32 @@ func TestOpenAIGatewayServiceRecordUsage_GPT61SolObservedTierKeepsCredentialExem
 				account.Extra[OpenAIAPIKeyModeExtraKey] = "codex_engine"
 			}
 			tier := "priority"
-			err := svc.RecordUsage(context.Background(), &OpenAIRecordUsageInput{
+			in := &OpenAIRecordUsageInput{
 				Result: &OpenAIForwardResult{RequestID: "observed-tier", Model: "gpt-6.1-sol", ServiceTier: &tier,
 					UpstreamResponseServiceTier: "standard", Duration: time.Second,
 					Usage: OpenAIUsage{InputTokens: 300000, OutputTokens: 2000}},
 				APIKey: openAIRecordUsageAPIKeyWithGroup(svc, 1, true), User: &User{ID: 2}, Account: account,
-			})
+			}
+			err := svc.RecordUsage(context.Background(), in)
 			require.NoError(t, err)
 			want := 0.62
+			log := usageRepo.lastLog
+			amount := userRepo.lastAmount
 			if engine {
+				require.Nil(t, log, "public context usage cannot create an Engine charge")
+				raw, snapshotErr := svc.CaptureCodexEngineBillingSnapshot(context.Background(), in)
+				require.NoError(t, snapshotErr)
+				event := engineFrozenTestModelEvent()
+				event.Model, event.ServiceTier = "gpt-6.1-sol", "standard"
+				event.Usage = OpenAIUsage{InputTokens: 300000, OutputTokens: 2000}
+				cmd, eventLog, billingErr := svc.BuildCodexEngineBillingEvent(context.Background(), &CodexEngineBillingJob{CodexEngineBillingPending: CodexEngineBillingPending{UserID: in.User.ID, APIKeyID: in.APIKey.ID, AccountID: account.ID, Snapshot: raw}}, event)
+				require.NoError(t, billingErr)
+				log, amount = eventLog, cmd.BalanceCost
 				want = 1.23
 			}
-			require.Equal(t, engine, usageRepo.lastLog.LongContextBillingApplied)
-			require.InDelta(t, want, usageRepo.lastLog.TotalCost, 1e-12)
-			require.InDelta(t, want*1.1, userRepo.lastAmount, 1e-12)
+			require.Equal(t, engine, log.LongContextBillingApplied)
+			require.InDelta(t, want, log.TotalCost, 1e-12)
+			require.InDelta(t, want*1.1, amount, 1e-12)
 		})
 	}
 }

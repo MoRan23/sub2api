@@ -1284,6 +1284,7 @@ func (s *BillingCacheService) checkUserPlatformQuotaEligibility(
 		dailyUsage := entry.DailyUsageUSD
 		weeklyUsage := entry.WeeklyUsageUSD
 		monthlyUsage := entry.MonthlyUsageUSD
+		engineDaily, engineWeekly, engineMonthly := entry.EngineDailyUsageUSD, entry.EngineWeeklyUsageUSD, entry.EngineMonthlyUsageUSD
 		// 若窗口已更新（DB 已重置但 cache 尚未失效）,将对应 usage 清零再做比较,
 		// 同时记录新窗口起点用于后续刷新 cache entry。
 		// 本次请求用本地清零值继续判断;DB 层 IncrementUsageWithReset 已有窗口自愈能力,
@@ -1294,18 +1295,21 @@ func (s *BillingCacheService) checkUserPlatformQuotaEligibility(
 		newMonthlyStart := entry.MonthlyWindowStart
 		if quotaWindowExpired(entry.DailyWindowStart, timezone.StartOfDay(now)) {
 			dailyUsage = 0
+			engineDaily = 0
 			windowExpired = true
 			dayStart := timezone.StartOfDay(now)
 			newDailyStart = &dayStart
 		}
 		if quotaWindowExpired(entry.WeeklyWindowStart, timezone.StartOfWeek(now)) {
 			weeklyUsage = 0
+			engineWeekly = 0
 			windowExpired = true
 			weekStart := timezone.StartOfWeek(now)
 			newWeeklyStart = &weekStart
 		}
 		if monthlyQuotaWindowExpired(entry.MonthlyWindowStart, now) {
 			monthlyUsage = 0
+			engineMonthly = 0
 			windowExpired = true
 			monthStart := now
 			newMonthlyStart = &monthStart
@@ -1322,17 +1326,37 @@ func (s *BillingCacheService) checkUserPlatformQuotaEligibility(
 		// 跳过 refresh 不改变结果。
 		isSentinel := entry.DailyLimitUSD == nil && entry.WeeklyLimitUSD == nil && entry.MonthlyLimitUSD == nil
 		if windowExpired && s.cache != nil && !isSentinel {
+			if _, supported := s.userPlatformQuotaRepo.(userPlatformQuotaWindowLoader); supported {
+				current, err := s.loadCurrentUserPlatformQuota(ctx, userID, platform)
+				if err != nil {
+					return err
+				}
+				if current != nil {
+					if quotaWindowExpired(entry.DailyWindowStart, timezone.StartOfDay(now)) {
+						dailyUsage, engineDaily, newDailyStart = current.DailyUsageUSD, current.EngineDailyUsageUSD, current.DailyWindowStart
+					}
+					if quotaWindowExpired(entry.WeeklyWindowStart, timezone.StartOfWeek(now)) {
+						weeklyUsage, engineWeekly, newWeeklyStart = current.WeeklyUsageUSD, current.EngineWeeklyUsageUSD, current.WeeklyWindowStart
+					}
+					if monthlyQuotaWindowExpired(entry.MonthlyWindowStart, now) {
+						monthlyUsage, engineMonthly, newMonthlyStart = current.MonthlyUsageUSD, current.EngineMonthlyUsageUSD, current.MonthlyWindowStart
+					}
+				}
+			}
 			refreshed := &UserPlatformQuotaCacheEntry{
-				DailyUsageUSD:      dailyUsage,
-				WeeklyUsageUSD:     weeklyUsage,
-				MonthlyUsageUSD:    monthlyUsage,
-				SchemaVersion:      UserPlatformQuotaCacheSchemaV1,
-				DailyLimitUSD:      entry.DailyLimitUSD,
-				WeeklyLimitUSD:     entry.WeeklyLimitUSD,
-				MonthlyLimitUSD:    entry.MonthlyLimitUSD,
-				DailyWindowStart:   newDailyStart,
-				WeeklyWindowStart:  newWeeklyStart,
-				MonthlyWindowStart: newMonthlyStart,
+				DailyUsageUSD:         dailyUsage,
+				WeeklyUsageUSD:        weeklyUsage,
+				MonthlyUsageUSD:       monthlyUsage,
+				EngineDailyUsageUSD:   engineDaily,
+				EngineWeeklyUsageUSD:  engineWeekly,
+				EngineMonthlyUsageUSD: engineMonthly,
+				SchemaVersion:         UserPlatformQuotaCacheSchemaV1,
+				DailyLimitUSD:         entry.DailyLimitUSD,
+				WeeklyLimitUSD:        entry.WeeklyLimitUSD,
+				MonthlyLimitUSD:       entry.MonthlyLimitUSD,
+				DailyWindowStart:      newDailyStart,
+				WeeklyWindowStart:     newWeeklyStart,
+				MonthlyWindowStart:    newMonthlyStart,
 			}
 			ttl := time.Duration(s.cfg.Billing.UserPlatformQuotaCacheTTLSeconds) * time.Second
 			setCtx, setCancel := context.WithTimeout(context.Background(), 50*time.Millisecond)
@@ -1364,7 +1388,7 @@ func (s *BillingCacheService) checkUserPlatformQuotaEligibility(
 		// 防止"第一个 caller ctx 取消"使所有 follower 一起 fail。
 		bgCtx, bgCancel := context.WithTimeout(context.Background(), 3*time.Second)
 		defer bgCancel()
-		return s.userPlatformQuotaRepo.GetByUserPlatform(bgCtx, userID, platform)
+		return s.loadCurrentUserPlatformQuota(bgCtx, userID, platform)
 	})
 	var (
 		v     any
@@ -1418,14 +1442,18 @@ func (s *BillingCacheService) checkUserPlatformQuotaEligibility(
 	dailyUsage := rec.DailyUsageUSD
 	weeklyUsage := rec.WeeklyUsageUSD
 	monthlyUsage := rec.MonthlyUsageUSD
+	engineDaily, engineWeekly, engineMonthly := rec.EngineDailyUsageUSD, rec.EngineWeeklyUsageUSD, rec.EngineMonthlyUsageUSD
 	if quotaWindowExpired(rec.DailyWindowStart, timezone.StartOfDay(now)) {
 		dailyUsage = 0
+		engineDaily = 0
 	}
 	if quotaWindowExpired(rec.WeeklyWindowStart, timezone.StartOfWeek(now)) {
 		weeklyUsage = 0
+		engineWeekly = 0
 	}
 	if monthlyQuotaWindowExpired(rec.MonthlyWindowStart, now) {
 		monthlyUsage = 0
+		engineMonthly = 0
 	}
 
 	// Redis 故障时 fail-open：不回填，直接用 DB 数据做一次性检查
@@ -1444,16 +1472,19 @@ func (s *BillingCacheService) checkUserPlatformQuotaEligibility(
 
 	// cache MISS 或旧版 entry → 回填完整 entry（含 limits 和 window_start）
 	newEntry := &UserPlatformQuotaCacheEntry{
-		DailyUsageUSD:      dailyUsage,
-		WeeklyUsageUSD:     weeklyUsage,
-		MonthlyUsageUSD:    monthlyUsage,
-		SchemaVersion:      UserPlatformQuotaCacheSchemaV1,
-		DailyLimitUSD:      rec.DailyLimitUSD,
-		WeeklyLimitUSD:     rec.WeeklyLimitUSD,
-		MonthlyLimitUSD:    rec.MonthlyLimitUSD,
-		DailyWindowStart:   rec.DailyWindowStart,
-		WeeklyWindowStart:  rec.WeeklyWindowStart,
-		MonthlyWindowStart: rec.MonthlyWindowStart,
+		DailyUsageUSD:         dailyUsage,
+		WeeklyUsageUSD:        weeklyUsage,
+		MonthlyUsageUSD:       monthlyUsage,
+		EngineDailyUsageUSD:   engineDaily,
+		EngineWeeklyUsageUSD:  engineWeekly,
+		EngineMonthlyUsageUSD: engineMonthly,
+		SchemaVersion:         UserPlatformQuotaCacheSchemaV1,
+		DailyLimitUSD:         rec.DailyLimitUSD,
+		WeeklyLimitUSD:        rec.WeeklyLimitUSD,
+		MonthlyLimitUSD:       rec.MonthlyLimitUSD,
+		DailyWindowStart:      rec.DailyWindowStart,
+		WeeklyWindowStart:     rec.WeeklyWindowStart,
+		MonthlyWindowStart:    rec.MonthlyWindowStart,
 	}
 	if s.cache != nil {
 		ttl := time.Duration(s.cfg.Billing.UserPlatformQuotaCacheTTLSeconds) * time.Second

@@ -155,40 +155,32 @@ func TestOpenAIRecordUsage_EngineReceiptStableAcrossReplay(t *testing.T) {
 	id := engineReceiptTestID("a")
 	first := engineReceiptTestInput(id)
 	require.NoError(t, svc.RecordUsage(context.WithValue(context.Background(), ctxkey.ClientRequestID, "first-client"), first))
-	originalLog := logs.lastLog
 	replay := engineReceiptTestInput(id)
 	replay.Result.RequestID = "new-upstream-id"
 	replay.RequestPayloadHash = "changed-body"
 	svc.cfg.Default.RateMultiplier *= 4
 	require.NoError(t, svc.RecordUsage(context.WithValue(context.Background(), ctxkey.ClientRequestID, "retry-client"), replay))
-	require.Equal(t, 1, billing.applied)
-	require.Equal(t, 1, logs.calls)
-	require.Same(t, originalLog, logs.lastLog)
-	require.Equal(t, codexEngineUsageReceiptID(first.Account, first.Result.UpstreamHeaders), billing.commands[0].RequestID)
-	require.LessOrEqual(t, len(billing.commands[0].RequestID), 64)
-	require.Regexp(t, `^[0-9a-f]{64}$`, billing.commands[0].RequestFingerprint)
-	require.LessOrEqual(t, len(logs.lastLog.RequestID), 64)
-	require.Equal(t, billing.commands[0].RequestFingerprint, billing.commands[1].RequestFingerprint)
-	require.NotEqual(t, billing.commands[0].BalanceCost, billing.commands[1].BalanceCost)
+	require.Zero(t, billing.applied, "public context usage never creates consumption charges")
+	require.Zero(t, logs.calls)
 	require.Equal(t, first.Result.Usage, replay.Result.Usage)
 	require.Equal(t, 50, replay.Result.Usage.InputTokens)
 
 	conflict := engineReceiptTestInput(id)
 	conflict.Result.Usage.OutputTokens++
-	require.ErrorIs(t, svc.RecordUsage(context.Background(), conflict), ErrUsageBillingRequestConflict)
-	require.Equal(t, 1, billing.applied)
-	require.Equal(t, 1, logs.calls)
+	require.NoError(t, svc.RecordUsage(context.Background(), conflict))
+	require.Zero(t, billing.applied)
+	require.Zero(t, logs.calls)
 
-	// Same token counts on a new accepted execution still incur a new charge.
+	// A different receipt still settles exclusively through confirmed events.
 	require.NoError(t, svc.RecordUsage(context.Background(), engineReceiptTestInput(engineReceiptTestID("b"))))
-	require.Equal(t, 2, billing.applied)
-	require.Equal(t, 2, logs.calls)
+	require.Zero(t, billing.applied)
+	require.Zero(t, logs.calls)
 
-	// Preserve the existing downstream API-key billing boundary.
+	// No downstream key can turn context usage into consumption usage.
 	otherKey := engineReceiptTestInput(id)
 	otherKey.APIKey.ID++
 	require.NoError(t, svc.RecordUsage(context.Background(), otherKey))
-	require.Equal(t, 3, billing.applied)
+	require.Zero(t, billing.applied)
 }
 
 func TestOpenAIRecordUsage_EngineReceiptNeedsFinalUsage(t *testing.T) {
@@ -199,10 +191,10 @@ func TestOpenAIRecordUsage_EngineReceiptNeedsFinalUsage(t *testing.T) {
 	require.NoError(t, svc.RecordUsage(context.Background(), partial))
 	require.Empty(t, billing.commands)
 	require.Zero(t, logs.calls)
-	// The original response may be lost; the first final replay must still bill.
+	// Final public usage is context evidence, not a consumption event.
 	require.NoError(t, svc.RecordUsage(context.Background(), engineReceiptTestInput(engineReceiptTestID("a"))))
-	require.Equal(t, 1, billing.applied)
-	require.Equal(t, 1, logs.calls)
+	require.Zero(t, billing.applied)
+	require.Zero(t, logs.calls)
 }
 
 func TestOpenAIRecordUsage_EngineFailedPartialDoesNotClaimReceipt(t *testing.T) {
@@ -222,9 +214,8 @@ func TestOpenAIRecordUsage_EngineFailedPartialDoesNotClaimReceipt(t *testing.T) 
 	observeCodexEnginePayload(complete.Result, []byte(`{"usage":{"input_tokens":50,"output_tokens":20}}`), "")
 	require.True(t, complete.Result.CodexEngineUsageFinalized)
 	require.NoError(t, svc.RecordUsage(context.Background(), complete))
-	require.Equal(t, 1, billing.applied)
-	require.Equal(t, 1, logs.calls)
-	require.Equal(t, 50, billing.commands[0].InputTokens)
+	require.Zero(t, billing.applied)
+	require.Zero(t, logs.calls)
 }
 
 func TestOpenAIRecordUsage_EngineReceiptFallbackAndTrustBoundary(t *testing.T) {
@@ -245,8 +236,13 @@ func TestOpenAIRecordUsage_EngineReceiptFallbackAndTrustBoundary(t *testing.T) {
 				input.Result.ResponseHeaders, input.Result.UpstreamHeaders = input.Result.UpstreamHeaders, nil
 			}
 			require.NoError(t, svc.RecordUsage(context.WithValue(context.Background(), ctxkey.ClientRequestID, "legacy"), input))
-			require.Equal(t, 1, billing.applied)
-			require.Equal(t, "client:legacy", billing.commands[0].RequestID)
+			if mode == "nonengine" {
+				require.Equal(t, 1, billing.applied)
+				require.Equal(t, "client:legacy", billing.commands[0].RequestID)
+			} else {
+				require.Zero(t, billing.applied)
+				require.Zero(t, logs.calls)
+			}
 		})
 	}
 }
@@ -254,7 +250,7 @@ func TestOpenAIRecordUsage_EngineReceiptFallbackAndTrustBoundary(t *testing.T) {
 func TestOpenAIRecordUsage_EngineReceiptRequiresRepository(t *testing.T) {
 	logs, users := &openAIRecordUsageLogRepoStub{}, &openAIRecordUsageUserRepoStub{}
 	svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(logs, nil, users, &openAIRecordUsageSubRepoStub{}, nil)
-	require.ErrorIs(t, svc.RecordUsage(context.Background(), engineReceiptTestInput(engineReceiptTestID("a"))), ErrCodexEngineUsageBillingUnavailable)
+	require.NoError(t, svc.RecordUsage(context.Background(), engineReceiptTestInput(engineReceiptTestID("a"))))
 	require.Zero(t, users.deductCalls)
 	require.Zero(t, logs.calls)
 }
@@ -388,10 +384,6 @@ func TestOpenAIRecordUsage_EngineMessagesJSONAndSSEReceiptChargeOnce(t *testing.
 	require.True(t, replay.Result.CodexEngineUsageFinalized)
 	require.Equal(t, original.Result.Usage, replay.Result.Usage)
 	require.NoError(t, svc.RecordUsage(context.WithValue(context.Background(), ctxkey.ClientRequestID, "replay"), replay))
-	require.Equal(t, 1, billing.applied)
-	require.Equal(t, 1, logs.calls)
-	require.Equal(t, 3, billing.commands[0].InputTokens)
-	require.Equal(t, 2, billing.commands[0].CacheReadTokens)
-	require.Equal(t, 1, billing.commands[0].CacheCreationTokens)
-	require.Equal(t, billing.commands[0].RequestFingerprint, billing.commands[1].RequestFingerprint)
+	require.Zero(t, billing.applied)
+	require.Zero(t, logs.calls)
 }

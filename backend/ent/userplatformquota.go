@@ -40,6 +40,12 @@ type UserPlatformQuota struct {
 	WeeklyUsageUsd float64 `json:"weekly_usage_usd,omitempty"`
 	// MonthlyUsageUsd holds the value of the "monthly_usage_usd" field.
 	MonthlyUsageUsd float64 `json:"monthly_usage_usd,omitempty"`
+	// EngineDailyUsageUsd holds the value of the "engine_daily_usage_usd" field.
+	EngineDailyUsageUsd float64 `json:"engine_daily_usage_usd,omitempty"`
+	// EngineWeeklyUsageUsd holds the value of the "engine_weekly_usage_usd" field.
+	EngineWeeklyUsageUsd float64 `json:"engine_weekly_usage_usd,omitempty"`
+	// EngineMonthlyUsageUsd holds the value of the "engine_monthly_usage_usd" field.
+	EngineMonthlyUsageUsd float64 `json:"engine_monthly_usage_usd,omitempty"`
 	// DailyWindowStart holds the value of the "daily_window_start" field.
 	DailyWindowStart *time.Time `json:"daily_window_start,omitempty"`
 	// WeeklyWindowStart holds the value of the "weekly_window_start" field.
@@ -77,7 +83,7 @@ func (*UserPlatformQuota) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case userplatformquota.FieldDailyLimitUsd, userplatformquota.FieldWeeklyLimitUsd, userplatformquota.FieldMonthlyLimitUsd, userplatformquota.FieldDailyUsageUsd, userplatformquota.FieldWeeklyUsageUsd, userplatformquota.FieldMonthlyUsageUsd:
+		case userplatformquota.FieldDailyLimitUsd, userplatformquota.FieldWeeklyLimitUsd, userplatformquota.FieldMonthlyLimitUsd, userplatformquota.FieldDailyUsageUsd, userplatformquota.FieldWeeklyUsageUsd, userplatformquota.FieldMonthlyUsageUsd, userplatformquota.FieldEngineDailyUsageUsd, userplatformquota.FieldEngineWeeklyUsageUsd, userplatformquota.FieldEngineMonthlyUsageUsd:
 			values[i] = new(sql.NullFloat64)
 		case userplatformquota.FieldID, userplatformquota.FieldUserID:
 			values[i] = new(sql.NullInt64)
@@ -175,6 +181,24 @@ func (_m *UserPlatformQuota) assignValues(columns []string, values []any) error 
 				return fmt.Errorf("unexpected type %T for field monthly_usage_usd", values[i])
 			} else if value.Valid {
 				_m.MonthlyUsageUsd = value.Float64
+			}
+		case userplatformquota.FieldEngineDailyUsageUsd:
+			if value, ok := values[i].(*sql.NullFloat64); !ok {
+				return fmt.Errorf("unexpected type %T for field engine_daily_usage_usd", values[i])
+			} else if value.Valid {
+				_m.EngineDailyUsageUsd = value.Float64
+			}
+		case userplatformquota.FieldEngineWeeklyUsageUsd:
+			if value, ok := values[i].(*sql.NullFloat64); !ok {
+				return fmt.Errorf("unexpected type %T for field engine_weekly_usage_usd", values[i])
+			} else if value.Valid {
+				_m.EngineWeeklyUsageUsd = value.Float64
+			}
+		case userplatformquota.FieldEngineMonthlyUsageUsd:
+			if value, ok := values[i].(*sql.NullFloat64); !ok {
+				return fmt.Errorf("unexpected type %T for field engine_monthly_usage_usd", values[i])
+			} else if value.Valid {
+				_m.EngineMonthlyUsageUsd = value.Float64
 			}
 		case userplatformquota.FieldDailyWindowStart:
 			if value, ok := values[i].(*sql.NullTime); !ok {
@@ -278,6 +302,15 @@ func (_m *UserPlatformQuota) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("monthly_usage_usd=")
 	builder.WriteString(fmt.Sprintf("%v", _m.MonthlyUsageUsd))
+	builder.WriteString(", ")
+	builder.WriteString("engine_daily_usage_usd=")
+	builder.WriteString(fmt.Sprintf("%v", _m.EngineDailyUsageUsd))
+	builder.WriteString(", ")
+	builder.WriteString("engine_weekly_usage_usd=")
+	builder.WriteString(fmt.Sprintf("%v", _m.EngineWeeklyUsageUsd))
+	builder.WriteString(", ")
+	builder.WriteString("engine_monthly_usage_usd=")
+	builder.WriteString(fmt.Sprintf("%v", _m.EngineMonthlyUsageUsd))
 	builder.WriteString(", ")
 	if v := _m.DailyWindowStart; v != nil {
 		builder.WriteString("daily_window_start=")

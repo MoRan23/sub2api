@@ -37,6 +37,12 @@ const (
 	FieldWeeklyUsageUsd = "weekly_usage_usd"
 	// FieldMonthlyUsageUsd holds the string denoting the monthly_usage_usd field in the database.
 	FieldMonthlyUsageUsd = "monthly_usage_usd"
+	// FieldEngineDailyUsageUsd holds the string denoting the engine_daily_usage_usd field in the database.
+	FieldEngineDailyUsageUsd = "engine_daily_usage_usd"
+	// FieldEngineWeeklyUsageUsd holds the string denoting the engine_weekly_usage_usd field in the database.
+	FieldEngineWeeklyUsageUsd = "engine_weekly_usage_usd"
+	// FieldEngineMonthlyUsageUsd holds the string denoting the engine_monthly_usage_usd field in the database.
+	FieldEngineMonthlyUsageUsd = "engine_monthly_usage_usd"
 	// FieldDailyWindowStart holds the string denoting the daily_window_start field in the database.
 	FieldDailyWindowStart = "daily_window_start"
 	// FieldWeeklyWindowStart holds the string denoting the weekly_window_start field in the database.
@@ -70,6 +76,9 @@ var Columns = []string{
 	FieldDailyUsageUsd,
 	FieldWeeklyUsageUsd,
 	FieldMonthlyUsageUsd,
+	FieldEngineDailyUsageUsd,
+	FieldEngineWeeklyUsageUsd,
+	FieldEngineMonthlyUsageUsd,
 	FieldDailyWindowStart,
 	FieldWeeklyWindowStart,
 	FieldMonthlyWindowStart,
@@ -107,6 +116,12 @@ var (
 	DefaultWeeklyUsageUsd float64
 	// DefaultMonthlyUsageUsd holds the default value on creation for the "monthly_usage_usd" field.
 	DefaultMonthlyUsageUsd float64
+	// DefaultEngineDailyUsageUsd holds the default value on creation for the "engine_daily_usage_usd" field.
+	DefaultEngineDailyUsageUsd float64
+	// DefaultEngineWeeklyUsageUsd holds the default value on creation for the "engine_weekly_usage_usd" field.
+	DefaultEngineWeeklyUsageUsd float64
+	// DefaultEngineMonthlyUsageUsd holds the default value on creation for the "engine_monthly_usage_usd" field.
+	DefaultEngineMonthlyUsageUsd float64
 )
 
 // OrderOption defines the ordering options for the UserPlatformQuota queries.
@@ -170,6 +185,21 @@ func ByWeeklyUsageUsd(opts ...sql.OrderTermOption) OrderOption {
 // ByMonthlyUsageUsd orders the results by the monthly_usage_usd field.
 func ByMonthlyUsageUsd(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldMonthlyUsageUsd, opts...).ToFunc()
+}
+
+// ByEngineDailyUsageUsd orders the results by the engine_daily_usage_usd field.
+func ByEngineDailyUsageUsd(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldEngineDailyUsageUsd, opts...).ToFunc()
+}
+
+// ByEngineWeeklyUsageUsd orders the results by the engine_weekly_usage_usd field.
+func ByEngineWeeklyUsageUsd(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldEngineWeeklyUsageUsd, opts...).ToFunc()
+}
+
+// ByEngineMonthlyUsageUsd orders the results by the engine_monthly_usage_usd field.
+func ByEngineMonthlyUsageUsd(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldEngineMonthlyUsageUsd, opts...).ToFunc()
 }
 
 // ByDailyWindowStart orders the results by the daily_window_start field.

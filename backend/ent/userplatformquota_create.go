@@ -161,6 +161,48 @@ func (_c *UserPlatformQuotaCreate) SetNillableMonthlyUsageUsd(v *float64) *UserP
 	return _c
 }
 
+// SetEngineDailyUsageUsd sets the "engine_daily_usage_usd" field.
+func (_c *UserPlatformQuotaCreate) SetEngineDailyUsageUsd(v float64) *UserPlatformQuotaCreate {
+	_c.mutation.SetEngineDailyUsageUsd(v)
+	return _c
+}
+
+// SetNillableEngineDailyUsageUsd sets the "engine_daily_usage_usd" field if the given value is not nil.
+func (_c *UserPlatformQuotaCreate) SetNillableEngineDailyUsageUsd(v *float64) *UserPlatformQuotaCreate {
+	if v != nil {
+		_c.SetEngineDailyUsageUsd(*v)
+	}
+	return _c
+}
+
+// SetEngineWeeklyUsageUsd sets the "engine_weekly_usage_usd" field.
+func (_c *UserPlatformQuotaCreate) SetEngineWeeklyUsageUsd(v float64) *UserPlatformQuotaCreate {
+	_c.mutation.SetEngineWeeklyUsageUsd(v)
+	return _c
+}
+
+// SetNillableEngineWeeklyUsageUsd sets the "engine_weekly_usage_usd" field if the given value is not nil.
+func (_c *UserPlatformQuotaCreate) SetNillableEngineWeeklyUsageUsd(v *float64) *UserPlatformQuotaCreate {
+	if v != nil {
+		_c.SetEngineWeeklyUsageUsd(*v)
+	}
+	return _c
+}
+
+// SetEngineMonthlyUsageUsd sets the "engine_monthly_usage_usd" field.
+func (_c *UserPlatformQuotaCreate) SetEngineMonthlyUsageUsd(v float64) *UserPlatformQuotaCreate {
+	_c.mutation.SetEngineMonthlyUsageUsd(v)
+	return _c
+}
+
+// SetNillableEngineMonthlyUsageUsd sets the "engine_monthly_usage_usd" field if the given value is not nil.
+func (_c *UserPlatformQuotaCreate) SetNillableEngineMonthlyUsageUsd(v *float64) *UserPlatformQuotaCreate {
+	if v != nil {
+		_c.SetEngineMonthlyUsageUsd(*v)
+	}
+	return _c
+}
+
 // SetDailyWindowStart sets the "daily_window_start" field.
 func (_c *UserPlatformQuotaCreate) SetDailyWindowStart(v time.Time) *UserPlatformQuotaCreate {
 	_c.mutation.SetDailyWindowStart(v)
@@ -271,6 +313,18 @@ func (_c *UserPlatformQuotaCreate) defaults() error {
 		v := userplatformquota.DefaultMonthlyUsageUsd
 		_c.mutation.SetMonthlyUsageUsd(v)
 	}
+	if _, ok := _c.mutation.EngineDailyUsageUsd(); !ok {
+		v := userplatformquota.DefaultEngineDailyUsageUsd
+		_c.mutation.SetEngineDailyUsageUsd(v)
+	}
+	if _, ok := _c.mutation.EngineWeeklyUsageUsd(); !ok {
+		v := userplatformquota.DefaultEngineWeeklyUsageUsd
+		_c.mutation.SetEngineWeeklyUsageUsd(v)
+	}
+	if _, ok := _c.mutation.EngineMonthlyUsageUsd(); !ok {
+		v := userplatformquota.DefaultEngineMonthlyUsageUsd
+		_c.mutation.SetEngineMonthlyUsageUsd(v)
+	}
 	return nil
 }
 
@@ -301,6 +355,15 @@ func (_c *UserPlatformQuotaCreate) check() error {
 	}
 	if _, ok := _c.mutation.MonthlyUsageUsd(); !ok {
 		return &ValidationError{Name: "monthly_usage_usd", err: errors.New(`ent: missing required field "UserPlatformQuota.monthly_usage_usd"`)}
+	}
+	if _, ok := _c.mutation.EngineDailyUsageUsd(); !ok {
+		return &ValidationError{Name: "engine_daily_usage_usd", err: errors.New(`ent: missing required field "UserPlatformQuota.engine_daily_usage_usd"`)}
+	}
+	if _, ok := _c.mutation.EngineWeeklyUsageUsd(); !ok {
+		return &ValidationError{Name: "engine_weekly_usage_usd", err: errors.New(`ent: missing required field "UserPlatformQuota.engine_weekly_usage_usd"`)}
+	}
+	if _, ok := _c.mutation.EngineMonthlyUsageUsd(); !ok {
+		return &ValidationError{Name: "engine_monthly_usage_usd", err: errors.New(`ent: missing required field "UserPlatformQuota.engine_monthly_usage_usd"`)}
 	}
 	if len(_c.mutation.UserIDs()) == 0 {
 		return &ValidationError{Name: "user", err: errors.New(`ent: missing required edge "UserPlatformQuota.user"`)}
@@ -371,6 +434,18 @@ func (_c *UserPlatformQuotaCreate) createSpec() (*UserPlatformQuota, *sqlgraph.C
 	if value, ok := _c.mutation.MonthlyUsageUsd(); ok {
 		_spec.SetField(userplatformquota.FieldMonthlyUsageUsd, field.TypeFloat64, value)
 		_node.MonthlyUsageUsd = value
+	}
+	if value, ok := _c.mutation.EngineDailyUsageUsd(); ok {
+		_spec.SetField(userplatformquota.FieldEngineDailyUsageUsd, field.TypeFloat64, value)
+		_node.EngineDailyUsageUsd = value
+	}
+	if value, ok := _c.mutation.EngineWeeklyUsageUsd(); ok {
+		_spec.SetField(userplatformquota.FieldEngineWeeklyUsageUsd, field.TypeFloat64, value)
+		_node.EngineWeeklyUsageUsd = value
+	}
+	if value, ok := _c.mutation.EngineMonthlyUsageUsd(); ok {
+		_spec.SetField(userplatformquota.FieldEngineMonthlyUsageUsd, field.TypeFloat64, value)
+		_node.EngineMonthlyUsageUsd = value
 	}
 	if value, ok := _c.mutation.DailyWindowStart(); ok {
 		_spec.SetField(userplatformquota.FieldDailyWindowStart, field.TypeTime, value)
@@ -630,6 +705,60 @@ func (u *UserPlatformQuotaUpsert) UpdateMonthlyUsageUsd() *UserPlatformQuotaUpse
 // AddMonthlyUsageUsd adds v to the "monthly_usage_usd" field.
 func (u *UserPlatformQuotaUpsert) AddMonthlyUsageUsd(v float64) *UserPlatformQuotaUpsert {
 	u.Add(userplatformquota.FieldMonthlyUsageUsd, v)
+	return u
+}
+
+// SetEngineDailyUsageUsd sets the "engine_daily_usage_usd" field.
+func (u *UserPlatformQuotaUpsert) SetEngineDailyUsageUsd(v float64) *UserPlatformQuotaUpsert {
+	u.Set(userplatformquota.FieldEngineDailyUsageUsd, v)
+	return u
+}
+
+// UpdateEngineDailyUsageUsd sets the "engine_daily_usage_usd" field to the value that was provided on create.
+func (u *UserPlatformQuotaUpsert) UpdateEngineDailyUsageUsd() *UserPlatformQuotaUpsert {
+	u.SetExcluded(userplatformquota.FieldEngineDailyUsageUsd)
+	return u
+}
+
+// AddEngineDailyUsageUsd adds v to the "engine_daily_usage_usd" field.
+func (u *UserPlatformQuotaUpsert) AddEngineDailyUsageUsd(v float64) *UserPlatformQuotaUpsert {
+	u.Add(userplatformquota.FieldEngineDailyUsageUsd, v)
+	return u
+}
+
+// SetEngineWeeklyUsageUsd sets the "engine_weekly_usage_usd" field.
+func (u *UserPlatformQuotaUpsert) SetEngineWeeklyUsageUsd(v float64) *UserPlatformQuotaUpsert {
+	u.Set(userplatformquota.FieldEngineWeeklyUsageUsd, v)
+	return u
+}
+
+// UpdateEngineWeeklyUsageUsd sets the "engine_weekly_usage_usd" field to the value that was provided on create.
+func (u *UserPlatformQuotaUpsert) UpdateEngineWeeklyUsageUsd() *UserPlatformQuotaUpsert {
+	u.SetExcluded(userplatformquota.FieldEngineWeeklyUsageUsd)
+	return u
+}
+
+// AddEngineWeeklyUsageUsd adds v to the "engine_weekly_usage_usd" field.
+func (u *UserPlatformQuotaUpsert) AddEngineWeeklyUsageUsd(v float64) *UserPlatformQuotaUpsert {
+	u.Add(userplatformquota.FieldEngineWeeklyUsageUsd, v)
+	return u
+}
+
+// SetEngineMonthlyUsageUsd sets the "engine_monthly_usage_usd" field.
+func (u *UserPlatformQuotaUpsert) SetEngineMonthlyUsageUsd(v float64) *UserPlatformQuotaUpsert {
+	u.Set(userplatformquota.FieldEngineMonthlyUsageUsd, v)
+	return u
+}
+
+// UpdateEngineMonthlyUsageUsd sets the "engine_monthly_usage_usd" field to the value that was provided on create.
+func (u *UserPlatformQuotaUpsert) UpdateEngineMonthlyUsageUsd() *UserPlatformQuotaUpsert {
+	u.SetExcluded(userplatformquota.FieldEngineMonthlyUsageUsd)
+	return u
+}
+
+// AddEngineMonthlyUsageUsd adds v to the "engine_monthly_usage_usd" field.
+func (u *UserPlatformQuotaUpsert) AddEngineMonthlyUsageUsd(v float64) *UserPlatformQuotaUpsert {
+	u.Add(userplatformquota.FieldEngineMonthlyUsageUsd, v)
 	return u
 }
 
@@ -939,6 +1068,69 @@ func (u *UserPlatformQuotaUpsertOne) AddMonthlyUsageUsd(v float64) *UserPlatform
 func (u *UserPlatformQuotaUpsertOne) UpdateMonthlyUsageUsd() *UserPlatformQuotaUpsertOne {
 	return u.Update(func(s *UserPlatformQuotaUpsert) {
 		s.UpdateMonthlyUsageUsd()
+	})
+}
+
+// SetEngineDailyUsageUsd sets the "engine_daily_usage_usd" field.
+func (u *UserPlatformQuotaUpsertOne) SetEngineDailyUsageUsd(v float64) *UserPlatformQuotaUpsertOne {
+	return u.Update(func(s *UserPlatformQuotaUpsert) {
+		s.SetEngineDailyUsageUsd(v)
+	})
+}
+
+// AddEngineDailyUsageUsd adds v to the "engine_daily_usage_usd" field.
+func (u *UserPlatformQuotaUpsertOne) AddEngineDailyUsageUsd(v float64) *UserPlatformQuotaUpsertOne {
+	return u.Update(func(s *UserPlatformQuotaUpsert) {
+		s.AddEngineDailyUsageUsd(v)
+	})
+}
+
+// UpdateEngineDailyUsageUsd sets the "engine_daily_usage_usd" field to the value that was provided on create.
+func (u *UserPlatformQuotaUpsertOne) UpdateEngineDailyUsageUsd() *UserPlatformQuotaUpsertOne {
+	return u.Update(func(s *UserPlatformQuotaUpsert) {
+		s.UpdateEngineDailyUsageUsd()
+	})
+}
+
+// SetEngineWeeklyUsageUsd sets the "engine_weekly_usage_usd" field.
+func (u *UserPlatformQuotaUpsertOne) SetEngineWeeklyUsageUsd(v float64) *UserPlatformQuotaUpsertOne {
+	return u.Update(func(s *UserPlatformQuotaUpsert) {
+		s.SetEngineWeeklyUsageUsd(v)
+	})
+}
+
+// AddEngineWeeklyUsageUsd adds v to the "engine_weekly_usage_usd" field.
+func (u *UserPlatformQuotaUpsertOne) AddEngineWeeklyUsageUsd(v float64) *UserPlatformQuotaUpsertOne {
+	return u.Update(func(s *UserPlatformQuotaUpsert) {
+		s.AddEngineWeeklyUsageUsd(v)
+	})
+}
+
+// UpdateEngineWeeklyUsageUsd sets the "engine_weekly_usage_usd" field to the value that was provided on create.
+func (u *UserPlatformQuotaUpsertOne) UpdateEngineWeeklyUsageUsd() *UserPlatformQuotaUpsertOne {
+	return u.Update(func(s *UserPlatformQuotaUpsert) {
+		s.UpdateEngineWeeklyUsageUsd()
+	})
+}
+
+// SetEngineMonthlyUsageUsd sets the "engine_monthly_usage_usd" field.
+func (u *UserPlatformQuotaUpsertOne) SetEngineMonthlyUsageUsd(v float64) *UserPlatformQuotaUpsertOne {
+	return u.Update(func(s *UserPlatformQuotaUpsert) {
+		s.SetEngineMonthlyUsageUsd(v)
+	})
+}
+
+// AddEngineMonthlyUsageUsd adds v to the "engine_monthly_usage_usd" field.
+func (u *UserPlatformQuotaUpsertOne) AddEngineMonthlyUsageUsd(v float64) *UserPlatformQuotaUpsertOne {
+	return u.Update(func(s *UserPlatformQuotaUpsert) {
+		s.AddEngineMonthlyUsageUsd(v)
+	})
+}
+
+// UpdateEngineMonthlyUsageUsd sets the "engine_monthly_usage_usd" field to the value that was provided on create.
+func (u *UserPlatformQuotaUpsertOne) UpdateEngineMonthlyUsageUsd() *UserPlatformQuotaUpsertOne {
+	return u.Update(func(s *UserPlatformQuotaUpsert) {
+		s.UpdateEngineMonthlyUsageUsd()
 	})
 }
 
@@ -1423,6 +1615,69 @@ func (u *UserPlatformQuotaUpsertBulk) AddMonthlyUsageUsd(v float64) *UserPlatfor
 func (u *UserPlatformQuotaUpsertBulk) UpdateMonthlyUsageUsd() *UserPlatformQuotaUpsertBulk {
 	return u.Update(func(s *UserPlatformQuotaUpsert) {
 		s.UpdateMonthlyUsageUsd()
+	})
+}
+
+// SetEngineDailyUsageUsd sets the "engine_daily_usage_usd" field.
+func (u *UserPlatformQuotaUpsertBulk) SetEngineDailyUsageUsd(v float64) *UserPlatformQuotaUpsertBulk {
+	return u.Update(func(s *UserPlatformQuotaUpsert) {
+		s.SetEngineDailyUsageUsd(v)
+	})
+}
+
+// AddEngineDailyUsageUsd adds v to the "engine_daily_usage_usd" field.
+func (u *UserPlatformQuotaUpsertBulk) AddEngineDailyUsageUsd(v float64) *UserPlatformQuotaUpsertBulk {
+	return u.Update(func(s *UserPlatformQuotaUpsert) {
+		s.AddEngineDailyUsageUsd(v)
+	})
+}
+
+// UpdateEngineDailyUsageUsd sets the "engine_daily_usage_usd" field to the value that was provided on create.
+func (u *UserPlatformQuotaUpsertBulk) UpdateEngineDailyUsageUsd() *UserPlatformQuotaUpsertBulk {
+	return u.Update(func(s *UserPlatformQuotaUpsert) {
+		s.UpdateEngineDailyUsageUsd()
+	})
+}
+
+// SetEngineWeeklyUsageUsd sets the "engine_weekly_usage_usd" field.
+func (u *UserPlatformQuotaUpsertBulk) SetEngineWeeklyUsageUsd(v float64) *UserPlatformQuotaUpsertBulk {
+	return u.Update(func(s *UserPlatformQuotaUpsert) {
+		s.SetEngineWeeklyUsageUsd(v)
+	})
+}
+
+// AddEngineWeeklyUsageUsd adds v to the "engine_weekly_usage_usd" field.
+func (u *UserPlatformQuotaUpsertBulk) AddEngineWeeklyUsageUsd(v float64) *UserPlatformQuotaUpsertBulk {
+	return u.Update(func(s *UserPlatformQuotaUpsert) {
+		s.AddEngineWeeklyUsageUsd(v)
+	})
+}
+
+// UpdateEngineWeeklyUsageUsd sets the "engine_weekly_usage_usd" field to the value that was provided on create.
+func (u *UserPlatformQuotaUpsertBulk) UpdateEngineWeeklyUsageUsd() *UserPlatformQuotaUpsertBulk {
+	return u.Update(func(s *UserPlatformQuotaUpsert) {
+		s.UpdateEngineWeeklyUsageUsd()
+	})
+}
+
+// SetEngineMonthlyUsageUsd sets the "engine_monthly_usage_usd" field.
+func (u *UserPlatformQuotaUpsertBulk) SetEngineMonthlyUsageUsd(v float64) *UserPlatformQuotaUpsertBulk {
+	return u.Update(func(s *UserPlatformQuotaUpsert) {
+		s.SetEngineMonthlyUsageUsd(v)
+	})
+}
+
+// AddEngineMonthlyUsageUsd adds v to the "engine_monthly_usage_usd" field.
+func (u *UserPlatformQuotaUpsertBulk) AddEngineMonthlyUsageUsd(v float64) *UserPlatformQuotaUpsertBulk {
+	return u.Update(func(s *UserPlatformQuotaUpsert) {
+		s.AddEngineMonthlyUsageUsd(v)
+	})
+}
+
+// UpdateEngineMonthlyUsageUsd sets the "engine_monthly_usage_usd" field to the value that was provided on create.
+func (u *UserPlatformQuotaUpsertBulk) UpdateEngineMonthlyUsageUsd() *UserPlatformQuotaUpsertBulk {
+	return u.Update(func(s *UserPlatformQuotaUpsert) {
+		s.UpdateEngineMonthlyUsageUsd()
 	})
 }
 

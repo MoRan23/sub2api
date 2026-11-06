@@ -465,6 +465,8 @@ type OpenAIGatewayService struct {
 	accountRepo           AccountRepository
 	usageLogRepo          UsageLogRepository
 	usageBillingRepo      UsageBillingRepository
+	codexEngineBilling    *CodexEngineBillingService
+	engineBillingAPIKeys  *APIKeyService
 	userRepo              UserRepository
 	userSubRepo           UserSubscriptionRepository
 	cache                 GatewayCache

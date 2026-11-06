@@ -780,6 +780,33 @@ func (w *opsCaptureWriter) Flush() {
 	defer finishDelegatedCall(state)
 	rw.Flush()
 }
+
+// FlushError preserves the same lease protection as Flush while exposing a
+// failed socket flush to callers that must promptly cancel upstream execution.
+func (w *opsCaptureWriter) FlushError() error {
+	state, rw := w.beginDelegatedCall()
+	if state == nil {
+		return errors.New("response writer released")
+	}
+	state.mu.Unlock()
+	defer finishDelegatedCall(state)
+	rw.WriteHeaderNow()
+	var current http.ResponseWriter = rw
+	for range 32 {
+		switch inner := current.(type) {
+		case interface{ FlushError() error }:
+			return inner.FlushError()
+		case interface{ Unwrap() http.ResponseWriter }:
+			current = inner.Unwrap()
+		case http.Flusher:
+			inner.Flush()
+			return nil
+		default:
+			return http.ErrNotSupported
+		}
+	}
+	return http.ErrNotSupported
+}
 func (w *opsCaptureWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 	state, rw := w.beginDelegatedCall()
 	if state == nil {

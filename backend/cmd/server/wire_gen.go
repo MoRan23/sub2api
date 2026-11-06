@@ -166,7 +166,9 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	proxyExitInfoProber := repository.NewProxyExitInfoProber(configConfig)
 	proxyLatencyCache := repository.NewProxyLatencyCache(redisClient, db)
 	openAIEgressLocationService := service.ProvideOpenAIEgressLocationService(proxyExitInfoProber, proxyLatencyCache)
-	openAIGatewayService := service.ProvideOpenAIGatewayService(accountRepository, usageLogRepository, usageBillingRepository, userRepository, userSubscriptionRepository, userGroupRateRepository, gatewayCache, configConfig, schedulerSnapshotService, concurrencyService, billingService, rateLimitService, billingCacheService, httpUpstream, deferredService, openAITokenProvider, grokTokenProvider, modelPricingResolver, channelService, balanceNotifyService, settingService, serviceUserPlatformQuotaRepository, oAuthSyncSessionRepository, oAuthDailySessionRepository, codexTelemetryService, openAIEgressLocationService)
+	codexEngineBillingStore := repository.NewCodexEngineBillingStore(db)
+	codexEngineBillingService := service.NewCodexEngineBillingService(codexEngineBillingStore, accountRepository, httpUpstream, configConfig)
+	openAIGatewayService := service.ProvideOpenAIGatewayService(accountRepository, usageLogRepository, usageBillingRepository, userRepository, userSubscriptionRepository, userGroupRateRepository, gatewayCache, configConfig, schedulerSnapshotService, concurrencyService, billingService, rateLimitService, billingCacheService, httpUpstream, deferredService, openAITokenProvider, grokTokenProvider, modelPricingResolver, channelService, balanceNotifyService, settingService, serviceUserPlatformQuotaRepository, oAuthSyncSessionRepository, oAuthDailySessionRepository, codexTelemetryService, openAIEgressLocationService, codexEngineBillingService, codexEngineBillingStore, apiKeyService)
 	geminiOAuthClient := repository.NewGeminiOAuthClient(configConfig)
 	geminiCliCodeAssistClient := repository.NewGeminiCliCodeAssistClient()
 	driveClient := repository.NewGeminiDriveClient()
@@ -379,7 +381,7 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	channelMonitorRunner := service.ProvideChannelMonitorRunner(channelMonitorService, settingService, channelMonitorQuotaFetcher)
 	channelMonitorV2Aggregator := service.ProvideChannelMonitorV2Aggregator(channelMonitorV2Repository, db, settingService)
 	userPlatformQuotaUsageFlusher := service.ProvideUserPlatformQuotaUsageFlusher(configConfig, billingCache, serviceUserPlatformQuotaRepository, timingWheelService)
-	v2 := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, opsService, opsIngressRejectAggregator, apiKeyService, authCacheInvalidationWorker, groupApplicationWorker, schedulerSnapshotService, tokenRefreshService, accountExpiryService, codexEngineCapacitySyncService, cnProviderBalanceCheckService, openAICodexVersionSyncService, openAIOAuthOSProfileBackfill, claudeCodeVersionSyncService, proxyExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, geminiCachedContentService, batchImageCleanupService, batchImageWorkerRuntime, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, grokOAuthService, openAIGatewayService, codexTelemetryService, accountCandyTestService, modelAttributionService, openAIEgressLocationService, adminService, openAIOutboundSessionV1CleanupWorker, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, channelMonitorV2Aggregator, userPlatformQuotaUsageFlusher, upstreamBillingProbeService, ollamaCloudUsageService, openCodeGoUsageService, auditLogService, openAIQuotaAutoResetService, promptService, pluginManager)
+	v2 := provideCleanup(client, redisClient, opsMetricsCollector, opsAggregationService, opsAlertEvaluatorService, opsCleanupService, opsScheduledReportService, opsSystemLogSink, opsService, opsIngressRejectAggregator, apiKeyService, authCacheInvalidationWorker, groupApplicationWorker, schedulerSnapshotService, tokenRefreshService, accountExpiryService, codexEngineCapacitySyncService, codexEngineBillingService, cnProviderBalanceCheckService, openAICodexVersionSyncService, openAIOAuthOSProfileBackfill, claudeCodeVersionSyncService, proxyExpiryService, subscriptionExpiryService, usageCleanupService, idempotencyCleanupService, geminiCachedContentService, batchImageCleanupService, batchImageWorkerRuntime, pricingService, emailQueueService, billingCacheService, usageRecordWorkerPool, subscriptionService, oAuthService, openAIOAuthService, geminiOAuthService, antigravityOAuthService, grokOAuthService, openAIGatewayService, codexTelemetryService, accountCandyTestService, modelAttributionService, openAIEgressLocationService, adminService, openAIOutboundSessionV1CleanupWorker, scheduledTestRunnerService, backupService, paymentOrderExpiryService, channelMonitorRunner, channelMonitorV2Aggregator, userPlatformQuotaUsageFlusher, upstreamBillingProbeService, ollamaCloudUsageService, openCodeGoUsageService, auditLogService, openAIQuotaAutoResetService, promptService, pluginManager)
 	application := &Application{
 		Server:        httpServer,
 		PromptAudit:   promptService,
@@ -440,6 +442,7 @@ func provideCleanup(
 	tokenRefresh *service.TokenRefreshService,
 	accountExpiry *service.AccountExpiryService,
 	codexEngineCapacitySync *service.CodexEngineCapacitySyncService,
+	codexEngineBilling *service.CodexEngineBillingService,
 	cnProviderBalanceCheck *service.CNProviderBalanceCheckService,
 	codexVersionSync *service.OpenAICodexVersionSyncService,
 	openAIOAuthOSProfiles *service.OpenAIOAuthOSProfileBackfill,
@@ -492,6 +495,9 @@ func provideCleanup(
 		}
 		if attribution != nil {
 			attribution.Stop()
+		}
+		if codexEngineBilling != nil {
+			codexEngineBilling.Stop()
 		}
 		if maintenance, ok := adminService.(interface{ StopProxyGeoBackfill() }); ok {
 			maintenance.StopProxyGeoBackfill()

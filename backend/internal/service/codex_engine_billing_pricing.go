@@ -1,0 +1,600 @@
+package service
+
+import (
+	"context"
+	"encoding/hex"
+	"encoding/json"
+	"errors"
+	"fmt"
+	"math"
+	"net"
+	"sort"
+	"strings"
+	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/config"
+)
+
+const codexEnginePricingSnapshotVersion = 1
+const codexEnginePricingModelLimit = 512
+const codexEnginePricingSnapshotLimit = 256 * 1024
+
+// SetCodexEngineBillingAPIKeyService supplies cache invalidation only. Recovered
+// settlement must never reload prices or billing ownership through this service.
+func (s *OpenAIGatewayService) SetCodexEngineBillingAPIKeyService(keys *APIKeyService) {
+	if s != nil {
+		s.engineBillingAPIKeys = keys
+	}
+}
+
+// The snapshot is deliberately an allowlist, not a serialization of an Account,
+// APIKey, Group or User: none of their credentials belongs in a recovery job.
+type codexEnginePricingSnapshot struct {
+	Version                  int                               `json:"version"`
+	PricingAt                time.Time                         `json:"pricing_at"`
+	RequestedModel           string                            `json:"requested_model"`
+	UpstreamModel            string                            `json:"upstream_model"`
+	BillingModel             string                            `json:"billing_model"`
+	RequestedTier            string                            `json:"requested_tier,omitempty"`
+	ReasoningEffort          string                            `json:"reasoning_effort,omitempty"`
+	RequestedReasoningEffort string                            `json:"requested_reasoning_effort,omitempty"`
+	OpenAIWSMode             bool                              `json:"openai_ws_mode"`
+	RequestType              RequestType                       `json:"request_type"`
+	UserAgent                string                            `json:"user_agent,omitempty"`
+	IPAddress                string                            `json:"ip_address,omitempty"`
+	SessionID                string                            `json:"session_id,omitempty"`
+	RequestPayloadHash       string                            `json:"request_payload_hash,omitempty"`
+	InboundEndpoint          string                            `json:"inbound_endpoint,omitempty"`
+	UpstreamEndpoint         string                            `json:"upstream_endpoint,omitempty"`
+	GroupID                  *int64                            `json:"group_id,omitempty"`
+	SubscriptionID           *int64                            `json:"subscription_id,omitempty"`
+	ChannelID                int64                             `json:"channel_id,omitempty"`
+	ModelMappingChain        string                            `json:"model_mapping_chain,omitempty"`
+	QuotaPlatform            string                            `json:"quota_platform,omitempty"`
+	AccountType              string                            `json:"account_type"`
+	Stream                   bool                              `json:"stream"`
+	NativeCompactionV2       bool                              `json:"native_compaction_v2"`
+	SubscriptionBilling      bool                              `json:"subscription_billing"`
+	SimpleMode               bool                              `json:"simple_mode"`
+	SimpleKeyRateOnly        bool                              `json:"simple_key_rate_only"`
+	KeyQuota                 bool                              `json:"key_quota"`
+	KeyRateLimit             bool                              `json:"key_rate_limit"`
+	AccountQuota             bool                              `json:"account_quota"`
+	AccountDailyQuota        bool                              `json:"account_daily_quota"`
+	AccountWeeklyQuota       bool                              `json:"account_weekly_quota"`
+	AccountRate              float64                           `json:"account_rate"`
+	TokenRate                float64                           `json:"token_rate"`
+	ImageRate                float64                           `json:"image_rate"`
+	BaseRate                 float64                           `json:"base_rate"`
+	SearchPrice              float64                           `json:"search_price"`
+	FreeFast                 bool                              `json:"free_fast"`
+	LongContext              bool                              `json:"long_context"`
+	Prices                   map[string]codexEngineFrozenPrice `json:"prices"`
+}
+
+// Exported fields mirror the nonsecret resolved card, including the two private
+// flags which would otherwise silently disappear in JSON persistence.
+type codexEngineFrozenPrice struct {
+	Resolved          ResolvedPricing                  `json:"resolved"`
+	Channel           *ChannelModelPricing             `json:"channel,omitempty"`
+	LongContext       bool                             `json:"long_context"`
+	ImageCosts        map[string]float64               `json:"image_costs,omitempty"`
+	StatsCustom       *ChannelModelPricing             `json:"stats_custom,omitempty"`
+	StatsUseCustomer  bool                             `json:"stats_use_customer,omitempty"`
+	StatsCatalog      *ModelPricing                    `json:"stats_catalog,omitempty"`
+	ImageTokenPricing bool                             `json:"image_token_pricing,omitempty"`
+	TokenIntervals    []codexEngineFrozenTokenInterval `json:"token_intervals,omitempty"`
+	TimeMultiplier    *float64                         `json:"time_multiplier,omitempty"`
+}
+
+type codexEngineFrozenTokenInterval struct {
+	MinTokens int           `json:"min_tokens"`
+	MaxTokens *int          `json:"max_tokens,omitempty"`
+	Price     *ModelPricing `json:"price"`
+}
+
+// CaptureCodexEngineBillingSnapshot freezes the applicable catalog before the
+// physical dispatch. Event settlement has no dependency on live pricing.
+func (s *OpenAIGatewayService) CaptureCodexEngineBillingSnapshot(ctx context.Context, in *OpenAIRecordUsageInput) (json.RawMessage, error) {
+	if s == nil || s.billingService == nil || in == nil || in.Result == nil || in.Account == nil || !in.Account.IsCodexEngine() || in.APIKey == nil || in.User == nil {
+		return nil, errors.New("engine billing snapshot inputs unavailable")
+	}
+	a, key, result := in.Account, in.APIKey, in.Result
+	baseRate := 1.0
+	if s.cfg != nil {
+		baseRate = s.cfg.Default.RateMultiplier
+	}
+	if key.GroupID != nil && key.Group != nil {
+		baseRate = s.ResolveUserGroupRateMultiplier(ctx, in.User.ID, *key.GroupID, key.Group.RateMultiplier)
+	}
+	at := openAIUsagePricingAt(in)
+	tokenRate, imageRate := computePeakAwareMultipliers(key, baseRate, at)
+	billingModel := firstNonEmpty(result.BillingModel, forwardResultBillingModel(result.Model, result.UpstreamModel))
+	if in.BillingModelSource == BillingModelSourceChannelMapped && in.ChannelMappedModel != "" && in.ChannelMappedModel != in.OriginalModel {
+		billingModel = in.ChannelMappedModel
+	}
+	if in.BillingModelSource == BillingModelSourceRequested && in.OriginalModel != "" {
+		billingModel = in.OriginalModel
+	}
+	f := codexEnginePricingSnapshot{
+		Version: codexEnginePricingSnapshotVersion, PricingAt: at,
+		RequestedModel: firstNonEmpty(in.OriginalModel, result.Model), UpstreamModel: firstNonEmpty(result.UpstreamModel, result.Model), BillingModel: billingModel,
+		RequestedTier: optionalStringValue(result.ServiceTier), ReasoningEffort: optionalStringValue(result.ReasoningEffort),
+		RequestedReasoningEffort: optionalStringValue(coalesceRequestedReasoningEffort(result.RequestedReasoningEffort, result.ReasoningEffort)),
+		OpenAIWSMode:             result.OpenAIWSMode, RequestType: RequestTypeFromLegacy(result.Stream, result.OpenAIWSMode),
+		UserAgent: codexEngineBillingUserAgent(in.UserAgent), SessionID: sanitizeSessionID(in.SessionID),
+		InboundEndpoint: in.InboundEndpoint, UpstreamEndpoint: in.UpstreamEndpoint, GroupID: key.GroupID, ChannelID: in.ChannelID, ModelMappingChain: in.ModelMappingChain,
+		AccountType: a.Type, QuotaPlatform: firstNonEmpty(in.QuotaPlatform, PlatformFromAPIKey(key)), Stream: result.Stream, NativeCompactionV2: in.NativeCompactionV2,
+		KeyQuota: key.Quota > 0 && in.APIKeyService != nil, KeyRateLimit: key.HasRateLimits() && in.APIKeyService != nil,
+		AccountQuota: a.SupportsAccountQuota() && a.HasAnyQuotaLimit(), AccountDailyQuota: a.GetQuotaDailyLimit() > 0, AccountWeeklyQuota: a.GetQuotaWeeklyLimit() > 0,
+		AccountRate: a.BillingRateMultiplier(), TokenRate: tokenRate, ImageRate: imageRate, BaseRate: baseRate,
+		SearchPrice: defaultWebSearchPricePerCall, LongContext: a.IsOpenAILongContextBillingEnabled(), Prices: make(map[string]codexEngineFrozenPrice),
+	}
+	if in.CyberBlocked {
+		f.RequestType = RequestTypeCyberBlocked
+	}
+	if ip := net.ParseIP(strings.TrimSpace(in.IPAddress)); ip != nil {
+		f.IPAddress = ip.String()
+	}
+	if digest := strings.TrimSpace(in.RequestPayloadHash); len(digest) == 64 {
+		if _, err := hex.DecodeString(digest); err == nil {
+			f.RequestPayloadHash = strings.ToLower(digest)
+		}
+	}
+	if p := webSearchPricePerCallFromAPIKey(key); p != nil {
+		f.SearchPrice = *p
+	}
+	if key.Group != nil {
+		f.FreeFast = key.Group.FreeOpenAIFast && groupSupportsOpenAIFast(key.Group.Platform)
+	}
+	if in.Subscription != nil {
+		id := in.Subscription.ID
+		f.SubscriptionID = &id
+		f.SubscriptionBilling = key.Group != nil && key.Group.IsSubscriptionType()
+	}
+	f.SimpleMode = s.cfg != nil && s.cfg.RunMode == config.RunModeSimple
+	f.SimpleKeyRateOnly = simpleModeKeyRateLimitBillingEnabled(s.cfg, key)
+	candidates := map[string]struct{}{}
+	add := func(v string) {
+		v = strings.TrimSpace(v)
+		if v != "" && !strings.Contains(v, "*") {
+			candidates[v] = struct{}{}
+		}
+	}
+	for _, model := range []string{f.RequestedModel, f.UpstreamModel, billingModel, in.ChannelMappedModel} {
+		add(model)
+	}
+	for _, model := range a.GetModelMapping() {
+		add(model)
+	}
+	if key.Group != nil {
+		for _, card := range key.Group.ModelPricing {
+			for _, model := range card.Models {
+				add(model)
+			}
+		}
+	}
+	for _, model := range s.billingService.ListSupportedModels() {
+		if strings.HasPrefix(model, "gpt-") || strings.HasPrefix(model, "codex-") {
+			add(model)
+		}
+	}
+	if ps := s.billingService.pricingService; ps != nil {
+		for _, model := range ps.ListModelNamesByProvider("openai") {
+			add(model)
+		}
+	}
+	if len(candidates) > codexEnginePricingModelLimit {
+		return nil, errors.New("engine applicable pricing catalog exceeds snapshot limit")
+	}
+	resolver := s.resolver
+	if resolver == nil {
+		resolver = NewModelPricingResolver(s.channelService, s.billingService)
+	}
+	imagePricer := &OpenAIGatewayService{billingService: s.billingService, resolver: resolver, channelService: s.channelService}
+	var statsChannel *Channel
+	statsPlatform := ""
+	if key.GroupID != nil && s.channelService != nil {
+		statsChannel, _ = s.channelService.GetChannelForGroup(ctx, *key.GroupID)
+		statsPlatform = s.channelService.GetGroupPlatform(ctx, *key.GroupID)
+	}
+	if statsChannel != nil {
+		for _, card := range statsChannel.ModelPricing {
+			if card.Platform != PlatformOpenAI {
+				continue
+			}
+			for _, model := range card.Models {
+				add(model)
+			}
+		}
+	}
+	if len(candidates) > codexEnginePricingModelLimit {
+		return nil, errors.New("engine applicable pricing catalog exceeds snapshot limit")
+	}
+	models := make([]string, 0, len(candidates))
+	for model := range candidates {
+		models = append(models, model)
+	}
+	sort.Strings(models)
+	for _, model := range models {
+		r := resolver.Resolve(ctx, PricingInput{Model: model, GroupID: key.GroupID, Group: key.Group})
+		if r == nil {
+			continue
+		}
+		p := codexEngineFrozenPrice{Resolved: *r, Channel: r.channelPricing, LongContext: r.longContextPricingEnabled}
+		// The ordinary no-group path has no group long-context entitlement. The
+		// resolver's nil-group default must not override the account's preference.
+		if key.Group == nil {
+			p.LongContext = false
+		}
+		freezeTokenCard := func(card *ModelPricing) *ModelPricing {
+			if card == nil {
+				return nil
+			}
+			card = s.billingService.applyModelSpecificPricingPolicyEx(model, card, r.Source == PricingSourceLiteLLM, at)
+			frozen := *card
+			if r.Source == PricingSourceLiteLLM && isDeepSeekModel(model) {
+				multiplier := deepseekPeakMultiplierAt(at)
+				frozen.InputPricePerToken *= multiplier
+				frozen.OutputPricePerToken *= multiplier
+				frozen.CacheReadPricePerToken *= multiplier
+			}
+			if frozen.FlexMultiplier == nil {
+				v := .5
+				frozen.FlexMultiplier = &v
+			}
+			if frozen.UltrafastMultiplier == 0 {
+				frozen.UltrafastMultiplier = 2
+			}
+			if frozen.FastMultiplier == nil && !usePriorityServiceTierPricing("priority", &frozen) {
+				v := 2.0
+				frozen.FastMultiplier = &v
+			}
+			return &frozen
+		}
+		p.Resolved.BasePricing = freezeTokenCard(r.BasePricing)
+		for _, interval := range r.Intervals {
+			if interval.MinTokens == int(^uint(0)>>1) {
+				return nil, errors.New("engine price interval exceeds token range")
+			}
+			p.TokenIntervals = append(p.TokenIntervals, codexEngineFrozenTokenInterval{MinTokens: interval.MinTokens, MaxTokens: interval.MaxTokens, Price: freezeTokenCard(resolver.GetIntervalPricing(r, interval.MinTokens+1))})
+		}
+		timeMultiplier := resolvedChannelTimeMultiplier(r, at)
+		p.TimeMultiplier = &timeMultiplier
+		p.ImageTokenPricing = r.Mode == BillingModeToken && (r.Source == PricingSourceGroup || r.Source == PricingSourceChannel) && !imageCountBillingApplies(key, result.ImageEndpoint)
+		if strings.Contains(strings.ToLower(model), "image") || (result.ImageEndpoint && model == f.UpstreamModel) {
+			p.ImageCosts = make(map[string]float64)
+			for _, size := range []string{"1K", "2K", "4K"} {
+				v := imagePricer.calculateOpenAIImageCost(ctx, model, key, &OpenAIForwardResult{ImageCount: 1, ImageSize: size, ImageEndpoint: true, ReasoningEffort: result.ReasoningEffort}, 1)
+				p.ImageCosts[size] = v.TotalCost
+			}
+		}
+		if statsChannel != nil {
+			p.StatsUseCustomer = statsChannel.ApplyPricingToAccountStats
+			for _, rule := range statsChannel.AccountStatsPricingRules {
+				if matchAccountStatsRule(&rule, a.ID, *key.GroupID) {
+					if found := findPricingForModel(rule.Pricing, statsPlatform, strings.ToLower(model)); found != nil {
+						p.StatsCustom = found
+						break
+					}
+				}
+			}
+			p.StatsCatalog, _ = s.billingService.GetModelPricing(model)
+		}
+		f.Prices[model] = p
+	}
+	// Preserve the existing configured-model candidate order, but resolve its
+	// first usable card now. Recovery never falls back to a newly added price.
+	for _, candidate := range usageBillingModelCandidates(billingModel, result.BillingModel, in.ChannelMappedModel, in.OriginalModel, result.UpstreamModel, result.Model) {
+		if card, ok := f.Prices[candidate]; ok && (card.Resolved.BasePricing != nil || len(card.TokenIntervals) > 0 || card.Resolved.Mode != BillingModeToken && card.Resolved.Mode != "" || len(card.ImageCosts) > 0) {
+			f.BillingModel = candidate
+			break
+		}
+	}
+	raw, err := json.Marshal(f)
+	if err != nil {
+		return nil, err
+	}
+	if len(raw) > codexEnginePricingSnapshotLimit {
+		return nil, errors.New("engine applicable pricing snapshot exceeds storage limit")
+	}
+	return raw, nil
+}
+
+func codexEngineBillingUserAgent(value string) string {
+	value = strings.TrimSpace(strings.ToValidUTF8(value, ""))
+	value = strings.Map(func(r rune) rune {
+		if r < 0x20 || r == 0x7f {
+			return -1
+		}
+		return r
+	}, value)
+	if len(value) > 512 {
+		value = strings.ToValidUTF8(value[:512], "")
+	}
+	return value
+}
+
+func decodeCodexEnginePricingSnapshot(raw json.RawMessage) (*codexEnginePricingSnapshot, error) {
+	if len(raw) > codexEnginePricingSnapshotLimit {
+		return nil, errors.New("engine pricing snapshot exceeds storage limit")
+	}
+	var f codexEnginePricingSnapshot
+	if err := json.Unmarshal(raw, &f); err != nil {
+		return nil, fmt.Errorf("decode engine pricing snapshot: %w", err)
+	}
+	if f.Version != codexEnginePricingSnapshotVersion || len(f.Prices) > codexEnginePricingModelLimit || f.PricingAt.IsZero() {
+		return nil, errors.New("unsupported engine pricing snapshot")
+	}
+	for _, v := range []float64{f.AccountRate, f.TokenRate, f.ImageRate, f.BaseRate, f.SearchPrice} {
+		if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
+			return nil, errors.New("invalid engine pricing multiplier")
+		}
+	}
+	return &f, nil
+}
+
+func codexEngineValidateTokenEvidence(event *CodexEngineBillingUsageEvent) error {
+	// Inclusive input/output and cache split are needed even for plain text.
+	// Optional dimensions declared inapplicable by the source stay absent; an
+	// applicable but unobserved dimension cannot be silently treated as free.
+	for _, name := range []string{"input_tokens", "output_tokens", "cached_input_tokens"} {
+		if !event.ApplicableUsage[name] || !event.UsagePresent[name] {
+			return fmt.Errorf("engine token evidence missing %s", name)
+		}
+	}
+	for _, name := range []string{"cache_write_input_tokens", "image_input_tokens", "cached_image_input_tokens", "image_output_tokens"} {
+		if event.ApplicableUsage[name] && !event.UsagePresent[name] {
+			return fmt.Errorf("engine token evidence missing %s", name)
+		}
+	}
+	return nil
+}
+
+// BuildCodexEngineBillingEvent reads only immutable snapshot data. Unknown cards
+// leave the event pending instead of silently recording free or current-price usage.
+func (s *OpenAIGatewayService) BuildCodexEngineBillingEvent(ctx context.Context, job *CodexEngineBillingJob, event *CodexEngineBillingUsageEvent) (*UsageBillingCommand, *UsageLog, error) {
+	if job == nil || event == nil {
+		return nil, nil, errors.New("engine billing event is nil")
+	}
+	f, err := decodeCodexEnginePricingSnapshot(job.Snapshot)
+	if err != nil {
+		return nil, nil, err
+	}
+	model := strings.TrimSpace(event.Model)
+	priceModel := model
+	if model == f.UpstreamModel {
+		priceModel = f.BillingModel
+	}
+	tier := strings.TrimSpace(event.ServiceTier)
+	effort := firstNonEmpty(event.ReasoningEffort, f.ReasoningEffort)
+	u := event.Usage
+	if u.InputTokens < 0 || u.OutputTokens < 0 || u.CacheReadInputTokens < 0 || u.CacheCreationInputTokens < 0 || u.CacheReadInputTokens > u.InputTokens || u.CacheCreationInputTokens > u.InputTokens-u.CacheReadInputTokens || u.ImageInputTokens < 0 || u.ImageCacheReadTokens < 0 || u.ImageOutputTokens < 0 || u.ImageInputTokens > u.InputTokens || u.ImageCacheReadTokens > u.CacheReadInputTokens || u.ImageCacheReadTokens > u.ImageInputTokens || u.ImageOutputTokens > u.OutputTokens || u.ImageInputTokens-u.ImageCacheReadTokens > u.InputTokens-u.CacheReadInputTokens-u.CacheCreationInputTokens {
+		return nil, nil, errors.New("invalid engine usage token buckets")
+	}
+	tokens := UsageTokens{InputTokens: u.InputTokens - u.CacheReadInputTokens - u.CacheCreationInputTokens, OutputTokens: u.OutputTokens, CacheReadTokens: u.CacheReadInputTokens, CacheCreationTokens: u.CacheCreationInputTokens, ImageInputTokens: max(u.ImageInputTokens-u.ImageCacheReadTokens, 0), ImageCacheReadTokens: u.ImageCacheReadTokens, ImageOutputTokens: u.ImageOutputTokens}
+	var cost *CostBreakdown
+	rate := f.TokenRate
+	p, known := f.Prices[priceModel]
+	bs := &BillingService{}
+	imageSize := ""
+	switch event.Kind {
+	case "search":
+		if event.SearchCalls < 0 || event.SearchOperations < 0 || event.SearchCalls > 0 && event.SearchOperations > 0 {
+			return nil, nil, errors.New("invalid engine search units")
+		}
+		units := event.SearchCalls
+		if event.SearchOperations > 0 {
+			units = event.SearchOperations
+		}
+		if units == 0 {
+			return nil, nil, errors.New("missing engine search units")
+		}
+		// Operations and native calls are distinct meter dimensions, both using
+		// the frozen alpha/search price. Never manufacture calls from operations.
+		cost = &CostBreakdown{TotalCost: float64(units) * f.SearchPrice, ActualCost: float64(units) * f.SearchPrice * f.BaseRate, BillingMode: string(BillingModePerRequest)}
+		rate = f.BaseRate
+	case "image":
+		if !known {
+			return nil, nil, fmt.Errorf("engine image price missing for %q: %w", priceModel, ErrModelPricingUnavailable)
+		}
+		if event.ImageActual != nil {
+			imageSize = event.ImageActual.Size
+		}
+		if !p.ImageTokenPricing {
+			if event.ImageCount <= 0 {
+				return nil, nil, errors.New("missing engine actual image count")
+			}
+			size, validSize := ClassifyImageBillingTier(imageSize)
+			unit, ok := p.ImageCosts[size]
+			if !validSize || !ok {
+				return nil, nil, fmt.Errorf("engine actual image size price missing: %w", ErrModelPricingUnavailable)
+			}
+			cost = &CostBreakdown{TotalCost: unit * float64(event.ImageCount), ActualCost: unit * float64(event.ImageCount) * f.ImageRate, BillingMode: string(BillingModeImage)}
+			rate = f.ImageRate
+			break
+		}
+		fallthrough
+	case "model":
+		if !known {
+			return nil, nil, fmt.Errorf("engine frozen price missing for %q: %w", priceModel, ErrModelPricingUnavailable)
+		}
+		if p.Resolved.Mode == BillingModeToken || p.Resolved.Mode == "" {
+			if err := codexEngineValidateTokenEvidence(event); err != nil {
+				return nil, nil, err
+			}
+			switch normalizeBillingServiceTier(tier) {
+			case "default", "standard", "priority", "fast", "flex", OpenAIFastTierUltrafast:
+			default:
+				return nil, nil, errors.New("engine actual service tier is unknown")
+			}
+		} else if len(p.Resolved.RequestTiers) > 0 && (!event.ApplicableUsage["input_tokens"] || !event.UsagePresent["input_tokens"]) {
+			return nil, nil, errors.New("engine input context required for per-request price tier")
+		}
+		r := p.Resolved
+		r.channelPricing = p.Channel
+		r.longContextPricingEnabled = p.LongContext
+		input := CostInput{Ctx: ctx, Model: priceModel, Tokens: tokens, RequestCount: 1, RateMultiplier: f.TokenRate, PricingAt: f.PricingAt, ServiceTier: tier, ReasoningEffort: effort, Resolver: &ModelPricingResolver{}, Resolved: &r, LongContextBillingEnabled: &f.LongContext}
+		calculate := func(input CostInput) (*CostBreakdown, error) {
+			if r.Mode != BillingModeToken && r.Mode != "" {
+				return bs.CalculateCostUnified(input)
+			}
+			price := p.Resolved.BasePricing
+			contextTokens := u.InputTokens
+			if !p.LongContext && !f.LongContext {
+				contextTokens = 1
+			}
+			for _, interval := range p.TokenIntervals {
+				if contextTokens > interval.MinTokens && (interval.MaxTokens == nil || contextTokens <= *interval.MaxTokens) {
+					price = interval.Price
+					break
+				}
+			}
+			if price == nil {
+				return nil, ErrModelPricingUnavailable
+			}
+			out := bs.computeTokenBreakdown(price, tokens, f.TokenRate, input.ServiceTier, len(p.TokenIntervals) == 0 && (p.LongContext || f.LongContext))
+			if p.TimeMultiplier != nil {
+				applyCostBreakdownMultiplier(out, *p.TimeMultiplier)
+			}
+			applyCostBreakdownMultiplier(out, reasoningEffortBillingMultiplier(effort, price.ReasoningEffortMultipliers))
+			out.BillingMode = string(BillingModeToken)
+			return out, nil
+		}
+		cost, err = calculate(input)
+		if err != nil {
+			return nil, nil, err
+		}
+		if f.FreeFast && (normalizeBillingServiceTier(tier) == "priority" || normalizeBillingServiceTier(tier) == "fast") {
+			input.ServiceTier = ""
+			standard, e := calculate(input)
+			if e != nil {
+				return nil, nil, e
+			}
+			cost.ActualCost = standard.ActualCost
+		}
+	default:
+		return nil, nil, errors.New("unsupported engine billing event kind")
+	}
+	if cost == nil || math.IsNaN(cost.TotalCost) || math.IsInf(cost.TotalCost, 0) || cost.TotalCost < 0 || math.IsNaN(cost.ActualCost) || math.IsInf(cost.ActualCost, 0) || cost.ActualCost < 0 {
+		return nil, nil, errors.New("invalid engine calculated cost")
+	}
+	billingType := BillingTypeBalance
+	if f.SubscriptionBilling {
+		billingType = BillingTypeSubscription
+	}
+	log := &UsageLog{UserID: job.UserID, APIKeyID: job.APIKeyID, AccountID: job.AccountID, Model: model, RequestedModel: f.RequestedModel, UpstreamModel: optionalTrimmedStringPtr(model), UpstreamResponseModel: optionalTrimmedStringPtr(model), ServiceTier: optionalTrimmedStringPtr(tier), ReasoningEffort: optionalTrimmedStringPtr(effort), GroupID: f.GroupID, SubscriptionID: f.SubscriptionID, ChannelID: optionalInt64Ptr(f.ChannelID), ModelMappingChain: optionalTrimmedStringPtr(f.ModelMappingChain), InboundEndpoint: optionalTrimmedStringPtr(f.InboundEndpoint), UpstreamEndpoint: optionalTrimmedStringPtr(f.UpstreamEndpoint), InputTokens: tokens.InputTokens, OutputTokens: tokens.OutputTokens, CacheReadTokens: tokens.CacheReadTokens, CacheCreationTokens: tokens.CacheCreationTokens, ImageInputTokens: u.ImageInputTokens, ImageOutputTokens: u.ImageOutputTokens, ImageCount: event.ImageCount, ImageSize: optionalTrimmedStringPtr(imageSize), InputCost: cost.InputCost, OutputCost: cost.OutputCost, CacheReadCost: cost.CacheReadCost, CacheCreationCost: cost.CacheCreationCost, ImageInputCost: cost.ImageInputCost, ImageOutputCost: cost.ImageOutputCost, TotalCost: cost.TotalCost, ActualCost: cost.ActualCost, RateMultiplier: rate, AccountRateMultiplier: &f.AccountRate, BillingType: billingType, BillingMode: optionalTrimmedStringPtr(cost.BillingMode), Stream: f.Stream, NativeCompactionV2: f.NativeCompactionV2 || event.Purpose == "compact", LongContextBillingApplied: cost.LongContextBillingApplied, CreatedAt: f.PricingAt}
+	log.OpenAIWSMode, log.RequestType = f.OpenAIWSMode, f.RequestType
+	if !event.OccurredAt.IsZero() {
+		log.CreatedAt = event.OccurredAt
+	}
+	log.UserAgent, log.IPAddress, log.SessionID = optionalTrimmedStringPtr(f.UserAgent), optionalTrimmedStringPtr(f.IPAddress), optionalTrimmedStringPtr(f.SessionID)
+	log.RequestedReasoningEffort = optionalTrimmedStringPtr(f.RequestedReasoningEffort)
+	if u.ImageCacheReadTokens > 0 {
+		log.ImageSizeBreakdown = map[string]int{"image_cache_read_tokens": u.ImageCacheReadTokens}
+	}
+	if event.ImageActual != nil {
+		log.ImageOutputSize = optionalTrimmedStringPtr(event.ImageActual.Size)
+		if size, ok := ClassifyImageBillingTier(event.ImageActual.Size); ok {
+			log.ImageSize, log.BillingTier, log.ImageSizeSource = &size, &size, optionalTrimmedStringPtr(ImageSizeSourceOutput)
+		}
+	}
+	if event.ImageRequested != nil {
+		log.ImageInputSize = optionalTrimmedStringPtr(event.ImageRequested.Size)
+	}
+	statsPrice := f.Prices[model]
+	if statsPrice.StatsCustom != nil && event.Kind != "search" {
+		log.AccountStatsCost = calculateStatsCost(statsPrice.StatsCustom, tokens, max(1, event.ImageCount))
+		if log.AccountStatsCost != nil {
+			*log.AccountStatsCost *= reasoningEffortBillingMultiplier(effort, statsPrice.StatsCustom.ReasoningEffortMultipliers)
+		}
+	}
+	if log.AccountStatsCost == nil && event.Kind != "search" {
+		if statsPrice.StatsUseCustomer {
+			if cost.TotalCost > 0 {
+				v := cost.TotalCost
+				log.AccountStatsCost = &v
+			}
+		} else if statsPrice.StatsCatalog != nil && event.Kind == "model" {
+			c := bs.computeTokenBreakdown(statsPrice.StatsCatalog, tokens, 1, tier, f.LongContext)
+			applyCostBreakdownMultiplier(c, reasoningEffortBillingMultiplier(effort, statsPrice.StatsCatalog.ReasoningEffortMultipliers))
+			log.AccountStatsCost = &c.TotalCost
+		}
+	}
+	cmd := &UsageBillingCommand{APIKeyID: job.APIKeyID, UserID: job.UserID, AccountID: job.AccountID, AccountType: f.AccountType, SubscriptionID: f.SubscriptionID, Model: model, ServiceTier: tier, ReasoningEffort: effort, BillingType: billingType, InputTokens: log.InputTokens, OutputTokens: log.OutputTokens, CacheReadTokens: log.CacheReadTokens, CacheCreationTokens: log.CacheCreationTokens, ImageCount: log.ImageCount}
+	if f.SimpleMode {
+		if f.SimpleKeyRateOnly && f.KeyRateLimit {
+			cmd.APIKeyRateLimitCost = cost.ActualCost
+		}
+	} else {
+		if f.SubscriptionBilling {
+			cmd.SubscriptionCost = cost.ActualCost
+		} else {
+			cmd.BalanceCost = cost.ActualCost
+		}
+		if f.KeyQuota {
+			cmd.APIKeyQuotaCost = cost.ActualCost
+		}
+		if f.KeyRateLimit {
+			cmd.APIKeyRateLimitCost = cost.ActualCost
+		}
+		if f.AccountQuota {
+			cmd.AccountQuotaCost = cost.TotalCost * f.AccountRate
+			cmd.AccountQuotaHasDailyLimit = f.AccountDailyQuota
+			cmd.AccountQuotaHasWeeklyLimit = f.AccountWeeklyQuota
+		}
+	}
+	cmd.Normalize()
+	return cmd, log, nil
+}
+
+func (s *OpenAIGatewayService) SettleCodexEngineBillingEvent(ctx context.Context, store CodexEngineBillingStore, job *CodexEngineBillingJob, event *CodexEngineBillingUsageEvent) error {
+	cmd, log, err := s.BuildCodexEngineBillingEvent(ctx, job, event)
+	if err != nil {
+		return err
+	}
+	f, err := decodeCodexEnginePricingSnapshot(job.Snapshot)
+	if err != nil {
+		return err
+	}
+	quotaCost := log.ActualCost
+	if f.SimpleMode || f.SubscriptionBilling {
+		quotaCost = 0
+	}
+	result, err := store.ApplyEvent(ctx, &CodexEngineBillingEvent{JobID: job.ID, ClaimToken: job.ClaimToken, EventID: event.EventID, Fingerprint: event.Fingerprint, Sequence: event.Sequence, Summary: CodexEngineBillingSummaryGroup{Kind: event.Kind, Purpose: event.Purpose, Model: event.Model, ServiceTier: optionalTrimmedStringPtr(event.ServiceTier), Usage: event.UsageValues}, Platform: f.QuotaPlatform, PlatformQuotaCost: quotaCost, Command: *cmd, UsageLog: *log})
+	if err != nil {
+		return err
+	}
+	if result == nil {
+		return errors.New("engine billing settlement result unavailable")
+	}
+	// Invalidation is idempotent. Recovered events must never apply a second
+	// monetary delta to a potentially stale cache.
+	if s.billingCacheService != nil {
+		if err := s.billingCacheService.InvalidateUserBalance(ctx, job.UserID); err != nil {
+			return fmt.Errorf("invalidate engine balance cache: %w", err)
+		}
+		if err := s.billingCacheService.InvalidateAPIKeyRateLimit(ctx, job.APIKeyID); err != nil {
+			return fmt.Errorf("invalidate engine key rate cache: %w", err)
+		}
+		if log.GroupID != nil && log.BillingType == BillingTypeSubscription {
+			if err := s.billingCacheService.InvalidateSubscription(ctx, job.UserID, *log.GroupID); err != nil {
+				return fmt.Errorf("invalidate engine subscription cache: %w", err)
+			}
+		}
+		if quotaCost > 0 {
+			if err := s.billingCacheService.RefreshUserPlatformQuotaEngineUsage(ctx, job.UserID, f.QuotaPlatform); err != nil {
+				return fmt.Errorf("refresh engine platform quota cache: %w", err)
+			}
+		}
+	}
+	if s.deferredService != nil {
+		s.deferredService.ScheduleLastUsedUpdate(job.AccountID)
+	}
+	if s.engineBillingAPIKeys != nil {
+		if key, e := s.engineBillingAPIKeys.GetByID(ctx, job.APIKeyID); e == nil && key != nil && key.Key != "" {
+			s.engineBillingAPIKeys.InvalidateAuthCacheByKey(ctx, key.Key)
+		}
+	}
+	return store.AckReceivedSettled(ctx, job.ID, job.ClaimToken, event.EventID, event.Fingerprint, event.Sequence)
+}
