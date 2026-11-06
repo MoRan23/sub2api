@@ -69,8 +69,15 @@ func newCodexEngineResponseError(status int, payload []byte, event string) *code
 	if strings.TrimSpace(message) == "" {
 		message = firstNonEmpty(gjson.GetBytes(payload, "response.incomplete_details.reason").String(), event, http.StatusText(status))
 	}
-	return &codexEngineResponseError{status: status, reportedStatus: reportedStatus, code: failure.Get("code").String(), errorType: failure.Get("type").String(), message: message, event: event,
+	code, errorType, message, event := ownCodexEngineErrorSummary(failure, message, event)
+	return &codexEngineResponseError{status: status, reportedStatus: reportedStatus, code: code, errorType: errorType, message: message, event: event,
 		tempUnschedBody: codexEngineTempUnschedBody(payload, failure, event)}
+}
+
+// Result.Get returns string views into the parsed error object (or the whole
+// frame for bare errors). Only these fields may outlive the parsed payload.
+func ownCodexEngineErrorSummary(failure gjson.Result, message, event string) (code, errorType, ownedMessage, ownedEvent string) {
+	return strings.Clone(failure.Get("code").String()), strings.Clone(failure.Get("type").String()), strings.Clone(message), strings.Clone(event)
 }
 
 func recordCodexEngineError(c *gin.Context, account *Account, resp *http.Response, failure *codexEngineResponseError, usage *OpenAIUsage) {
