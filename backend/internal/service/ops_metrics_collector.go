@@ -16,7 +16,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
-	"github.com/google/uuid"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/runtimeobs"
 	"github.com/redis/go-redis/v9"
 	"github.com/shirou/gopsutil/v4/cpu"
 	"github.com/shirou/gopsutil/v4/mem"
@@ -83,7 +83,7 @@ func NewOpsMetricsCollector(
 		concurrencyService: concurrencyService,
 		db:                 db,
 		redisClient:        redisClient,
-		instanceID:         uuid.NewString(),
+		instanceID:         runtimeobs.InstanceID(),
 	}
 }
 

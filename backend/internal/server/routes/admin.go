@@ -220,6 +220,10 @@ func registerOpsRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		// Runtime settings (DB-backed)
 		runtime := ops.Group("/runtime")
 		{
+			runtime.GET("/memory", h.Admin.Ops.GetRuntimeMemory)
+			runtime.POST("/heap-profile/enable", h.Admin.Ops.EnableHeapProfile)
+			runtime.POST("/heap-profile/disable", h.Admin.Ops.DisableHeapProfile)
+			runtime.GET("/heap-profile/download", h.Admin.Ops.DownloadHeapProfile)
 			runtime.GET("/alert", h.Admin.Ops.GetAlertRuntimeSettings)
 			runtime.PUT("/alert", h.Admin.Ops.UpdateAlertRuntimeSettings)
 			runtime.GET("/logging", h.Admin.Ops.GetRuntimeLogConfig)

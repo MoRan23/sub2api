@@ -14,6 +14,111 @@ export interface OpsRequestOptions {
   signal?: AbortSignal
 }
 
+export interface OpsMemoryHistogram {
+  bounds: number[]
+  counts: number[]
+}
+
+export interface OpsMemorySample {
+  at: string
+  rss_bytes: number
+  rss_available: boolean
+  heap_alloc_bytes: number
+  heap_inuse_bytes: number
+  heap_idle_bytes: number
+  heap_released_bytes: number
+  heap_objects: number
+  stack_inuse_bytes: number
+  sys_bytes: number
+  gc_cycles: number
+  alloc_bytes_total: number
+  free_bytes_total: number
+  goroutines: number
+  gc_pause_seconds: OpsMemoryHistogram
+  activity: {
+    active_bodies: number
+    active_body_bytes: number
+    active_large_bodies: number
+    active_large_body_bytes: number
+    active_sse: number
+    active_sse_buffers: number
+    active_sse_buffer_bytes: number
+    sse_buffer_max_bytes: number
+    body_size_bytes: OpsMemoryHistogram
+    sse_buffer_size_bytes: OpsMemoryHistogram
+  }
+  caches: Array<{
+    name: string
+    entries: number
+    estimated_bytes: number
+    max_entries: number
+    max_bytes: number
+    hits: number
+    misses: number
+    evictions: number
+    ttl_seconds: number
+  }>
+  usage_queue: {
+    capacity: number
+    waiting: number
+    running: number
+    submitted: number
+    completed: number
+    failed: number
+    settlement_succeeded: number
+    settlement_failed: number
+    dropped: number
+    sync_fallback: number
+    wait_ms: OpsMemoryHistogram
+    execution_ms: OpsMemoryHistogram
+  }
+}
+
+export interface OpsHeapProfileState {
+  enabled: boolean
+  expires_at: string | null
+  in_progress: boolean
+}
+
+export interface OpsMemoryResponse {
+  current_instance_id: string
+  selected_instance_id: string
+  sample_interval_seconds: number
+  history_limit: number
+  stale_after_seconds: number
+  redis_available: boolean
+  truncated: boolean
+  instances: Array<{ instance_id: string; started_at: string; last_seen_at: string; stale: boolean }>
+  history: OpsMemorySample[]
+  profile: OpsHeapProfileState
+}
+
+export async function getMemoryObservation(instanceId?: string, options: OpsRequestOptions = {}): Promise<OpsMemoryResponse> {
+  const { data } = await apiClient.get<OpsMemoryResponse>('/admin/ops/runtime/memory', {
+    params: { instance_id: instanceId || undefined },
+    signal: options.signal
+  })
+  return data
+}
+
+export async function setHeapProfileEnabled(instanceId: string, enabled: boolean, options: OpsRequestOptions = {}): Promise<OpsHeapProfileState> {
+  const { data } = await apiClient.post<OpsHeapProfileState>(
+    `/admin/ops/runtime/heap-profile/${enabled ? 'enable' : 'disable'}`,
+    { instance_id: instanceId },
+    { signal: options.signal }
+  )
+  return data
+}
+
+export async function downloadHeapProfile(instanceId: string, options: OpsRequestOptions = {}): Promise<Blob> {
+  const { data } = await apiClient.get<Blob>('/admin/ops/runtime/heap-profile/download', {
+    params: { instance_id: instanceId },
+    responseType: 'blob',
+    signal: options.signal
+  })
+  return data
+}
+
 export type OpsUpstreamErrorEvent = {
   at_unix_ms?: number
   platform?: string
@@ -1319,6 +1424,9 @@ async function updateMetricThresholds(thresholds: OpsMetricThresholds): Promise<
 }
 
 export const opsAPI = {
+  getMemoryObservation,
+  setHeapProfileEnabled,
+  downloadHeapProfile,
   getDashboardSnapshotV2,
   getDashboardOverview,
   getThroughputTrend,

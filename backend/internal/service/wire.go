@@ -910,6 +910,9 @@ func ProvideOpsService(
 	settingService *SettingService,
 	authCacheInvalidationWorker *AuthCacheInvalidationWorker,
 	apiKeyService *APIKeyService,
+	redisClient *redis.Client,
+	usageRecordWorkerPool *UsageRecordWorkerPool,
+	schedulerCache SchedulerCache,
 ) *OpsService {
 	svc := NewOpsService(
 		opsRepo,
@@ -932,6 +935,7 @@ func ProvideOpsService(
 	}
 	svc.authCacheInvalidationWorker = authCacheInvalidationWorker
 	svc.apiKeyService = apiKeyService
+	svc.startRuntimeMemory(redisClient, usageRecordWorkerPool, schedulerCache)
 	svc.StartRuntimeSettingsRefresh(context.Background())
 	return svc
 }

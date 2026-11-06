@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"strings"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/runtimeobs"
 	"github.com/klauspost/compress/zstd"
 )
 
@@ -63,10 +64,11 @@ func (p *PrereadBody) Bytes() []byte {
 // client used to compress the body (zstd, gzip, deflate).
 // 已由 PrereadBody 回填的请求体直接返回其完整切片（零拷贝），不检查内部
 // reader 是否已被消费——见 PrereadBody 的文档说明。
-func ReadRequestBodyWithPrealloc(req *http.Request) ([]byte, error) {
+func ReadRequestBodyWithPrealloc(req *http.Request) (body []byte, err error) {
 	if req == nil || req.Body == nil {
 		return nil, nil
 	}
+	defer func() { runtimeobs.ObserveBufferedBody(req.Context(), int64(len(body))) }()
 	if preread, ok := req.Body.(*PrereadBody); ok {
 		return preread.Bytes(), nil
 	}
@@ -157,8 +159,11 @@ func readRequestBodyChunks(reader io.Reader, initialCapacity int, contentLength 
 
 // ReadLenientJSONRequestBodyWithPrealloc reads a request body and normalizes
 // JSON string control bytes before strict validation.
-func ReadLenientJSONRequestBodyWithPrealloc(req *http.Request, maxNormalizedBytes int64) ([]byte, error) {
-	body, err := ReadRequestBodyWithPrealloc(req)
+func ReadLenientJSONRequestBodyWithPrealloc(req *http.Request, maxNormalizedBytes int64) (body []byte, err error) {
+	if req != nil {
+		defer func() { runtimeobs.ObserveBufferedBody(req.Context(), int64(len(body))) }()
+	}
+	body, err = ReadRequestBodyWithPrealloc(req)
 	if err != nil {
 		return nil, err
 	}

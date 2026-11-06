@@ -10,6 +10,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/runtimeobs"
 	"github.com/alitto/pond/v2"
 	"go.uber.org/zap"
 )
@@ -74,7 +75,12 @@ type UsageRecordWorkerPoolOptions struct {
 }
 
 // UsageRecordWorkerPoolStats 使用量记录池运行时统计。
+// Completed/Successful describe closure scheduling, not billing settlement.
+// WaitMS covers enqueued tasks; ExecutionMS also includes synchronous fallbacks.
 type UsageRecordWorkerPoolStats struct {
+	QueueCapacity      int
+	WaitMS             runtimeobs.Histogram
+	ExecutionMS        runtimeobs.Histogram
 	MaxConcurrency     int
 	RunningWorkers     int64
 	WaitingTasks       uint64
@@ -91,6 +97,9 @@ type UsageRecordWorkerPoolStats struct {
 // UsageRecordWorkerPool 提供“有界队列 + 固定 worker”的异步执行器。
 // 用于替代请求路径里的直接 goroutine，避免高并发时无界堆积。
 type UsageRecordWorkerPool struct {
+	queueCapacity         int
+	waitHistogram         runtimeobs.FixedHistogram
+	executionHistogram    runtimeobs.FixedHistogram
 	pool                  pond.Pool
 	taskTimeout           time.Duration
 	overflowPolicy        string
@@ -126,6 +135,7 @@ func NewUsageRecordWorkerPoolWithOptions(opts UsageRecordWorkerPoolOptions) *Usa
 	opts = normalizeUsageRecordPoolOptions(opts)
 
 	p := &UsageRecordWorkerPool{
+		queueCapacity:         opts.QueueSize,
 		taskTimeout:           opts.TaskTimeout,
 		overflowPolicy:        opts.OverflowPolicy,
 		overflowSamplePercent: opts.OverflowSamplePercent,
@@ -162,7 +172,9 @@ func (p *UsageRecordWorkerPool) Submit(task UsageRecordTask) UsageRecordSubmitMo
 		return UsageRecordSubmitModeDroppedStopped
 	}
 
+	submittedAt := time.Now()
 	_, ok := p.pool.TrySubmit(func() {
+		p.waitHistogram.ObserveDuration(time.Since(submittedAt))
 		p.execute(task)
 	})
 	if ok {
@@ -199,6 +211,9 @@ func (p *UsageRecordWorkerPool) Stats() UsageRecordWorkerPoolStats {
 		return UsageRecordWorkerPoolStats{}
 	}
 	return UsageRecordWorkerPoolStats{
+		QueueCapacity:      p.queueCapacity,
+		WaitMS:             p.waitHistogram.Snapshot(runtimeobs.DurationBounds),
+		ExecutionMS:        p.executionHistogram.Snapshot(runtimeobs.DurationBounds),
 		MaxConcurrency:     p.pool.MaxConcurrency(),
 		RunningWorkers:     p.pool.RunningWorkers(),
 		WaitingTasks:       p.pool.WaitingTasks(),
@@ -325,6 +340,8 @@ func (p *UsageRecordWorkerPool) shouldSyncFallback() bool {
 }
 
 func (p *UsageRecordWorkerPool) execute(task UsageRecordTask) {
+	startedAt := time.Now()
+	defer func() { p.executionHistogram.ObserveDuration(time.Since(startedAt)) }()
 	ctx, cancel := context.WithTimeout(context.Background(), p.taskTimeout)
 	defer cancel()
 

@@ -156,6 +156,10 @@ docs/*
 !docs/model-attribution.md
 !docs/codex-engine.md
 !docs/openai-request-body-ownership.md
+!docs/memory-observation.md
+!docs/memory-observation.zh-CN.md
+!docs/memory-performance-20261106.md
+!docs/memory-performance-20261106.zh-CN.md
 !docs/legal/
 !docs/legal/*.md
 !docs/screenshots/
