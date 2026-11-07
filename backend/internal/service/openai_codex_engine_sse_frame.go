@@ -10,6 +10,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/runtimeobs"
 )
 
@@ -80,13 +81,17 @@ type codexEngineSSEReader struct {
 	started   time.Time
 	lastRead  atomic.Int64
 	slots     [2]codexEngineSSEFrame
+	cfg       *config.Config
 }
 
-func newCodexEngineSSEReader(body io.ReadCloser, limit int, trackActivity bool) *codexEngineSSEReader {
+func newCodexEngineSSEReader(body io.ReadCloser, limit int, trackActivity bool, configs ...*config.Config) *codexEngineSSEReader {
 	r := &codexEngineSSEReader{
 		frames: make(chan *codexEngineSSEFrame, 1), available: make(chan *codexEngineSSEFrame, 2),
 		done: make(chan struct{}), finished: make(chan struct{}),
 		body: body, started: time.Now(),
+	}
+	if len(configs) > 0 {
+		r.cfg = configs[0]
 	}
 	if trackActivity {
 		r.progress = make(chan struct{}, 1)
@@ -125,11 +130,20 @@ func (r *codexEngineSSEReader) read(limit int) {
 
 func (r *codexEngineSSEReader) readFrame(reader *bufio.Reader, frame *codexEngineSSEFrame, limit int) {
 	lineStart := 0
+	limits := newSSEEventLimits(r.cfg, limit)
 	for {
 		piece, err := reader.ReadSlice('\n')
 		if len(piece) > limit-len(frame.raw) {
 			frame.err = fmt.Errorf("upstream SSE event exceeds configured limit")
 			frame.oversized = true
+			return
+		}
+		// Keep the Engine's existing complete-frame ownership bound, and apply
+		// the shared event budget before growing the raw frame. Incomplete lines
+		// must not evade the event cap while ReadSlice returns buffer fragments.
+		if int64(len(frame.raw)-lineStart+len(piece)) > limits.maxBytes-limits.bytes &&
+			(len(frame.raw) != lineStart || len(bytes.TrimRight(piece, "\r\n")) != 0) {
+			frame.err, frame.oversized = limits.exceeded(), true
 			return
 		}
 		previousRaw, previousScratch := cap(frame.raw), cap(frame.scratch)
@@ -148,6 +162,10 @@ func (r *codexEngineSSEReader) readFrame(reader *bufio.Reader, frame *codexEngin
 			}
 		}
 		line := bytes.TrimRight(frame.raw[lineStart:], "\r\n")
+		if limitErr := limits.observeTrimmed(line, len(frame.raw)-lineStart); limitErr != nil {
+			frame.err, frame.oversized = limitErr, true
+			return
+		}
 		if bytes.HasPrefix(line, []byte("data:")) {
 			start := lineStart + 5
 			if start < lineStart+len(line) && frame.raw[start] == ' ' {

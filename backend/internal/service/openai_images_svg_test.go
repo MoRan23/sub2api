@@ -77,18 +77,16 @@ func TestOpenAIImagesSVGForwarding(t *testing.T) {
 	}
 }
 
-func TestOpenAIImagesSVGValidationBeforeSend(t *testing.T) {
+func TestOpenAIImagesSVGOptionCombinationsReachUpstream(t *testing.T) {
 	for _, accountType := range []string{AccountTypeOAuth, AccountTypeAPIKey} {
-		for _, tc := range []struct{ fields, want string }{
-			{`"n":2`, "n=1"}, {`"n":0`, "n must be greater than 0"}, {`"n":-1`, "n must be greater than 0"}, {`"n":1.5`, "n=1"},
-			{`"stream":true`, "streaming"}, {`"partial_images":0`, "partial_images"},
-			{`"output_compression":100`, "output_compression"},
-			{`"prompt_rewriter":true`, "prompt_rewriter"}, {`"prompt_rewriter":false`, "prompt_rewriter"}, {`"prompt_rewriter":null`, "prompt_rewriter"},
-			{`"frame_count":9`, "only supported with output_format gif"},
+		for _, fields := range []string{
+			`"n":2`, `"stream":true`, `"partial_images":0`,
+			`"output_compression":100`, `"prompt_rewriter":true`,
+			`"prompt_rewriter":false`, `"prompt_rewriter":null`, `"frame_count":9`,
 		} {
-			t.Run(accountType+"/"+tc.fields, func(t *testing.T) {
-				body := []byte(`{"model":"gpt-image-1","prompt":"draw","output_format":"svg",` + tc.fields + `}`)
-				c, rec := newOpenAIImagesTestContext(t, body)
+			t.Run(accountType+"/"+fields, func(t *testing.T) {
+				body := []byte(`{"model":"gpt-image-1","prompt":"draw","output_format":"svg",` + fields + `}`)
+				c, _ := newOpenAIImagesTestContext(t, body)
 				upstream := &httpUpstreamRecorder{resp: openAIImagesJSONResponse()}
 				svc := newOpenAIImagesTestService(upstream)
 				parsed, err := svc.ParseOpenAIImagesRoutingRequest(c, body)
@@ -99,68 +97,74 @@ func TestOpenAIImagesSVGValidationBeforeSend(t *testing.T) {
 				}
 				account.Credentials["model_mapping"] = map[string]any{"gpt-image-1": "gpt-image-2.6-sunburst"}
 				_, err = svc.ForwardImages(context.Background(), c, account, body, parsed, "")
-				require.ErrorContains(t, err, tc.want)
-				require.Equal(t, 400, rec.Code)
-				require.Nil(t, upstream.lastReq)
+				require.NoError(t, err)
+				require.NotNil(t, upstream.lastReq)
+				require.Equal(t, "svg", gjson.GetBytes(upstream.lastBody, "output_format").String())
+				for _, field := range []string{"n", "stream", "partial_images", "output_compression", "prompt_rewriter", "frame_count"} {
+					input := gjson.GetBytes(body, field)
+					if !input.Exists() {
+						continue
+					}
+					output := gjson.GetBytes(upstream.lastBody, field)
+					if accountType == AccountTypeOAuth && field == "prompt_rewriter" {
+						require.False(t, output.Exists(), "OAuth does not forward unknown options")
+					} else {
+						require.Equal(t, input.Raw, output.Raw, field)
+					}
+				}
 			})
 		}
 	}
 }
 
 func TestOpenAIImagesSVGMultipartAndEdits(t *testing.T) {
-	for _, forbidden := range []string{"", "partial_images", "output_compression", "prompt_rewriter"} {
-		t.Run(forbidden, func(t *testing.T) {
+	for _, option := range []string{"", "partial_images", "output_compression", "prompt_rewriter"} {
+		t.Run(option, func(t *testing.T) {
 			var body bytes.Buffer
 			w := multipart.NewWriter(&body)
 			for key, value := range map[string]string{"model": "gpt-image-2.6-flare", "prompt": "draw", "output_format": "svg"} {
 				require.NoError(t, w.WriteField(key, value))
 			}
-			if forbidden != "" {
-				require.NoError(t, w.WriteField(forbidden, "0"))
+			if option != "" {
+				require.NoError(t, w.WriteField(option, "0"))
 			}
+			image, err := w.CreateFormFile("image", "source.png")
+			require.NoError(t, err)
+			_, err = image.Write([]byte("png"))
+			require.NoError(t, err)
 			require.NoError(t, w.Close())
 			c, _ := newOpenAIImagesTestContext(t, body.Bytes())
 			c.Request.Header.Set("Content-Type", w.FormDataContentType())
 			parsed, err := (&OpenAIGatewayService{}).ParseOpenAIImagesRoutingRequest(c, body.Bytes())
 			require.NoError(t, err)
 			payload, _, err := buildOpenAIImagesOAuthPayload(parsed, "gpt-image-2.6-flare")
-			if forbidden != "" {
-				require.ErrorContains(t, err, forbidden)
-				return
-			}
 			require.NoError(t, err)
 			require.Equal(t, "svg", gjson.GetBytes(payload, "output_format").String())
 			require.False(t, gjson.GetBytes(payload, "n").Exists())
+			if option == "partial_images" || option == "output_compression" {
+				require.Equal(t, "0", gjson.GetBytes(payload, option).Raw)
+			}
 			parsed.Endpoint = openAIImagesEditsEndpoint
-			_, _, err = buildOpenAIImagesOAuthPayload(parsed, "gpt-image-2.6-flare")
-			require.ErrorContains(t, err, "only supported by images/generations")
+			payload, endpoint, err := buildOpenAIImagesOAuthPayload(parsed, "gpt-image-2.6-flare")
+			require.NoError(t, err)
+			require.Contains(t, endpoint, "/images/edits")
+			require.Equal(t, "svg", gjson.GetBytes(payload, "output_format").String())
+			require.Len(t, gjson.GetBytes(payload, "images").Array(), 1)
 		})
 	}
 }
 
-func TestOpenAIImagesSVGRejectsResponsesBeforeSend(t *testing.T) {
-	for _, forced := range []bool{false, true} {
-		t.Run(fmt.Sprint(forced), func(t *testing.T) {
-			model := "gpt-image-1"
-			ctx := context.Background()
-			if forced {
-				model = "gpt-image-2.6-sunburst"
-				ctx = withOpenAIImagesForceResponses(ctx)
-			}
-			body := []byte(fmt.Sprintf(`{"model":%q,"prompt":"draw","output_format":"svg"}`, model))
-			c, rec := newOpenAIImagesTestContext(t, body)
-			upstream := &httpUpstreamRecorder{resp: openAIImagesJSONResponse()}
-			svc := newOpenAIImagesTestService(upstream)
-			parsed, err := svc.ParseOpenAIImagesRoutingRequest(c, body)
-			require.NoError(t, err)
-			_, err = buildOpenAIImagesResponsesRequest(parsed, model)
-			require.ErrorContains(t, err, "SVG output requires")
-			_, err = svc.ForwardImages(ctx, c, directImagesTestAccount(), body, parsed, "")
-			require.ErrorContains(t, err, "SVG output requires")
-			require.Equal(t, 400, rec.Code)
-			require.Nil(t, upstream.lastReq)
-		})
-	}
+func TestOpenAIImagesSVGResponsesBridgeKeepsOutputButRequiresNativeAuthorOptions(t *testing.T) {
+	body := []byte(`{"model":"gpt-image-1","prompt":"draw","output_format":"svg"}`)
+	c, _ := newOpenAIImagesTestContext(t, body)
+	parsed, err := newOpenAIImagesTestService(nil).ParseOpenAIImagesRequest(c, body)
+	require.NoError(t, err)
+	payload, err := buildOpenAIImagesResponsesRequest(parsed, parsed.Model)
+	require.NoError(t, err)
+	require.Equal(t, "svg", gjson.GetBytes(payload, "tools.0.output_format").String())
+	parsed.SVG = &OpenAIImagesSVGOptions{Model: "gpt-6-astra"}
+	_, err = buildOpenAIImagesResponsesRequest(parsed, parsed.Model)
+	require.ErrorContains(t, err, "native Images endpoint")
 }
 
 func TestOpenAIImagesSVGErrorsAndProviderIsolation(t *testing.T) {
@@ -192,7 +196,7 @@ func TestOpenAIImagesSVGErrorsAndProviderIsolation(t *testing.T) {
 			require.Equal(t, "svg_unavailable", gjson.GetBytes(rec.Body.Bytes(), "error.code").String())
 		})
 	}
-	// GPT-specific SVG restrictions apply to the final model only.
+	// Compatible providers retain their own options across model mapping.
 	body := []byte(`{"model":"gpt-image-2.6-flare","prompt":"draw","output_format":"svg","n":2,"prompt_rewriter":false}`)
 	c, _ := newOpenAIImagesTestContext(t, body)
 	upstream := &httpUpstreamRecorder{resp: openAIImagesJSONResponse()}

@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAPIKeyAuthSnapshotV26LocalFieldsAndModelAllowlistRoundtrip(t *testing.T) {
+func TestAPIKeyAuthSnapshotV28LocalFieldsAndModelAllowlistRoundtrip(t *testing.T) {
 	for _, limit := range []*float64{nil, new(float64), new(125.5)} {
 		apiKey := profitAuthTestAPIKey()
 		apiKey.User.Balance = 1.25
@@ -21,10 +21,14 @@ func TestAPIKeyAuthSnapshotV26LocalFieldsAndModelAllowlistRoundtrip(t *testing.T
 		apiKey.Group.OpenAIDaybreakBlueEnabled = true
 		apiKey.Group.OpenAIDaybreakRedEnabled = true
 		apiKey.Group.ImageCountBilling = true
+		apiKey.Group.RequirePrivacySet = true
 		apiKey.Group.MaxReasoningEffortOverLimit = ReasoningEffortOverLimitDeny
 		svc := &APIKeyService{}
 		snapshot := svc.snapshotFromAPIKey(context.Background(), apiKey)
-		require.Equal(t, 26, snapshot.Version)
+		require.Equal(t, 28, snapshot.Version)
+		// The merged schema scopes a cached override to its original group.
+		snapshot.User.UserGroupRPMOverride = new(17)
+		snapshot.User.UserGroupRPMOverrideGroupID = apiKey.Group.ID
 
 		payload, err := json.Marshal(&APIKeyAuthCacheEntry{Snapshot: snapshot})
 		require.NoError(t, err)
@@ -43,7 +47,22 @@ func TestAPIKeyAuthSnapshotV26LocalFieldsAndModelAllowlistRoundtrip(t *testing.T
 		require.True(t, restored.Group.OpenAIDaybreakBlueEnabled)
 		require.True(t, restored.Group.OpenAIDaybreakRedEnabled)
 		require.True(t, restored.Group.ImageCountBilling)
+		require.True(t, restored.Group.RequirePrivacySet)
+		require.Equal(t, new(17), restored.User.UserGroupRPMOverride)
+		require.Equal(t, apiKey.Group.ID, restored.User.UserGroupRPMOverrideGroupID)
 		require.Equal(t, ReasoningEffortOverLimitDeny, restored.Group.MaxReasoningEffortOverLimit)
+	}
+}
+
+func TestAPIKeyAuthSnapshotRejectsPreV28MergeSchemas(t *testing.T) {
+	for _, version := range []int{26, 27} {
+		svc := &APIKeyService{}
+		snapshot := svc.snapshotFromAPIKey(context.Background(), profitAuthTestAPIKey())
+		snapshot.Version = version
+		restored, used, err := svc.applyAuthCacheEntry("pre-v28-merge", &APIKeyAuthCacheEntry{Snapshot: snapshot})
+		require.NoError(t, err)
+		require.False(t, used)
+		require.Nil(t, restored)
 	}
 }
 

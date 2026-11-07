@@ -1,0 +1,7 @@
+2026/11/07 10:47:27 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkCodexEngineRelay/WS/multiline_128-4         	   17761	    191681 ns/op	  77.66 MB/s	      9257 first-write-ns/op	    312092 p95-ns	      2793 write-ns/op	   17232 B/op	     314 allocs/op
+PASS

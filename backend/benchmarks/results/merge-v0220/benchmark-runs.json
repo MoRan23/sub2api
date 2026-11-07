@@ -1,0 +1,128 @@
+[
+  {
+    "phase": "cache",
+    "round": 1,
+    "label": "baseline",
+    "exit_code": 0,
+    "elapsed_seconds": 11.909
+  },
+  {
+    "phase": "cache",
+    "round": 1,
+    "label": "candidate",
+    "exit_code": 0,
+    "elapsed_seconds": 11.819
+  },
+  {
+    "phase": "cache",
+    "round": 2,
+    "label": "baseline",
+    "exit_code": 0,
+    "elapsed_seconds": 11.654
+  },
+  {
+    "phase": "cache",
+    "round": 2,
+    "label": "candidate",
+    "exit_code": 0,
+    "elapsed_seconds": 11.59
+  },
+  {
+    "phase": "cache",
+    "round": 3,
+    "label": "baseline",
+    "exit_code": 0,
+    "elapsed_seconds": 11.453
+  },
+  {
+    "phase": "cache",
+    "round": 3,
+    "label": "candidate",
+    "exit_code": 0,
+    "elapsed_seconds": 12.057
+  },
+  {
+    "phase": "sse",
+    "round": 1,
+    "label": "baseline",
+    "exit_code": 0,
+    "elapsed_seconds": 15.161
+  },
+  {
+    "phase": "sse",
+    "round": 1,
+    "label": "candidate",
+    "exit_code": 0,
+    "elapsed_seconds": 12.854
+  },
+  {
+    "phase": "sse",
+    "round": 2,
+    "label": "baseline",
+    "exit_code": 0,
+    "elapsed_seconds": 14.709
+  },
+  {
+    "phase": "sse",
+    "round": 2,
+    "label": "candidate",
+    "exit_code": 0,
+    "elapsed_seconds": 13.915
+  },
+  {
+    "phase": "sse",
+    "round": 3,
+    "label": "baseline",
+    "exit_code": 0,
+    "elapsed_seconds": 13.968
+  },
+  {
+    "phase": "sse",
+    "round": 3,
+    "label": "candidate",
+    "exit_code": 0,
+    "elapsed_seconds": 12.912
+  },
+  {
+    "phase": "billing",
+    "round": 1,
+    "label": "baseline",
+    "exit_code": 0,
+    "elapsed_seconds": 0.686
+  },
+  {
+    "phase": "billing",
+    "round": 1,
+    "label": "candidate",
+    "exit_code": 0,
+    "elapsed_seconds": 0.641
+  },
+  {
+    "phase": "billing",
+    "round": 2,
+    "label": "baseline",
+    "exit_code": 0,
+    "elapsed_seconds": 0.608
+  },
+  {
+    "phase": "billing",
+    "round": 2,
+    "label": "candidate",
+    "exit_code": 0,
+    "elapsed_seconds": 0.644
+  },
+  {
+    "phase": "billing",
+    "round": 3,
+    "label": "baseline",
+    "exit_code": 0,
+    "elapsed_seconds": 0.627
+  },
+  {
+    "phase": "billing",
+    "round": 3,
+    "label": "candidate",
+    "exit_code": 0,
+    "elapsed_seconds": 0.628
+  }
+]

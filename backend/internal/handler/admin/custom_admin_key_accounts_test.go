@@ -86,7 +86,7 @@ type scopedRefreshIdentityService struct {
 func (*scopedRefreshIdentityService) GetAccount(_ context.Context, id int64) (*service.Account, error) {
 	return &service.Account{ID: id, Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth, GroupIDs: []int64{1}}, nil
 }
-func (*scopedRefreshIdentityService) ScopedAdminList(context.Context, pagination.PaginationParams, string, string, string, string) ([]service.Account, int64, error) {
+func (*scopedRefreshIdentityService) ScopedAdminList(context.Context, pagination.PaginationParams, string, string, string, string, int64) ([]service.Account, int64, error) {
 	panic("unexpected list")
 }
 func (s *scopedRefreshIdentityService) ScopedAdminWrite(ctx context.Context, id int64, action string, _ map[string]json.RawMessage, run func(context.Context, *service.Account) (*service.Account, error)) (*service.Account, error) {
@@ -137,7 +137,7 @@ type scopedBulkAccountService struct {
 	fields map[string]json.RawMessage
 }
 
-func (s *scopedBulkAccountService) ScopedAdminList(context.Context, pagination.PaginationParams, string, string, string, string) ([]service.Account, int64, error) {
+func (s *scopedBulkAccountService) ScopedAdminList(context.Context, pagination.PaginationParams, string, string, string, string, int64) ([]service.Account, int64, error) {
 	panic("不应读取全站账户")
 }
 func (s *scopedBulkAccountService) ScopedAdminWrite(_ context.Context, id int64, _ string, fields map[string]json.RawMessage, _ func(context.Context, *service.Account) (*service.Account, error)) (*service.Account, error) {

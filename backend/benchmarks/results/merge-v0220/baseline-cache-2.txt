@@ -1,0 +1,8 @@
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/repository
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_1-4         	     100	   2282642 ns/op	   7084176 decoded-retained-B	   2619327 p95-ns	  421726 B/op	   10369 allocs/op
+BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_10-4        	     100	   2055615 ns/op	  11151744 decoded-retained-B	   2270045 p95-ns	  421724 B/op	   10369 allocs/op
+BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_100-4       	     100	   2251165 ns/op	  46235208 decoded-retained-B	   2571540 p95-ns	  421728 B/op	   10369 allocs/op
+PASS

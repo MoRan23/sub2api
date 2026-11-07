@@ -1,0 +1,35 @@
+{
+  "baseline": [
+    "\tdep\tgithub.com/tidwall/gjson\tv1.18.0\th1:FIDeeyB800efLX89e5a8Y0BNH+LOngJyGrIWxG2FKQY=",
+    "\tbuild\t-buildmode=exe",
+    "\tbuild\t-compiler=gc",
+    "\tbuild\t-tags=unit",
+    "\tbuild\tCGO_ENABLED=0",
+    "\tbuild\tGOARCH=amd64",
+    "\tbuild\tGOEXPERIMENT=greenteagc,jsonv2",
+    "\tbuild\tGOOS=linux",
+    "\tbuild\tGOAMD64=v1"
+  ],
+  "candidate": [
+    "\tdep\tgithub.com/tidwall/gjson\tv1.18.0\th1:FIDeeyB800efLX89e5a8Y0BNH+LOngJyGrIWxG2FKQY=",
+    "\tbuild\t-buildmode=exe",
+    "\tbuild\t-compiler=gc",
+    "\tbuild\t-tags=unit",
+    "\tbuild\tCGO_ENABLED=0",
+    "\tbuild\tGOARCH=amd64",
+    "\tbuild\tGOEXPERIMENT=greenteagc,jsonv2",
+    "\tbuild\tGOOS=linux",
+    "\tbuild\tGOAMD64=v1"
+  ],
+  "optimized": [
+    "\tdep\tgithub.com/tidwall/gjson\tv1.18.0\th1:FIDeeyB800efLX89e5a8Y0BNH+LOngJyGrIWxG2FKQY=",
+    "\tbuild\t-buildmode=exe",
+    "\tbuild\t-compiler=gc",
+    "\tbuild\t-tags=unit",
+    "\tbuild\tCGO_ENABLED=0",
+    "\tbuild\tGOARCH=amd64",
+    "\tbuild\tGOEXPERIMENT=greenteagc,jsonv2",
+    "\tbuild\tGOOS=linux",
+    "\tbuild\tGOAMD64=v1"
+  ]
+}

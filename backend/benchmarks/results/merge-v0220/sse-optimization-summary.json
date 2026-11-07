@@ -1,0 +1,454 @@
+{
+  "benchmark": "BenchmarkCodexEngineRelay/WS/multiline_128",
+  "environment": {
+    "platform": "linux/amd64, WSL Ubuntu-24.04",
+    "go": "go1.27.3",
+    "GOEXPERIMENT": "greenteagc,jsonv2",
+    "GOMAXPROCS": 4,
+    "affinity": "taskset -c 0-3",
+    "duration": "3s",
+    "rounds": 6,
+    "order": "AB/BA alternating"
+  },
+  "unoptimized": {
+    "baseline": {
+      "samples": [
+        {
+          "file": "baseline-sse-focused-1.txt",
+          "iterations": 16204,
+          "ns/op": 202268.0,
+          "p95-ns": 419828.0,
+          "B/op": 17232.0,
+          "allocs/op": 314.0
+        },
+        {
+          "file": "baseline-sse-focused-2.txt",
+          "iterations": 18486,
+          "ns/op": 191398.0,
+          "p95-ns": 281304.0,
+          "B/op": 17232.0,
+          "allocs/op": 314.0
+        },
+        {
+          "file": "baseline-sse-focused-3.txt",
+          "iterations": 18033,
+          "ns/op": 188207.0,
+          "p95-ns": 278258.0,
+          "B/op": 17232.0,
+          "allocs/op": 314.0
+        },
+        {
+          "file": "baseline-sse-focused-4.txt",
+          "iterations": 18375,
+          "ns/op": 186500.0,
+          "p95-ns": 252408.0,
+          "B/op": 17232.0,
+          "allocs/op": 314.0
+        },
+        {
+          "file": "baseline-sse-focused-5.txt",
+          "iterations": 18684,
+          "ns/op": 188664.0,
+          "p95-ns": 260324.0,
+          "B/op": 17232.0,
+          "allocs/op": 314.0
+        },
+        {
+          "file": "baseline-sse-focused-6.txt",
+          "iterations": 17761,
+          "ns/op": 191681.0,
+          "p95-ns": 312092.0,
+          "B/op": 17232.0,
+          "allocs/op": 314.0
+        }
+      ],
+      "metrics": {
+        "ns/op": {
+          "median": 190031.0,
+          "min": 186500.0,
+          "max": 202268.0
+        },
+        "p95-ns": {
+          "median": 279781.0,
+          "min": 252408.0,
+          "max": 419828.0
+        },
+        "B/op": {
+          "median": 17232.0,
+          "min": 17232.0,
+          "max": 17232.0
+        },
+        "allocs/op": {
+          "median": 314.0,
+          "min": 314.0,
+          "max": 314.0
+        }
+      }
+    },
+    "candidate": {
+      "samples": [
+        {
+          "file": "candidate-sse-focused-1.txt",
+          "iterations": 16647,
+          "ns/op": 205309.0,
+          "p95-ns": 260113.0,
+          "B/op": 17232.0,
+          "allocs/op": 314.0
+        },
+        {
+          "file": "candidate-sse-focused-2.txt",
+          "iterations": 17637,
+          "ns/op": 197961.0,
+          "p95-ns": 283128.0,
+          "B/op": 17232.0,
+          "allocs/op": 314.0
+        },
+        {
+          "file": "candidate-sse-focused-3.txt",
+          "iterations": 17925,
+          "ns/op": 196406.0,
+          "p95-ns": 300209.0,
+          "B/op": 17232.0,
+          "allocs/op": 314.0
+        },
+        {
+          "file": "candidate-sse-focused-4.txt",
+          "iterations": 17420,
+          "ns/op": 201849.0,
+          "p95-ns": 333282.0,
+          "B/op": 17232.0,
+          "allocs/op": 314.0
+        },
+        {
+          "file": "candidate-sse-focused-5.txt",
+          "iterations": 18033,
+          "ns/op": 196404.0,
+          "p95-ns": 271944.0,
+          "B/op": 17232.0,
+          "allocs/op": 314.0
+        },
+        {
+          "file": "candidate-sse-focused-6.txt",
+          "iterations": 16960,
+          "ns/op": 200481.0,
+          "p95-ns": 302133.0,
+          "B/op": 17232.0,
+          "allocs/op": 314.0
+        }
+      ],
+      "metrics": {
+        "ns/op": {
+          "median": 199221.0,
+          "min": 196404.0,
+          "max": 205309.0
+        },
+        "p95-ns": {
+          "median": 291668.5,
+          "min": 260113.0,
+          "max": 333282.0
+        },
+        "B/op": {
+          "median": 17232.0,
+          "min": 17232.0,
+          "max": 17232.0
+        },
+        "allocs/op": {
+          "median": 314.0,
+          "min": 314.0,
+          "max": 314.0
+        }
+      }
+    },
+    "median_delta_percent": {
+      "ns/op": 4.836053065026236,
+      "p95-ns": 4.248858928947996,
+      "B/op": 0.0,
+      "allocs/op": 0.0
+    }
+  },
+  "optimized": {
+    "baseline": {
+      "samples": [
+        {
+          "file": "baseline-sse-optimized-1.txt",
+          "iterations": 19342,
+          "ns/op": 185891.0,
+          "p95-ns": 244224.0,
+          "B/op": 17232.0,
+          "allocs/op": 314.0
+        },
+        {
+          "file": "baseline-sse-optimized-2.txt",
+          "iterations": 18638,
+          "ns/op": 191362.0,
+          "p95-ns": 264953.0,
+          "B/op": 17232.0,
+          "allocs/op": 314.0
+        },
+        {
+          "file": "baseline-sse-optimized-3.txt",
+          "iterations": 16810,
+          "ns/op": 229702.0,
+          "p95-ns": 268772.0,
+          "B/op": 17232.0,
+          "allocs/op": 314.0
+        },
+        {
+          "file": "baseline-sse-optimized-4.txt",
+          "iterations": 19088,
+          "ns/op": 184249.0,
+          "p95-ns": 241308.0,
+          "B/op": 17232.0,
+          "allocs/op": 314.0
+        },
+        {
+          "file": "baseline-sse-optimized-5.txt",
+          "iterations": 19200,
+          "ns/op": 206226.0,
+          "p95-ns": 249353.0,
+          "B/op": 17232.0,
+          "allocs/op": 314.0
+        },
+        {
+          "file": "baseline-sse-optimized-6.txt",
+          "iterations": 17162,
+          "ns/op": 189757.0,
+          "p95-ns": 249734.0,
+          "B/op": 17232.0,
+          "allocs/op": 314.0
+        }
+      ],
+      "metrics": {
+        "ns/op": {
+          "median": 190559.5,
+          "min": 184249.0,
+          "max": 229702.0
+        },
+        "p95-ns": {
+          "median": 249543.5,
+          "min": 241308.0,
+          "max": 268772.0
+        },
+        "B/op": {
+          "median": 17232.0,
+          "min": 17232.0,
+          "max": 17232.0
+        },
+        "allocs/op": {
+          "median": 314.0,
+          "min": 314.0,
+          "max": 314.0
+        }
+      }
+    },
+    "optimized": {
+      "samples": [
+        {
+          "file": "optimized-sse-optimized-1.txt",
+          "iterations": 18660,
+          "ns/op": 258419.0,
+          "p95-ns": 276355.0,
+          "B/op": 17232.0,
+          "allocs/op": 314.0
+        },
+        {
+          "file": "optimized-sse-optimized-2.txt",
+          "iterations": 18468,
+          "ns/op": 184792.0,
+          "p95-ns": 256898.0,
+          "B/op": 17232.0,
+          "allocs/op": 314.0
+        },
+        {
+          "file": "optimized-sse-optimized-3.txt",
+          "iterations": 15840,
+          "ns/op": 224978.0,
+          "p95-ns": 371891.0,
+          "B/op": 17232.0,
+          "allocs/op": 314.0
+        },
+        {
+          "file": "optimized-sse-optimized-4.txt",
+          "iterations": 12993,
+          "ns/op": 318868.0,
+          "p95-ns": 382756.0,
+          "B/op": 17232.0,
+          "allocs/op": 314.0
+        },
+        {
+          "file": "optimized-sse-optimized-5.txt",
+          "iterations": 17265,
+          "ns/op": 202058.0,
+          "p95-ns": 326175.0,
+          "B/op": 17232.0,
+          "allocs/op": 314.0
+        },
+        {
+          "file": "optimized-sse-optimized-6.txt",
+          "iterations": 15854,
+          "ns/op": 211328.0,
+          "p95-ns": 367146.0,
+          "B/op": 17232.0,
+          "allocs/op": 314.0
+        }
+      ],
+      "metrics": {
+        "ns/op": {
+          "median": 218153.0,
+          "min": 184792.0,
+          "max": 318868.0
+        },
+        "p95-ns": {
+          "median": 346660.5,
+          "min": 256898.0,
+          "max": 382756.0
+        },
+        "B/op": {
+          "median": 17232.0,
+          "min": 17232.0,
+          "max": 17232.0
+        },
+        "allocs/op": {
+          "median": 314.0,
+          "min": 314.0,
+          "max": 314.0
+        }
+      }
+    },
+    "median_delta_percent": {
+      "ns/op": 14.480254198819797,
+      "p95-ns": 38.91786401969996,
+      "B/op": 0.0,
+      "allocs/op": 0.0
+    }
+  },
+  "direct": {
+    "candidate": [
+      {
+        "ns/op": 249337.0,
+        "p95-ns": 265726.0,
+        "B/op": 17232.0,
+        "allocs/op": 314.0
+      },
+      {
+        "ns/op": 192295.0,
+        "p95-ns": 308275.0,
+        "B/op": 17232.0,
+        "allocs/op": 314.0
+      },
+      {
+        "ns/op": 193822.0,
+        "p95-ns": 354653.0,
+        "B/op": 17232.0,
+        "allocs/op": 314.0
+      }
+    ],
+    "optimized": [
+      {
+        "ns/op": 193023.0,
+        "p95-ns": 343663.0,
+        "B/op": 17232.0,
+        "allocs/op": 314.0
+      },
+      {
+        "ns/op": 187770.0,
+        "p95-ns": 265874.0,
+        "B/op": 17232.0,
+        "allocs/op": 314.0
+      },
+      {
+        "ns/op": 181892.0,
+        "p95-ns": 236910.0,
+        "B/op": 17232.0,
+        "allocs/op": 314.0
+      }
+    ],
+    "medians": {
+      "candidate": {
+        "ns/op": 193822.0,
+        "p95-ns": 308275.0,
+        "B/op": 17232.0,
+        "allocs/op": 314.0
+      },
+      "optimized": {
+        "ns/op": 187770.0,
+        "p95-ns": 265874.0,
+        "B/op": 17232.0,
+        "allocs/op": 314.0
+      }
+    }
+  },
+  "p95_method": "First up to 1024 relay calls of each benchmark invocation; ns/op includes fixture setup/cleanup and all measured iterations.",
+  "verification": [
+    {
+      "label": "sse-optimized-race",
+      "command": [
+        "go",
+        "test",
+        "-race",
+        "-tags=unit",
+        "-p=1",
+        "./internal/service",
+        "-run",
+        "Test(CodexEngineSSE|CodexEngineWSBorrowedView|SSE|BoundedSSE)",
+        "-count=1",
+        "-timeout=5m"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 92.94902340000044
+    },
+    {
+      "label": "sse-optimized-test-build",
+      "command": [
+        "go",
+        "test",
+        "-tags=unit",
+        "-c",
+        "-o",
+        "D:\\Code\\sub2api\\.git\\task-artifacts\\merge-v0220\\optimized-service.test",
+        "./internal/service"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 54.47608559999935
+    },
+    {
+      "label": "sse-optimized-backend-build",
+      "command": [
+        "go",
+        "build",
+        "-o",
+        "D:\\Code\\sub2api\\.git\\task-artifacts\\merge-v0220\\optimized-sub2api-linux",
+        "./cmd/server"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 26.016787900000054
+    },
+    {
+      "label": "sse-optimized-linux-tests",
+      "command": [
+        "wsl.exe",
+        "-d",
+        "Ubuntu-24.04",
+        "--exec",
+        "env",
+        "GOMAXPROCS=4",
+        "GIN_MODE=release",
+        "/mnt/d/Code/sub2api/.git/task-artifacts/merge-v0220/optimized-service.test",
+        "-test.run=Test(CodexEngineSSE|CodexEngineWSBorrowedView|SSE|BoundedSSE)",
+        "-test.count=1",
+        "-test.timeout=5m"
+      ],
+      "exit_code": 0,
+      "elapsed_seconds": 2.0480582999989565
+    }
+  ],
+  "profile_files": [
+    "baseline-sse-focused-profile-top.txt",
+    "candidate-sse-focused-profile-top.txt",
+    "optimized-sse-optimized-profile-top.txt",
+    "baseline-sse-focused-profile-readframe.txt",
+    "candidate-sse-focused-profile-readframe.txt",
+    "optimized-sse-optimized-profile-readframe.txt"
+  ],
+  "startup_note": "Two diagnostic WSL commands stalled before any Go output. The execution channel recovered without a distribution restart. A process snapshot then showed no residual test or compiler processes, and the final Linux focused test passed before the optimized comparison. Startup diagnostics are retained separately."
+}

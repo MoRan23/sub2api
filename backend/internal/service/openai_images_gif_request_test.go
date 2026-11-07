@@ -51,46 +51,29 @@ func TestOpenAIImagesGIFRequestDefaults(t *testing.T) {
 	require.False(t, gjson.GetBytes(payload, "frame_duration_ms").Exists())
 }
 
-func TestOpenAIImagesGIFRequestInvalidControls(t *testing.T) {
+func TestOpenAIImagesGIFRequestRejectsInvalidControlTypes(t *testing.T) {
 	for _, tc := range []struct {
 		name, extra, errorText string
 	}{
-		{"count zero", `"frame_count":0`, "frame_count"},
-		{"count below range", `"frame_count":1`, "frame_count"},
-		{"count above range", `"frame_count":65`, "frame_count"},
-		{"count negative", `"frame_count":-2`, "frame_count"},
 		{"count fraction", `"frame_count":2.5`, "frame_count"},
-		{"count null", `"frame_count":null`, "frame_count"},
 		{"count string", `"frame_count":"9"`, "frame_count"},
 		{"count boolean", `"frame_count":true`, "frame_count"},
 		{"count array", `"frame_count":[]`, "frame_count"},
 		{"count object", `"frame_count":{}`, "frame_count"},
 		{"count overflow", `"frame_count":999999999999999999999999999999`, "frame_count"},
-		{"duration below range", `"frame_duration_ms":19`, "frame_duration_ms"},
-		{"duration above range", `"frame_duration_ms":2001`, "frame_duration_ms"},
 		{"duration fraction", `"frame_duration_ms":200.5`, "frame_duration_ms"},
-		{"duration null", `"frame_duration_ms":null`, "frame_duration_ms"},
 		{"duration string", `"frame_duration_ms":"200"`, "frame_duration_ms"},
-		{"streaming", `"stream":true`, "streaming"},
-		{"partial images zero", `"partial_images":0`, "partial_images"},
-		{"compression", `"output_compression":100`, "output_compression"},
-		{"prompt rewriter", `"prompt_rewriter":true`, "prompt_rewriter"},
-		{"prompt rewriter false", `"prompt_rewriter":false`, "prompt_rewriter"},
-		{"prompt rewriter null", `"prompt_rewriter":null`, "prompt_rewriter"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body := []byte(`{"model":"gpt-image-2.6-sunburst","prompt":"animate","output_format":"gif",` + tc.extra + `}`)
 			c, _ := newOpenAIImagesTestContext(t, body)
-			parsed, err := (&OpenAIGatewayService{}).ParseOpenAIImagesRoutingRequest(c, body)
-			require.NoError(t, err, "provider validation waits until after model mapping")
-			require.ErrorContains(t, validateOpenAIImagesGIFOptions(parsed), tc.errorText)
-			_, _, err = buildOpenAIImagesOAuthPayload(parsed, "gpt-image-2.6-sunburst")
+			_, err := (&OpenAIGatewayService{}).ParseOpenAIImagesRequest(c, body)
 			require.ErrorContains(t, err, tc.errorText)
 		})
 	}
 }
 
-func TestOpenAIImagesGIFRequestGenerationsOnly(t *testing.T) {
+func TestOpenAIImagesFrameControlsDoNotRequireGIF(t *testing.T) {
 	for _, body := range []string{
 		`{"model":"gpt-image-2.6-flare","prompt":"draw","output_format":"png","frame_count":9}`,
 		`{"model":"gpt-image-2.6-flare","prompt":"draw","frame_duration_ms":200}`,
@@ -98,14 +81,22 @@ func TestOpenAIImagesGIFRequestGenerationsOnly(t *testing.T) {
 		c, _ := newOpenAIImagesTestContext(t, []byte(body))
 		parsed, err := (&OpenAIGatewayService{}).ParseOpenAIImagesRoutingRequest(c, []byte(body))
 		require.NoError(t, err)
-		require.ErrorContains(t, validateOpenAIImagesGIFOptions(parsed), "only supported with output_format gif")
+		payload, _, err := buildOpenAIImagesOAuthPayload(parsed, "gpt-image-2.6-flare")
+		require.NoError(t, err)
+		for _, field := range []string{"frame_count", "frame_duration_ms"} {
+			require.Equal(t, gjson.Get(body, field).Raw, gjson.GetBytes(payload, field).Raw)
+		}
 	}
 	body := []byte(`{"model":"gpt-image-2.6-flare","prompt":"edit","output_format":"gif","images":[{"image_url":"data:image/png;base64,cG5n"}]}`)
 	c, _ := newOpenAIImagesTestContext(t, body)
 	c.Request.URL.Path = openAIImagesEditsEndpoint
 	parsed, err := (&OpenAIGatewayService{}).ParseOpenAIImagesRequest(c, body)
 	require.NoError(t, err)
-	require.ErrorContains(t, validateOpenAIImagesGIFOptions(parsed), "only supported by images/generations")
+	payload, endpoint, err := buildOpenAIImagesOAuthPayload(parsed, "gpt-image-2.6-flare")
+	require.NoError(t, err)
+	require.Contains(t, endpoint, "/images/edits")
+	require.Equal(t, "gif", gjson.GetBytes(payload, "output_format").String())
+	require.Equal(t, "data:image/png;base64,cG5n", gjson.GetBytes(payload, "images.0.image_url").String())
 }
 
 func TestOpenAIImagesGIFRequestMultipart(t *testing.T) {
@@ -114,8 +105,8 @@ func TestOpenAIImagesGIFRequestMultipart(t *testing.T) {
 	}{
 		{"valid", "frame_count", "64", ""},
 		{"invalid count", "frame_count", "2.5", "frame_count"},
-		{"invalid duration", "frame_duration_ms", "2001", "frame_duration_ms"},
-		{"invalid rewriter", "prompt_rewriter", "", "prompt_rewriter"},
+		{"duration left to upstream", "frame_duration_ms", "2001", ""},
+		{"unknown rewriter", "prompt_rewriter", "", ""},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			var body bytes.Buffer
@@ -127,26 +118,30 @@ func TestOpenAIImagesGIFRequestMultipart(t *testing.T) {
 			require.NoError(t, w.Close())
 			c, _ := newOpenAIImagesTestContext(t, body.Bytes())
 			c.Request.Header.Set("Content-Type", w.FormDataContentType())
-			parsed, err := (&OpenAIGatewayService{}).ParseOpenAIImagesRoutingRequest(c, body.Bytes())
-			require.NoError(t, err)
-			payload, _, err := buildOpenAIImagesOAuthPayload(parsed, "gpt-image-2.6-flare")
+			parsed, err := (&OpenAIGatewayService{}).ParseOpenAIImagesRequest(c, body.Bytes())
 			if tc.errorText != "" {
 				require.ErrorContains(t, err, tc.errorText)
 				return
 			}
 			require.NoError(t, err)
-			require.EqualValues(t, 64, gjson.GetBytes(payload, "frame_count").Int())
-			require.False(t, gjson.GetBytes(payload, "frame_duration_ms").Exists())
+			payload, _, err := buildOpenAIImagesOAuthPayload(parsed, "gpt-image-2.6-flare")
+			require.NoError(t, err)
+			if tc.field == "prompt_rewriter" {
+				require.False(t, gjson.GetBytes(payload, tc.field).Exists(), "OAuth sends the upstream supported option allowlist")
+			} else {
+				require.Equal(t, tc.value, gjson.GetBytes(payload, tc.field).Raw)
+			}
 		})
 	}
 }
 
-func TestOpenAIImagesGIFRequestProgrammaticValidation(t *testing.T) {
-	badCount := 65
-	_, _, err := buildOpenAIImagesOAuthPayload(&OpenAIImagesRequest{
-		Prompt: "animate", OutputFormat: "gif", FrameCount: &badCount,
+func TestOpenAIImagesGIFRequestLeavesRangesToUpstream(t *testing.T) {
+	count := 65
+	payload, _, err := buildOpenAIImagesOAuthPayload(&OpenAIImagesRequest{
+		Prompt: "animate", OutputFormat: "gif", FrameCount: &count,
 	}, "gpt-image-2.6-sunburst")
-	require.ErrorContains(t, err, "frame_count")
+	require.NoError(t, err)
+	require.EqualValues(t, 65, gjson.GetBytes(payload, "frame_count").Int())
 	require.Equal(t, OpenAIImagesCapabilityNative, classifyOpenAIImagesCapability(&OpenAIImagesRequest{Model: "gpt-image-2.6-flare", N: 1, OutputFormat: "gif"}))
 }
 

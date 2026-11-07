@@ -1,0 +1,69 @@
+Total: 15.31s
+ROUTINE ======================== github.com/Wei-Shaw/sub2api/internal/service.(*codexEngineSSEReader).readFrame in D:/Code/sub2api/backend/internal/service/openai_codex_engine_sse_frame.go
+     190ms      1.66s (flat, cum) 10.84% of Total
+         .          .    131:func (r *codexEngineSSEReader) readFrame(reader *bufio.Reader, frame *codexEngineSSEFrame, limit int) {
+         .          .    132:	lineStart := 0
+         .       10ms    133:	limits := newSSEEventLimits(r.cfg, limit)
+         .          .    134:	for {
+      20ms      410ms    135:		piece, err := reader.ReadSlice('\n')
+      10ms       10ms    136:		if len(piece) > limit-len(frame.raw) {
+         .          .    137:			frame.err = fmt.Errorf("upstream SSE event exceeds configured limit")
+         .          .    138:			frame.oversized = true
+         .          .    139:			return
+         .          .    140:		}
+         .          .    141:		// Keep the Engine's existing complete-frame ownership bound, and apply
+         .          .    142:		// the shared event budget before growing the raw frame. Incomplete lines
+         .          .    143:		// must not evade the event cap while ReadSlice returns buffer fragments.
+      10ms      360ms    144:		if (len(bytes.TrimRight(piece, "\r\n")) != 0 || len(frame.raw) != lineStart) &&
+      20ms       20ms    145:			int64(len(frame.raw)-lineStart+len(piece)) > limits.maxBytes-limits.bytes {
+         .          .    146:			frame.err, frame.oversized = limits.exceeded(), true
+         .          .    147:			return
+         .          .    148:		}
+         .          .    149:		previousRaw, previousScratch := cap(frame.raw), cap(frame.scratch)
+      10ms       60ms    150:		frame.raw = append(frame.raw, piece...)
+         .       70ms    151:		frame.trackCapacity(previousRaw, previousScratch)
+      10ms       10ms    152:		if err == bufio.ErrBufferFull {
+         .          .    153:			continue
+         .          .    154:		}
+         .          .    155:		// A complete line, including comments, refreshes idle activity even
+         .          .    156:		// when the event itself is still incomplete.
+         .          .    157:		if r.progress != nil {
+         .          .    158:			r.lastRead.Store(time.Since(r.started).Nanoseconds())
+         .          .    159:			select {
+         .          .    160:			case r.progress <- struct{}{}:
+         .          .    161:			default:
+         .          .    162:			}
+         .          .    163:		}
+      30ms      350ms    164:		line := bytes.TrimRight(frame.raw[lineStart:], "\r\n")
+      20ms      220ms    165:		if limitErr := limits.observe(line, len(frame.raw)-lineStart); limitErr != nil {
+         .          .    166:			frame.err, frame.oversized = limitErr, true
+         .          .    167:			return
+         .          .    168:		}
+      10ms       30ms    169:		if bytes.HasPrefix(line, []byte("data:")) {
+         .          .    170:			start := lineStart + 5
+      30ms       30ms    171:			if start < lineStart+len(line) && frame.raw[start] == ' ' {
+         .          .    172:				start++
+         .          .    173:			}
+         .          .    174:			span := codexEngineSSESpan{start, lineStart + len(line)}
+         .          .    175:			if frame.dataCount == 0 {
+         .          .    176:				frame.firstData = span
+         .          .    177:			} else {
+         .          .    178:				previousRaw, previousScratch := cap(frame.raw), cap(frame.scratch)
+         .          .    179:				if frame.dataCount == 1 {
+      10ms       20ms    180:					frame.scratch = append(frame.scratch[:0], frame.raw[frame.firstData.start:frame.firstData.end]...)
+         .          .    181:				}
+         .          .    182:				// Match the original adapters: empty leading data fields do not
+         .          .    183:				// add a newline until the payload contains some bytes.
+         .          .    184:				if len(frame.scratch) > 0 {
+         .          .    185:					frame.scratch = append(frame.scratch, '\n')
+         .          .    186:				}
+      10ms       40ms    187:				frame.scratch = append(frame.scratch, frame.raw[span.start:span.end]...)
+         .       10ms    188:				frame.trackCapacity(previousRaw, previousScratch)
+         .          .    189:			}
+         .          .    190:			frame.dataCount++
+         .       10ms    191:		} else if bytes.HasPrefix(line, []byte("event:")) {
+         .          .    192:			frame.event = codexEngineSSESpan{lineStart + 6, lineStart + len(line)}
+         .          .    193:		}
+         .          .    194:		if len(line) == 0 || err != nil {
+         .          .    195:			frame.err = err
+         .          .    196:			return

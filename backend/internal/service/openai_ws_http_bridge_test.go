@@ -2689,3 +2689,51 @@ func TestOpenAIWSHTTPBridge_IdleTimeoutClosesClientSession(t *testing.T) {
 	}
 	require.Len(t, upstream.bodies, 1, "an idle client must not leave a continuation request running")
 }
+
+func TestProxyOpenAIWSHTTPBridgeTurnKeepsPlanWithoutClientCacheKey(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	account := &Account{ID: 7101, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
+		Credentials: map[string]any{"access_token": "oauth-token", "chatgpt_account_id": "chatgpt-account"}}
+	plan := OpenAIOAuthIdentityPlan{
+		PolicySnapshot: defaultOpenAICodexFingerprintPolicy(0),
+		TurnIdentity: OpenAICodexTurnIdentity{SessionID: testOutboundSessionUUID, ThreadID: testOutboundThreadUUID,
+			ParentThreadID: testOutboundSessionUUID, Relation: OpenAICodexTurnRelationDescendant},
+		TurnIdentityEnabled: true, TurnIdentityRequested: true,
+		InstallationID:           "01989f44-7c00-4000-8000-000000000003",
+		InstallationEnabled:      true,
+		InstallationPolicy:       OpenAIOAuthInstallationAccountPin,
+		ProjectionMode:           OpenAIOAuthIdentityProjectionPassthrough,
+		CredentialOwnerNamespace: openAIOutboundSessionIdentityNamespace(account),
+	}
+	run := func(turn int) *http.Request {
+		sse := `data: {"type":"response.completed","response":{"id":"resp_fp","model":"gpt-5.5","status":"completed","usage":{"input_tokens":1,"output_tokens":1}}}` + "\n\n"
+		upstream := &httpUpstreamRecorder{resp: &http.Response{
+			StatusCode: http.StatusOK,
+			Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+			Body:       io.NopCloser(strings.NewReader(sse)),
+		}}
+		svc := &OpenAIGatewayService{
+			cfg:          &config.Config{Gateway: config.GatewayConfig{MaxLineSize: defaultMaxLineSize}},
+			httpUpstream: upstream,
+			accountRepo:  newAuthorizedOpenAIOAuthTestRepo(account),
+		}
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		c.Request = httptest.NewRequest(http.MethodGet, "/v1/responses", nil)
+		payload := []byte(`{"type":"response.create","model":"gpt-5.5","stream":true,"store":false,"input":"hi","client_metadata":{"session_id":"client-session","thread_id":"client-thread"}}`)
+		_, err := svc.proxyOpenAIWSHTTPBridgeTurn(
+			context.Background(), c, account, "test-token", payload, len(payload),
+			"gpt-5.5", "", "", "", "", turn,
+			func([]byte) error { return nil }, &plan,
+		)
+		require.NoError(t, err)
+		require.NotNil(t, upstream.lastReq)
+		require.Equal(t, testOutboundSessionUUID, gjson.GetBytes(upstream.lastBody, "client_metadata.session_id").String())
+		require.Equal(t, testOutboundThreadUUID, gjson.GetBytes(upstream.lastBody, "client_metadata.thread_id").String())
+		return upstream.lastReq
+	}
+
+	first := run(1)
+	require.Equal(t, testOutboundSessionUUID, first.Header.Get("session-id"))
+	require.Equal(t, testOutboundThreadUUID, first.Header.Get("thread-id"))
+	require.Equal(t, first.Header.Get("session-id"), run(2).Header.Get("session-id"))
+}

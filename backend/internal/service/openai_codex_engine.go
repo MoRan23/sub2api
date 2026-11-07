@@ -517,7 +517,7 @@ func (s *OpenAIGatewayService) relayCodexEngineStream(ctx, downstreamCtx context
 	if imageRequest {
 		idle = s.openAIImageStreamDataInterval()
 	}
-	reader := newCodexEngineSSEReader(resp.Body, maxLine, idle > 0)
+	reader := newCodexEngineSSEReader(resp.Body, maxLine, idle > 0, s.cfg)
 	defer reader.stop()
 	var timer *time.Timer
 	var timeout <-chan time.Time

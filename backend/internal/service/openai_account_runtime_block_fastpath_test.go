@@ -444,7 +444,7 @@ func TestOpenAIRuntimeBlock_AppliesToCNOpenAICompatiblePlatforms(t *testing.T) {
 
 func TestOpenAIRuntimeBlocker_KimiConcurrencySurvivesRepositoryFailure(t *testing.T) {
 	gateway := &OpenAIGatewayService{}
-	repo := &rateLimitAccountRepoStub{tempErr: errors.New("repository unavailable")}
+	repo := &rateLimitAccountRepoStub{rateLimitErr: errors.New("repository unavailable")}
 	rateLimitService := NewRateLimitService(repo, nil, &config.Config{}, nil, nil)
 	rateLimitService.SetAccountRuntimeBlocker(gateway)
 	account := &Account{ID: 449, Platform: PlatformKimi, Type: AccountTypeAPIKey}
@@ -458,7 +458,8 @@ func TestOpenAIRuntimeBlocker_KimiConcurrencySurvivesRepositoryFailure(t *testin
 	)
 
 	require.True(t, shouldDisable)
-	require.Equal(t, 1, repo.tempCalls)
+	require.Equal(t, 1, repo.rateLimitedCalls)
+	require.Zero(t, repo.tempCalls)
 	require.True(t, gateway.isOpenAIAccountRuntimeBlocked(account))
 }
 

@@ -40,6 +40,8 @@ var DefaultModels = []Model{
 	{ID: "gpt-image-2", Object: "model", Created: 1738368000, OwnedBy: "openai", Type: "model", DisplayName: "GPT Image 2"},
 	{ID: "gpt-image-2.5-flare", Object: "model", Created: 1788825600, OwnedBy: "openai", Type: "model", DisplayName: "GPT Image 2.5 Flare"},
 	{ID: "gpt-image-2.5-sunburst", Object: "model", Created: 1788825600, OwnedBy: "openai", Type: "model", DisplayName: "GPT Image 2.5 Sunburst"},
+	{ID: "gpt-image-2.6-flare", Object: "model", Created: 1793750400, OwnedBy: "openai", Type: "model", DisplayName: "GPT Image 2.6 Flare"},
+	{ID: "gpt-image-2.6-sunburst", Object: "model", Created: 1793750400, OwnedBy: "openai", Type: "model", DisplayName: "GPT Image 2.6 Sunburst"},
 }
 
 // DefaultModelIDs returns the default model ID list
@@ -109,6 +111,13 @@ var instructionsDaybreakRed string
 //
 //go:embed codex_gpt61_sol.json
 var CodexGPT61SolMetadata []byte
+
+// CodexGPT61TerraMetadata preserves the upstream descriptor as a reference for
+// catalog compatibility checks. Runtime defaults use the local bundled catalog
+// and apply account capability policy after loading its model metadata.
+//
+//go:embed codex_gpt61_terra.json
+var CodexGPT61TerraMetadata []byte
 
 // latestCodexInstructions retains the existing GPT-5.5 fallback for models
 // without a known template; it is not evidence of an upstream model mapping.
@@ -245,6 +254,8 @@ func IsGPT61TerraModelSpelling(model string) bool {
 	return IsKnownCodexModelVariant(model, "gpt-6.1-terra")
 }
 
+// RequiresResponsesForToolCalls reports models whose tool calls are only
+// available through the Responses API.
 func RequiresResponsesForToolCalls(model string) bool {
 	return IsGPT61SolModelSpelling(model) || IsGPT61TerraModelSpelling(model)
 }
@@ -259,4 +270,22 @@ func ValidateGPT61SolReasoningEffort(model, effort string) error {
 		}
 	}
 	return nil
+}
+
+// ValidateGPT61TerraReasoningEffort rejects the unpublished minimal level;
+// GPT-6.1 Terra accepts none through max.
+func ValidateGPT61TerraReasoningEffort(model, effort string) error {
+	if IsGPT61TerraModelSpelling(model) && strings.EqualFold(strings.TrimSpace(effort), "minimal") {
+		return fmt.Errorf("gpt-6.1-terra does not support reasoning effort %q; use none, low, medium, high, xhigh or max", effort)
+	}
+	return nil
+}
+
+// ValidateGPT61ReasoningEffort applies the published effort scale of each
+// GPT-6.1 model.
+func ValidateGPT61ReasoningEffort(model, effort string) error {
+	if err := ValidateGPT61SolReasoningEffort(model, effort); err != nil {
+		return err
+	}
+	return ValidateGPT61TerraReasoningEffort(model, effort)
 }

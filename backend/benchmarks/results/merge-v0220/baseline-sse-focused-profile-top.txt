@@ -1,0 +1,123 @@
+File: baseline-service.test
+Build ID: 77834f97edec3eff7ab2270c1bf2e5dab7b89aef
+Type: cpu
+Time: 2026-11-07 18:47:33 CST
+Duration: 13.81s, Total samples = 15.36s (111.20%)
+Showing nodes accounting for 12.93s, 84.18% of 15.36s total
+Dropped 217 nodes (cum <= 0.08s)
+      flat  flat%   sum%        cum   cum%
+     1.75s 11.39% 11.39%      1.75s 11.39%  runtime.futex
+     1.29s  8.40% 19.79%      2.64s 17.19%  github.com/tidwall/gjson.parseObject
+     1.02s  6.64% 26.43%      4.09s 26.63%  github.com/tidwall/gjson.getBytes
+     1.01s  6.58% 33.01%      3.75s 24.41%  runtime.selectgo
+     0.71s  4.62% 37.63%      0.71s  4.62%  github.com/tidwall/gjson.parseString
+     0.56s  3.65% 41.28%      0.56s  3.65%  github.com/tidwall/gjson.validstring
+     0.55s  3.58% 44.86%      0.59s  3.84%  github.com/tidwall/gjson.parseObjectPath
+     0.46s  2.99% 47.85%      0.46s  2.99%  indexbody
+     0.46s  2.99% 50.85%      0.50s  3.26%  runtime.lock2
+     0.41s  2.67% 53.52%      0.41s  2.67%  runtime.usleep
+     0.39s  2.54% 56.05%      0.40s  2.60%  runtime.unlock2
+     0.31s  2.02% 58.07%      2.99s 19.47%  github.com/tidwall/gjson.Get
+     0.28s  1.82% 59.90%      0.28s  1.82%  time.runtimeNow
+     0.27s  1.76% 61.65%      0.27s  1.76%  runtime.nanotime (inline)
+     0.25s  1.63% 63.28%      0.68s  4.43%  runtime.sellock
+     0.23s  1.50% 64.78%      1.07s  6.97%  github.com/Wei-Shaw/sub2api/internal/service.(*codexEngineSSEReader).readFrame
+     0.19s  1.24% 66.02%      0.45s  2.93%  bufio.(*Reader).ReadSlice
+     0.19s  1.24% 67.25%      0.25s  1.63%  bytes.TrimRight
+     0.19s  1.24% 68.49%      0.19s  1.24%  indexbytebody
+     0.16s  1.04% 69.53%      0.16s  1.04%  runtime.memmove
+     0.15s  0.98% 70.51%      0.40s  2.60%  runtime.selunlock
+     0.12s  0.78% 71.29%      0.79s  5.14%  github.com/tidwall/gjson.validany
+     0.12s  0.78% 72.07%      0.19s  1.24%  runtime.mallocgcSmallNoScanSC4
+     0.10s  0.65% 72.72%      1.65s 10.74%  github.com/Wei-Shaw/sub2api/internal/service.(*codexEngineWSWriter).writePayload
+     0.10s  0.65% 73.37%      0.10s  0.65%  runtime.acquireSudog
+     0.09s  0.59% 73.96%      0.18s  1.17%  runtime.casgstatus
+     0.08s  0.52% 74.48%      7.61s 49.54%  github.com/Wei-Shaw/sub2api/internal/service.(*OpenAIGatewayService).relayCodexEngineStream.func2
+     0.08s  0.52% 75.00%      4.16s 27.08%  github.com/Wei-Shaw/sub2api/internal/service.observeCodexEnginePayloadFields
+     0.08s  0.52% 75.52%      0.11s  0.72%  runtime.stringtoslicebyte
+     0.07s  0.46% 75.98%      0.57s  3.71%  bytes.Index
+     0.07s  0.46% 76.43%      0.60s  3.91%  runtime.mallocgc
+     0.07s  0.46% 76.89%      0.18s  1.17%  runtime.selparkcommit
+     0.06s  0.39% 77.28%     10.35s 67.38%  github.com/Wei-Shaw/sub2api/internal/service.(*OpenAIGatewayService).relayCodexEngineStream
+     0.06s  0.39% 77.67%      0.75s  4.88%  github.com/tidwall/gjson.validobject
+     0.06s  0.39% 78.06%      1.07s  6.97%  runtime.findRunnable
+     0.05s  0.33% 78.39%      0.09s  0.59%  internal/runtime/maps.(*Map).putSlotSmallFastStr
+     0.05s  0.33% 78.71%      0.09s  0.59%  runtime.typedmemmove
+     0.04s  0.26% 78.97%      0.25s  1.63%  bytes.IndexByte (inline)
+     0.04s  0.26% 79.23%      4.13s 26.89%  github.com/tidwall/gjson.GetBytes (inline)
+     0.04s  0.26% 79.49%      0.11s  0.72%  runtime.execute
+     0.04s  0.26% 79.75%      0.19s  1.24%  runtime.mapassign_faststr
+     0.04s  0.26% 80.01%      0.32s  2.08%  time.Now
+     0.03s   0.2% 80.21%      1.25s  8.14%  github.com/Wei-Shaw/sub2api/internal/service.extractOpenAIResponseIDFromJSONBytes
+     0.03s   0.2% 80.40%      0.66s  4.30%  github.com/Wei-Shaw/sub2api/internal/service.observeCodexEngineImages
+     0.03s   0.2% 80.60%      0.34s  2.21%  github.com/gin-gonic/gin.(*Context).Set
+     0.03s   0.2% 80.79%      0.82s  5.34%  github.com/tidwall/gjson.validpayload
+     0.03s   0.2% 80.99%      1.56s 10.16%  runtime.schedule
+     0.03s   0.2% 81.18%      0.48s  3.12%  runtime.stealWork
+     0.02s  0.13% 81.32%      2.67s 17.38%  github.com/Wei-Shaw/sub2api/internal/service.(*codexEngineSSEReader).read
+     0.02s  0.13% 81.45%      1.46s  9.51%  github.com/Wei-Shaw/sub2api/internal/service.(*codexEngineSSEReader).release (inline)
+     0.02s  0.13% 81.58%     10.60s 69.01%  github.com/Wei-Shaw/sub2api/internal/service.BenchmarkCodexEngineRelay.func1
+     0.02s  0.13% 81.71%      0.60s  3.91%  github.com/Wei-Shaw/sub2api/internal/service.codexEngineMayHaveImages
+     0.02s  0.13% 81.84%      0.08s  0.52%  github.com/Wei-Shaw/sub2api/internal/service.codexEngineStreamStartsSemanticTTFT
+     0.02s  0.13% 81.97%      0.08s  0.52%  github.com/Wei-Shaw/sub2api/internal/service.observeCodexEngineUsageFinalityParsed
+     0.02s  0.13% 82.10%      0.38s  2.47%  github.com/Wei-Shaw/sub2api/internal/service.parseOpenAIResponseUsageInto
+     0.02s  0.13% 82.23%      0.12s  0.78%  github.com/tidwall/gjson.Result.Get
+     0.02s  0.13% 82.36%      1.24s  8.07%  runtime.goready (inline)
+     0.02s  0.13% 82.49%      1.83s 11.91%  runtime.mcall
+     0.02s  0.13% 82.62%      0.13s  0.85%  runtime.newobject
+     0.02s  0.13% 82.75%      0.44s  2.86%  runtime.runqgrab
+     0.02s  0.13% 82.88%      1.41s  9.18%  runtime.send
+     0.02s  0.13% 83.01%      1.60s 10.42%  runtime.systemstack
+     0.02s  0.13% 83.14%      1.52s  9.90%  runtime.wakep
+     0.01s 0.065% 83.20%      1.21s  7.88%  _.goready.func1
+     0.01s 0.065% 83.27%      0.52s  3.39%  github.com/Wei-Shaw/sub2api/internal/service.(*codexEngineBenchmarkWriter).Write
+     0.01s 0.065% 83.33%      0.53s  3.45%  github.com/Wei-Shaw/sub2api/internal/service.BenchmarkCodexEngineRelay.func1.1
+     0.01s 0.065% 83.40%      0.20s  1.30%  github.com/Wei-Shaw/sub2api/internal/service.extractOpenAIUsageFromJSONBytes
+     0.01s 0.065% 83.46%      0.83s  5.40%  github.com/tidwall/gjson.ValidBytes (inline)
+     0.01s 0.065% 83.53%      0.09s  0.59%  runtime.(*mheap).alloc
+     0.01s 0.065% 83.59%      0.08s  0.52%  runtime.(*mheap).allocSpan
+     0.01s 0.065% 83.66%      0.29s  1.89%  runtime.mPark (inline)
+     0.01s 0.065% 83.72%      0.12s  0.78%  runtime.makeslice
+     0.01s 0.065% 83.79%      0.14s  0.91%  runtime.mallocgcSmallNoscan
+     0.01s 0.065% 83.85%      0.14s  0.91%  runtime.mallocgcSmallScanNoHeader
+     0.01s 0.065% 83.92%      0.13s  0.85%  runtime.newproc.func1
+     0.01s 0.065% 83.98%      1.80s 11.72%  runtime.park_m
+     0.01s 0.065% 84.05%      0.35s  2.28%  runtime.stopm
+     0.01s 0.065% 84.11%      0.09s  0.59%  runtime.sweepone
+     0.01s 0.065% 84.18%      0.41s  2.67%  runtime.unlock (inline)
+         0     0% 84.18%      0.09s  0.59%  bufio.NewReader (inline)
+         0     0% 84.18%      0.09s  0.59%  bufio.NewReaderSize (inline)
+         0     0% 84.18%      0.57s  3.71%  bytes.Contains (inline)
+         0     0% 84.18%      0.14s  0.91%  github.com/Wei-Shaw/sub2api/internal/service.(*codexEngineSSEFrame).eventName (inline)
+         0     0% 84.18%      1.66s 10.81%  github.com/Wei-Shaw/sub2api/internal/service.(*codexEngineWSWriter).writeSSEFrame
+         0     0% 84.18%      0.25s  1.63%  github.com/Wei-Shaw/sub2api/internal/service.newCodexEngineSSEReader
+         0     0% 84.18%      0.14s  0.91%  github.com/Wei-Shaw/sub2api/internal/service.openAIUsageFromGJSON
+         0     0% 84.18%      0.10s  0.65%  github.com/gin-gonic/gin.CreateTestContext
+         0     0% 84.18%      0.15s  0.98%  runtime.(*mcache).nextFree
+         0     0% 84.18%      0.14s  0.91%  runtime.(*mcache).refill
+         0     0% 84.18%      0.12s  0.78%  runtime.(*mcentral).cacheSpan
+         0     0% 84.18%      0.10s  0.65%  runtime.(*mcentral).grow
+         0     0% 84.18%      0.08s  0.52%  runtime.(*mheap).alloc.func1
+         0     0% 84.18%      0.09s  0.59%  runtime.bgsweep
+         0     0% 84.18%      0.29s  1.89%  runtime.futexsleep
+         0     0% 84.18%      1.46s  9.51%  runtime.futexwakeup
+         0     0% 84.18%      0.10s  0.65%  runtime.gcBgMarkWorker
+         0     0% 84.18%      0.09s  0.59%  runtime.gcBgMarkWorker.func2
+         0     0% 84.18%      0.09s  0.59%  runtime.gcDrain
+         0     0% 84.18%      0.50s  3.26%  runtime.lock (inline)
+         0     0% 84.18%      0.50s  3.26%  runtime.lockWithRank (inline)
+         0     0% 84.18%      0.13s  0.85%  runtime.newproc
+         0     0% 84.18%      0.28s  1.82%  runtime.notesleep
+         0     0% 84.18%      1.46s  9.51%  runtime.notewakeup
+         0     0% 84.18%      1.20s  7.81%  runtime.ready
+         0     0% 84.18%      0.34s  2.21%  runtime.resetspinning
+         0     0% 84.18%      0.44s  2.86%  runtime.runqsteal
+         0     0% 84.18%      0.13s  0.85%  runtime.selectgo.func3
+         0     0% 84.18%      0.30s  1.95%  runtime.slicebytetostring
+         0     0% 84.18%      1.47s  9.57%  runtime.startm
+         0     0% 84.18%      0.40s  2.60%  runtime.unlockWithRank (inline)
+         0     0% 84.18%      0.09s  0.59%  sync.(*RWMutex).Unlock
+         0     0% 84.18%     10.60s 69.01%  testing.(*B).launch
+         0     0% 84.18%     10.63s 69.21%  testing.(*B).runN
+         0     0% 84.18%      0.20s  1.30%  time.Since
+         0     0% 84.18%      0.18s  1.17%  time.runtimeNano

@@ -1,0 +1,56 @@
+Total: 15.36s
+ROUTINE ======================== github.com/Wei-Shaw/sub2api/internal/service.(*codexEngineSSEReader).readFrame in D:/Code/sub2api/.git/task-artifacts/merge-v0220/baseline/backend/internal/service/openai_codex_engine_sse_frame.go
+     230ms      1.07s (flat, cum)  6.97% of Total
+         .          .    126:func (r *codexEngineSSEReader) readFrame(reader *bufio.Reader, frame *codexEngineSSEFrame, limit int) {
+         .          .    127:	lineStart := 0
+      20ms       20ms    128:	for {
+         .      450ms    129:		piece, err := reader.ReadSlice('\n')
+      20ms       20ms    130:		if len(piece) > limit-len(frame.raw) {
+         .          .    131:			frame.err = fmt.Errorf("upstream SSE event exceeds configured limit")
+         .          .    132:			frame.oversized = true
+         .          .    133:			return
+         .          .    134:		}
+      20ms       20ms    135:		previousRaw, previousScratch := cap(frame.raw), cap(frame.scratch)
+      60ms      100ms    136:		frame.raw = append(frame.raw, piece...)
+      10ms       40ms    137:		frame.trackCapacity(previousRaw, previousScratch)
+         .          .    138:		if err == bufio.ErrBufferFull {
+         .          .    139:			continue
+         .          .    140:		}
+         .          .    141:		// A complete line, including comments, refreshes idle activity even
+         .          .    142:		// when the event itself is still incomplete.
+         .          .    143:		if r.progress != nil {
+         .          .    144:			r.lastRead.Store(time.Since(r.started).Nanoseconds())
+         .          .    145:			select {
+         .          .    146:			case r.progress <- struct{}{}:
+         .          .    147:			default:
+         .          .    148:			}
+         .          .    149:		}
+      20ms      270ms    150:		line := bytes.TrimRight(frame.raw[lineStart:], "\r\n")
+      10ms       30ms    151:		if bytes.HasPrefix(line, []byte("data:")) {
+         .          .    152:			start := lineStart + 5
+      20ms       20ms    153:			if start < lineStart+len(line) && frame.raw[start] == ' ' {
+         .          .    154:				start++
+         .          .    155:			}
+         .          .    156:			span := codexEngineSSESpan{start, lineStart + len(line)}
+         .          .    157:			if frame.dataCount == 0 {
+         .          .    158:				frame.firstData = span
+         .          .    159:			} else {
+         .          .    160:				previousRaw, previousScratch := cap(frame.raw), cap(frame.scratch)
+         .          .    161:				if frame.dataCount == 1 {
+         .       30ms    162:					frame.scratch = append(frame.scratch[:0], frame.raw[frame.firstData.start:frame.firstData.end]...)
+         .          .    163:				}
+         .          .    164:				// Match the original adapters: empty leading data fields do not
+         .          .    165:				// add a newline until the payload contains some bytes.
+         .          .    166:				if len(frame.scratch) > 0 {
+         .          .    167:					frame.scratch = append(frame.scratch, '\n')
+         .          .    168:				}
+      40ms       40ms    169:				frame.scratch = append(frame.scratch, frame.raw[span.start:span.end]...)
+         .          .    170:				frame.trackCapacity(previousRaw, previousScratch)
+         .          .    171:			}
+      10ms       10ms    172:			frame.dataCount++
+         .       20ms    173:		} else if bytes.HasPrefix(line, []byte("event:")) {
+         .          .    174:			frame.event = codexEngineSSESpan{lineStart + 6, lineStart + len(line)}
+         .          .    175:		}
+         .          .    176:		if len(line) == 0 || err != nil {
+         .          .    177:			frame.err = err
+         .          .    178:			return

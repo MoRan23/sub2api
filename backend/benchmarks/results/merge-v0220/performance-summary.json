@@ -1,0 +1,3081 @@
+{
+  "fixtures": [
+    {
+      "fixture": "BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_1",
+      "metric": "B/op",
+      "baseline": {
+        "rounds": [
+          421731.0,
+          421726.0,
+          421717.0
+        ],
+        "median": 421726.0,
+        "spread_percent": 0.0033196909841935285
+      },
+      "candidate": {
+        "rounds": [
+          421717.0,
+          421718.0,
+          421723.0
+        ],
+        "median": 421718.0,
+        "spread_percent": 0.0014227516966313983
+      },
+      "change_percent": -0.0018969662766820162
+    },
+    {
+      "fixture": "BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_1",
+      "metric": "allocs/op",
+      "baseline": {
+        "rounds": [
+          10369.0,
+          10369.0,
+          10369.0
+        ],
+        "median": 10369.0,
+        "spread_percent": 0.0
+      },
+      "candidate": {
+        "rounds": [
+          10369.0,
+          10369.0,
+          10369.0
+        ],
+        "median": 10369.0,
+        "spread_percent": 0.0
+      },
+      "change_percent": 0.0
+    },
+    {
+      "fixture": "BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_1",
+      "metric": "decoded-retained-B",
+      "baseline": {
+        "rounds": [
+          7072072.0,
+          7084176.0,
+          7107792.0
+        ],
+        "median": 7084176.0,
+        "spread_percent": 0.5042223682754353
+      },
+      "candidate": {
+        "rounds": [
+          7107328.0,
+          7084288.0,
+          7073144.0
+        ],
+        "median": 7084288.0,
+        "spread_percent": 0.48253261301629746
+      },
+      "change_percent": 0.0015809883887695619
+    },
+    {
+      "fixture": "BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_1",
+      "metric": "ns/op",
+      "baseline": {
+        "rounds": [
+          2364063.0,
+          2282642.0,
+          2248773.0
+        ],
+        "median": 2282642.0,
+        "spread_percent": 5.050726307498066
+      },
+      "candidate": {
+        "rounds": [
+          2344703.0,
+          2315218.0,
+          2265194.0
+        ],
+        "median": 2315218.0,
+        "spread_percent": 3.434190646409971
+      },
+      "change_percent": 1.4271182252845607
+    },
+    {
+      "fixture": "BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_1",
+      "metric": "p95-ns",
+      "baseline": {
+        "rounds": [
+          2979950.0,
+          2619327.0,
+          2620676.0
+        ],
+        "median": 2620676.0,
+        "spread_percent": 13.760686174101645
+      },
+      "candidate": {
+        "rounds": [
+          2650110.0,
+          2654792.0,
+          2631790.0
+        ],
+        "median": 2650110.0,
+        "spread_percent": 0.8679639713068514
+      },
+      "change_percent": 1.1231453258624875
+    },
+    {
+      "fixture": "BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_10",
+      "metric": "B/op",
+      "baseline": {
+        "rounds": [
+          421717.0,
+          421724.0,
+          421728.0
+        ],
+        "median": 421724.0,
+        "spread_percent": 0.0026083410002750614
+      },
+      "candidate": {
+        "rounds": [
+          421724.0,
+          421721.0,
+          421725.0
+        ],
+        "median": 421724.0,
+        "spread_percent": 0.0009484876364636587
+      },
+      "change_percent": 0.0
+    },
+    {
+      "fixture": "BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_10",
+      "metric": "allocs/op",
+      "baseline": {
+        "rounds": [
+          10369.0,
+          10369.0,
+          10369.0
+        ],
+        "median": 10369.0,
+        "spread_percent": 0.0
+      },
+      "candidate": {
+        "rounds": [
+          10369.0,
+          10369.0,
+          10369.0
+        ],
+        "median": 10369.0,
+        "spread_percent": 0.0
+      },
+      "change_percent": 0.0
+    },
+    {
+      "fixture": "BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_10",
+      "metric": "decoded-retained-B",
+      "baseline": {
+        "rounds": [
+          11151488.0,
+          11151744.0,
+          11151408.0
+        ],
+        "median": 11151488.0,
+        "spread_percent": 0.0030130508143845916
+      },
+      "candidate": {
+        "rounds": [
+          11151536.0,
+          11154368.0,
+          11149312.0
+        ],
+        "median": 11151536.0,
+        "spread_percent": 0.04533904567047983
+      },
+      "change_percent": 0.0004304358306263702
+    },
+    {
+      "fixture": "BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_10",
+      "metric": "ns/op",
+      "baseline": {
+        "rounds": [
+          2143567.0,
+          2055615.0,
+          2157710.0
+        ],
+        "median": 2143567.0,
+        "spread_percent": 4.762855558048804
+      },
+      "candidate": {
+        "rounds": [
+          2153600.0,
+          2154821.0,
+          2238908.0
+        ],
+        "median": 2154821.0,
+        "spread_percent": 3.958936728387184
+      },
+      "change_percent": 0.5250127474438634
+    },
+    {
+      "fixture": "BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_10",
+      "metric": "p95-ns",
+      "baseline": {
+        "rounds": [
+          2608958.0,
+          2270045.0,
+          2390126.0
+        ],
+        "median": 2390126.0,
+        "spread_percent": 14.179712701338758
+      },
+      "candidate": {
+        "rounds": [
+          2513453.0,
+          2479354.0,
+          2582133.0
+        ],
+        "median": 2513453.0,
+        "spread_percent": 4.089155436763687
+      },
+      "change_percent": 5.159853497263324
+    },
+    {
+      "fixture": "BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_100",
+      "metric": "B/op",
+      "baseline": {
+        "rounds": [
+          421726.0,
+          421728.0,
+          421722.0
+        ],
+        "median": 421726.0,
+        "spread_percent": 0.0014227247075115123
+      },
+      "candidate": {
+        "rounds": [
+          421728.0,
+          421726.0,
+          421728.0
+        ],
+        "median": 421728.0,
+        "spread_percent": 0.00047423932013051064
+      },
+      "change_percent": 0.00047424156917050405
+    },
+    {
+      "fixture": "BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_100",
+      "metric": "allocs/op",
+      "baseline": {
+        "rounds": [
+          10369.0,
+          10369.0,
+          10369.0
+        ],
+        "median": 10369.0,
+        "spread_percent": 0.0
+      },
+      "candidate": {
+        "rounds": [
+          10369.0,
+          10369.0,
+          10369.0
+        ],
+        "median": 10369.0,
+        "spread_percent": 0.0
+      },
+      "change_percent": 0.0
+    },
+    {
+      "fixture": "BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_100",
+      "metric": "decoded-retained-B",
+      "baseline": {
+        "rounds": [
+          46272712.0,
+          46235208.0,
+          46260632.0
+        ],
+        "median": 46260632.0,
+        "spread_percent": 0.08107109301922205
+      },
+      "candidate": {
+        "rounds": [
+          46259864.0,
+          46272648.0,
+          46260344.0
+        ],
+        "median": 46260344.0,
+        "spread_percent": 0.02763490042356797
+      },
+      "change_percent": -0.0006225595880315686
+    },
+    {
+      "fixture": "BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_100",
+      "metric": "ns/op",
+      "baseline": {
+        "rounds": [
+          2119758.0,
+          2251165.0,
+          2177793.0
+        ],
+        "median": 2177793.0,
+        "spread_percent": 6.033952721861077
+      },
+      "candidate": {
+        "rounds": [
+          2332151.0,
+          2207942.0,
+          2527800.0
+        ],
+        "median": 2332151.0,
+        "spread_percent": 13.71514966226458
+      },
+      "change_percent": 7.087817804538815
+    },
+    {
+      "fixture": "BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_100",
+      "metric": "p95-ns",
+      "baseline": {
+        "rounds": [
+          2475912.0,
+          2571540.0,
+          2429855.0
+        ],
+        "median": 2475912.0,
+        "spread_percent": 5.722537796173693
+      },
+      "candidate": {
+        "rounds": [
+          2660475.0,
+          2550424.0,
+          3219878.0
+        ],
+        "median": 2660475.0,
+        "spread_percent": 25.162950225053798
+      },
+      "change_percent": 7.454344096236054
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/small_256",
+      "metric": "B/op",
+      "baseline": {
+        "rounds": [
+          16392.0,
+          16345.0,
+          16388.0
+        ],
+        "median": 16388.0,
+        "spread_percent": 0.28679521601171587
+      },
+      "candidate": {
+        "rounds": [
+          16334.0,
+          16392.0,
+          16418.0
+        ],
+        "median": 16392.0,
+        "spread_percent": 0.5124450951683748
+      },
+      "change_percent": 0.0244081034903588
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/small_256",
+      "metric": "MB/s",
+      "baseline": {
+        "rounds": [
+          70.75,
+          48.55,
+          67.23
+        ],
+        "median": 67.23,
+        "spread_percent": 33.02097278000893
+      },
+      "candidate": {
+        "rounds": [
+          77.6,
+          76.82,
+          71.07
+        ],
+        "median": 76.82,
+        "spread_percent": 8.500390523301226
+      },
+      "change_percent": 14.264465268481315
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/small_256",
+      "metric": "allocs/op",
+      "baseline": {
+        "rounds": [
+          304.0,
+          304.0,
+          304.0
+        ],
+        "median": 304.0,
+        "spread_percent": 0.0
+      },
+      "candidate": {
+        "rounds": [
+          304.0,
+          304.0,
+          304.0
+        ],
+        "median": 304.0,
+        "spread_percent": 0.0
+      },
+      "change_percent": 0.0
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/small_256",
+      "metric": "first-write-ns/op",
+      "baseline": {
+        "rounds": [
+          19071.0,
+          26175.0,
+          59387.0
+        ],
+        "median": 26175.0,
+        "spread_percent": 154.0248328557784
+      },
+      "candidate": {
+        "rounds": [
+          15004.0,
+          23623.0,
+          22739.0
+        ],
+        "median": 22739.0,
+        "spread_percent": 37.90404151457848
+      },
+      "change_percent": -13.127029608404966
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/small_256",
+      "metric": "ns/op",
+      "baseline": {
+        "rounds": [
+          378681.0,
+          551798.0,
+          398491.0
+        ],
+        "median": 398491.0,
+        "spread_percent": 43.443139242793436
+      },
+      "candidate": {
+        "rounds": [
+          345232.0,
+          348727.0,
+          376973.0
+        ],
+        "median": 348727.0,
+        "spread_percent": 9.101962279949646
+      },
+      "change_percent": -12.488111400257472
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/small_256",
+      "metric": "p95-ns",
+      "baseline": {
+        "rounds": [
+          494964.0,
+          625202.0,
+          542145.0
+        ],
+        "median": 542145.0,
+        "spread_percent": 24.02272454786081
+      },
+      "candidate": {
+        "rounds": [
+          410021.0,
+          410341.0,
+          452486.0
+        ],
+        "median": 410341.0,
+        "spread_percent": 10.348709975361954
+      },
+      "change_percent": -24.31157716109159
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/small_256",
+      "metric": "write-ns/op",
+      "baseline": {
+        "rounds": [
+          5556.0,
+          6232.0,
+          5389.0
+        ],
+        "median": 5556.0,
+        "spread_percent": 15.17278617710583
+      },
+      "candidate": {
+        "rounds": [
+          5580.0,
+          5125.0,
+          5354.0
+        ],
+        "median": 5354.0,
+        "spread_percent": 8.498319013821442
+      },
+      "change_percent": -3.6357091432685387
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/small_256",
+      "metric": "B/op",
+      "baseline": {
+        "rounds": [
+          25012.0,
+          25080.0,
+          25087.0
+        ],
+        "median": 25080.0,
+        "spread_percent": 0.29904306220095694
+      },
+      "candidate": {
+        "rounds": [
+          25075.0,
+          25023.0,
+          25023.0
+        ],
+        "median": 25023.0,
+        "spread_percent": 0.20780881588938177
+      },
+      "change_percent": -0.22727272727272727
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/small_256",
+      "metric": "MB/s",
+      "baseline": {
+        "rounds": [
+          50.59,
+          43.21,
+          70.82
+        ],
+        "median": 50.59,
+        "spread_percent": 54.57600316268035
+      },
+      "candidate": {
+        "rounds": [
+          71.92,
+          75.98,
+          59.86
+        ],
+        "median": 71.92,
+        "spread_percent": 22.41379310344828
+      },
+      "change_percent": 42.162482704091715
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/small_256",
+      "metric": "allocs/op",
+      "baseline": {
+        "rounds": [
+          565.0,
+          565.0,
+          565.0
+        ],
+        "median": 565.0,
+        "spread_percent": 0.0
+      },
+      "candidate": {
+        "rounds": [
+          565.0,
+          565.0,
+          565.0
+        ],
+        "median": 565.0,
+        "spread_percent": 0.0
+      },
+      "change_percent": 0.0
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/small_256",
+      "metric": "first-write-ns/op",
+      "baseline": {
+        "rounds": [
+          21614.0,
+          35128.0,
+          14108.0
+        ],
+        "median": 21614.0,
+        "spread_percent": 97.25178125289165
+      },
+      "candidate": {
+        "rounds": [
+          15175.0,
+          13047.0,
+          15737.0
+        ],
+        "median": 15175.0,
+        "spread_percent": 17.72652388797364
+      },
+      "change_percent": -29.79087628389007
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/small_256",
+      "metric": "ns/op",
+      "baseline": {
+        "rounds": [
+          529588.0,
+          620029.0,
+          378279.0
+        ],
+        "median": 529588.0,
+        "spread_percent": 45.648692946214794
+      },
+      "candidate": {
+        "rounds": [
+          372485.0,
+          352596.0,
+          447551.0
+        ],
+        "median": 372485.0,
+        "spread_percent": 25.4923017034243
+      },
+      "change_percent": -29.665135916976972
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/small_256",
+      "metric": "p95-ns",
+      "baseline": {
+        "rounds": [
+          749541.0,
+          898232.0,
+          435173.0
+        ],
+        "median": 749541.0,
+        "spread_percent": 61.779008753357054
+      },
+      "candidate": {
+        "rounds": [
+          467429.0,
+          408738.0,
+          722500.0
+        ],
+        "median": 467429.0,
+        "spread_percent": 67.12506070440645
+      },
+      "change_percent": -37.63796776960833
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/small_256",
+      "metric": "write-ns/op",
+      "baseline": {
+        "rounds": [
+          6249.0,
+          6588.0,
+          5469.0
+        ],
+        "median": 6249.0,
+        "spread_percent": 17.906865098415746
+      },
+      "candidate": {
+        "rounds": [
+          5315.0,
+          5162.0,
+          5783.0
+        ],
+        "median": 5315.0,
+        "spread_percent": 11.683913452492945
+      },
+      "change_percent": -14.94639142262762
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/multiline_128",
+      "metric": "B/op",
+      "baseline": {
+        "rounds": [
+          12648.0,
+          12723.0,
+          12711.0
+        ],
+        "median": 12711.0,
+        "spread_percent": 0.5900401227283455
+      },
+      "candidate": {
+        "rounds": [
+          12648.0,
+          12648.0,
+          12648.0
+        ],
+        "median": 12648.0,
+        "spread_percent": 0.0
+      },
+      "change_percent": -0.49563370309181026
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/multiline_128",
+      "metric": "MB/s",
+      "baseline": {
+        "rounds": [
+          51.98,
+          53.66,
+          52.56
+        ],
+        "median": 52.56,
+        "spread_percent": 3.1963470319634695
+      },
+      "candidate": {
+        "rounds": [
+          79.7,
+          62.49,
+          74.55
+        ],
+        "median": 74.55,
+        "spread_percent": 23.08517773306506
+      },
+      "change_percent": 41.83789954337899
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/multiline_128",
+      "metric": "allocs/op",
+      "baseline": {
+        "rounds": [
+          181.0,
+          181.0,
+          181.0
+        ],
+        "median": 181.0,
+        "spread_percent": 0.0
+      },
+      "candidate": {
+        "rounds": [
+          181.0,
+          181.0,
+          181.0
+        ],
+        "median": 181.0,
+        "spread_percent": 0.0
+      },
+      "change_percent": 0.0
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/multiline_128",
+      "metric": "first-write-ns/op",
+      "baseline": {
+        "rounds": [
+          23916.0,
+          20500.0,
+          25897.0
+        ],
+        "median": 23916.0,
+        "spread_percent": 22.566482689412947
+      },
+      "candidate": {
+        "rounds": [
+          13248.0,
+          15417.0,
+          13320.0
+        ],
+        "median": 13320.0,
+        "spread_percent": 16.283783783783782
+      },
+      "change_percent": -44.30506773707978
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/multiline_128",
+      "metric": "ns/op",
+      "baseline": {
+        "rounds": [
+          286375.0,
+          277421.0,
+          283240.0
+        ],
+        "median": 283240.0,
+        "spread_percent": 3.1612766558395706
+      },
+      "candidate": {
+        "rounds": [
+          186778.0,
+          238223.0,
+          199675.0
+        ],
+        "median": 199675.0,
+        "spread_percent": 25.764367096531863
+      },
+      "change_percent": -29.503248128795367
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/multiline_128",
+      "metric": "p95-ns",
+      "baseline": {
+        "rounds": [
+          421696.0,
+          515031.0,
+          305598.0
+        ],
+        "median": 421696.0,
+        "spread_percent": 49.66445022006374
+      },
+      "candidate": {
+        "rounds": [
+          244851.0,
+          254965.0,
+          254412.0
+        ],
+        "median": 254412.0,
+        "spread_percent": 3.975441409996384
+      },
+      "change_percent": -39.669335255729244
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/multiline_128",
+      "metric": "write-ns/op",
+      "baseline": {
+        "rounds": [
+          3130.0,
+          3204.0,
+          2910.0
+        ],
+        "median": 3130.0,
+        "spread_percent": 9.39297124600639
+      },
+      "candidate": {
+        "rounds": [
+          2641.0,
+          2706.0,
+          2764.0
+        ],
+        "median": 2706.0,
+        "spread_percent": 4.545454545454546
+      },
+      "change_percent": -13.54632587859425
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/multiline_128",
+      "metric": "B/op",
+      "baseline": {
+        "rounds": [
+          17292.0,
+          17232.0,
+          17243.0
+        ],
+        "median": 17243.0,
+        "spread_percent": 0.347967291074639
+      },
+      "candidate": {
+        "rounds": [
+          17232.0,
+          17232.0,
+          17283.0
+        ],
+        "median": 17232.0,
+        "spread_percent": 0.29596100278551535
+      },
+      "change_percent": -0.06379400336368381
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/multiline_128",
+      "metric": "MB/s",
+      "baseline": {
+        "rounds": [
+          72.51,
+          57.49,
+          82.07
+        ],
+        "median": 72.51,
+        "spread_percent": 33.898772583091976
+      },
+      "candidate": {
+        "rounds": [
+          62.83,
+          76.91,
+          70.05
+        ],
+        "median": 70.05,
+        "spread_percent": 20.09992862241256
+      },
+      "change_percent": -3.3926354985519347
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/multiline_128",
+      "metric": "allocs/op",
+      "baseline": {
+        "rounds": [
+          314.0,
+          314.0,
+          314.0
+        ],
+        "median": 314.0,
+        "spread_percent": 0.0
+      },
+      "candidate": {
+        "rounds": [
+          314.0,
+          314.0,
+          314.0
+        ],
+        "median": 314.0,
+        "spread_percent": 0.0
+      },
+      "change_percent": 0.0
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/multiline_128",
+      "metric": "first-write-ns/op",
+      "baseline": {
+        "rounds": [
+          11230.0,
+          22764.0,
+          12410.0
+        ],
+        "median": 12410.0,
+        "spread_percent": 92.94117647058823
+      },
+      "candidate": {
+        "rounds": [
+          18978.0,
+          11455.0,
+          11572.0
+        ],
+        "median": 11572.0,
+        "spread_percent": 65.01036985827861
+      },
+      "change_percent": -6.752618855761483
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/multiline_128",
+      "metric": "ns/op",
+      "baseline": {
+        "rounds": [
+          205303.0,
+          258946.0,
+          181392.0
+        ],
+        "median": 205303.0,
+        "spread_percent": 37.77538564950342
+      },
+      "candidate": {
+        "rounds": [
+          236937.0,
+          193562.0,
+          212514.0
+        ],
+        "median": 212514.0,
+        "spread_percent": 20.410420019386958
+      },
+      "change_percent": 3.5123695221209625
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/multiline_128",
+      "metric": "p95-ns",
+      "baseline": {
+        "rounds": [
+          273246.0,
+          307225.0,
+          226688.0
+        ],
+        "median": 273246.0,
+        "spread_percent": 29.474173455421123
+      },
+      "candidate": {
+        "rounds": [
+          316466.0,
+          229687.0,
+          290641.0
+        ],
+        "median": 290641.0,
+        "spread_percent": 29.85779707611796
+      },
+      "change_percent": 6.366058423545084
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/multiline_128",
+      "metric": "write-ns/op",
+      "baseline": {
+        "rounds": [
+          2822.0,
+          3098.0,
+          2628.0
+        ],
+        "median": 2822.0,
+        "spread_percent": 16.654854712969524
+      },
+      "candidate": {
+        "rounds": [
+          2971.0,
+          2648.0,
+          2828.0
+        ],
+        "median": 2828.0,
+        "spread_percent": 11.421499292786422
+      },
+      "change_percent": 0.21261516654854712
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/slow_write_32",
+      "metric": "B/op",
+      "baseline": {
+        "rounds": [
+          9301.0,
+          9279.0,
+          9288.0
+        ],
+        "median": 9288.0,
+        "spread_percent": 0.2368647717484927
+      },
+      "candidate": {
+        "rounds": [
+          9360.0,
+          9429.0,
+          9393.0
+        ],
+        "median": 9393.0,
+        "spread_percent": 0.7345895879910572
+      },
+      "change_percent": 1.1304909560723515
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/slow_write_32",
+      "metric": "MB/s",
+      "baseline": {
+        "rounds": [
+          0.1,
+          0.1,
+          0.1
+        ],
+        "median": 0.1,
+        "spread_percent": 0.0
+      },
+      "candidate": {
+        "rounds": [
+          0.1,
+          0.1,
+          0.1
+        ],
+        "median": 0.1,
+        "spread_percent": 0.0
+      },
+      "change_percent": 0.0
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/slow_write_32",
+      "metric": "allocs/op",
+      "baseline": {
+        "rounds": [
+          80.0,
+          80.0,
+          80.0
+        ],
+        "median": 80.0,
+        "spread_percent": 0.0
+      },
+      "candidate": {
+        "rounds": [
+          81.0,
+          81.0,
+          81.0
+        ],
+        "median": 81.0,
+        "spread_percent": 0.0
+      },
+      "change_percent": 1.25
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/slow_write_32",
+      "metric": "first-write-ns/op",
+      "baseline": {
+        "rounds": [
+          1129187.0,
+          1170737.0,
+          1170587.0
+        ],
+        "median": 1170587.0,
+        "spread_percent": 3.5495012331420046
+      },
+      "candidate": {
+        "rounds": [
+          1168002.0,
+          1163935.0,
+          1165334.0
+        ],
+        "median": 1165334.0,
+        "spread_percent": 0.34899865617925846
+      },
+      "change_percent": -0.44874921727304334
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/slow_write_32",
+      "metric": "ns/op",
+      "baseline": {
+        "rounds": [
+          36712042.0,
+          36726839.0,
+          36740512.0
+        ],
+        "median": 36726839.0,
+        "spread_percent": 0.07751824217706293
+      },
+      "candidate": {
+        "rounds": [
+          36721423.0,
+          36631284.0,
+          36746710.0
+        ],
+        "median": 36721423.0,
+        "spread_percent": 0.3143287775095208
+      },
+      "change_percent": -0.014746708803335893
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/slow_write_32",
+      "metric": "p95-ns",
+      "baseline": {
+        "rounds": [
+          36874190.0,
+          37289889.0,
+          37074891.0
+        ],
+        "median": 37074891.0,
+        "spread_percent": 1.1212413274525879
+      },
+      "candidate": {
+        "rounds": [
+          36964035.0,
+          36899079.0,
+          36921140.0
+        ],
+        "median": 36921140.0,
+        "spread_percent": 0.17593172908528826
+      },
+      "change_percent": -0.4147038490281738
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/slow_write_32",
+      "metric": "write-ns/op",
+      "baseline": {
+        "rounds": [
+          36334098.0,
+          36334157.0,
+          36359804.0
+        ],
+        "median": 36334157.0,
+        "spread_percent": 0.07074885485852885
+      },
+      "candidate": {
+        "rounds": [
+          36353224.0,
+          36283530.0,
+          36383104.0
+        ],
+        "median": 36353224.0,
+        "spread_percent": 0.27390693051048237
+      },
+      "change_percent": 0.052476792016944274
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/slow_write_32",
+      "metric": "B/op",
+      "baseline": {
+        "rounds": [
+          10749.0,
+          10783.0,
+          10701.0
+        ],
+        "median": 10749.0,
+        "spread_percent": 0.7628616615499116
+      },
+      "candidate": {
+        "rounds": [
+          10824.0,
+          10677.0,
+          10855.0
+        ],
+        "median": 10824.0,
+        "spread_percent": 1.6444937176644494
+      },
+      "change_percent": 0.6977393245883338
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/slow_write_32",
+      "metric": "MB/s",
+      "baseline": {
+        "rounds": [
+          0.1,
+          0.09,
+          0.1
+        ],
+        "median": 0.1,
+        "spread_percent": 10.000000000000009
+      },
+      "candidate": {
+        "rounds": [
+          0.09,
+          0.1,
+          0.1
+        ],
+        "median": 0.1,
+        "spread_percent": 10.000000000000009
+      },
+      "change_percent": 0.0
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/slow_write_32",
+      "metric": "allocs/op",
+      "baseline": {
+        "rounds": [
+          117.0,
+          117.0,
+          117.0
+        ],
+        "median": 117.0,
+        "spread_percent": 0.0
+      },
+      "candidate": {
+        "rounds": [
+          117.0,
+          117.0,
+          117.0
+        ],
+        "median": 117.0,
+        "spread_percent": 0.0
+      },
+      "change_percent": 0.0
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/slow_write_32",
+      "metric": "first-write-ns/op",
+      "baseline": {
+        "rounds": [
+          1173879.0,
+          1194195.0,
+          1163838.0
+        ],
+        "median": 1173879.0,
+        "spread_percent": 2.586041661874861
+      },
+      "candidate": {
+        "rounds": [
+          1184942.0,
+          1165124.0,
+          1156978.0
+        ],
+        "median": 1165124.0,
+        "spread_percent": 2.400087887641144
+      },
+      "change_percent": -0.7458179250161218
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/slow_write_32",
+      "metric": "ns/op",
+      "baseline": {
+        "rounds": [
+          36600213.0,
+          36837760.0,
+          36710284.0
+        ],
+        "median": 36710284.0,
+        "spread_percent": 0.6470857049212695
+      },
+      "candidate": {
+        "rounds": [
+          36804642.0,
+          36699255.0,
+          36698776.0
+        ],
+        "median": 36699255.0,
+        "spread_percent": 0.28846907110239706
+      },
+      "change_percent": -0.03004335242952629
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/slow_write_32",
+      "metric": "p95-ns",
+      "baseline": {
+        "rounds": [
+          36901631.0,
+          37696552.0,
+          36990788.0
+        ],
+        "median": 36990788.0,
+        "spread_percent": 2.1489701706273463
+      },
+      "candidate": {
+        "rounds": [
+          37179610.0,
+          36924925.0,
+          36929088.0
+        ],
+        "median": 36929088.0,
+        "spread_percent": 0.6896595984173777
+      },
+      "change_percent": -0.16679828502166538
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/slow_write_32",
+      "metric": "write-ns/op",
+      "baseline": {
+        "rounds": [
+          36227646.0,
+          36392986.0,
+          36319962.0
+        ],
+        "median": 36319962.0,
+        "spread_percent": 0.4552317538217689
+      },
+      "candidate": {
+        "rounds": [
+          36395432.0,
+          36335775.0,
+          36332409.0
+        ],
+        "median": 36335775.0,
+        "spread_percent": 0.17344614226612753
+      },
+      "change_percent": 0.04353804114662895
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/terminal_1MiB",
+      "metric": "B/op",
+      "baseline": {
+        "rounds": [
+          6765684.0,
+          6765672.0,
+          6765672.0
+        ],
+        "median": 6765672.0,
+        "spread_percent": 0.00017736597340219863
+      },
+      "candidate": {
+        "rounds": [
+          6765672.0,
+          6765708.0,
+          6765672.0
+        ],
+        "median": 6765672.0,
+        "spread_percent": 0.0005320979202065959
+      },
+      "change_percent": 0.0
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/terminal_1MiB",
+      "metric": "MB/s",
+      "baseline": {
+        "rounds": [
+          123.01,
+          134.34,
+          123.95
+        ],
+        "median": 123.95,
+        "spread_percent": 9.140782573618392
+      },
+      "candidate": {
+        "rounds": [
+          134.69,
+          166.15,
+          149.66
+        ],
+        "median": 149.66,
+        "spread_percent": 21.02098089001738
+      },
+      "change_percent": 20.742234772085514
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/terminal_1MiB",
+      "metric": "allocs/op",
+      "baseline": {
+        "rounds": [
+          86.0,
+          86.0,
+          86.0
+        ],
+        "median": 86.0,
+        "spread_percent": 0.0
+      },
+      "candidate": {
+        "rounds": [
+          86.0,
+          86.0,
+          86.0
+        ],
+        "median": 86.0,
+        "spread_percent": 0.0
+      },
+      "change_percent": 0.0
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/terminal_1MiB",
+      "metric": "first-write-ns/op",
+      "baseline": {
+        "rounds": [
+          45546.0,
+          58496.0,
+          60571.0
+        ],
+        "median": 58496.0,
+        "spread_percent": 25.685516958424508
+      },
+      "candidate": {
+        "rounds": [
+          49333.0,
+          40147.0,
+          53808.0
+        ],
+        "median": 49333.0,
+        "spread_percent": 27.691403320292704
+      },
+      "change_percent": -15.664318927789934
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/terminal_1MiB",
+      "metric": "ns/op",
+      "baseline": {
+        "rounds": [
+          8529851.0,
+          7810471.0,
+          8464905.0
+        ],
+        "median": 8464905.0,
+        "spread_percent": 8.498382439023239
+      },
+      "candidate": {
+        "rounds": [
+          7790015.0,
+          6314810.0,
+          7010809.0
+        ],
+        "median": 7010809.0,
+        "spread_percent": 21.041865496549686
+      },
+      "change_percent": -17.177936432836518
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/terminal_1MiB",
+      "metric": "p95-ns",
+      "baseline": {
+        "rounds": [
+          13119183.0,
+          11145053.0,
+          10797951.0
+        ],
+        "median": 11145053.0,
+        "spread_percent": 20.827464885092965
+      },
+      "candidate": {
+        "rounds": [
+          11158435.0,
+          7574280.0,
+          9105988.0
+        ],
+        "median": 9105988.0,
+        "spread_percent": 39.36041866077574
+      },
+      "change_percent": -18.295695857166404
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/terminal_1MiB",
+      "metric": "write-ns/op",
+      "baseline": {
+        "rounds": [
+          771.6,
+          855.1,
+          932.5
+        ],
+        "median": 855.1,
+        "spread_percent": 18.816512688574434
+      },
+      "candidate": {
+        "rounds": [
+          742.5,
+          633.5,
+          930.8
+        ],
+        "median": 742.5,
+        "spread_percent": 40.040404040404034
+      },
+      "change_percent": -13.168050520406972
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/terminal_1MiB",
+      "metric": "B/op",
+      "baseline": {
+        "rounds": [
+          6766288.0,
+          6766288.0,
+          6766288.0
+        ],
+        "median": 6766288.0,
+        "spread_percent": 0.0
+      },
+      "candidate": {
+        "rounds": [
+          6766288.0,
+          6766288.0,
+          6766311.0
+        ],
+        "median": 6766288.0,
+        "spread_percent": 0.00033992049998462966
+      },
+      "change_percent": 0.0
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/terminal_1MiB",
+      "metric": "MB/s",
+      "baseline": {
+        "rounds": [
+          146.02,
+          129.67,
+          122.53
+        ],
+        "median": 129.67,
+        "spread_percent": 18.11521554715818
+      },
+      "candidate": {
+        "rounds": [
+          141.48,
+          161.1,
+          145.11
+        ],
+        "median": 145.11,
+        "spread_percent": 13.520777341327271
+      },
+      "change_percent": 11.907148916480319
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/terminal_1MiB",
+      "metric": "allocs/op",
+      "baseline": {
+        "rounds": [
+          95.0,
+          95.0,
+          95.0
+        ],
+        "median": 95.0,
+        "spread_percent": 0.0
+      },
+      "candidate": {
+        "rounds": [
+          95.0,
+          95.0,
+          95.0
+        ],
+        "median": 95.0,
+        "spread_percent": 0.0
+      },
+      "change_percent": 0.0
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/terminal_1MiB",
+      "metric": "first-write-ns/op",
+      "baseline": {
+        "rounds": [
+          53550.0,
+          59408.0,
+          59670.0
+        ],
+        "median": 59408.0,
+        "spread_percent": 10.301642876380285
+      },
+      "candidate": {
+        "rounds": [
+          50728.0,
+          44224.0,
+          50495.0
+        ],
+        "median": 50495.0,
+        "spread_percent": 12.880483216160016
+      },
+      "change_percent": -15.00302989496364
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/terminal_1MiB",
+      "metric": "ns/op",
+      "baseline": {
+        "rounds": [
+          7185377.0,
+          8091528.0,
+          8562816.0
+        ],
+        "median": 8091528.0,
+        "spread_percent": 17.02322478523216
+      },
+      "candidate": {
+        "rounds": [
+          7416198.0,
+          6512919.0,
+          7230570.0
+        ],
+        "median": 7230570.0,
+        "spread_percent": 12.492500591239695
+      },
+      "change_percent": -10.640240013999827
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/terminal_1MiB",
+      "metric": "p95-ns",
+      "baseline": {
+        "rounds": [
+          8724050.0,
+          10151900.0,
+          10381679.0
+        ],
+        "median": 10151900.0,
+        "spread_percent": 16.32826367478009
+      },
+      "candidate": {
+        "rounds": [
+          11550382.0,
+          7715230.0,
+          9568635.0
+        ],
+        "median": 9568635.0,
+        "spread_percent": 40.08045034636602
+      },
+      "change_percent": -5.74537771254642
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/terminal_1MiB",
+      "metric": "write-ns/op",
+      "baseline": {
+        "rounds": [
+          752.0,
+          1023.0,
+          1077.0
+        ],
+        "median": 1023.0,
+        "spread_percent": 31.76930596285435
+      },
+      "candidate": {
+        "rounds": [
+          763.4,
+          658.8,
+          2358.0
+        ],
+        "median": 763.4,
+        "spread_percent": 222.58318050825255
+      },
+      "change_percent": -25.376344086021508
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/terminal_8MiB",
+      "metric": "B/op",
+      "baseline": {
+        "rounds": [
+          53353633.0,
+          53353599.0,
+          53353598.0
+        ],
+        "median": 53353599.0,
+        "spread_percent": 6.560007320218454e-05
+      },
+      "candidate": {
+        "rounds": [
+          53353580.0,
+          53353632.0,
+          53353658.0
+        ],
+        "median": 53353632.0,
+        "spread_percent": 0.00014619435842718262
+      },
+      "change_percent": 6.185149759063114e-05
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/terminal_8MiB",
+      "metric": "MB/s",
+      "baseline": {
+        "rounds": [
+          146.54,
+          151.45,
+          149.61
+        ],
+        "median": 149.61,
+        "spread_percent": 3.281866185415411
+      },
+      "candidate": {
+        "rounds": [
+          168.8,
+          177.6,
+          165.83
+        ],
+        "median": 168.8,
+        "spread_percent": 6.972748815165866
+      },
+      "change_percent": 12.826682708375106
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/terminal_8MiB",
+      "metric": "allocs/op",
+      "baseline": {
+        "rounds": [
+          95.0,
+          95.0,
+          95.0
+        ],
+        "median": 95.0,
+        "spread_percent": 0.0
+      },
+      "candidate": {
+        "rounds": [
+          95.0,
+          95.0,
+          95.0
+        ],
+        "median": 95.0,
+        "spread_percent": 0.0
+      },
+      "change_percent": 0.0
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/terminal_8MiB",
+      "metric": "first-write-ns/op",
+      "baseline": {
+        "rounds": [
+          66948.0,
+          68884.0,
+          69037.0
+        ],
+        "median": 68884.0,
+        "spread_percent": 3.0326345740665466
+      },
+      "candidate": {
+        "rounds": [
+          61409.0,
+          65980.0,
+          70831.0
+        ],
+        "median": 65980.0,
+        "spread_percent": 14.280084874204304
+      },
+      "change_percent": -4.215783055571686
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/terminal_8MiB",
+      "metric": "ns/op",
+      "baseline": {
+        "rounds": [
+          57248620.0,
+          55394118.0,
+          56073791.0
+        ],
+        "median": 56073791.0,
+        "spread_percent": 3.3072527591366168
+      },
+      "candidate": {
+        "rounds": [
+          49698400.0,
+          47236599.0,
+          50589848.0
+        ],
+        "median": 49698400.0,
+        "spread_percent": 6.747197092864156
+      },
+      "change_percent": -11.369645045044306
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/terminal_8MiB",
+      "metric": "p95-ns",
+      "baseline": {
+        "rounds": [
+          74991065.0,
+          59567457.0,
+          61054050.0
+        ],
+        "median": 61054050.0,
+        "spread_percent": 25.262219295853427
+      },
+      "candidate": {
+        "rounds": [
+          54094235.0,
+          50538222.0,
+          57974045.0
+        ],
+        "median": 54094235.0,
+        "spread_percent": 13.74605445478617
+      },
+      "change_percent": -11.39943214250324
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/terminal_8MiB",
+      "metric": "write-ns/op",
+      "baseline": {
+        "rounds": [
+          990.8,
+          1046.0,
+          1150.0
+        ],
+        "median": 1046.0,
+        "spread_percent": 15.219885277246657
+      },
+      "candidate": {
+        "rounds": [
+          929.0,
+          1023.0,
+          972.5
+        ],
+        "median": 972.5,
+        "spread_percent": 9.665809768637532
+      },
+      "change_percent": -7.0267686424474185
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/terminal_8MiB",
+      "metric": "B/op",
+      "baseline": {
+        "rounds": [
+          53354279.0,
+          53354208.0,
+          53354233.0
+        ],
+        "median": 53354233.0,
+        "spread_percent": 0.00013307285290747222
+      },
+      "candidate": {
+        "rounds": [
+          53354220.0,
+          53354284.0,
+          53354208.0
+        ],
+        "median": 53354220.0,
+        "spread_percent": 0.00014244421528418933
+      },
+      "change_percent": -2.436545194080477e-05
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/terminal_8MiB",
+      "metric": "MB/s",
+      "baseline": {
+        "rounds": [
+          147.35,
+          142.81,
+          150.34
+        ],
+        "median": 147.35,
+        "spread_percent": 5.110281642348151
+      },
+      "candidate": {
+        "rounds": [
+          173.74,
+          166.56,
+          168.87
+        ],
+        "median": 168.87,
+        "spread_percent": 4.251791318765918
+      },
+      "change_percent": 14.604682728198174
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/terminal_8MiB",
+      "metric": "allocs/op",
+      "baseline": {
+        "rounds": [
+          104.0,
+          104.0,
+          104.0
+        ],
+        "median": 104.0,
+        "spread_percent": 0.0
+      },
+      "candidate": {
+        "rounds": [
+          104.0,
+          104.0,
+          104.0
+        ],
+        "median": 104.0,
+        "spread_percent": 0.0
+      },
+      "change_percent": 0.0
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/terminal_8MiB",
+      "metric": "first-write-ns/op",
+      "baseline": {
+        "rounds": [
+          64523.0,
+          61866.0,
+          69981.0
+        ],
+        "median": 64523.0,
+        "spread_percent": 12.576910559025464
+      },
+      "candidate": {
+        "rounds": [
+          64614.0,
+          71445.0,
+          59481.0
+        ],
+        "median": 64614.0,
+        "spread_percent": 18.516111059522704
+      },
+      "change_percent": 0.141034979774654
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/terminal_8MiB",
+      "metric": "ns/op",
+      "baseline": {
+        "rounds": [
+          56932422.0,
+          58742891.0,
+          55801270.0
+        ],
+        "median": 56932422.0,
+        "spread_percent": 5.166864322055366
+      },
+      "candidate": {
+        "rounds": [
+          48285752.0,
+          50367456.0,
+          49679494.0
+        ],
+        "median": 49679494.0,
+        "spread_percent": 4.190268121490932
+      },
+      "change_percent": -12.739538816739607
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/terminal_8MiB",
+      "metric": "p95-ns",
+      "baseline": {
+        "rounds": [
+          66553331.0,
+          70013858.0,
+          62667514.0
+        ],
+        "median": 66553331.0,
+        "spread_percent": 11.038281464830062
+      },
+      "candidate": {
+        "rounds": [
+          52010760.0,
+          54692620.0,
+          51281105.0
+        ],
+        "median": 52010760.0,
+        "spread_percent": 6.559248509346912
+      },
+      "change_percent": -21.851003971536752
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/terminal_8MiB",
+      "metric": "write-ns/op",
+      "baseline": {
+        "rounds": [
+          935.1,
+          1067.0,
+          1041.0
+        ],
+        "median": 1041.0,
+        "spread_percent": 12.670509125840535
+      },
+      "candidate": {
+        "rounds": [
+          955.2,
+          1047.0,
+          1023.0
+        ],
+        "median": 1023.0,
+        "spread_percent": 8.973607038123163
+      },
+      "change_percent": -1.7291066282420748
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/terminal_32MiB",
+      "metric": "B/op",
+      "baseline": {
+        "rounds": [
+          206527722.0,
+          206527692.0,
+          206527657.0
+        ],
+        "median": 206527692.0,
+        "spread_percent": 3.1472777025949625e-05
+      },
+      "candidate": {
+        "rounds": [
+          206527605.0,
+          206527798.0,
+          206527729.0
+        ],
+        "median": 206527729.0,
+        "spread_percent": 9.344992119678031e-05
+      },
+      "change_percent": 1.7915273076309785e-05
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/terminal_32MiB",
+      "metric": "MB/s",
+      "baseline": {
+        "rounds": [
+          147.09,
+          145.82,
+          156.6
+        ],
+        "median": 147.09,
+        "spread_percent": 7.328846284587668
+      },
+      "candidate": {
+        "rounds": [
+          171.83,
+          144.78,
+          178.43
+        ],
+        "median": 171.83,
+        "spread_percent": 19.583309084560323
+      },
+      "change_percent": 16.819634237541646
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/terminal_32MiB",
+      "metric": "allocs/op",
+      "baseline": {
+        "rounds": [
+          101.0,
+          101.0,
+          101.0
+        ],
+        "median": 101.0,
+        "spread_percent": 0.0
+      },
+      "candidate": {
+        "rounds": [
+          101.0,
+          102.0,
+          101.0
+        ],
+        "median": 101.0,
+        "spread_percent": 0.9900990099009901
+      },
+      "change_percent": 0.0
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/terminal_32MiB",
+      "metric": "first-write-ns/op",
+      "baseline": {
+        "rounds": [
+          73763.0,
+          65571.0,
+          62394.0
+        ],
+        "median": 65571.0,
+        "spread_percent": 17.33845754983148
+      },
+      "candidate": {
+        "rounds": [
+          63180.0,
+          74744.0,
+          66955.0
+        ],
+        "median": 66955.0,
+        "spread_percent": 17.271301620491375
+      },
+      "change_percent": 2.1106891766177123
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/terminal_32MiB",
+      "metric": "ns/op",
+      "baseline": {
+        "rounds": [
+          228128353.0,
+          230111290.0,
+          214271343.0
+        ],
+        "median": 228128353.0,
+        "spread_percent": 6.943436355760654
+      },
+      "candidate": {
+        "rounds": [
+          195283646.0,
+          231759539.0,
+          188060686.0
+        ],
+        "median": 195283646.0,
+        "spread_percent": 22.3771185632206
+      },
+      "change_percent": -14.397468165651466
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/terminal_32MiB",
+      "metric": "p95-ns",
+      "baseline": {
+        "rounds": [
+          275983998.0,
+          251465756.0,
+          234413314.0
+        ],
+        "median": 251465756.0,
+        "spread_percent": 16.531349898790992
+      },
+      "candidate": {
+        "rounds": [
+          221547063.0,
+          291792205.0,
+          205159212.0
+        ],
+        "median": 221547063.0,
+        "spread_percent": 39.10365221135881
+      },
+      "change_percent": -11.897720578701778
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/HTTP/terminal_32MiB",
+      "metric": "write-ns/op",
+      "baseline": {
+        "rounds": [
+          1179.0,
+          974.3,
+          936.7
+        ],
+        "median": 974.3,
+        "spread_percent": 24.869136816175715
+      },
+      "candidate": {
+        "rounds": [
+          906.2,
+          1113.0,
+          1019.0
+        ],
+        "median": 1019.0,
+        "spread_percent": 20.294406280667317
+      },
+      "change_percent": 4.587909268192553
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/terminal_32MiB",
+      "metric": "B/op",
+      "baseline": {
+        "rounds": [
+          206528282.0,
+          206528232.0,
+          206528372.0
+        ],
+        "median": 206528282.0,
+        "spread_percent": 6.778732609609371e-05
+      },
+      "candidate": {
+        "rounds": [
+          206528244.0,
+          206528227.0,
+          206528238.0
+        ],
+        "median": 206528238.0,
+        "spread_percent": 8.231319922460192e-06
+      },
+      "change_percent": -2.130458820162945e-05
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/terminal_32MiB",
+      "metric": "MB/s",
+      "baseline": {
+        "rounds": [
+          136.59,
+          143.49,
+          153.03
+        ],
+        "median": 143.49,
+        "spread_percent": 11.457244407275766
+      },
+      "candidate": {
+        "rounds": [
+          167.13,
+          152.76,
+          160.58
+        ],
+        "median": 160.58,
+        "spread_percent": 8.94881056171379
+      },
+      "change_percent": 11.910237647222806
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/terminal_32MiB",
+      "metric": "allocs/op",
+      "baseline": {
+        "rounds": [
+          110.0,
+          110.0,
+          110.0
+        ],
+        "median": 110.0,
+        "spread_percent": 0.0
+      },
+      "candidate": {
+        "rounds": [
+          110.0,
+          110.0,
+          110.0
+        ],
+        "median": 110.0,
+        "spread_percent": 0.0
+      },
+      "change_percent": 0.0
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/terminal_32MiB",
+      "metric": "first-write-ns/op",
+      "baseline": {
+        "rounds": [
+          69768.0,
+          67720.0,
+          71086.0
+        ],
+        "median": 69768.0,
+        "spread_percent": 4.824561403508772
+      },
+      "candidate": {
+        "rounds": [
+          62861.0,
+          77377.0,
+          69277.0
+        ],
+        "median": 69277.0,
+        "spread_percent": 20.953563231664187
+      },
+      "change_percent": -0.7037610365783741
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/terminal_32MiB",
+      "metric": "ns/op",
+      "baseline": {
+        "rounds": [
+          245655985.0,
+          233851619.0,
+          219267767.0
+        ],
+        "median": 233851619.0,
+        "spread_percent": 11.284171609690674
+      },
+      "candidate": {
+        "rounds": [
+          200772814.0,
+          219665046.0,
+          208960102.0
+        ],
+        "median": 208960102.0,
+        "spread_percent": 9.041071390748076
+      },
+      "change_percent": -10.644149955617797
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/terminal_32MiB",
+      "metric": "p95-ns",
+      "baseline": {
+        "rounds": [
+          347314743.0,
+          246502858.0,
+          233935790.0
+        ],
+        "median": 246502858.0,
+        "spread_percent": 45.99498517781891
+      },
+      "candidate": {
+        "rounds": [
+          220634353.0,
+          240913622.0,
+          252206528.0
+        ],
+        "median": 240913622.0,
+        "spread_percent": 13.105184645806371
+      },
+      "change_percent": -2.267412250449445
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/terminal_32MiB",
+      "metric": "write-ns/op",
+      "baseline": {
+        "rounds": [
+          1489.0,
+          1088.0,
+          1039.0
+        ],
+        "median": 1088.0,
+        "spread_percent": 41.36029411764706
+      },
+      "candidate": {
+        "rounds": [
+          939.1,
+          1073.0,
+          1078.0
+        ],
+        "median": 1073.0,
+        "spread_percent": 12.945013979496736
+      },
+      "change_percent": -1.3786764705882353
+    },
+    {
+      "fixture": "BenchmarkUsageRecordQueueRetainedHeap/ws_replay/queued=32",
+      "metric": "B/op",
+      "baseline": {
+        "rounds": [
+          33731288.0,
+          33731208.0,
+          33731304.0
+        ],
+        "median": 33731288.0,
+        "spread_percent": 0.00028460223635693956
+      },
+      "candidate": {
+        "rounds": [
+          33731224.0,
+          33731240.0,
+          33731320.0
+        ],
+        "median": 33731240.0,
+        "spread_percent": 0.00028460264134968057
+      },
+      "change_percent": -0.00014230111817846978
+    },
+    {
+      "fixture": "BenchmarkUsageRecordQueueRetainedHeap/ws_replay/queued=32",
+      "metric": "allocs/op",
+      "baseline": {
+        "rounds": [
+          668.0,
+          667.0,
+          668.0
+        ],
+        "median": 668.0,
+        "spread_percent": 0.1497005988023952
+      },
+      "candidate": {
+        "rounds": [
+          668.0,
+          669.0,
+          670.0
+        ],
+        "median": 669.0,
+        "spread_percent": 0.29895366218236175
+      },
+      "change_percent": 0.1497005988023952
+    },
+    {
+      "fixture": "BenchmarkUsageRecordQueueRetainedHeap/ws_replay/queued=32",
+      "metric": "ns/op",
+      "baseline": {
+        "rounds": [
+          24135662.0,
+          17534259.0,
+          18572538.0
+        ],
+        "median": 18572538.0,
+        "spread_percent": 35.543892816372214
+      },
+      "candidate": {
+        "rounds": [
+          16259032.0,
+          17066489.0,
+          16718078.0
+        ],
+        "median": 16718078.0,
+        "spread_percent": 4.82984347841899
+      },
+      "change_percent": -9.984957360162623
+    },
+    {
+      "fixture": "BenchmarkUsageRecordQueueRetainedHeap/ws_replay/queued=32",
+      "metric": "retained-B/task",
+      "baseline": {
+        "rounds": [
+          3770.0,
+          3764.0,
+          3774.0
+        ],
+        "median": 3770.0,
+        "spread_percent": 0.26525198938992045
+      },
+      "candidate": {
+        "rounds": [
+          3764.0,
+          3768.0,
+          3767.0
+        ],
+        "median": 3767.0,
+        "spread_percent": 0.10618529333687285
+      },
+      "change_percent": -0.07957559681697612
+    },
+    {
+      "fixture": "BenchmarkUsageRecordQueueRetainedHeap/ws_replay/queued=32",
+      "metric": "retained/payload",
+      "baseline": {
+        "rounds": [
+          0.003596,
+          0.00359,
+          0.003599
+        ],
+        "median": 0.003596,
+        "spread_percent": 0.25027808676307917
+      },
+      "candidate": {
+        "rounds": [
+          0.00359,
+          0.003593,
+          0.003592
+        ],
+        "median": 0.003592,
+        "spread_percent": 0.08351893095768274
+      },
+      "change_percent": -0.1112347052280218
+    },
+    {
+      "fixture": "BenchmarkUsageRecordQueueRetainedHeap/ws_replay/queued=128",
+      "metric": "B/op",
+      "baseline": {
+        "rounds": [
+          134854536.0,
+          134854408.0,
+          134855256.0
+        ],
+        "median": 134854536.0,
+        "spread_percent": 0.0006288257148428437
+      },
+      "candidate": {
+        "rounds": [
+          134855400.0,
+          134855496.0,
+          134854536.0
+        ],
+        "median": 134855400.0,
+        "spread_percent": 0.0007118736068411054
+      },
+      "change_percent": 0.0006406903509719539
+    },
+    {
+      "fixture": "BenchmarkUsageRecordQueueRetainedHeap/ws_replay/queued=128",
+      "metric": "allocs/op",
+      "baseline": {
+        "rounds": [
+          2493.0,
+          2491.0,
+          2494.0
+        ],
+        "median": 2493.0,
+        "spread_percent": 0.12033694344163658
+      },
+      "candidate": {
+        "rounds": [
+          2496.0,
+          2495.0,
+          2492.0
+        ],
+        "median": 2495.0,
+        "spread_percent": 0.16032064128256512
+      },
+      "change_percent": 0.08022462896109106
+    },
+    {
+      "fixture": "BenchmarkUsageRecordQueueRetainedHeap/ws_replay/queued=128",
+      "metric": "ns/op",
+      "baseline": {
+        "rounds": [
+          23843454.0,
+          19414838.0,
+          19594319.0
+        ],
+        "median": 19594319.0,
+        "spread_percent": 22.601530576285914
+      },
+      "candidate": {
+        "rounds": [
+          22205384.0,
+          24734195.0,
+          18927812.0
+        ],
+        "median": 22205384.0,
+        "spread_percent": 26.14853676928082
+      },
+      "change_percent": 13.325622594998071
+    },
+    {
+      "fixture": "BenchmarkUsageRecordQueueRetainedHeap/ws_replay/queued=128",
+      "metric": "retained-B/task",
+      "baseline": {
+        "rounds": [
+          3763.0,
+          3764.0,
+          3764.0
+        ],
+        "median": 3764.0,
+        "spread_percent": 0.026567481402763018
+      },
+      "candidate": {
+        "rounds": [
+          3763.0,
+          3766.0,
+          3764.0
+        ],
+        "median": 3764.0,
+        "spread_percent": 0.07970244420828905
+      },
+      "change_percent": 0.0
+    },
+    {
+      "fixture": "BenchmarkUsageRecordQueueRetainedHeap/ws_replay/queued=128",
+      "metric": "retained/payload",
+      "baseline": {
+        "rounds": [
+          0.003589,
+          0.00359,
+          0.003589
+        ],
+        "median": 0.003589,
+        "spread_percent": 0.02786291446084422
+      },
+      "candidate": {
+        "rounds": [
+          0.003588,
+          0.003591,
+          0.00359
+        ],
+        "median": 0.00359,
+        "spread_percent": 0.08356545961002687
+      },
+      "change_percent": 0.02786291446084422
+    },
+    {
+      "fixture": "BenchmarkUsageRecordQueueRetainedHeap/systemone_response/queued=32",
+      "metric": "B/op",
+      "baseline": {
+        "rounds": [
+          33714408.0,
+          33715096.0,
+          33714936.0
+        ],
+        "median": 33714936.0,
+        "spread_percent": 0.0020406386059875657
+      },
+      "candidate": {
+        "rounds": [
+          33714008.0,
+          33714264.0,
+          33713560.0
+        ],
+        "median": 33714008.0,
+        "spread_percent": 0.002088152793936574
+      },
+      "change_percent": -0.0027524892824948564
+    },
+    {
+      "fixture": "BenchmarkUsageRecordQueueRetainedHeap/systemone_response/queued=32",
+      "metric": "allocs/op",
+      "baseline": {
+        "rounds": [
+          630.0,
+          633.0,
+          632.0
+        ],
+        "median": 632.0,
+        "spread_percent": 0.47468354430379744
+      },
+      "candidate": {
+        "rounds": [
+          627.0,
+          630.0,
+          627.0
+        ],
+        "median": 627.0,
+        "spread_percent": 0.4784688995215311
+      },
+      "change_percent": -0.7911392405063291
+    },
+    {
+      "fixture": "BenchmarkUsageRecordQueueRetainedHeap/systemone_response/queued=32",
+      "metric": "ns/op",
+      "baseline": {
+        "rounds": [
+          9408182.0,
+          8210012.0,
+          9061115.0
+        ],
+        "median": 9061115.0,
+        "spread_percent": 13.223207077716154
+      },
+      "candidate": {
+        "rounds": [
+          8541470.0,
+          8697241.0,
+          9542153.0
+        ],
+        "median": 8697241.0,
+        "spread_percent": 11.505752226481938
+      },
+      "change_percent": -4.015775100525708
+    },
+    {
+      "fixture": "BenchmarkUsageRecordQueueRetainedHeap/systemone_response/queued=32",
+      "metric": "retained-B/task",
+      "baseline": {
+        "rounds": [
+          3518.0,
+          3515.0,
+          3515.0
+        ],
+        "median": 3515.0,
+        "spread_percent": 0.08534850640113797
+      },
+      "candidate": {
+        "rounds": [
+          3515.0,
+          3522.0,
+          3515.0
+        ],
+        "median": 3515.0,
+        "spread_percent": 0.19914651493598862
+      },
+      "change_percent": 0.0
+    },
+    {
+      "fixture": "BenchmarkUsageRecordQueueRetainedHeap/systemone_response/queued=32",
+      "metric": "retained/payload",
+      "baseline": {
+        "rounds": [
+          0.003355,
+          0.003352,
+          0.003352
+        ],
+        "median": 0.003352,
+        "spread_percent": 0.08949880668257651
+      },
+      "candidate": {
+        "rounds": [
+          0.003352,
+          0.003359,
+          0.003352
+        ],
+        "median": 0.003352,
+        "spread_percent": 0.20883054892601616
+      },
+      "change_percent": 0.0
+    },
+    {
+      "fixture": "BenchmarkUsageRecordQueueRetainedHeap/systemone_response/queued=128",
+      "metric": "B/op",
+      "baseline": {
+        "rounds": [
+          134790664.0,
+          134790744.0,
+          134790808.0
+        ],
+        "median": 134790744.0,
+        "spread_percent": 0.00010683226141996812
+      },
+      "candidate": {
+        "rounds": [
+          134791256.0,
+          134790744.0,
+          134791064.0
+        ],
+        "median": 134791064.0,
+        "spread_percent": 0.0003798471388281348
+      },
+      "change_percent": 0.00023740502537770696
+    },
+    {
+      "fixture": "BenchmarkUsageRecordQueueRetainedHeap/systemone_response/queued=128",
+      "metric": "allocs/op",
+      "baseline": {
+        "rounds": [
+          2360.0,
+          2364.0,
+          2362.0
+        ],
+        "median": 2362.0,
+        "spread_percent": 0.1693480101608806
+      },
+      "candidate": {
+        "rounds": [
+          2362.0,
+          2364.0,
+          2363.0
+        ],
+        "median": 2363.0,
+        "spread_percent": 0.08463817181548879
+      },
+      "change_percent": 0.04233700254022015
+    },
+    {
+      "fixture": "BenchmarkUsageRecordQueueRetainedHeap/systemone_response/queued=128",
+      "metric": "ns/op",
+      "baseline": {
+        "rounds": [
+          21821634.0,
+          17151911.0,
+          19829661.0
+        ],
+        "median": 19829661.0,
+        "spread_percent": 23.549182207401326
+      },
+      "candidate": {
+        "rounds": [
+          20244993.0,
+          25404426.0,
+          19168226.0
+        ],
+        "median": 20244993.0,
+        "spread_percent": 30.803665874322604
+      },
+      "change_percent": 2.094498741052608
+    },
+    {
+      "fixture": "BenchmarkUsageRecordQueueRetainedHeap/systemone_response/queued=128",
+      "metric": "retained-B/task",
+      "baseline": {
+        "rounds": [
+          3514.0,
+          3517.0,
+          3515.0
+        ],
+        "median": 3515.0,
+        "spread_percent": 0.08534850640113797
+      },
+      "candidate": {
+        "rounds": [
+          3515.0,
+          3517.0,
+          3514.0
+        ],
+        "median": 3515.0,
+        "spread_percent": 0.08534850640113797
+      },
+      "change_percent": 0.0
+    },
+    {
+      "fixture": "BenchmarkUsageRecordQueueRetainedHeap/systemone_response/queued=128",
+      "metric": "retained/payload",
+      "baseline": {
+        "rounds": [
+          0.003351,
+          0.003354,
+          0.003352
+        ],
+        "median": 0.003352,
+        "spread_percent": 0.08949880668258944
+      },
+      "candidate": {
+        "rounds": [
+          0.003352,
+          0.003354,
+          0.003351
+        ],
+        "median": 0.003352,
+        "spread_percent": 0.08949880668258944
+      },
+      "change_percent": 0.0
+    },
+    {
+      "fixture": "BenchmarkUsageRecordQueueRetainedHeap/grok_request/queued=32",
+      "metric": "B/op",
+      "baseline": {
+        "rounds": [
+          33713752.0,
+          33714680.0,
+          33713560.0
+        ],
+        "median": 33713752.0,
+        "spread_percent": 0.0033220864886233962
+      },
+      "candidate": {
+        "rounds": [
+          33714008.0,
+          33714344.0,
+          33713640.0
+        ],
+        "median": 33714008.0,
+        "spread_percent": 0.002088152793936574
+      },
+      "change_percent": 0.0007593340545424906
+    },
+    {
+      "fixture": "BenchmarkUsageRecordQueueRetainedHeap/grok_request/queued=32",
+      "metric": "allocs/op",
+      "baseline": {
+        "rounds": [
+          628.0,
+          633.0,
+          627.0
+        ],
+        "median": 628.0,
+        "spread_percent": 0.9554140127388535
+      },
+      "candidate": {
+        "rounds": [
+          627.0,
+          630.0,
+          627.0
+        ],
+        "median": 627.0,
+        "spread_percent": 0.4784688995215311
+      },
+      "change_percent": -0.1592356687898089
+    },
+    {
+      "fixture": "BenchmarkUsageRecordQueueRetainedHeap/grok_request/queued=32",
+      "metric": "ns/op",
+      "baseline": {
+        "rounds": [
+          28279003.0,
+          25894483.0,
+          25890791.0
+        ],
+        "median": 25894483.0,
+        "spread_percent": 9.222860328974322
+      },
+      "candidate": {
+        "rounds": [
+          25525426.0,
+          27291783.0,
+          25285911.0
+        ],
+        "median": 25525426.0,
+        "spread_percent": 7.858329181264203
+      },
+      "change_percent": -1.425234093300878
+    },
+    {
+      "fixture": "BenchmarkUsageRecordQueueRetainedHeap/grok_request/queued=32",
+      "metric": "retained-B/task",
+      "baseline": {
+        "rounds": [
+          3823.0,
+          3826.0,
+          3819.0
+        ],
+        "median": 3823.0,
+        "spread_percent": 0.18310227569971227
+      },
+      "candidate": {
+        "rounds": [
+          3819.0,
+          3823.0,
+          3823.0
+        ],
+        "median": 3823.0,
+        "spread_percent": 0.10462987182840701
+      },
+      "change_percent": 0.0
+    },
+    {
+      "fixture": "BenchmarkUsageRecordQueueRetainedHeap/grok_request/queued=32",
+      "metric": "retained/payload",
+      "baseline": {
+        "rounds": [
+          0.003646,
+          0.003649,
+          0.003642
+        ],
+        "median": 0.003646,
+        "spread_percent": 0.19199122325836704
+      },
+      "candidate": {
+        "rounds": [
+          0.003642,
+          0.003646,
+          0.003646
+        ],
+        "median": 0.003646,
+        "spread_percent": 0.10970927043335428
+      },
+      "change_percent": 0.0
+    },
+    {
+      "fixture": "BenchmarkUsageRecordQueueRetainedHeap/grok_request/queued=128",
+      "metric": "B/op",
+      "baseline": {
+        "rounds": [
+          134790888.0,
+          134790184.0,
+          134790104.0
+        ],
+        "median": 134790184.0,
+        "spread_percent": 0.0005816447286695595
+      },
+      "candidate": {
+        "rounds": [
+          134790552.0,
+          134791144.0,
+          134790920.0
+        ],
+        "median": 134790920.0,
+        "spread_percent": 0.0004391987234748453
+      },
+      "change_percent": 0.0005460338269142803
+    },
+    {
+      "fixture": "BenchmarkUsageRecordQueueRetainedHeap/grok_request/queued=128",
+      "metric": "allocs/op",
+      "baseline": {
+        "rounds": [
+          2362.0,
+          2359.0,
+          2359.0
+        ],
+        "median": 2359.0,
+        "spread_percent": 0.1271725307333616
+      },
+      "candidate": {
+        "rounds": [
+          2363.0,
+          2365.0,
+          2363.0
+        ],
+        "median": 2363.0,
+        "spread_percent": 0.08463817181548879
+      },
+      "change_percent": 0.1695633743111488
+    },
+    {
+      "fixture": "BenchmarkUsageRecordQueueRetainedHeap/grok_request/queued=128",
+      "metric": "ns/op",
+      "baseline": {
+        "rounds": [
+          78014847.0,
+          74380352.0,
+          75530656.0
+        ],
+        "median": 75530656.0,
+        "spread_percent": 4.8119468206392915
+      },
+      "candidate": {
+        "rounds": [
+          74338175.0,
+          76752237.0,
+          76554817.0
+        ],
+        "median": 76554817.0,
+        "spread_percent": 3.153377010880974
+      },
+      "change_percent": 1.3559540645324197
+    },
+    {
+      "fixture": "BenchmarkUsageRecordQueueRetainedHeap/grok_request/queued=128",
+      "metric": "retained-B/task",
+      "baseline": {
+        "rounds": [
+          3819.0,
+          3819.0,
+          3818.0
+        ],
+        "median": 3819.0,
+        "spread_percent": 0.026184865147944488
+      },
+      "candidate": {
+        "rounds": [
+          3820.0,
+          3819.0,
+          3820.0
+        ],
+        "median": 3820.0,
+        "spread_percent": 0.02617801047120419
+      },
+      "change_percent": 0.026184865147944488
+    },
+    {
+      "fixture": "BenchmarkUsageRecordQueueRetainedHeap/grok_request/queued=128",
+      "metric": "retained/payload",
+      "baseline": {
+        "rounds": [
+          0.003642,
+          0.003642,
+          0.003641
+        ],
+        "median": 0.003642,
+        "spread_percent": 0.02745744096649366
+      },
+      "candidate": {
+        "rounds": [
+          0.003643,
+          0.003642,
+          0.003643
+        ],
+        "median": 0.003643,
+        "spread_percent": 0.027449903925339907
+      },
+      "change_percent": 0.027457440966505566
+    }
+  ],
+  "process_resources": {
+    "cache": {
+      "baseline": {
+        "Maximum resident set size (kbytes)": [
+          381080.0,
+          380732.0,
+          387512.0
+        ],
+        "User time (seconds)": [
+          8.11,
+          7.95,
+          7.96
+        ],
+        "System time (seconds)": [
+          8.75,
+          8.7,
+          8.43
+        ]
+      },
+      "candidate": {
+        "Maximum resident set size (kbytes)": [
+          389688.0,
+          387276.0,
+          388604.0
+        ],
+        "User time (seconds)": [
+          8.04,
+          8.0,
+          8.52
+        ],
+        "System time (seconds)": [
+          8.91,
+          8.61,
+          8.89
+        ]
+      }
+    },
+    "sse": {
+      "baseline": {
+        "Maximum resident set size (kbytes)": [
+          353468.0,
+          379712.0,
+          377524.0
+        ],
+        "User time (seconds)": [
+          12.65,
+          12.57,
+          11.94
+        ],
+        "System time (seconds)": [
+          1.52,
+          1.27,
+          1.0
+        ]
+      },
+      "candidate": {
+        "Maximum resident set size (kbytes)": [
+          350760.0,
+          379404.0,
+          379788.0
+        ],
+        "User time (seconds)": [
+          10.78,
+          11.66,
+          10.87
+        ],
+        "System time (seconds)": [
+          1.06,
+          1.37,
+          1.07
+        ]
+      }
+    },
+    "billing": {
+      "baseline": {
+        "Maximum resident set size (kbytes)": [
+          61336.0,
+          70132.0,
+          71096.0
+        ],
+        "User time (seconds)": [
+          0.24,
+          0.22,
+          0.26
+        ],
+        "System time (seconds)": [
+          0.2,
+          0.16,
+          0.14
+        ]
+      },
+      "candidate": {
+        "Maximum resident set size (kbytes)": [
+          64304.0,
+          64156.0,
+          64200.0
+        ],
+        "User time (seconds)": [
+          0.22,
+          0.3,
+          0.27
+        ],
+        "System time (seconds)": [
+          0.19,
+          0.13,
+          0.14
+        ]
+      }
+    }
+  }
+}

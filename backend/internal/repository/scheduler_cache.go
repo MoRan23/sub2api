@@ -1402,6 +1402,8 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		service.OpenAIDaybreakBlueEnabledKey,
 		service.OpenAIDaybreakRedEnabledKey,
 		"openai_oauth_passthrough",
+		// 生图尺寸档位在候选过滤阶段按本投影判定，裁掉后受限账号会接到不允许的档位。
+		service.AccountExtraOpenAIImageSizeTiers,
 		"codex_5h_used_percent",
 		"codex_7d_used_percent",
 		"codex_5h_reset_at",

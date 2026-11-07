@@ -107,3 +107,29 @@ func TestRegistrationInvitationExistingOAuthLoginDoesNotRequireAdmission(t *test
 	require.NoError(t, err)
 	require.Equal(t, existing.ID, user.ID)
 }
+
+func TestRegistrationBlacklistPreservesInvitationAdmission(t *testing.T) {
+	for _, flow := range []string{"email", "verified_oauth"} {
+		for _, code := range []string{"REFERRAL", "LEGACY"} {
+			t.Run(flow+"/"+code, func(t *testing.T) {
+				svc := newRegistrationInvitationTestService()
+				svc.settingService.settingRepo.(*settingRepoStub).values[SettingKeyRegistrationEmailBlacklist] = `["blocked.user@gmail.com"]`
+				ctx := context.Background()
+				var err error
+				if flow == "email" {
+					_, _, err = svc.RegisterWithVerification(ctx, "blockeduser+x@googlemail.com", "password", "", "", code, "")
+				} else {
+					_, err = svc.createEmailOAuthUser(ctx, "blockeduser+x@googlemail.com", "Blocked", "oidc", code, "")
+				}
+				require.ErrorIs(t, err, ErrEmailBlocked)
+				users := svc.userRepo.(*raceSafeUserRepo)
+				require.Len(t, users.byID, 2, "a rejected signup must not create a user")
+				require.Empty(t, users.byEmail)
+				require.Empty(t, svc.redeemRepo.(*redeemCodeRepoStub).useCalls, "a rejected signup must not consume a legacy invitation")
+				admission, err := svc.resolveRegistrationInvitation(ctx, code, "")
+				require.NoError(t, err)
+				require.NotNil(t, admission)
+			})
+		}
+	}
+}

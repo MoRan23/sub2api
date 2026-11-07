@@ -1,0 +1,28 @@
+{
+  "baseline": "b41bb98fb7313b33d7c18bc0e72d6e3d7db86094",
+  "upstream": "6b4b37db43443b5e88e424fe3c69602cc3810dfb",
+  "candidate": "merge working tree including compatibility fixes",
+  "go": "go1.27.3",
+  "goexperiment": "greenteagc,jsonv2",
+  "gomaxprocs": 4,
+  "phases": {
+    "cache": [
+      "repository",
+      "^BenchmarkSchedulerCacheReadSharing$",
+      "100x"
+    ],
+    "sse": [
+      "service",
+      "^BenchmarkCodexEngineRelay$",
+      "20x"
+    ],
+    "billing": [
+      "service",
+      "^BenchmarkUsageRecordQueueRetainedHeap$",
+      "1x"
+    ]
+  },
+  "rounds": 3,
+  "order": "alternating baseline/candidate per phase and round",
+  "os": "Linux amd64, WSL Ubuntu-24.04"
+}

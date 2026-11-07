@@ -1,0 +1,70 @@
+{
+  "baseline": "b41bb98fb7313b33d7c18bc0e72d6e3d7db86094",
+  "upstream": "6b4b37db43443b5e88e424fe3c69602cc3810dfb",
+  "go": "1.27.3",
+  "frontend": {
+    "files": 437,
+    "tests": 3750,
+    "typecheck": "passed",
+    "production_build": "passed",
+    "changed_file_eslint": "passed",
+    "frozen_lockfile_install": "passed"
+  },
+  "backend": {
+    "linux_build": "passed",
+    "targeted_race": "passed",
+    "remote_CI": "not run; repository Actions disabled",
+    "affected_service_top_level_pass": 882,
+    "affected_service_note": "881 passed in changed-file batches; previous-response size-routing case repaired and final targeted rerun passed."
+  },
+  "broad_unit": {
+    "repository": {
+      "top_level_pass": 850,
+      "total_pass_including_subtests": 1680,
+      "skipped": 16,
+      "known_baseline_failures_excluded": true
+    },
+    "handler": {
+      "top_level_pass": 1007,
+      "total_pass_including_subtests": 2059,
+      "skipped": 1,
+      "known_baseline_failures_excluded": true
+    },
+    "server-middleware": {
+      "top_level_pass": 194,
+      "total_pass_including_subtests": 544,
+      "skipped": 0,
+      "known_baseline_failures_excluded": true
+    }
+  },
+  "integration_local_customizations": [
+    {
+      "log": "local-customizations-build.log",
+      "exit_code": 0,
+      "pass": 0,
+      "fail": 0,
+      "skip": 0,
+      "top_level_pass": 0,
+      "failed_tests": []
+    },
+    {
+      "log": "local-customizations-integration.log",
+      "exit_code": 0,
+      "pass": 91,
+      "fail": 0,
+      "skip": 0,
+      "top_level_pass": 45,
+      "failed_tests": []
+    },
+    {
+      "log": "local-wallet-daybreak-integration.log",
+      "exit_code": 0,
+      "pass": 29,
+      "fail": 0,
+      "skip": 0,
+      "top_level_pass": 4,
+      "failed_tests": []
+    }
+  ],
+  "limitations": "See docs/merge-upstream-v0.2.20.md for independently reproduced baseline failures and the loopback-only DNS case. Full historical suite is not labelled passing."
+}

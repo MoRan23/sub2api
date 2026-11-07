@@ -217,3 +217,36 @@ func TestOpenAIImagesComplexityErrorDoesNotDropOptionsOnFallback(t *testing.T) {
 		})
 	}
 }
+
+func TestOpenAIImagesLegacyFallbackKeepsComplexityAndOutputFormat(t *testing.T) {
+	for _, outputFormat := range []string{"png", "gif", "svg"} {
+		t.Run(outputFormat, func(t *testing.T) {
+			calls := 0
+			upstream := &codexModelsHTTPUpstreamStub{do: func(req *http.Request, _ string, _ int64, _ int) (*http.Response, error) {
+				calls++
+				body, err := io.ReadAll(req.Body)
+				require.NoError(t, err)
+				if calls == 1 {
+					require.Equal(t, "/backend-api/codex/images/generations", req.URL.Path)
+					require.Equal(t, "low", gjson.GetBytes(body, "complexity").String())
+					return &http.Response{StatusCode: http.StatusNotFound, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(`{"error":{"message":"Images endpoint unavailable"}}`))}, nil
+				}
+				require.Equal(t, "/backend-api/codex/responses", req.URL.Path)
+				require.Equal(t, "low", gjson.GetBytes(body, "tools.0.complexity").String())
+				require.Equal(t, "high", gjson.GetBytes(body, "tools.0.quality").String())
+				require.Equal(t, outputFormat, gjson.GetBytes(body, "tools.0.output_format").String())
+				require.Equal(t, "medium", gjson.GetBytes(body, "reasoning.effort").String())
+				return &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader("data: {\"type\":\"response.completed\",\"response\":{\"output\":[{\"type\":\"image_generation_call\",\"result\":\"aGVsbG8=\"}]}}\n\n"))}, nil
+			}}
+			body := []byte(fmt.Sprintf(`{"model":"gpt-image-2.5-flare","prompt":"draw","complexity":"low","quality":"high","output_format":%q}`, outputFormat))
+			c, _ := newOpenAIImagesTestContext(t, body)
+			svc := newOpenAIImagesTestService(upstream)
+			parsed, err := svc.ParseOpenAIImagesRequest(c, body)
+			require.NoError(t, err)
+			result, err := svc.ForwardImages(context.Background(), c, directImagesTestAccount(), body, parsed, "")
+			require.NoError(t, err)
+			require.Equal(t, 2, calls)
+			require.Equal(t, 1, result.ImageCount)
+		})
+	}
+}

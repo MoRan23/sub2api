@@ -53,6 +53,8 @@ describe('useModelWhitelist', () => {
     expect(models.filter(model => model.startsWith('gpt-6'))).toEqual([
       'gpt-6', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-sol', 'gpt-6-luna'
     ])
+    expect(models).toContain('gpt-image-2.6-flare')
+    expect(models).toContain('gpt-image-2.6-sunburst')
   })
 
   it('openai 预设映射包含 GPT-6 别名及 GPT-6.1 Sol / Terra', () => {

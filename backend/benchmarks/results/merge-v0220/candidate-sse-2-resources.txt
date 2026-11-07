@@ -1,0 +1,23 @@
+	Command being timed: "env GOMAXPROCS=4 GIN_MODE=release /mnt/d/Code/sub2api/.git/task-artifacts/merge-v0220/candidate-service.test -test.run=^$ -test.bench=^BenchmarkCodexEngineRelay$ -test.benchmem -test.benchtime=20x -test.count=1 -test.timeout=20m"
+	User time (seconds): 11.66
+	System time (seconds): 1.37
+	Percent of CPU this job got: 94%
+	Elapsed (wall clock) time (h:mm:ss or m:ss): 0:13.79
+	Average shared text size (kbytes): 0
+	Average unshared data size (kbytes): 0
+	Average stack size (kbytes): 0
+	Average total size (kbytes): 0
+	Maximum resident set size (kbytes): 379404
+	Average resident set size (kbytes): 0
+	Major (requiring I/O) page faults: 890
+	Minor (reclaiming a frame) page faults: 401574
+	Voluntary context switches: 12369
+	Involuntary context switches: 1020
+	Swaps: 0
+	File system inputs: 0
+	File system outputs: 0
+	Socket messages sent: 0
+	Socket messages received: 0
+	Signals delivered: 0
+	Page size (bytes): 4096
+	Exit status: 0

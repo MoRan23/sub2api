@@ -1,0 +1,63 @@
+[
+  {
+    "label": "sse-optimized-race",
+    "command": [
+      "go",
+      "test",
+      "-race",
+      "-tags=unit",
+      "-p=1",
+      "./internal/service",
+      "-run",
+      "Test(CodexEngineSSE|CodexEngineWSBorrowedView|SSE|BoundedSSE)",
+      "-count=1",
+      "-timeout=5m"
+    ],
+    "exit_code": 0,
+    "elapsed_seconds": 92.94902340000044
+  },
+  {
+    "label": "sse-optimized-test-build",
+    "command": [
+      "go",
+      "test",
+      "-tags=unit",
+      "-c",
+      "-o",
+      "D:\\Code\\sub2api\\.git\\task-artifacts\\merge-v0220\\optimized-service.test",
+      "./internal/service"
+    ],
+    "exit_code": 0,
+    "elapsed_seconds": 54.47608559999935
+  },
+  {
+    "label": "sse-optimized-backend-build",
+    "command": [
+      "go",
+      "build",
+      "-o",
+      "D:\\Code\\sub2api\\.git\\task-artifacts\\merge-v0220\\optimized-sub2api-linux",
+      "./cmd/server"
+    ],
+    "exit_code": 0,
+    "elapsed_seconds": 26.016787900000054
+  },
+  {
+    "label": "sse-optimized-linux-tests",
+    "command": [
+      "wsl.exe",
+      "-d",
+      "Ubuntu-24.04",
+      "--exec",
+      "env",
+      "GOMAXPROCS=4",
+      "GIN_MODE=release",
+      "/mnt/d/Code/sub2api/.git/task-artifacts/merge-v0220/optimized-service.test",
+      "-test.run=Test(CodexEngineSSE|CodexEngineWSBorrowedView|SSE|BoundedSSE)",
+      "-test.count=1",
+      "-test.timeout=5m"
+    ],
+    "exit_code": 0,
+    "elapsed_seconds": 2.0480582999989565
+  }
+]

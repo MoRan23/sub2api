@@ -62,6 +62,47 @@ func TestCodexEngineSSEFrameViewsPreserveBytesAndEmptyData(t *testing.T) {
 	}
 }
 
+func TestCodexEngineSSEFrameConfiguredEventLimits(t *testing.T) {
+	for _, tc := range []struct {
+		name     string
+		wire     string
+		bytes    int64
+		lines    int
+		exceeded bool
+	}{
+		{"bytes_at_limit", "data: {}\n\n", 9, 2, false},
+		{"bytes_over_limit", "data: {}\n\n", 8, 2, true},
+		{"crlf_bytes_at_limit", "data: {}\r\n\r\n", 10, 1, false},
+		{"crlf_bytes_over_limit", "data: {}\r\n\r\n", 9, 1, true},
+		{"crlf_empty_event", "\r\n", 1, 1, false},
+		{"multiline_bytes", "data: a\ndata: b\n\n", 15, 2, true},
+		{"lines_at_limit", ": ping\ndata: {}\n\n", 64, 2, false},
+		{"comments_count", ": ping\ndata: {}\n\n", 64, 1, true},
+		{"crlf_comments_at_limit", ": ping\r\ndata: {}\r\n\r\n", 18, 2, false},
+		{"crlf_comments_bytes_over_limit", ": ping\r\ndata: {}\r\n\r\n", 17, 2, true},
+		{"crlf_comments_lines_over_limit", ": ping\r\ndata: {}\r\n\r\n", 18, 1, true},
+		{"fragmented_crlf_at_limit", "data: " + strings.Repeat("x", 4090) + "\r\n\r\n", 4098, 1, false},
+		{"fragmented_crlf_over_limit", "data: " + strings.Repeat("x", 4090) + "\r\n\r\n", 4097, 1, true},
+		{"incomplete_line", "data: " + strings.Repeat("x", 8192), 5000, 2, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := &config.Config{Gateway: config.GatewayConfig{SSEEventMaxBytes: tc.bytes, SSEEventMaxLines: tc.lines}}
+			reader := newCodexEngineSSEReader(io.NopCloser(strings.NewReader(tc.wire)), 1<<20, false, cfg)
+			defer reader.stop()
+			frame := <-reader.frames
+			require.NotNil(t, frame)
+			require.Equal(t, tc.exceeded, frame.oversized)
+			if tc.exceeded {
+				require.ErrorIs(t, frame.err, errSSETransportLimit)
+			} else {
+				require.NoError(t, frame.err)
+				require.Equal(t, tc.wire, string(frame.raw))
+			}
+			reader.release(frame)
+		})
+	}
+}
+
 func TestCodexEngineSSEFrameGrowthAndRetention(t *testing.T) {
 	wire := "data: first\ndata: " + strings.Repeat("A", 128<<10) + "\n\n"
 	frame := &codexEngineSSEFrame{}

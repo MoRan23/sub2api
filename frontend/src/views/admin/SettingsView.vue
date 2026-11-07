@@ -1512,6 +1512,9 @@
                 />
               </div>
 
+              <!-- Exact Email Blacklist -->
+              <RegistrationEmailBlacklistEditor />
+
               <!-- Promo Code -->
               <div
                 class="flex items-center justify-between border-t border-gray-100 pt-4 dark:border-dark-700"
@@ -9278,6 +9281,7 @@ import ImageUpload from "@/components/common/ImageUpload.vue";
 import BackupSettings from "@/views/admin/BackupView.vue";
 import EmailTemplateEditor from "@/views/admin/settings/EmailTemplateEditor.vue";
 import AdminUserMultiSelect from "@/views/admin/settings/AdminUserMultiSelect.vue";
+import RegistrationEmailBlacklistEditor from "@/components/admin/settings/RegistrationEmailBlacklistEditor.vue";
 import { useClipboard } from "@/composables/useClipboard";
 import {
   useStepUp,

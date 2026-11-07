@@ -1,0 +1,18 @@
+2026/11/07 10:17:08 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkCodexEngineRelay/HTTP/small_256-4         	      20	    398491 ns/op	  67.23 MB/s	     59387 first-write-ns/op	    542145 p95-ns	      5389 write-ns/op	   16388 B/op	     304 allocs/op
+BenchmarkCodexEngineRelay/WS/small_256-4           	      20	    378279 ns/op	  70.82 MB/s	     14108 first-write-ns/op	    435173 p95-ns	      5469 write-ns/op	   25087 B/op	     565 allocs/op
+BenchmarkCodexEngineRelay/HTTP/multiline_128-4     	      20	    283240 ns/op	  52.56 MB/s	     25897 first-write-ns/op	    305598 p95-ns	      2910 write-ns/op	   12711 B/op	     181 allocs/op
+BenchmarkCodexEngineRelay/WS/multiline_128-4       	      20	    181392 ns/op	  82.07 MB/s	     12410 first-write-ns/op	    226688 p95-ns	      2628 write-ns/op	   17243 B/op	     314 allocs/op
+BenchmarkCodexEngineRelay/HTTP/slow_write_32-4     	      20	  36740512 ns/op	   0.10 MB/s	   1170587 first-write-ns/op	  37074891 p95-ns	  36359804 write-ns/op	    9288 B/op	      80 allocs/op
+BenchmarkCodexEngineRelay/WS/slow_write_32-4       	      20	  36710284 ns/op	   0.10 MB/s	   1163838 first-write-ns/op	  36990788 p95-ns	  36319962 write-ns/op	   10701 B/op	     117 allocs/op
+BenchmarkCodexEngineRelay/HTTP/terminal_1MiB-4     	      20	   8464905 ns/op	 123.95 MB/s	     60571 first-write-ns/op	  10797951 p95-ns	       932.5 write-ns/op	 6765672 B/op	      86 allocs/op
+BenchmarkCodexEngineRelay/WS/terminal_1MiB-4       	      20	   8562816 ns/op	 122.53 MB/s	     59670 first-write-ns/op	  10381679 p95-ns	      1077 write-ns/op	 6766288 B/op	      95 allocs/op
+BenchmarkCodexEngineRelay/HTTP/terminal_8MiB-4     	      20	  56073791 ns/op	 149.61 MB/s	     69037 first-write-ns/op	  61054050 p95-ns	      1150 write-ns/op	53353598 B/op	      95 allocs/op
+BenchmarkCodexEngineRelay/WS/terminal_8MiB-4       	      20	  55801270 ns/op	 150.34 MB/s	     69981 first-write-ns/op	  62667514 p95-ns	      1041 write-ns/op	53354233 B/op	     104 allocs/op
+BenchmarkCodexEngineRelay/HTTP/terminal_32MiB-4    	      20	 214271343 ns/op	 156.60 MB/s	     62394 first-write-ns/op	 234413314 p95-ns	       936.7 write-ns/op	206527657 B/op	     101 allocs/op
+BenchmarkCodexEngineRelay/WS/terminal_32MiB-4      	      20	 219267767 ns/op	 153.03 MB/s	     71086 first-write-ns/op	 233935790 p95-ns	      1039 write-ns/op	206528372 B/op	     110 allocs/op
+PASS

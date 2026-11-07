@@ -1,0 +1,584 @@
+{
+  "fixtures": [
+    {
+      "fixture": "BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_1",
+      "metric": "B/op",
+      "baseline": {
+        "rounds": [
+          421714.0,
+          421714.0,
+          421713.0
+        ],
+        "median": 421714.0,
+        "spread_percent": 0.00023712753192922217
+      },
+      "candidate": {
+        "rounds": [
+          421716.0,
+          421714.0,
+          421717.0
+        ],
+        "median": 421716.0,
+        "spread_percent": 0.0007113792220356827
+      },
+      "change_percent": 0.00047425506385844434
+    },
+    {
+      "fixture": "BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_1",
+      "metric": "allocs/op",
+      "baseline": {
+        "rounds": [
+          10369.0,
+          10369.0,
+          10369.0
+        ],
+        "median": 10369.0,
+        "spread_percent": 0.0
+      },
+      "candidate": {
+        "rounds": [
+          10369.0,
+          10369.0,
+          10369.0
+        ],
+        "median": 10369.0,
+        "spread_percent": 0.0
+      },
+      "change_percent": 0.0
+    },
+    {
+      "fixture": "BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_1",
+      "metric": "decoded-retained-B",
+      "baseline": {
+        "rounds": [
+          7107872.0,
+          7073368.0,
+          7084208.0
+        ],
+        "median": 7084208.0,
+        "spread_percent": 0.4870551514015399
+      },
+      "candidate": {
+        "rounds": [
+          7094864.0,
+          7106720.0,
+          7082952.0
+        ],
+        "median": 7094864.0,
+        "spread_percent": 0.3350028978709106
+      },
+      "change_percent": 0.15041907295776746
+    },
+    {
+      "fixture": "BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_1",
+      "metric": "ns/op",
+      "baseline": {
+        "rounds": [
+          2184010.0,
+          2185386.0,
+          2059675.0
+        ],
+        "median": 2184010.0,
+        "spread_percent": 5.755971813315873
+      },
+      "candidate": {
+        "rounds": [
+          2170075.0,
+          2105183.0,
+          2090355.0
+        ],
+        "median": 2105183.0,
+        "spread_percent": 3.7868441840923093
+      },
+      "change_percent": -3.60927834579512
+    },
+    {
+      "fixture": "BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_1",
+      "metric": "p95-ns",
+      "baseline": {
+        "rounds": [
+          2640677.0,
+          3122032.0,
+          2400747.0
+        ],
+        "median": 2640677.0,
+        "spread_percent": 27.314397027731903
+      },
+      "candidate": {
+        "rounds": [
+          2585264.0,
+          2495090.0,
+          2378390.0
+        ],
+        "median": 2495090.0,
+        "spread_percent": 8.291244003222328
+      },
+      "change_percent": -5.513245277631456
+    },
+    {
+      "fixture": "BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_10",
+      "metric": "B/op",
+      "baseline": {
+        "rounds": [
+          421713.0,
+          421714.0,
+          421712.0
+        ],
+        "median": 421713.0,
+        "spread_percent": 0.00047425618845043906
+      },
+      "candidate": {
+        "rounds": [
+          421713.0,
+          421713.0,
+          421714.0
+        ],
+        "median": 421713.0,
+        "spread_percent": 0.00023712809422521953
+      },
+      "change_percent": 0.0
+    },
+    {
+      "fixture": "BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_10",
+      "metric": "allocs/op",
+      "baseline": {
+        "rounds": [
+          10369.0,
+          10369.0,
+          10369.0
+        ],
+        "median": 10369.0,
+        "spread_percent": 0.0
+      },
+      "candidate": {
+        "rounds": [
+          10369.0,
+          10369.0,
+          10369.0
+        ],
+        "median": 10369.0,
+        "spread_percent": 0.0
+      },
+      "change_percent": 0.0
+    },
+    {
+      "fixture": "BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_10",
+      "metric": "decoded-retained-B",
+      "baseline": {
+        "rounds": [
+          11151568.0,
+          11133512.0,
+          11151536.0
+        ],
+        "median": 11151536.0,
+        "spread_percent": 0.16191491468081168
+      },
+      "candidate": {
+        "rounds": [
+          11151824.0,
+          11149072.0,
+          11146704.0
+        ],
+        "median": 11149072.0,
+        "spread_percent": 0.04592310463148861
+      },
+      "change_percent": -0.022095610864727513
+    },
+    {
+      "fixture": "BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_10",
+      "metric": "ns/op",
+      "baseline": {
+        "rounds": [
+          2127514.0,
+          2208976.0,
+          2179585.0
+        ],
+        "median": 2179585.0,
+        "spread_percent": 3.737500487478121
+      },
+      "candidate": {
+        "rounds": [
+          2248506.0,
+          2133557.0,
+          2139959.0
+        ],
+        "median": 2139959.0,
+        "spread_percent": 5.371551511033623
+      },
+      "change_percent": -1.8180525191722277
+    },
+    {
+      "fixture": "BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_10",
+      "metric": "p95-ns",
+      "baseline": {
+        "rounds": [
+          2482397.0,
+          2588414.0,
+          2595481.0
+        ],
+        "median": 2588414.0,
+        "spread_percent": 4.368852896020497
+      },
+      "candidate": {
+        "rounds": [
+          2667779.0,
+          2496930.0,
+          2595472.0
+        ],
+        "median": 2595472.0,
+        "spread_percent": 6.58257919946738
+      },
+      "change_percent": 0.27267662746376736
+    },
+    {
+      "fixture": "BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_100",
+      "metric": "B/op",
+      "baseline": {
+        "rounds": [
+          421714.0,
+          421715.0,
+          421714.0
+        ],
+        "median": 421714.0,
+        "spread_percent": 0.00023712753192922217
+      },
+      "candidate": {
+        "rounds": [
+          421715.0,
+          421714.0,
+          421714.0
+        ],
+        "median": 421714.0,
+        "spread_percent": 0.00023712753192922217
+      },
+      "change_percent": 0.0
+    },
+    {
+      "fixture": "BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_100",
+      "metric": "allocs/op",
+      "baseline": {
+        "rounds": [
+          10369.0,
+          10369.0,
+          10369.0
+        ],
+        "median": 10369.0,
+        "spread_percent": 0.0
+      },
+      "candidate": {
+        "rounds": [
+          10369.0,
+          10369.0,
+          10369.0
+        ],
+        "median": 10369.0,
+        "spread_percent": 0.0
+      },
+      "change_percent": 0.0
+    },
+    {
+      "fixture": "BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_100",
+      "metric": "decoded-retained-B",
+      "baseline": {
+        "rounds": [
+          46260424.0,
+          46235960.0,
+          46247912.0
+        ],
+        "median": 46247912.0,
+        "spread_percent": 0.05289752324386018
+      },
+      "candidate": {
+        "rounds": [
+          46273448.0,
+          46272376.0,
+          46272632.0
+        ],
+        "median": 46272632.0,
+        "spread_percent": 0.002316704180561849
+      },
+      "change_percent": 0.05345106174739305
+    },
+    {
+      "fixture": "BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_100",
+      "metric": "ns/op",
+      "baseline": {
+        "rounds": [
+          2011641.0,
+          2260187.0,
+          2137983.0
+        ],
+        "median": 2137983.0,
+        "spread_percent": 11.625256140951542
+      },
+      "candidate": {
+        "rounds": [
+          2465222.0,
+          2141389.0,
+          2042492.0
+        ],
+        "median": 2141389.0,
+        "spread_percent": 19.74092516586197
+      },
+      "change_percent": 0.15930903098855323
+    },
+    {
+      "fixture": "BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_100",
+      "metric": "p95-ns",
+      "baseline": {
+        "rounds": [
+          2854065.0,
+          2798556.0,
+          2531388.0
+        ],
+        "median": 2798556.0,
+        "spread_percent": 11.530124821515095
+      },
+      "candidate": {
+        "rounds": [
+          3324041.0,
+          2467155.0,
+          2507396.0
+        ],
+        "median": 2507396.0,
+        "spread_percent": 34.17433863657755
+      },
+      "change_percent": -10.403936887451957
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/multiline_128",
+      "metric": "B/op",
+      "baseline": {
+        "rounds": [
+          17238.0,
+          17239.0,
+          17237.0
+        ],
+        "median": 17238.0,
+        "spread_percent": 0.01160227404571296
+      },
+      "candidate": {
+        "rounds": [
+          17237.0,
+          17238.0,
+          17244.0
+        ],
+        "median": 17238.0,
+        "spread_percent": 0.040607959159995356
+      },
+      "change_percent": 0.0
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/multiline_128",
+      "metric": "MB/s",
+      "baseline": {
+        "rounds": [
+          69.8,
+          72.55,
+          77.28
+        ],
+        "median": 72.55,
+        "spread_percent": 10.310130944176437
+      },
+      "candidate": {
+        "rounds": [
+          59.54,
+          71.89,
+          50.47
+        ],
+        "median": 59.54,
+        "spread_percent": 35.975814578434665
+      },
+      "change_percent": -17.93246037215713
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/multiline_128",
+      "metric": "allocs/op",
+      "baseline": {
+        "rounds": [
+          314.0,
+          314.0,
+          314.0
+        ],
+        "median": 314.0,
+        "spread_percent": 0.0
+      },
+      "candidate": {
+        "rounds": [
+          314.0,
+          314.0,
+          314.0
+        ],
+        "median": 314.0,
+        "spread_percent": 0.0
+      },
+      "change_percent": 0.0
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/multiline_128",
+      "metric": "first-write-ns/op",
+      "baseline": {
+        "rounds": [
+          14206.0,
+          11781.0,
+          12377.0
+        ],
+        "median": 12377.0,
+        "spread_percent": 19.592793083946027
+      },
+      "candidate": {
+        "rounds": [
+          18086.0,
+          13219.0,
+          11853.0
+        ],
+        "median": 13219.0,
+        "spread_percent": 47.151826915803014
+      },
+      "change_percent": 6.802940938838168
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/multiline_128",
+      "metric": "ns/op",
+      "baseline": {
+        "rounds": [
+          213259.0,
+          205188.0,
+          192614.0
+        ],
+        "median": 205188.0,
+        "spread_percent": 10.061504571417432
+      },
+      "candidate": {
+        "rounds": [
+          250010.0,
+          207074.0,
+          294936.0
+        ],
+        "median": 250010.0,
+        "spread_percent": 35.14339426422943
+      },
+      "change_percent": 21.844357369826696
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/multiline_128",
+      "metric": "p95-ns",
+      "baseline": {
+        "rounds": [
+          301443.0,
+          287006.0,
+          258140.0
+        ],
+        "median": 287006.0,
+        "spread_percent": 15.087837884922266
+      },
+      "candidate": {
+        "rounds": [
+          413345.0,
+          293698.0,
+          445296.0
+        ],
+        "median": 413345.0,
+        "spread_percent": 36.67590027700831
+      },
+      "change_percent": 44.019637220127805
+    },
+    {
+      "fixture": "BenchmarkCodexEngineRelay/WS/multiline_128",
+      "metric": "write-ns/op",
+      "baseline": {
+        "rounds": [
+          2844.0,
+          2816.0,
+          2706.0
+        ],
+        "median": 2816.0,
+        "spread_percent": 4.900568181818182
+      },
+      "candidate": {
+        "rounds": [
+          3184.0,
+          2752.0,
+          4598.0
+        ],
+        "median": 3184.0,
+        "spread_percent": 57.97738693467337
+      },
+      "change_percent": 13.068181818181818
+    }
+  ],
+  "process_resources": {
+    "cache-extended": {
+      "baseline": {
+        "Maximum resident set size (kbytes)": [
+          389960.0,
+          383756.0,
+          379896.0
+        ],
+        "User time (seconds)": [
+          11.36,
+          11.49,
+          10.56
+        ],
+        "System time (seconds)": [
+          12.9,
+          13.02,
+          12.59
+        ]
+      },
+      "candidate": {
+        "Maximum resident set size (kbytes)": [
+          389780.0,
+          389004.0,
+          390456.0
+        ],
+        "User time (seconds)": [
+          12.38,
+          10.93,
+          10.99
+        ],
+        "System time (seconds)": [
+          13.07,
+          12.43,
+          12.28
+        ]
+      }
+    },
+    "sse-multiline-extended": {
+      "baseline": {
+        "Maximum resident set size (kbytes)": [
+          133808.0,
+          133728.0,
+          133900.0
+        ],
+        "User time (seconds)": [
+          0.25,
+          0.22,
+          0.23
+        ],
+        "System time (seconds)": [
+          0.14,
+          0.17,
+          0.16
+        ]
+      },
+      "candidate": {
+        "Maximum resident set size (kbytes)": [
+          134020.0,
+          135436.0,
+          135212.0
+        ],
+        "User time (seconds)": [
+          0.28,
+          0.26,
+          0.35
+        ],
+        "System time (seconds)": [
+          0.18,
+          0.15,
+          0.11
+        ]
+      }
+    }
+  }
+}
