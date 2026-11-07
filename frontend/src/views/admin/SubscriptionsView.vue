@@ -459,6 +459,15 @@
           <template #cell-actions="{ row }">
             <div class="flex items-center gap-1">
               <button
+                v-if="(row.status === 'active' || row.status === 'expired') && isTotalQuotaSubscription(row)"
+                @click="handleAppendQuota(row)"
+                data-test="append-quota"
+                class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-green-50 hover:text-green-600 dark:hover:bg-green-900/20 dark:hover:text-green-400"
+              >
+                <Icon name="plus" size="sm" />
+                <span class="text-xs">{{ t('subscription.appendQuota') }}</span>
+              </button>
+              <button
                 v-if="(row.status === 'active' || row.status === 'expired') && !isTotalQuotaSubscription(row)"
                 @click="handleExtend(row)"
                 class="flex flex-col items-center gap-0.5 rounded-lg p-1.5 text-gray-500 transition-colors hover:bg-blue-50 hover:text-blue-600 dark:hover:bg-blue-900/20 dark:hover:text-blue-400"
@@ -530,7 +539,7 @@
     <!-- Assign Subscription Modal -->
     <BaseDialog
       :show="showAssignModal"
-      :title="t('admin.subscriptions.assignSubscription')"
+      :title="t(appendingSubscription ? 'subscription.appendQuota' : 'admin.subscriptions.assignSubscription')"
       width="normal"
       :show-close-button="!submitting"
       :close-on-escape="!submitting"
@@ -541,12 +550,16 @@
         @submit.prevent="handleAssignSubscription"
         class="space-y-5"
       >
-        <label class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
+        <label v-if="!appendingSubscription" class="flex items-center gap-2 text-sm text-gray-700 dark:text-gray-300">
           <input v-model="batchAssignEnabled" type="checkbox" :disabled="submitting" @change="resetAssignUsers" />
           {{ t('admin.subscriptions.batchAssign.enable') }}
         </label>
         <p v-if="batchAssignEnabled" class="input-hint">{{ t('admin.subscriptions.batchAssign.hint') }}</p>
-        <div>
+        <div v-if="appendingSubscription" data-test="append-quota-user">
+          <label class="input-label">{{ t('admin.subscriptions.form.user') }}</label>
+          <p class="text-sm">{{ appendingSubscription.user?.email || appendingSubscription.user?.username || `#${appendingSubscription.user_id}` }}</p>
+        </div>
+        <div v-else>
           <label class="input-label">{{ t('admin.subscriptions.form.user') }}</label>
           <div class="relative" data-assign-user-search>
             <input
@@ -615,7 +628,11 @@
             </ul>
           </div>
         </div>
-        <div>
+        <div v-if="appendingSubscription" data-test="append-quota-group">
+          <label class="input-label">{{ t('admin.subscriptions.form.group') }}</label>
+          <p class="text-sm">{{ assignGroup?.name || `#${appendingSubscription.group_id}` }}</p>
+        </div>
+        <div v-else>
           <label class="input-label">{{ t('admin.subscriptions.form.group') }}</label>
           <Select
             v-model="assignForm.group_id"
@@ -650,6 +667,10 @@
           <label class="input-label" for="assign-quota-amount">{{ t(batchAssignEnabled ? 'subscription.amountPerUser' : 'subscription.grantAmount') }}</label>
           <input id="assign-quota-amount" v-model.number="assignForm.quota_amount" type="number" min="0.00000001" step="0.00000001" :disabled="submitting" required class="input" />
           <p class="input-hint">{{ t('subscription.appendHint') }}</p>
+        </div>
+        <div v-if="appendingSubscription" class="rounded-lg bg-gray-50 p-3 text-sm dark:bg-dark-800" data-test="append-quota-preview">
+          <p>{{ t('subscription.remainingQuota') }} ${{ formatWalletAmount(appendingSubscription.total_remaining_usd ?? 0) }}</p>
+          <p v-if="isValidQuotaAmount(assignForm.quota_amount)">{{ t('subscription.estimatedRemainingQuota') }} ${{ formatWalletAmount((appendingSubscription.total_remaining_usd ?? 0) + (assignForm.quota_amount ?? 0)) }}</p>
         </div>
         <p v-if="assignIsPermanent" class="input-hint">{{ t('subscription.permanent') }}</p>
         <div v-else>
@@ -696,7 +717,7 @@
                 d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"
               ></path>
             </svg>
-            {{ submitting ? t('admin.subscriptions.assigning') : t('admin.subscriptions.assign') }}
+            {{ submitting ? t('admin.subscriptions.assigning') : t(appendingSubscription ? 'subscription.appendQuota' : 'admin.subscriptions.assign') }}
           </button>
         </div>
       </template>
@@ -1131,6 +1152,7 @@ const pagination = reactive({
 })
 
 const showAssignModal = ref(false)
+const appendingSubscription = ref<UserSubscription | null>(null)
 const showExtendModal = ref(false)
 const showRevokeDialog = ref(false)
 const showRestoreDialog = ref(false)
@@ -1149,7 +1171,7 @@ const assignForm = reactive({
   quota_amount: null as number | null
 })
 
-const assignGroup = computed(() => groups.value.find((group) => group.id === assignForm.group_id))
+const assignGroup = computed(() => appendingSubscription.value?.group ?? groups.value.find((group) => group.id === assignForm.group_id))
 const assignIsTotalQuota = computed(() => assignGroup.value?.subscription_type === 'total_quota')
 const assignIsPermanent = computed(() => assignIsTotalQuota.value && assignGroup.value?.total_quota_no_expiry === true)
 watch(() => assignForm.group_id, () => { assignForm.quota_amount = null })
@@ -1382,6 +1404,7 @@ const handleSort = (key: string, order: 'asc' | 'desc') => {
 const closeAssignModal = () => {
   if (submitting.value) return
   showAssignModal.value = false
+  appendingSubscription.value = null
   batchAssignEnabled.value = false
   assignUsers.value = []
   batchAssignResult.value = null
@@ -1394,6 +1417,15 @@ const closeAssignModal = () => {
   userSearchKeyword.value = ''
   userSearchResults.value = []
   showUserDropdown.value = false
+}
+
+const handleAppendQuota = (subscription: UserSubscription) => {
+  if (submitting.value) return
+  closeAssignModal()
+  appendingSubscription.value = subscription
+  assignForm.user_id = subscription.user_id
+  assignForm.group_id = subscription.group_id
+  showAssignModal.value = true
 }
 
 const handleAssignSubscription = async () => {
@@ -1443,7 +1475,7 @@ const handleAssignSubscription = async () => {
     })
     await adminAPI.subscriptions.assign(operation.request, operation.key)
     completeSubscriptionGrant(operation)
-    appStore.showSuccess(t('admin.subscriptions.subscriptionAssigned'))
+    appStore.showSuccess(t(appendingSubscription.value ? 'subscription.quotaAdded' : 'admin.subscriptions.subscriptionAssigned'))
     submitting.value = false
     closeAssignModal()
     loadSubscriptions()

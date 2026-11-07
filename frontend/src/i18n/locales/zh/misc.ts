@@ -124,6 +124,9 @@ export default {
     grantAmount: '本次增加额度（USD）',
     amountPerUser: '每人本次增加额度（USD）',
     appendHint: '本次金额追加到已有额度，不覆盖剩余额度。',
+    appendQuota: '追加额度',
+    estimatedRemainingQuota: '追加后预计剩余额度',
+    quotaAdded: '额度已追加',
     invalidAmount: '请输入大于 0、少于 1 万亿且最多八位小数的额度'
   },
 

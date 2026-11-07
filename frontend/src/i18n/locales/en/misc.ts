@@ -126,6 +126,9 @@ export default {
     grantAmount: 'Quota to add (USD)',
     amountPerUser: 'Quota to add per user (USD)',
     appendHint: 'Adds a new grant without replacing the remaining quota.',
+    appendQuota: 'Add quota',
+    estimatedRemainingQuota: 'Estimated remaining quota after addition',
+    quotaAdded: 'Quota added',
     invalidAmount: 'Enter a positive quota below 1 trillion with at most eight decimal places'
   },
 

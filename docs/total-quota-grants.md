@@ -5,6 +5,7 @@
 分组只定义订阅模式，不再填写或读取分组的旧总额度作为发放金额。创建总额度分组时可选择“额度永不过期”，默认关闭；创建后不可修改，复制分组保留这个选择。永久分组不能改成其他计费类型。
 
 - 添加订阅：填写本次追加额度；批量添加填写每人追加额度。
+- 已有总额度订阅可直接点击该行的“追加额度”，自动锁定用户和分组，显示当前剩额及追加后预计剩额；永久订阅只需填写金额。
 - 创建兑换码：填写每码额度，金额冻结在兑换码中。
 - 有限期总额度：还需填写有效天数，从发放或兑换时开始计算。
 - 永久总额度：只填金额，显示“永久有效”。兑换码本身的兑换截止时间仍然有效。
@@ -37,6 +38,8 @@
 Groups define the subscription mode, not the grant amount. Creating a total-quota group optionally enables permanent credit; the default is finite expiry. This setting is immutable after creation and is inherited when copying a group. Permanent groups cannot switch billing type.
 
 Administrators enter an explicit positive `quota_amount` (up to eight decimal places) when assigning a subscription or generating a code. Single and bulk assignment requests use `Idempotency-Key` (`idempotency_key` in MCP): retain it for retries and use a new value for each new grant. Bulk amounts apply per user or per code. Repeated grants append credit to the existing remaining amount; they do not overwrite spending history. Finite grants also require `validity_days`, while permanent grants have no subscription expiry. A code's redemption deadline remains independent.
+
+For an existing total-quota subscription, use the row's **Add quota** action. It fixes the user and group and previews the estimated remaining credit. Permanent subscriptions only require the additional amount.
 
 Permanent subscriptions display only the remaining credit and “Never expires”, without a total-credit ratio or progress bar. Exhausted credit blocks admission and administrators can still revoke the subscription. Each grant remains an independent ledger event. Consumption uses the earliest finite expiry first, followed by permanent credit. Both subscription and event expiry use SQL `NULL` / JSON `null` for permanence.
 
