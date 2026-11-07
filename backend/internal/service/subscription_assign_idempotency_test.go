@@ -273,16 +273,16 @@ func (s *subscriptionUserSubRepoStub) GetByID(_ context.Context, id int64) (*Use
 		cp.QuotaEvents = append([]UserSubscriptionQuotaEvent(nil), events...)
 		var nextExpiry *time.Time
 		for _, event := range events {
-			if event.ExpiresAt.After(time.Now()) {
+			if event.ExpiresAt == nil || event.ExpiresAt.After(time.Now()) {
 				cp.TotalLimitUSD += event.QuotaTotalUSD
 				cp.TotalUsedUSD += event.QuotaUsedUSD
 				remaining := maxFloat(event.QuotaTotalUSD-event.QuotaUsedUSD, 0)
 				cp.TotalRemainingUSD += remaining
-				if remaining <= 0 {
+				if remaining <= 0 || event.ExpiresAt == nil {
 					continue
 				}
 				if nextExpiry == nil || event.ExpiresAt.Before(*nextExpiry) {
-					exp := event.ExpiresAt
+					exp := *event.ExpiresAt
 					nextExpiry = &exp
 					cp.NextExpiringQuotaUSD = remaining
 					continue
@@ -324,7 +324,7 @@ func (s *subscriptionUserSubRepoStub) ExtendExpiry(_ context.Context, subscripti
 	if sub == nil {
 		return ErrSubscriptionNotFound
 	}
-	sub.ExpiresAt = newExpiresAt
+	sub.ExpiresAt = ptrTime(newExpiresAt)
 	return nil
 }
 
@@ -367,21 +367,28 @@ func (s *subscriptionUserSubRepoStub) RetireDepletedQuotaEventsOnAppend(_ contex
 
 	retireAt = retireAt.UTC()
 	var maxActiveExpiry time.Time
+	permanent := false
 	for i := range events {
 		if events[i].ID != keepEventID &&
-			events[i].ExpiresAt.After(retireAt) &&
+			(events[i].ExpiresAt == nil || events[i].ExpiresAt.After(retireAt)) &&
 			events[i].QuotaTotalUSD-events[i].QuotaUsedUSD <= 1e-9 {
-			events[i].ExpiresAt = retireAt
+			events[i].ExpiresAt = ptrTime(retireAt)
 		}
-		if events[i].ExpiresAt.After(retireAt) &&
+		if events[i].ExpiresAt == nil {
+			permanent = true
+		} else if events[i].ExpiresAt.After(retireAt) &&
 			(maxActiveExpiry.IsZero() || events[i].ExpiresAt.After(maxActiveExpiry)) {
-			maxActiveExpiry = events[i].ExpiresAt
+			maxActiveExpiry = *events[i].ExpiresAt
 		}
 	}
 	s.quotaEvents[subscriptionID] = events
 
-	if sub := s.byID[subscriptionID]; sub != nil && !maxActiveExpiry.IsZero() {
-		sub.ExpiresAt = maxActiveExpiry
+	if sub := s.byID[subscriptionID]; sub != nil {
+		if permanent {
+			sub.ExpiresAt = nil
+		} else if !maxActiveExpiry.IsZero() {
+			sub.ExpiresAt = ptrTime(maxActiveExpiry)
+		}
 	}
 	return nil
 }
@@ -403,18 +410,18 @@ func (s *subscriptionUserSubRepoStub) GetQuotaSummaryBatch(_ context.Context, su
 		summary := &UserSubscriptionQuotaSummary{}
 		var nextExpiry *time.Time
 		for _, event := range s.quotaEvents[subscriptionID] {
-			if !event.ExpiresAt.After(now) {
+			if event.ExpiresAt != nil && !event.ExpiresAt.After(now) {
 				continue
 			}
 			summary.TotalLimitUSD += event.QuotaTotalUSD
 			summary.TotalUsedUSD += event.QuotaUsedUSD
 			remaining := maxFloat(event.QuotaTotalUSD-event.QuotaUsedUSD, 0)
 			summary.TotalRemainingUSD += remaining
-			if remaining <= 0 {
+			if remaining <= 0 || event.ExpiresAt == nil {
 				continue
 			}
 			if nextExpiry == nil || event.ExpiresAt.Before(*nextExpiry) {
-				exp := event.ExpiresAt
+				exp := *event.ExpiresAt
 				nextExpiry = &exp
 				summary.NextExpiringQuotaUSD = remaining
 				continue
@@ -438,7 +445,7 @@ func (s *subscriptionUserSubRepoStub) DeleteExpiredQuotaEventsBatch(_ context.Co
 	for subscriptionID, events := range s.quotaEvents {
 		filtered := events[:0]
 		for _, event := range events {
-			if deleted < int64(limit) && !event.ExpiresAt.After(now) {
+			if deleted < int64(limit) && event.ExpiresAt != nil && !event.ExpiresAt.After(now) {
 				deleted++
 				continue
 			}
@@ -459,7 +466,7 @@ func TestAssignSubscriptionReuseWhenSemanticsMatch(t *testing.T) {
 		UserID:    1001,
 		GroupID:   1,
 		StartsAt:  start,
-		ExpiresAt: start.AddDate(0, 0, 30),
+		ExpiresAt: ptrTime(start.AddDate(0, 0, 30)),
 		Status:    SubscriptionStatusActive,
 		Notes:     "init",
 	})
@@ -475,7 +482,7 @@ func TestAssignSubscriptionReuseWhenSemanticsMatch(t *testing.T) {
 	require.Equal(t, int64(10), sub.ID)
 	require.Equal(t, 0, subRepo.createCalls, "reuse should not create new subscription")
 	require.Equal(t, start, sub.StartsAt)
-	require.Equal(t, start.AddDate(0, 0, 30), sub.ExpiresAt)
+	require.Equal(t, start.AddDate(0, 0, 30), *sub.ExpiresAt)
 }
 
 func TestAssignSubscriptionDoesNotReactivateFutureSuspendedSubscription(t *testing.T) {
@@ -489,7 +496,7 @@ func TestAssignSubscriptionDoesNotReactivateFutureSuspendedSubscription(t *testi
 		UserID:    1003,
 		GroupID:   1,
 		StartsAt:  start,
-		ExpiresAt: start.AddDate(0, 0, 30),
+		ExpiresAt: ptrTime(start.AddDate(0, 0, 30)),
 		Status:    SubscriptionStatusSuspended,
 		Notes:     "assignment",
 	})
@@ -506,7 +513,7 @@ func TestAssignSubscriptionDoesNotReactivateFutureSuspendedSubscription(t *testi
 	require.Equal(t, int64(13), sub.ID)
 	require.Equal(t, SubscriptionStatusSuspended, sub.Status)
 	require.Equal(t, start, sub.StartsAt)
-	require.Equal(t, start.AddDate(0, 0, 30), sub.ExpiresAt)
+	require.Equal(t, start.AddDate(0, 0, 30), *sub.ExpiresAt)
 	require.Equal(t, "assignment", sub.Notes)
 	require.Equal(t, 0, subRepo.createCalls)
 }
@@ -524,7 +531,7 @@ func TestAssignSubscriptionDoesNotReactivatePastExpirySuspendedSubscription(t *t
 		UserID:             1005,
 		GroupID:            1,
 		StartsAt:           start,
-		ExpiresAt:          expiresAt,
+		ExpiresAt:          ptrTime(expiresAt),
 		Status:             SubscriptionStatusSuspended,
 		DailyWindowStart:   &windowStart,
 		WeeklyWindowStart:  &windowStart,
@@ -547,7 +554,7 @@ func TestAssignSubscriptionDoesNotReactivatePastExpirySuspendedSubscription(t *t
 	require.Equal(t, int64(15), sub.ID)
 	require.Equal(t, SubscriptionStatusSuspended, sub.Status)
 	require.Equal(t, start, sub.StartsAt)
-	require.Equal(t, expiresAt, sub.ExpiresAt)
+	require.Equal(t, expiresAt, *sub.ExpiresAt)
 	require.Equal(t, "suspended assignment", sub.Notes)
 	require.Equal(t, &windowStart, sub.DailyWindowStart)
 	require.Equal(t, &windowStart, sub.WeeklyWindowStart)
@@ -570,7 +577,7 @@ func TestAssignSubscriptionRenewsExpiredSemanticMatch(t *testing.T) {
 		UserID:             1002,
 		GroupID:            1,
 		StartsAt:           oldStart,
-		ExpiresAt:          oldStart.AddDate(0, 0, 30),
+		ExpiresAt:          ptrTime(oldStart.AddDate(0, 0, 30)),
 		Status:             SubscriptionStatusExpired,
 		DailyWindowStart:   &oldWindowStart,
 		WeeklyWindowStart:  &oldWindowStart,
@@ -597,7 +604,7 @@ func TestAssignSubscriptionRenewsExpiredSemanticMatch(t *testing.T) {
 	require.Equal(t, SubscriptionStatusActive, sub.Status)
 	require.False(t, sub.StartsAt.Before(before))
 	require.False(t, sub.StartsAt.After(after))
-	require.Equal(t, sub.StartsAt.AddDate(0, 0, 30), sub.ExpiresAt)
+	require.Equal(t, sub.StartsAt.AddDate(0, 0, 30), *sub.ExpiresAt)
 	require.Equal(t, timezone.StartOfDay(sub.StartsAt), *sub.DailyWindowStart, "续期后日窗口应锚定当天 0 点")
 	require.Equal(t, sub.StartsAt, *sub.WeeklyWindowStart)
 	require.Equal(t, sub.StartsAt, *sub.MonthlyWindowStart)
@@ -618,7 +625,7 @@ func TestAssignSubscriptionRenewsExpiredAndAppendsDifferentNotes(t *testing.T) {
 		UserID:    1004,
 		GroupID:   1,
 		StartsAt:  oldStart,
-		ExpiresAt: oldStart.AddDate(0, 0, 30),
+		ExpiresAt: ptrTime(oldStart.AddDate(0, 0, 30)),
 		Status:    SubscriptionStatusExpired,
 		Notes:     "old assignment",
 	})
@@ -646,7 +653,7 @@ func TestAssignSubscriptionConflictWhenSemanticsMismatch(t *testing.T) {
 		UserID:    2001,
 		GroupID:   1,
 		StartsAt:  start,
-		ExpiresAt: start.AddDate(0, 0, 30),
+		ExpiresAt: ptrTime(start.AddDate(0, 0, 30)),
 		Status:    SubscriptionStatusActive,
 		Notes:     "old-note",
 	})
@@ -675,7 +682,7 @@ func TestBulkAssignSubscriptionCreatedReusedAndConflict(t *testing.T) {
 		UserID:    1,
 		GroupID:   1,
 		StartsAt:  start,
-		ExpiresAt: start.AddDate(0, 0, 30),
+		ExpiresAt: ptrTime(start.AddDate(0, 0, 30)),
 		Status:    SubscriptionStatusActive,
 		Notes:     "same-note",
 	})
@@ -685,7 +692,7 @@ func TestBulkAssignSubscriptionCreatedReusedAndConflict(t *testing.T) {
 		UserID:    3,
 		GroupID:   1,
 		StartsAt:  start,
-		ExpiresAt: start.AddDate(0, 0, 60),
+		ExpiresAt: ptrTime(start.AddDate(0, 0, 60)),
 		Status:    SubscriptionStatusActive,
 		Notes:     "same-note",
 	})
@@ -726,7 +733,7 @@ func TestAssignSubscriptionTotalQuota_AppendsEventOnExistingSubscription(t *test
 		UserID:    3001,
 		GroupID:   1,
 		StartsAt:  start,
-		ExpiresAt: expiresAt,
+		ExpiresAt: ptrTime(expiresAt),
 		Status:    SubscriptionStatusActive,
 	})
 
@@ -734,6 +741,7 @@ func TestAssignSubscriptionTotalQuota_AppendsEventOnExistingSubscription(t *test
 	sub, err := svc.AssignSubscription(context.Background(), &AssignSubscriptionInput{
 		UserID:          3001,
 		GroupID:         1,
+		QuotaAmount:     &totalLimit,
 		ValidityDays:    2,
 		AssignedBy:      9,
 		EventSourceKind: SubscriptionQuotaSourceAdminAssign,
@@ -764,7 +772,7 @@ func TestAssignSubscriptionTotalQuota_RetiresDepletedEventsOnAppend(t *testing.T
 		UserID:    3002,
 		GroupID:   1,
 		StartsAt:  now.Add(-2 * time.Hour),
-		ExpiresAt: now.Add(48 * time.Hour),
+		ExpiresAt: ptrTime(now.Add(48 * time.Hour)),
 		Status:    SubscriptionStatusActive,
 	})
 	subRepo.quotaEvents[52] = []UserSubscriptionQuotaEvent{
@@ -774,7 +782,7 @@ func TestAssignSubscriptionTotalQuota_RetiresDepletedEventsOnAppend(t *testing.T
 			QuotaTotalUSD:      1,
 			QuotaUsedUSD:       1.5,
 			StartsAt:           now.Add(-2 * time.Hour),
-			ExpiresAt:          now.Add(48 * time.Hour),
+			ExpiresAt:          ptrTime(now.Add(48 * time.Hour)),
 			SourceKind:         SubscriptionQuotaSourceRedeemCode,
 			SourceRef:          "old",
 		},
@@ -784,6 +792,7 @@ func TestAssignSubscriptionTotalQuota_RetiresDepletedEventsOnAppend(t *testing.T
 	sub, err := svc.AssignSubscription(context.Background(), &AssignSubscriptionInput{
 		UserID:          3002,
 		GroupID:         1,
+		QuotaAmount:     &totalLimit,
 		ValidityDays:    1,
 		AssignedBy:      9,
 		EventSourceKind: SubscriptionQuotaSourceAdminAssign,
@@ -798,10 +807,10 @@ func TestAssignSubscriptionTotalQuota_RetiresDepletedEventsOnAppend(t *testing.T
 	require.InDelta(t, 1.0, sub.TotalLimitUSD, 1e-9)
 	require.InDelta(t, 0.0, sub.TotalUsedUSD, 1e-9)
 	require.InDelta(t, 1.0, sub.TotalRemainingUSD, 1e-9)
-	require.WithinDuration(t, subRepo.quotaEvents[52][1].ExpiresAt, sub.ExpiresAt, time.Second)
+	require.WithinDuration(t, *subRepo.quotaEvents[52][1].ExpiresAt, *sub.ExpiresAt, time.Second)
 }
 
-func TestAssignSubscriptionTotalQuota_FirstCreateDoesNotRetireEvents(t *testing.T) {
+func TestAssignSubscriptionTotalQuota_FirstCreateRefreshesParentExpiry(t *testing.T) {
 	totalLimit := 2.0
 	groupRepo := &subscriptionGroupRepoStub{
 		group: &Group{
@@ -816,6 +825,7 @@ func TestAssignSubscriptionTotalQuota_FirstCreateDoesNotRetireEvents(t *testing.
 	sub, err := svc.AssignSubscription(context.Background(), &AssignSubscriptionInput{
 		UserID:          3003,
 		GroupID:         1,
+		QuotaAmount:     &totalLimit,
 		ValidityDays:    1,
 		AssignedBy:      9,
 		EventSourceKind: SubscriptionQuotaSourceAdminAssign,
@@ -824,7 +834,7 @@ func TestAssignSubscriptionTotalQuota_FirstCreateDoesNotRetireEvents(t *testing.
 	require.NoError(t, err)
 	require.NotNil(t, sub)
 	require.Equal(t, 1, subRepo.createCalls)
-	require.Equal(t, 0, subRepo.retireCalls)
+	require.Equal(t, 1, subRepo.retireCalls)
 	require.Len(t, subRepo.quotaEvents[sub.ID], 1)
 }
 
@@ -839,7 +849,7 @@ func TestBulkAssignSubscriptionRenewsExpiredSemanticMatch(t *testing.T) {
 		UserID:          4,
 		GroupID:         1,
 		StartsAt:        oldStart,
-		ExpiresAt:       oldStart.AddDate(0, 0, 7),
+		ExpiresAt:       ptrTime(oldStart.AddDate(0, 0, 7)),
 		Status:          SubscriptionStatusExpired,
 		DailyUsageUSD:   1,
 		WeeklyUsageUSD:  2,
@@ -867,7 +877,7 @@ func TestBulkAssignSubscriptionRenewsExpiredSemanticMatch(t *testing.T) {
 	require.Equal(t, SubscriptionStatusActive, renewed.Status)
 	require.False(t, renewed.StartsAt.Before(before))
 	require.False(t, renewed.StartsAt.After(after))
-	require.Equal(t, renewed.StartsAt.AddDate(0, 0, 7), renewed.ExpiresAt)
+	require.Equal(t, renewed.StartsAt.AddDate(0, 0, 7), *renewed.ExpiresAt)
 	require.Zero(t, renewed.DailyUsageUSD)
 	require.Zero(t, renewed.WeeklyUsageUSD)
 	require.Zero(t, renewed.MonthlyUsageUSD)
@@ -909,7 +919,7 @@ func TestDetectAssignSemanticConflictCases(t *testing.T) {
 		UserID:    1,
 		GroupID:   1,
 		StartsAt:  start,
-		ExpiresAt: start.AddDate(0, 0, 30),
+		ExpiresAt: ptrTime(start.AddDate(0, 0, 30)),
 		Notes:     "same",
 	}
 

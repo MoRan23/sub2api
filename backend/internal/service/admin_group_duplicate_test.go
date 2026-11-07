@@ -268,6 +268,20 @@ func TestDuplicateGroupRecoversSameOperationAndScopesByAdmin(t *testing.T) {
 	require.Equal(t, "team (Copy 2)", otherAdmin.Name)
 }
 
+func TestDuplicateGroupPreservesPermanentQuotaMode(t *testing.T) {
+	source := &Group{
+		ID: 42, Name: "permanent quota", Platform: PlatformOpenAI, Status: StatusActive,
+		SubscriptionType: SubscriptionTypeTotalQuota, TotalQuotaNoExpiry: true,
+	}
+	repo := newDuplicateGroupRepoStub(source)
+	svc := &adminServiceImpl{groupRepo: repo, groupDuplicateRepo: repo}
+
+	duplicate, err := svc.DuplicateGroup(context.Background(), source.ID, "admin:7", "permanent-copy")
+	require.NoError(t, err)
+	require.Equal(t, SubscriptionTypeTotalQuota, duplicate.SubscriptionType)
+	require.True(t, duplicate.TotalQuotaNoExpiry)
+}
+
 func TestDuplicateGroupAdvancesNameAndTruncatesUnicodeByRunes(t *testing.T) {
 	source := &Group{ID: 12, Name: "team", Platform: PlatformAnthropic, Status: StatusActive}
 	repo := newDuplicateGroupRepoStub(source)

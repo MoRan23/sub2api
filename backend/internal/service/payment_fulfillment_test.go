@@ -1017,7 +1017,7 @@ func TestExecuteSubscriptionFulfillmentRecoversCommittedAssignmentWithoutExtendi
 		UserID:    order.UserID,
 		GroupID:   *order.SubscriptionGroupID,
 		StartsAt:  time.Now().Add(-time.Hour),
-		ExpiresAt: expiresAt,
+		ExpiresAt: &expiresAt,
 		Status:    SubscriptionStatusActive,
 		Notes:     "manual note\n" + paymentSubscriptionOrderNote(order.ID) + "\nretained note",
 	})

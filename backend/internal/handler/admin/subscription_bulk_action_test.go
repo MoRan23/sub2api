@@ -69,7 +69,7 @@ func (r *bulkActionHandlerSubscriptionRepo) GetByIDForUpdate(ctx context.Context
 
 func (r *bulkActionHandlerSubscriptionRepo) ExtendExpiry(_ context.Context, _ int64, expiry time.Time) error {
 	r.extendCalls++
-	r.sub.ExpiresAt = expiry
+	r.sub.ExpiresAt = &expiry
 	return nil
 }
 
@@ -91,7 +91,7 @@ func TestSubscriptionBulkAction_ReplaysPartialResultWithoutRepeatingExtension(t 
 	service.SetDefaultIdempotencyCoordinator(service.NewIdempotencyCoordinator(newMemoryIdempotencyRepoStub(), cfg))
 	t.Cleanup(func() { service.SetDefaultIdempotencyCoordinator(nil) })
 	expiresAt := time.Now().AddDate(0, 0, 30)
-	repo := &bulkActionHandlerSubscriptionRepo{sub: &service.UserSubscription{ID: 1, UserID: 1, GroupID: 10, ExpiresAt: expiresAt}}
+	repo := &bulkActionHandlerSubscriptionRepo{sub: &service.UserSubscription{ID: 1, UserID: 1, GroupID: 10, ExpiresAt: &expiresAt}}
 	svc := service.NewSubscriptionService(nil, repo, nil, nil, nil)
 	t.Cleanup(svc.Stop)
 	h := NewSubscriptionHandler(svc)
@@ -119,7 +119,8 @@ func TestSubscriptionBulkAction_ReplaysPartialResultWithoutRepeatingExtension(t 
 	require.Equal(t, "true", replayed.Header().Get("X-Idempotency-Replayed"))
 	require.JSONEq(t, first.Body.String(), replayed.Body.String())
 	require.Equal(t, 1, repo.extendCalls)
-	require.Equal(t, expiresAt.AddDate(0, 0, 7), repo.sub.ExpiresAt)
+	require.NotNil(t, repo.sub.ExpiresAt)
+	require.Equal(t, expiresAt.AddDate(0, 0, 7), *repo.sub.ExpiresAt)
 
 	conflict := bulkActionHandlerRequest(router, path, `{"subscription_ids":[1,404,1],"action":"extend","days":14}`, "bulk-extend-once")
 	require.Equal(t, http.StatusConflict, conflict.Code)
@@ -135,7 +136,7 @@ func TestSubscriptionBulkAction_ClientCancellationStillPersistsReplay(t *testing
 	defer cancel()
 	expiresAt := time.Now().AddDate(0, 0, 30)
 	repo := &cancellationAwareBulkActionRepo{
-		bulkActionHandlerSubscriptionRepo: &bulkActionHandlerSubscriptionRepo{sub: &service.UserSubscription{ID: 1, UserID: 1, GroupID: 10, ExpiresAt: expiresAt}},
+		bulkActionHandlerSubscriptionRepo: &bulkActionHandlerSubscriptionRepo{sub: &service.UserSubscription{ID: 1, UserID: 1, GroupID: 10, ExpiresAt: &expiresAt}},
 		cancelRequest:                     cancel,
 	}
 	svc := service.NewSubscriptionService(nil, repo, nil, nil, nil)
@@ -158,7 +159,8 @@ func TestSubscriptionBulkAction_ClientCancellationStillPersistsReplay(t *testing
 	require.Equal(t, "true", replayed.Header().Get("X-Idempotency-Replayed"))
 	require.JSONEq(t, first.Body.String(), replayed.Body.String())
 	require.Equal(t, 1, repo.extendCalls)
-	require.Equal(t, expiresAt.AddDate(0, 0, 7), repo.sub.ExpiresAt)
+	require.NotNil(t, repo.sub.ExpiresAt)
+	require.Equal(t, expiresAt.AddDate(0, 0, 7), *repo.sub.ExpiresAt)
 }
 
 func TestSubscriptionBulkAction_ValidatesBeforeIdempotencyAndExecution(t *testing.T) {

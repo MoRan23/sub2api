@@ -6,8 +6,8 @@ import (
 	"math"
 	"time"
 
-	"github.com/lib/pq"
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/lib/pq"
 )
 
 const totalQuotaConsumeEpsilon = 1e-9
@@ -171,8 +171,8 @@ func loadTotalQuotaSpendRows(ctx context.Context, exec sqlExecutor, subscription
 		SELECT id, quota_total_usd, quota_used_usd
 		FROM user_subscription_quota_events
 		WHERE user_subscription_id = $1
-		  AND expires_at > $2
-		ORDER BY expires_at ASC, id ASC
+		  AND (expires_at IS NULL OR expires_at > $2)
+		ORDER BY expires_at ASC NULLS LAST, id ASC
 		FOR UPDATE
 	`, subscriptionID, now)
 	if err != nil {

@@ -198,6 +198,7 @@ func groupFromServiceBase(g *service.Group) Group {
 		WeeklyLimitUSD:                  g.WeeklyLimitUSD,
 		MonthlyLimitUSD:                 g.MonthlyLimitUSD,
 		TotalLimitUSD:                   g.TotalLimitUSD,
+		TotalQuotaNoExpiry:              g.TotalQuotaNoExpiry,
 		LongContextPricingEnabled:       g.LongContextPricingEnabled,
 		AllowImageGeneration:            g.AllowImageGeneration,
 		AllowBatchImageGeneration:       g.AllowBatchImageGeneration,
@@ -679,6 +680,7 @@ func redeemCodeFromServiceBase(rc *service.RedeemCode) RedeemCode {
 		ExpiresAt:    rc.ExpiresAt,
 		GroupID:      rc.GroupID,
 		ValidityDays: rc.ValidityDays,
+		QuotaAmount:  rc.QuotaAmount,
 		User:         UserFromServiceShallow(rc.User),
 		Group:        GroupFromServiceShallow(rc.Group),
 	}

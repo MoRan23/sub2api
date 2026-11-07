@@ -1,6 +1,15 @@
 import { describe, expect, it } from 'vitest'
 
-import { getExpirationDateRelation, getRemainingExpiryDuration } from '../subscriptionQuota'
+import { getExpirationDateRelation, getRemainingExpiryDuration, isValidQuotaAmount } from '../subscriptionQuota'
+
+describe('explicit quota grant amounts', () => {
+  it.each([0.00000001, 1, 12.12345678, 1000])('accepts positive eight-decimal amounts: %s', (value) => {
+    expect(isValidQuotaAmount(value)).toBe(true)
+  })
+  it.each([null, undefined, '', '12', 0, -1, Infinity, NaN, 0.000000001, 1.123456789, 1e12])('rejects absent or invalid amounts: %s', (value) => {
+    expect(isValidQuotaAmount(value)).toBe(false)
+  })
+})
 
 describe('subscription expiry timing', () => {
   it('uses local calendar dates for today and tomorrow', () => {

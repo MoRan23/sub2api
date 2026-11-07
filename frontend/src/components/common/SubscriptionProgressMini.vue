@@ -55,13 +55,20 @@
               >
                 {{ formatDaysRemaining(subscription.expires_at) }}
               </span>
+              <span v-else-if="subscription.expires_at === null" class="text-xs text-gray-500 dark:text-dark-400">
+                {{ t('subscription.permanent') }}
+              </span>
             </div>
 
             <!-- Progress bars or Unlimited badge -->
             <div class="space-y-1.5">
               <!-- Unlimited subscription badge -->
+              <div v-if="isPermanentQuota(subscription)" class="flex items-center justify-between text-xs text-gray-700 dark:text-gray-300">
+                <span>{{ t('subscription.remainingQuota') }}</span>
+                <span>${{ formatWalletAmount(subscription.total_remaining_usd ?? 0) }}</span>
+              </div>
               <div
-                v-if="isUnlimited(subscription)"
+                v-else-if="isUnlimited(subscription)"
                 class="flex items-center gap-2 rounded-lg bg-gradient-to-r from-emerald-50 to-teal-50 px-2.5 py-1.5 dark:from-emerald-900/20 dark:to-teal-900/20"
               >
                 <span class="text-lg text-emerald-600 dark:text-emerald-400">∞</span>
@@ -82,13 +89,13 @@
                       :class="
                         getProgressBarClass(
                           subscription.total_used_usd,
-                          subscription.total_limit_usd ?? subscription.group?.total_limit_usd
+                          subscription.total_limit_usd
                         )
                       "
                       :style="{
                         width: getProgressWidth(
                           subscription.total_used_usd,
-                          subscription.total_limit_usd ?? subscription.group?.total_limit_usd
+                          subscription.total_limit_usd
                         )
                       }"
                     ></div>
@@ -97,7 +104,7 @@
                     {{
                       formatUsage(
                         subscription.total_used_usd,
-                        subscription.total_limit_usd ?? subscription.group?.total_limit_usd
+                        subscription.total_limit_usd
                       )
                     }}
                   </span>
@@ -216,6 +223,7 @@ import { useSubscriptionStore } from '@/stores'
 import { FeatureFlags, isFeatureFlagEnabled } from '@/utils/featureFlags'
 import type { UserSubscription } from '@/types'
 import { getExpirationDateRelation } from '@/utils/subscriptionQuota'
+import { formatWalletAmount } from '@/components/payment/orderUtils'
 
 const { t } = useI18n()
 
@@ -240,9 +248,10 @@ const displaySubscriptions = computed(() => {
 })
 
 function getMaxUsagePercentage(sub: UserSubscription): number {
+  if (isPermanentQuota(sub)) return 0
   const percentages: number[] = []
   if (sub.group?.subscription_type === 'total_quota') {
-    const limit = sub.total_limit_usd ?? sub.group?.total_limit_usd
+    const limit = sub.total_limit_usd
     if (limit) {
       percentages.push(((sub.total_used_usd || 0) / limit) * 100)
     }
@@ -259,6 +268,10 @@ function getMaxUsagePercentage(sub: UserSubscription): number {
   return percentages.length > 0 ? Math.max(...percentages) : 0
 }
 
+function isPermanentQuota(sub: UserSubscription): boolean {
+  return sub.group?.subscription_type === 'total_quota' && sub.expires_at === null
+}
+
 function isUnlimited(sub: UserSubscription): boolean {
   if (sub.group?.subscription_type === 'total_quota') {
     return false
@@ -271,6 +284,7 @@ function isUnlimited(sub: UserSubscription): boolean {
 }
 
 function getProgressDotClass(sub: UserSubscription): string {
+  if (isPermanentQuota(sub)) return sub.total_remaining_usd > 0 ? 'bg-green-500' : 'bg-red-500'
   // Unlimited subscriptions get a special color
   if (isUnlimited(sub)) {
     return 'bg-emerald-500'

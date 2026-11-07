@@ -45,7 +45,7 @@ func TestDelayedFirstUseAnchorsMonthlyWindowAtActivation(t *testing.T) {
 	sub := &UserSubscription{
 		ID:        1,
 		StartsAt:  startsAt,
-		ExpiresAt: startsAt.Add(45 * 24 * time.Hour),
+		ExpiresAt: ptrTime(startsAt.Add(45 * 24 * time.Hour)),
 	}
 
 	require.NoError(t, svc.CheckAndActivateWindow(context.Background(), sub))
@@ -81,7 +81,7 @@ func TestCheckAndResetWindowsDoesNotResetExactThirtyDayLegacyMonthlyWindow(t *te
 	sub := &UserSubscription{
 		ID:                 1,
 		StartsAt:           startsAt,
-		ExpiresAt:          startsAt.Add(30 * 24 * time.Hour),
+		ExpiresAt:          ptrTime(startsAt.Add(30 * 24 * time.Hour)),
 		MonthlyWindowStart: &windowStart,
 		MonthlyUsageUSD:    12,
 	}
@@ -104,7 +104,7 @@ func TestCheckAndResetWindowsResetsPartialFinalMonthlySubscriptions(t *testing.T
 			sub := &UserSubscription{
 				ID:                 2,
 				StartsAt:           startsAt,
-				ExpiresAt:          startsAt.Add(time.Duration(durationDays) * 24 * time.Hour),
+				ExpiresAt:          ptrTime(startsAt.Add(time.Duration(durationDays) * 24 * time.Hour)),
 				MonthlyWindowStart: &legacyWindowStart,
 				MonthlyUsageUSD:    12,
 			}
@@ -123,7 +123,7 @@ func TestNormalizeExpiredWindowsKeepsLegacyMonthlyUsageBeforeExpiry(t *testing.T
 	now := windowStart.Add(30 * 24 * time.Hour)
 	subs := []UserSubscription{{
 		StartsAt:           startsAt,
-		ExpiresAt:          startsAt.Add(30 * 24 * time.Hour),
+		ExpiresAt:          ptrTime(startsAt.Add(30 * 24 * time.Hour)),
 		MonthlyWindowStart: &windowStart,
 		MonthlyUsageUSD:    12,
 	}}
@@ -140,7 +140,7 @@ func TestNormalizeExpiredWindowsResetsMonthlyUsageWithPartialFinalPeriod(t *test
 	now := startsAt.Add(30 * 24 * time.Hour)
 	subs := []UserSubscription{{
 		StartsAt:           startsAt,
-		ExpiresAt:          startsAt.Add(31 * 24 * time.Hour),
+		ExpiresAt:          ptrTime(startsAt.Add(31 * 24 * time.Hour)),
 		MonthlyWindowStart: &windowStart,
 		MonthlyUsageUSD:    12,
 	}}
@@ -159,7 +159,7 @@ func TestValidateAndCheckLimitsKeepsLegacyMonthlyUsageBeforeExpiry(t *testing.T)
 	sub := &UserSubscription{
 		Status:             SubscriptionStatusActive,
 		StartsAt:           startsAt,
-		ExpiresAt:          startsAt.Add(30 * 24 * time.Hour),
+		ExpiresAt:          ptrTime(startsAt.Add(30 * 24 * time.Hour)),
 		MonthlyWindowStart: &windowStart,
 		MonthlyUsageUSD:    12,
 	}
@@ -181,7 +181,7 @@ func TestValidateAndCheckLimitsResetsMonthlyUsageWithPartialFinalPeriod(t *testi
 	sub := &UserSubscription{
 		Status:             SubscriptionStatusActive,
 		StartsAt:           startsAt,
-		ExpiresAt:          startsAt.Add(45 * 24 * time.Hour),
+		ExpiresAt:          ptrTime(startsAt.Add(45 * 24 * time.Hour)),
 		MonthlyWindowStart: &windowStart,
 		MonthlyUsageUSD:    12,
 	}
@@ -197,7 +197,7 @@ func TestValidateAndCheckLimitsResetsMonthlyUsageWithPartialFinalPeriod(t *testi
 
 func TestValidateAndCheckLimitsRejectsExactExpiry(t *testing.T) {
 	now := time.Date(2026, 7, 31, 12, 0, 0, 0, time.UTC)
-	sub := &UserSubscription{Status: SubscriptionStatusActive, ExpiresAt: now}
+	sub := &UserSubscription{Status: SubscriptionStatusActive, ExpiresAt: ptrTime(now)}
 	svc := NewSubscriptionService(groupRepoNoop{}, userSubRepoNoop{}, nil, nil, nil)
 	svc.now = func() time.Time { return now }
 
@@ -221,7 +221,7 @@ func TestAutomaticWindowsAllowPartialFinalDailyAndWeeklyPeriods(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			sub := &UserSubscription{StartsAt: startsAt, ExpiresAt: tt.expiresAt}
+			sub := &UserSubscription{StartsAt: startsAt, ExpiresAt: ptrTime(tt.expiresAt)}
 			resetAt, ok := sub.automaticWindowStartAt(&legacyWindowStart, tt.period, startsAt.Add(tt.period))
 
 			require.True(t, ok)
@@ -233,7 +233,7 @@ func TestAutomaticWindowsAllowPartialFinalDailyAndWeeklyPeriods(t *testing.T) {
 func TestAutomaticWindowPreservesPersistedManualAnchorAndAdvancesWholePeriods(t *testing.T) {
 	startsAt := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
 	manualAnchor := startsAt.Add(5 * 24 * time.Hour)
-	sub := &UserSubscription{StartsAt: startsAt, ExpiresAt: startsAt.Add(100 * 24 * time.Hour)}
+	sub := &UserSubscription{StartsAt: startsAt, ExpiresAt: ptrTime(startsAt.Add(100 * 24 * time.Hour))}
 
 	resetAt, ok := sub.automaticWindowStartAt(&manualAnchor, 30*24*time.Hour, manualAnchor.Add(65*24*time.Hour))
 
@@ -244,7 +244,7 @@ func TestAutomaticWindowPreservesPersistedManualAnchorAndAdvancesWholePeriods(t 
 func TestAutomaticWindowPreservesPeriodAlignedLaterMidnightManualAnchor(t *testing.T) {
 	startsAt := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
 	manualAnchor := startOfDay(startsAt).Add(30 * 24 * time.Hour)
-	sub := &UserSubscription{StartsAt: startsAt, ExpiresAt: startsAt.Add(100 * 24 * time.Hour)}
+	sub := &UserSubscription{StartsAt: startsAt, ExpiresAt: ptrTime(startsAt.Add(100 * 24 * time.Hour))}
 
 	resetAt, ok := sub.automaticWindowStartAt(&manualAnchor, 30*24*time.Hour, startsAt.Add(60*24*time.Hour))
 
@@ -255,7 +255,7 @@ func TestAutomaticWindowPreservesPeriodAlignedLaterMidnightManualAnchor(t *testi
 func TestAutomaticWindowPreservesExactMidnightManualAnchor(t *testing.T) {
 	startsAt := time.Date(2026, 1, 1, 10, 0, 0, 0, time.UTC)
 	manualAnchor := time.Date(2026, 1, 20, 0, 0, 0, 0, time.UTC)
-	sub := &UserSubscription{StartsAt: startsAt, ExpiresAt: startsAt.Add(100 * 24 * time.Hour)}
+	sub := &UserSubscription{StartsAt: startsAt, ExpiresAt: ptrTime(startsAt.Add(100 * 24 * time.Hour))}
 
 	resetAt, ok := sub.automaticWindowStartAt(&manualAnchor, 30*24*time.Hour, manualAnchor.Add(30*24*time.Hour))
 

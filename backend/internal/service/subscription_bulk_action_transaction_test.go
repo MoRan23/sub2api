@@ -55,7 +55,7 @@ func (r *transactionalBulkSubscriptionRepo) GetByIDForUpdate(ctx context.Context
 }
 
 func (r *transactionalBulkSubscriptionRepo) ExtendExpiry(ctx context.Context, _ int64, expiry time.Time) error {
-	r.pending[dbent.TxFromContext(ctx)].ExpiresAt = expiry
+	r.pending[dbent.TxFromContext(ctx)].ExpiresAt = ptrTime(expiry)
 	return nil
 }
 
@@ -103,7 +103,7 @@ func TestBulkSubscriptionAction_RollsBackPostWriteFailureBeforeRetry(t *testing.
 				status = SubscriptionStatusExpired
 			}
 			repo := &transactionalBulkSubscriptionRepo{
-				committed:       UserSubscription{ID: 1, UserID: 10, GroupID: 20, Status: status, ExpiresAt: expiresAt, DailyUsageUSD: 7},
+				committed:       UserSubscription{ID: 1, UserID: 10, GroupID: 20, Status: status, ExpiresAt: ptrTime(expiresAt), DailyUsageUSD: 7},
 				pending:         make(map[*dbent.Tx]*UserSubscription),
 				reads:           make(map[*dbent.Tx]int),
 				postReadFailure: tc.postReadFailure,
@@ -118,7 +118,7 @@ func TestBulkSubscriptionAction_RollsBackPostWriteFailureBeforeRetry(t *testing.
 			result, err := svc.BulkSubscriptionAction(context.Background(), input)
 			require.NoError(t, err)
 			require.Equal(t, 1, result.FailedCount)
-			require.Equal(t, expiresAt, repo.committed.ExpiresAt, "failed operation must not commit its earlier expiry write")
+			require.Equal(t, expiresAt, *repo.committed.ExpiresAt, "failed operation must not commit its earlier expiry write")
 			require.Equal(t, status, repo.committed.Status)
 			require.Equal(t, float64(7), repo.committed.DailyUsageUSD)
 
@@ -129,7 +129,7 @@ func TestBulkSubscriptionAction_RollsBackPostWriteFailureBeforeRetry(t *testing.
 			require.NoError(t, err)
 			require.Equal(t, 1, result.SuccessCount)
 			if tc.action == "extend" {
-				require.Equal(t, expiresAt.AddDate(0, 0, 7), repo.committed.ExpiresAt, "retry must extend only once")
+				require.Equal(t, expiresAt.AddDate(0, 0, 7), *repo.committed.ExpiresAt, "retry must extend only once")
 				require.Equal(t, SubscriptionStatusActive, repo.committed.Status)
 			} else {
 				require.Zero(t, repo.committed.DailyUsageUSD)

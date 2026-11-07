@@ -115,6 +115,20 @@ export default {
     markReadHint: 'Click "Mark as read" to mark this announcement'
   },
 
+  subscription: {
+    permanent: 'Permanent',
+    finite: 'Valid for the granted term',
+    remainingQuota: 'Remaining quota',
+    noExpirySwitch: 'Quota never expires',
+    creationOnlyHint: 'Set only at creation; this cannot be changed later. Usage stops when the quota is exhausted.',
+    grantAmountHint: 'Set the amount when creating a redeem code or assigning a subscription.',
+    amountPerCode: 'Quota per code (USD)',
+    grantAmount: 'Quota to add (USD)',
+    amountPerUser: 'Quota to add per user (USD)',
+    appendHint: 'Adds a new grant without replacing the remaining quota.',
+    invalidAmount: 'Enter a positive quota below 1 trillion with at most eight decimal places'
+  },
+
   // User Subscriptions Page
   userSubscriptions: {
     title: 'My Subscriptions',

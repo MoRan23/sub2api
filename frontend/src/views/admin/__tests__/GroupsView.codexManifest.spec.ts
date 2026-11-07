@@ -378,13 +378,12 @@ describe("GroupsView gateway settings", () => {
     await fireEvent.click(await view.findByRole("button", { name: "common.edit" }));
 
     const totalInput = view.queryByPlaceholderText("admin.groups.subscription.totalLimitPlaceholder");
+    expect(totalInput).toBeNull();
     if (simpleMode) {
       expect(totalInput).toBeNull();
       expect(view.queryByTestId("codex-manifest-field")).toBeNull();
     } else {
-      expect(totalInput).not.toBeNull();
-      expect((totalInput as HTMLInputElement).value).toBe("25");
-      await fireEvent.update(totalInput!, "30");
+      expect(view.getByText('subscription.grantAmountHint')).toBeTruthy();
     }
 
     await fireEvent.submit(view.container.querySelector("#edit-group-form")!);
@@ -394,8 +393,8 @@ describe("GroupsView gateway settings", () => {
     } else {
       expect(updateGroup).toHaveBeenCalledWith(42, expect.objectContaining({
         subscription_type: "total_quota",
-        total_limit_usd: 30,
       }));
+      expect(updateGroup.mock.calls[0]![1]).not.toHaveProperty('total_limit_usd');
     }
   });
 });

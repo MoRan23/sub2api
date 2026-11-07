@@ -1335,7 +1335,9 @@ func (s *adminServiceImpl) GenerateRedeemCodes(ctx context.Context, input *Gener
 	giftRatio := normalizeGiftRatio(input.GiftRatio)
 	giftValue := calculateGiftBalance(input.Value, giftRatio)
 
-	// 如果是订阅类型，验证必须有 GroupID
+	validityDays := input.ValidityDays
+	var quotaAmount *float64
+	// Freeze the amount on the code, never read the group's former quota at redemption.
 	if input.Type == RedeemTypeSubscription {
 		if input.GroupID == nil {
 			return nil, errors.New("group_id is required for subscription type")
@@ -1345,8 +1347,17 @@ func (s *adminServiceImpl) GenerateRedeemCodes(ctx context.Context, input *Gener
 		if err != nil {
 			return nil, fmt.Errorf("group not found: %w", err)
 		}
-		if !group.IsSubscriptionType() {
-			return nil, errors.New("group must be subscription type")
+		if group.IsWindowedSubscriptionType() && validityDays <= 0 {
+			validityDays = 30 // Preserve the existing windowed-code default.
+		}
+		if err := ValidateSubscriptionRedeemGrant(group, input.QuotaAmount, validityDays); err != nil {
+			return nil, err
+		}
+		if group.IsTotalQuotaSubscriptionType() {
+			quotaAmount = input.QuotaAmount
+			if group.TotalQuotaNoExpiry {
+				validityDays = 0
+			}
 		}
 	}
 
@@ -1368,10 +1379,8 @@ func (s *adminServiceImpl) GenerateRedeemCodes(ctx context.Context, input *Gener
 		// 订阅类型专用字段
 		if input.Type == RedeemTypeSubscription {
 			code.GroupID = input.GroupID
-			code.ValidityDays = input.ValidityDays
-			if code.ValidityDays <= 0 {
-				code.ValidityDays = 30 // 默认30天
-			}
+			code.ValidityDays = validityDays
+			code.QuotaAmount = copySubscriptionQuotaAmount(quotaAmount)
 		}
 		if err := s.redeemCodeRepo.Create(ctx, &code); err != nil {
 			return nil, err

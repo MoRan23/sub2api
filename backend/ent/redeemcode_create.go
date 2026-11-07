@@ -58,6 +58,20 @@ func (_c *RedeemCodeCreate) SetNillableValue(v *float64) *RedeemCodeCreate {
 	return _c
 }
 
+// SetQuotaAmount sets the "quota_amount" field.
+func (_c *RedeemCodeCreate) SetQuotaAmount(v float64) *RedeemCodeCreate {
+	_c.mutation.SetQuotaAmount(v)
+	return _c
+}
+
+// SetNillableQuotaAmount sets the "quota_amount" field if the given value is not nil.
+func (_c *RedeemCodeCreate) SetNillableQuotaAmount(v *float64) *RedeemCodeCreate {
+	if v != nil {
+		_c.SetQuotaAmount(*v)
+	}
+	return _c
+}
+
 // SetGiftRatio sets the "gift_ratio" field.
 func (_c *RedeemCodeCreate) SetGiftRatio(v float64) *RedeemCodeCreate {
 	_c.mutation.SetGiftRatio(v)
@@ -367,6 +381,10 @@ func (_c *RedeemCodeCreate) createSpec() (*RedeemCode, *sqlgraph.CreateSpec) {
 		_spec.SetField(redeemcode.FieldValue, field.TypeFloat64, value)
 		_node.Value = value
 	}
+	if value, ok := _c.mutation.QuotaAmount(); ok {
+		_spec.SetField(redeemcode.FieldQuotaAmount, field.TypeFloat64, value)
+		_node.QuotaAmount = &value
+	}
 	if value, ok := _c.mutation.GiftRatio(); ok {
 		_spec.SetField(redeemcode.FieldGiftRatio, field.TypeFloat64, value)
 		_node.GiftRatio = value
@@ -524,6 +542,30 @@ func (u *RedeemCodeUpsert) UpdateValue() *RedeemCodeUpsert {
 // AddValue adds v to the "value" field.
 func (u *RedeemCodeUpsert) AddValue(v float64) *RedeemCodeUpsert {
 	u.Add(redeemcode.FieldValue, v)
+	return u
+}
+
+// SetQuotaAmount sets the "quota_amount" field.
+func (u *RedeemCodeUpsert) SetQuotaAmount(v float64) *RedeemCodeUpsert {
+	u.Set(redeemcode.FieldQuotaAmount, v)
+	return u
+}
+
+// UpdateQuotaAmount sets the "quota_amount" field to the value that was provided on create.
+func (u *RedeemCodeUpsert) UpdateQuotaAmount() *RedeemCodeUpsert {
+	u.SetExcluded(redeemcode.FieldQuotaAmount)
+	return u
+}
+
+// AddQuotaAmount adds v to the "quota_amount" field.
+func (u *RedeemCodeUpsert) AddQuotaAmount(v float64) *RedeemCodeUpsert {
+	u.Add(redeemcode.FieldQuotaAmount, v)
+	return u
+}
+
+// ClearQuotaAmount clears the value of the "quota_amount" field.
+func (u *RedeemCodeUpsert) ClearQuotaAmount() *RedeemCodeUpsert {
+	u.SetNull(redeemcode.FieldQuotaAmount)
 	return u
 }
 
@@ -774,6 +816,34 @@ func (u *RedeemCodeUpsertOne) AddValue(v float64) *RedeemCodeUpsertOne {
 func (u *RedeemCodeUpsertOne) UpdateValue() *RedeemCodeUpsertOne {
 	return u.Update(func(s *RedeemCodeUpsert) {
 		s.UpdateValue()
+	})
+}
+
+// SetQuotaAmount sets the "quota_amount" field.
+func (u *RedeemCodeUpsertOne) SetQuotaAmount(v float64) *RedeemCodeUpsertOne {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.SetQuotaAmount(v)
+	})
+}
+
+// AddQuotaAmount adds v to the "quota_amount" field.
+func (u *RedeemCodeUpsertOne) AddQuotaAmount(v float64) *RedeemCodeUpsertOne {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.AddQuotaAmount(v)
+	})
+}
+
+// UpdateQuotaAmount sets the "quota_amount" field to the value that was provided on create.
+func (u *RedeemCodeUpsertOne) UpdateQuotaAmount() *RedeemCodeUpsertOne {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.UpdateQuotaAmount()
+	})
+}
+
+// ClearQuotaAmount clears the value of the "quota_amount" field.
+func (u *RedeemCodeUpsertOne) ClearQuotaAmount() *RedeemCodeUpsertOne {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.ClearQuotaAmount()
 	})
 }
 
@@ -1216,6 +1286,34 @@ func (u *RedeemCodeUpsertBulk) AddValue(v float64) *RedeemCodeUpsertBulk {
 func (u *RedeemCodeUpsertBulk) UpdateValue() *RedeemCodeUpsertBulk {
 	return u.Update(func(s *RedeemCodeUpsert) {
 		s.UpdateValue()
+	})
+}
+
+// SetQuotaAmount sets the "quota_amount" field.
+func (u *RedeemCodeUpsertBulk) SetQuotaAmount(v float64) *RedeemCodeUpsertBulk {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.SetQuotaAmount(v)
+	})
+}
+
+// AddQuotaAmount adds v to the "quota_amount" field.
+func (u *RedeemCodeUpsertBulk) AddQuotaAmount(v float64) *RedeemCodeUpsertBulk {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.AddQuotaAmount(v)
+	})
+}
+
+// UpdateQuotaAmount sets the "quota_amount" field to the value that was provided on create.
+func (u *RedeemCodeUpsertBulk) UpdateQuotaAmount() *RedeemCodeUpsertBulk {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.UpdateQuotaAmount()
+	})
+}
+
+// ClearQuotaAmount clears the value of the "quota_amount" field.
+func (u *RedeemCodeUpsertBulk) ClearQuotaAmount() *RedeemCodeUpsertBulk {
+	return u.Update(func(s *RedeemCodeUpsert) {
+		s.ClearQuotaAmount()
 	})
 }
 

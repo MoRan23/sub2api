@@ -22200,6 +22200,7 @@ type GroupMutation struct {
 	addweekly_limit_usd                     *float64
 	monthly_limit_usd                       *float64
 	addmonthly_limit_usd                    *float64
+	total_quota_no_expiry                   *bool
 	total_limit_usd                         *float64
 	addtotal_limit_usd                      *float64
 	default_validity_days                   *int
@@ -23263,6 +23264,42 @@ func (m *GroupMutation) ResetMonthlyLimitUsd() {
 	m.monthly_limit_usd = nil
 	m.addmonthly_limit_usd = nil
 	delete(m.clearedFields, group.FieldMonthlyLimitUsd)
+}
+
+// SetTotalQuotaNoExpiry sets the "total_quota_no_expiry" field.
+func (m *GroupMutation) SetTotalQuotaNoExpiry(b bool) {
+	m.total_quota_no_expiry = &b
+}
+
+// TotalQuotaNoExpiry returns the value of the "total_quota_no_expiry" field in the mutation.
+func (m *GroupMutation) TotalQuotaNoExpiry() (r bool, exists bool) {
+	v := m.total_quota_no_expiry
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldTotalQuotaNoExpiry returns the old "total_quota_no_expiry" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldTotalQuotaNoExpiry(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldTotalQuotaNoExpiry is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldTotalQuotaNoExpiry requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldTotalQuotaNoExpiry: %w", err)
+	}
+	return oldValue.TotalQuotaNoExpiry, nil
+}
+
+// ResetTotalQuotaNoExpiry resets all changes to the "total_quota_no_expiry" field.
+func (m *GroupMutation) ResetTotalQuotaNoExpiry() {
+	m.total_quota_no_expiry = nil
 }
 
 // SetTotalLimitUsd sets the "total_limit_usd" field.
@@ -26236,7 +26273,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 71)
+	fields := make([]string, 0, 72)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -26293,6 +26330,9 @@ func (m *GroupMutation) Fields() []string {
 	}
 	if m.monthly_limit_usd != nil {
 		fields = append(fields, group.FieldMonthlyLimitUsd)
+	}
+	if m.total_quota_no_expiry != nil {
+		fields = append(fields, group.FieldTotalQuotaNoExpiry)
 	}
 	if m.total_limit_usd != nil {
 		fields = append(fields, group.FieldTotalLimitUsd)
@@ -26496,6 +26536,8 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.WeeklyLimitUsd()
 	case group.FieldMonthlyLimitUsd:
 		return m.MonthlyLimitUsd()
+	case group.FieldTotalQuotaNoExpiry:
+		return m.TotalQuotaNoExpiry()
 	case group.FieldTotalLimitUsd:
 		return m.TotalLimitUsd()
 	case group.FieldDefaultValidityDays:
@@ -26647,6 +26689,8 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldWeeklyLimitUsd(ctx)
 	case group.FieldMonthlyLimitUsd:
 		return m.OldMonthlyLimitUsd(ctx)
+	case group.FieldTotalQuotaNoExpiry:
+		return m.OldTotalQuotaNoExpiry(ctx)
 	case group.FieldTotalLimitUsd:
 		return m.OldTotalLimitUsd(ctx)
 	case group.FieldDefaultValidityDays:
@@ -26892,6 +26936,13 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetMonthlyLimitUsd(v)
+		return nil
+	case group.FieldTotalQuotaNoExpiry:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetTotalQuotaNoExpiry(v)
 		return nil
 	case group.FieldTotalLimitUsd:
 		v, ok := value.(float64)
@@ -27842,6 +27893,9 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldMonthlyLimitUsd:
 		m.ResetMonthlyLimitUsd()
+		return nil
+	case group.FieldTotalQuotaNoExpiry:
+		m.ResetTotalQuotaNoExpiry()
 		return nil
 	case group.FieldTotalLimitUsd:
 		m.ResetTotalLimitUsd()
@@ -41929,6 +41983,8 @@ type RedeemCodeMutation struct {
 	_type            *string
 	value            *float64
 	addvalue         *float64
+	quota_amount     *float64
+	addquota_amount  *float64
 	gift_ratio       *float64
 	addgift_ratio    *float64
 	gift_value       *float64
@@ -42174,6 +42230,76 @@ func (m *RedeemCodeMutation) AddedValue() (r float64, exists bool) {
 func (m *RedeemCodeMutation) ResetValue() {
 	m.value = nil
 	m.addvalue = nil
+}
+
+// SetQuotaAmount sets the "quota_amount" field.
+func (m *RedeemCodeMutation) SetQuotaAmount(f float64) {
+	m.quota_amount = &f
+	m.addquota_amount = nil
+}
+
+// QuotaAmount returns the value of the "quota_amount" field in the mutation.
+func (m *RedeemCodeMutation) QuotaAmount() (r float64, exists bool) {
+	v := m.quota_amount
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldQuotaAmount returns the old "quota_amount" field's value of the RedeemCode entity.
+// If the RedeemCode object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *RedeemCodeMutation) OldQuotaAmount(ctx context.Context) (v *float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldQuotaAmount is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldQuotaAmount requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldQuotaAmount: %w", err)
+	}
+	return oldValue.QuotaAmount, nil
+}
+
+// AddQuotaAmount adds f to the "quota_amount" field.
+func (m *RedeemCodeMutation) AddQuotaAmount(f float64) {
+	if m.addquota_amount != nil {
+		*m.addquota_amount += f
+	} else {
+		m.addquota_amount = &f
+	}
+}
+
+// AddedQuotaAmount returns the value that was added to the "quota_amount" field in this mutation.
+func (m *RedeemCodeMutation) AddedQuotaAmount() (r float64, exists bool) {
+	v := m.addquota_amount
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearQuotaAmount clears the value of the "quota_amount" field.
+func (m *RedeemCodeMutation) ClearQuotaAmount() {
+	m.quota_amount = nil
+	m.addquota_amount = nil
+	m.clearedFields[redeemcode.FieldQuotaAmount] = struct{}{}
+}
+
+// QuotaAmountCleared returns if the "quota_amount" field was cleared in this mutation.
+func (m *RedeemCodeMutation) QuotaAmountCleared() bool {
+	_, ok := m.clearedFields[redeemcode.FieldQuotaAmount]
+	return ok
+}
+
+// ResetQuotaAmount resets all changes to the "quota_amount" field.
+func (m *RedeemCodeMutation) ResetQuotaAmount() {
+	m.quota_amount = nil
+	m.addquota_amount = nil
+	delete(m.clearedFields, redeemcode.FieldQuotaAmount)
 }
 
 // SetGiftRatio sets the "gift_ratio" field.
@@ -42762,7 +42888,7 @@ func (m *RedeemCodeMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *RedeemCodeMutation) Fields() []string {
-	fields := make([]string, 0, 13)
+	fields := make([]string, 0, 14)
 	if m.code != nil {
 		fields = append(fields, redeemcode.FieldCode)
 	}
@@ -42771,6 +42897,9 @@ func (m *RedeemCodeMutation) Fields() []string {
 	}
 	if m.value != nil {
 		fields = append(fields, redeemcode.FieldValue)
+	}
+	if m.quota_amount != nil {
+		fields = append(fields, redeemcode.FieldQuotaAmount)
 	}
 	if m.gift_ratio != nil {
 		fields = append(fields, redeemcode.FieldGiftRatio)
@@ -42816,6 +42945,8 @@ func (m *RedeemCodeMutation) Field(name string) (ent.Value, bool) {
 		return m.GetType()
 	case redeemcode.FieldValue:
 		return m.Value()
+	case redeemcode.FieldQuotaAmount:
+		return m.QuotaAmount()
 	case redeemcode.FieldGiftRatio:
 		return m.GiftRatio()
 	case redeemcode.FieldGiftValue:
@@ -42851,6 +42982,8 @@ func (m *RedeemCodeMutation) OldField(ctx context.Context, name string) (ent.Val
 		return m.OldType(ctx)
 	case redeemcode.FieldValue:
 		return m.OldValue(ctx)
+	case redeemcode.FieldQuotaAmount:
+		return m.OldQuotaAmount(ctx)
 	case redeemcode.FieldGiftRatio:
 		return m.OldGiftRatio(ctx)
 	case redeemcode.FieldGiftValue:
@@ -42900,6 +43033,13 @@ func (m *RedeemCodeMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetValue(v)
+		return nil
+	case redeemcode.FieldQuotaAmount:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetQuotaAmount(v)
 		return nil
 	case redeemcode.FieldGiftRatio:
 		v, ok := value.(float64)
@@ -42982,6 +43122,9 @@ func (m *RedeemCodeMutation) AddedFields() []string {
 	if m.addvalue != nil {
 		fields = append(fields, redeemcode.FieldValue)
 	}
+	if m.addquota_amount != nil {
+		fields = append(fields, redeemcode.FieldQuotaAmount)
+	}
 	if m.addgift_ratio != nil {
 		fields = append(fields, redeemcode.FieldGiftRatio)
 	}
@@ -43001,6 +43144,8 @@ func (m *RedeemCodeMutation) AddedField(name string) (ent.Value, bool) {
 	switch name {
 	case redeemcode.FieldValue:
 		return m.AddedValue()
+	case redeemcode.FieldQuotaAmount:
+		return m.AddedQuotaAmount()
 	case redeemcode.FieldGiftRatio:
 		return m.AddedGiftRatio()
 	case redeemcode.FieldGiftValue:
@@ -43022,6 +43167,13 @@ func (m *RedeemCodeMutation) AddField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.AddValue(v)
+		return nil
+	case redeemcode.FieldQuotaAmount:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddQuotaAmount(v)
 		return nil
 	case redeemcode.FieldGiftRatio:
 		v, ok := value.(float64)
@@ -43052,6 +43204,9 @@ func (m *RedeemCodeMutation) AddField(name string, value ent.Value) error {
 // mutation.
 func (m *RedeemCodeMutation) ClearedFields() []string {
 	var fields []string
+	if m.FieldCleared(redeemcode.FieldQuotaAmount) {
+		fields = append(fields, redeemcode.FieldQuotaAmount)
+	}
 	if m.FieldCleared(redeemcode.FieldUsedBy) {
 		fields = append(fields, redeemcode.FieldUsedBy)
 	}
@@ -43081,6 +43236,9 @@ func (m *RedeemCodeMutation) FieldCleared(name string) bool {
 // error if the field is not defined in the schema.
 func (m *RedeemCodeMutation) ClearField(name string) error {
 	switch name {
+	case redeemcode.FieldQuotaAmount:
+		m.ClearQuotaAmount()
+		return nil
 	case redeemcode.FieldUsedBy:
 		m.ClearUsedBy()
 		return nil
@@ -43112,6 +43270,9 @@ func (m *RedeemCodeMutation) ResetField(name string) error {
 		return nil
 	case redeemcode.FieldValue:
 		m.ResetValue()
+		return nil
+	case redeemcode.FieldQuotaAmount:
+		m.ResetQuotaAmount()
 		return nil
 	case redeemcode.FieldGiftRatio:
 		m.ResetGiftRatio()
@@ -59495,7 +59656,7 @@ func (m *UserSubscriptionMutation) ExpiresAt() (r time.Time, exists bool) {
 // OldExpiresAt returns the old "expires_at" field's value of the UserSubscription entity.
 // If the UserSubscription object wasn't provided to the builder, the object is fetched from the database.
 // An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *UserSubscriptionMutation) OldExpiresAt(ctx context.Context) (v time.Time, err error) {
+func (m *UserSubscriptionMutation) OldExpiresAt(ctx context.Context) (v *time.Time, err error) {
 	if !m.op.Is(OpUpdateOne) {
 		return v, errors.New("OldExpiresAt is only allowed on UpdateOne operations")
 	}
@@ -59509,9 +59670,22 @@ func (m *UserSubscriptionMutation) OldExpiresAt(ctx context.Context) (v time.Tim
 	return oldValue.ExpiresAt, nil
 }
 
+// ClearExpiresAt clears the value of the "expires_at" field.
+func (m *UserSubscriptionMutation) ClearExpiresAt() {
+	m.expires_at = nil
+	m.clearedFields[usersubscription.FieldExpiresAt] = struct{}{}
+}
+
+// ExpiresAtCleared returns if the "expires_at" field was cleared in this mutation.
+func (m *UserSubscriptionMutation) ExpiresAtCleared() bool {
+	_, ok := m.clearedFields[usersubscription.FieldExpiresAt]
+	return ok
+}
+
 // ResetExpiresAt resets all changes to the "expires_at" field.
 func (m *UserSubscriptionMutation) ResetExpiresAt() {
 	m.expires_at = nil
+	delete(m.clearedFields, usersubscription.FieldExpiresAt)
 }
 
 // SetStatus sets the "status" field.
@@ -60572,6 +60746,9 @@ func (m *UserSubscriptionMutation) ClearedFields() []string {
 	if m.FieldCleared(usersubscription.FieldDeletedAt) {
 		fields = append(fields, usersubscription.FieldDeletedAt)
 	}
+	if m.FieldCleared(usersubscription.FieldExpiresAt) {
+		fields = append(fields, usersubscription.FieldExpiresAt)
+	}
 	if m.FieldCleared(usersubscription.FieldDailyWindowStart) {
 		fields = append(fields, usersubscription.FieldDailyWindowStart)
 	}
@@ -60603,6 +60780,9 @@ func (m *UserSubscriptionMutation) ClearField(name string) error {
 	switch name {
 	case usersubscription.FieldDeletedAt:
 		m.ClearDeletedAt()
+		return nil
+	case usersubscription.FieldExpiresAt:
+		m.ClearExpiresAt()
 		return nil
 	case usersubscription.FieldDailyWindowStart:
 		m.ClearDailyWindowStart()
@@ -61169,7 +61349,7 @@ func (m *UserSubscriptionQuotaEventMutation) ExpiresAt() (r time.Time, exists bo
 // OldExpiresAt returns the old "expires_at" field's value of the UserSubscriptionQuotaEvent entity.
 // If the UserSubscriptionQuotaEvent object wasn't provided to the builder, the object is fetched from the database.
 // An error is returned if the mutation operation is not UpdateOne, or the database query fails.
-func (m *UserSubscriptionQuotaEventMutation) OldExpiresAt(ctx context.Context) (v time.Time, err error) {
+func (m *UserSubscriptionQuotaEventMutation) OldExpiresAt(ctx context.Context) (v *time.Time, err error) {
 	if !m.op.Is(OpUpdateOne) {
 		return v, errors.New("OldExpiresAt is only allowed on UpdateOne operations")
 	}
@@ -61183,9 +61363,22 @@ func (m *UserSubscriptionQuotaEventMutation) OldExpiresAt(ctx context.Context) (
 	return oldValue.ExpiresAt, nil
 }
 
+// ClearExpiresAt clears the value of the "expires_at" field.
+func (m *UserSubscriptionQuotaEventMutation) ClearExpiresAt() {
+	m.expires_at = nil
+	m.clearedFields[usersubscriptionquotaevent.FieldExpiresAt] = struct{}{}
+}
+
+// ExpiresAtCleared returns if the "expires_at" field was cleared in this mutation.
+func (m *UserSubscriptionQuotaEventMutation) ExpiresAtCleared() bool {
+	_, ok := m.clearedFields[usersubscriptionquotaevent.FieldExpiresAt]
+	return ok
+}
+
 // ResetExpiresAt resets all changes to the "expires_at" field.
 func (m *UserSubscriptionQuotaEventMutation) ResetExpiresAt() {
 	m.expires_at = nil
+	delete(m.clearedFields, usersubscriptionquotaevent.FieldExpiresAt)
 }
 
 // SetSourceKind sets the "source_kind" field.
@@ -61629,6 +61822,9 @@ func (m *UserSubscriptionQuotaEventMutation) AddField(name string, value ent.Val
 // mutation.
 func (m *UserSubscriptionQuotaEventMutation) ClearedFields() []string {
 	var fields []string
+	if m.FieldCleared(usersubscriptionquotaevent.FieldExpiresAt) {
+		fields = append(fields, usersubscriptionquotaevent.FieldExpiresAt)
+	}
 	if m.FieldCleared(usersubscriptionquotaevent.FieldSourceRef) {
 		fields = append(fields, usersubscriptionquotaevent.FieldSourceRef)
 	}
@@ -61646,6 +61842,9 @@ func (m *UserSubscriptionQuotaEventMutation) FieldCleared(name string) bool {
 // error if the field is not defined in the schema.
 func (m *UserSubscriptionQuotaEventMutation) ClearField(name string) error {
 	switch name {
+	case usersubscriptionquotaevent.FieldExpiresAt:
+		m.ClearExpiresAt()
+		return nil
 	case usersubscriptionquotaevent.FieldSourceRef:
 		m.ClearSourceRef()
 		return nil

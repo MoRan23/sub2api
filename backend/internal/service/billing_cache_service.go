@@ -42,7 +42,7 @@ var (
 // subscriptionCacheData 订阅缓存数据结构（内部使用）
 type subscriptionCacheData struct {
 	Status               string
-	ExpiresAt            time.Time
+	ExpiresAt            *time.Time
 	DailyUsage           float64
 	WeeklyUsage          float64
 	MonthlyUsage         float64
@@ -1082,22 +1082,41 @@ func (s *BillingCacheService) checkSubscriptionEligibility(ctx context.Context, 
 		s.circuitBreaker.OnSuccess()
 	}
 
+	// NULL is valid only for a permanent total-quota group. A stale or
+	// malformed cache entry must not make a finite subscription perpetual.
+	if subData.ExpiresAt == nil && !(group.IsTotalQuotaSubscriptionType() && group.TotalQuotaNoExpiry) {
+		if s.subRepo == nil {
+			return ErrSubscriptionInvalid
+		}
+		if s.cache != nil {
+			_ = s.cache.InvalidateSubscriptionCache(ctx, userID, group.ID)
+		}
+		subData, err = s.getSubscriptionFromDB(ctx, userID, group.ID)
+		if err != nil || subData.ExpiresAt == nil {
+			return ErrSubscriptionInvalid
+		}
+		s.setSubscriptionCache(ctx, userID, group.ID, subData)
+	}
+
 	// 检查订阅状态
 	if subData.Status != SubscriptionStatusActive {
 		return ErrSubscriptionInvalid
 	}
 
 	// 检查是否过期
-	if time.Now().After(subData.ExpiresAt) {
+	if subData.ExpiresAt != nil && !time.Now().Before(*subData.ExpiresAt) {
 		return ErrSubscriptionInvalid
 	}
 
 	// 检查限额（使用传入的Group限额配置）
 	if group.IsTotalQuotaSubscriptionType() {
-		if group.HasTotalLimit() && subData.TotalRemaining <= 0 {
+		if subData.TotalRemaining <= 0 {
 			return ErrTotalLimitExceeded
 		}
 		return nil
+	}
+	if subData.ExpiresAt == nil {
+		return ErrSubscriptionInvalid
 	}
 
 	if group.HasDailyLimit() && subData.DailyUsage >= *group.DailyLimitUSD {

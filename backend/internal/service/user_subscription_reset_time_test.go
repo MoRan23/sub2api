@@ -18,7 +18,7 @@ func TestWeeklyResetTime_LegacyMidnightAnchor_UsesStartsAt(t *testing.T) {
 
 	sub := &UserSubscription{
 		StartsAt:          startsAt,
-		ExpiresAt:         startsAt.AddDate(0, 0, 30),
+		ExpiresAt:         ptrTime(startsAt.AddDate(0, 0, 30)),
 		WeeklyWindowStart: ptrTime(windowStart),
 	}
 
@@ -35,7 +35,7 @@ func TestWeeklyResetTime_RegularAnchor_UsesWindowStart(t *testing.T) {
 
 	sub := &UserSubscription{
 		StartsAt:          startsAt,
-		ExpiresAt:         startsAt.AddDate(0, 0, 30),
+		ExpiresAt:         ptrTime(startsAt.AddDate(0, 0, 30)),
 		WeeklyWindowStart: ptrTime(windowStart),
 	}
 
@@ -52,7 +52,7 @@ func TestWeeklyResetTime_MatchesAutomaticWindowStart(t *testing.T) {
 
 	sub := &UserSubscription{
 		StartsAt:          startsAt,
-		ExpiresAt:         startsAt.AddDate(0, 0, 30),
+		ExpiresAt:         ptrTime(startsAt.AddDate(0, 0, 30)),
 		WeeklyWindowStart: ptrTime(windowStart),
 	}
 
@@ -74,7 +74,7 @@ func TestMonthlyResetTime_LegacyMidnightAnchor_UsesStartsAt(t *testing.T) {
 
 	sub := &UserSubscription{
 		StartsAt:           startsAt,
-		ExpiresAt:          startsAt.AddDate(0, 0, 60),
+		ExpiresAt:          ptrTime(startsAt.AddDate(0, 0, 60)),
 		MonthlyWindowStart: ptrTime(windowStart),
 	}
 
@@ -94,7 +94,7 @@ func TestDailyResetTime_UnaffectedByWindowResetAnchor(t *testing.T) {
 
 	sub := &UserSubscription{
 		StartsAt:         startsAt,
-		ExpiresAt:        startsAt.AddDate(0, 0, 30),
+		ExpiresAt:        ptrTime(startsAt.AddDate(0, 0, 30)),
 		DailyWindowStart: ptrTime(windowStart),
 	}
 

@@ -113,6 +113,12 @@ func (_u *UserSubscriptionQuotaEventUpdate) SetNillableExpiresAt(v *time.Time) *
 	return _u
 }
 
+// ClearExpiresAt clears the value of the "expires_at" field.
+func (_u *UserSubscriptionQuotaEventUpdate) ClearExpiresAt() *UserSubscriptionQuotaEventUpdate {
+	_u.mutation.ClearExpiresAt()
+	return _u
+}
+
 // SetSourceKind sets the "source_kind" field.
 func (_u *UserSubscriptionQuotaEventUpdate) SetSourceKind(v string) *UserSubscriptionQuotaEventUpdate {
 	_u.mutation.SetSourceKind(v)
@@ -253,6 +259,9 @@ func (_u *UserSubscriptionQuotaEventUpdate) sqlSave(ctx context.Context) (_node 
 	}
 	if value, ok := _u.mutation.ExpiresAt(); ok {
 		_spec.SetField(usersubscriptionquotaevent.FieldExpiresAt, field.TypeTime, value)
+	}
+	if _u.mutation.ExpiresAtCleared() {
+		_spec.ClearField(usersubscriptionquotaevent.FieldExpiresAt, field.TypeTime)
 	}
 	if value, ok := _u.mutation.SourceKind(); ok {
 		_spec.SetField(usersubscriptionquotaevent.FieldSourceKind, field.TypeString, value)
@@ -396,6 +405,12 @@ func (_u *UserSubscriptionQuotaEventUpdateOne) SetNillableExpiresAt(v *time.Time
 	if v != nil {
 		_u.SetExpiresAt(*v)
 	}
+	return _u
+}
+
+// ClearExpiresAt clears the value of the "expires_at" field.
+func (_u *UserSubscriptionQuotaEventUpdateOne) ClearExpiresAt() *UserSubscriptionQuotaEventUpdateOne {
+	_u.mutation.ClearExpiresAt()
 	return _u
 }
 
@@ -569,6 +584,9 @@ func (_u *UserSubscriptionQuotaEventUpdateOne) sqlSave(ctx context.Context) (_no
 	}
 	if value, ok := _u.mutation.ExpiresAt(); ok {
 		_spec.SetField(usersubscriptionquotaevent.FieldExpiresAt, field.TypeTime, value)
+	}
+	if _u.mutation.ExpiresAtCleared() {
+		_spec.ClearField(usersubscriptionquotaevent.FieldExpiresAt, field.TypeTime)
 	}
 	if value, ok := _u.mutation.SourceKind(); ok {
 		_spec.SetField(usersubscriptionquotaevent.FieldSourceKind, field.TypeString, value)

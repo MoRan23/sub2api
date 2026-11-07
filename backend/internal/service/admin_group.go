@@ -433,6 +433,9 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	if subscriptionType == "" {
 		subscriptionType = SubscriptionTypeStandard
 	}
+	if input.TotalQuotaNoExpiry && subscriptionType != SubscriptionTypeTotalQuota {
+		return nil, infraerrors.BadRequest("INVALID_TOTAL_QUOTA_MODE", "permanent quota is only available for total-quota subscription groups")
+	}
 
 	// 限额字段：nil/负数 表示"无限制"，0 表示"不允许用量"，正数表示具体限额
 	dailyLimit := normalizeLimit(input.DailyLimitUSD)
@@ -587,7 +590,7 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		DailyLimitUSD:                   dailyLimit,
 		WeeklyLimitUSD:                  weeklyLimit,
 		MonthlyLimitUSD:                 monthlyLimit,
-		TotalLimitUSD:                   normalizeLimit(input.TotalLimitUSD),
+		TotalQuotaNoExpiry:              input.TotalQuotaNoExpiry,
 		LongContextPricingEnabled:       input.LongContextPricingEnabled,
 		ModelPricing:                    modelPricing,
 		AllowImageGeneration:            allowImageGeneration,
@@ -788,6 +791,12 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple {
 		normalizeUpdateGroupInputForSimpleMode(input)
 	}
+	if input.TotalQuotaNoExpiry != nil && *input.TotalQuotaNoExpiry != group.TotalQuotaNoExpiry {
+		return nil, infraerrors.BadRequest("TOTAL_QUOTA_MODE_IMMUTABLE", "quota expiration mode can only be selected when creating a group")
+	}
+	if group.TotalQuotaNoExpiry && input.SubscriptionType != "" && input.SubscriptionType != SubscriptionTypeTotalQuota {
+		return nil, infraerrors.BadRequest("TOTAL_QUOTA_MODE_IMMUTABLE", "permanent quota groups cannot change billing type")
+	}
 
 	// 渠道缓存里存了 groupID → platform 的映射，改了平台要让它失效（见函数末尾）
 	previousPlatform := group.Platform
@@ -845,9 +854,7 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	if input.MonthlyLimitUSD != nil {
 		group.MonthlyLimitUSD = normalizeLimit(input.MonthlyLimitUSD)
 	}
-	if input.TotalLimitUSD != nil {
-		group.TotalLimitUSD = normalizeLimit(input.TotalLimitUSD)
-	}
+	// TotalLimitUSD is retained for legacy reads only. Grants carry their own amount.
 	// 图片生成计费配置：负数表示清除（使用默认价格）
 	if input.AllowImageGeneration != nil {
 		group.AllowImageGeneration = *input.AllowImageGeneration

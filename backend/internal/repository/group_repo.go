@@ -11,6 +11,7 @@ import (
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/ent/group"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -112,6 +113,7 @@ func createGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 		SetNillableWeeklyLimitUsd(groupIn.WeeklyLimitUSD).
 		SetNillableMonthlyLimitUsd(groupIn.MonthlyLimitUSD).
 		SetNillableTotalLimitUsd(groupIn.TotalLimitUSD).
+		SetTotalQuotaNoExpiry(groupIn.TotalQuotaNoExpiry).
 		SetAllowImageGeneration(groupIn.AllowImageGeneration).
 		SetAllowBatchImageGeneration(groupIn.AllowBatchImageGeneration).
 		SetImageCountBilling(groupIn.ImageCountBilling).
@@ -344,6 +346,9 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 	if err != nil {
 		return translatePersistenceError(err, service.ErrGroupNotFound, nil)
 	}
+	if stored.TotalQuotaNoExpiry && groupIn.SubscriptionType != service.SubscriptionTypeTotalQuota {
+		return infraerrors.BadRequest("TOTAL_QUOTA_MODE_IMMUTABLE", "permanent quota groups cannot change billing type")
+	}
 	blue, red, err := service.ResolveGroupDaybreak(groupIn.Platform, stored.OpenaiDaybreakBlueEnabled, stored.OpenaiDaybreakRedEnabled, groupIn.OpenAIDaybreakUpdate)
 	if err != nil {
 		return err
@@ -363,7 +368,6 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		SetNillableDailyLimitUsd(groupIn.DailyLimitUSD).
 		SetNillableWeeklyLimitUsd(groupIn.WeeklyLimitUSD).
 		SetNillableMonthlyLimitUsd(groupIn.MonthlyLimitUSD).
-		SetNillableTotalLimitUsd(groupIn.TotalLimitUSD).
 		SetAllowImageGeneration(groupIn.AllowImageGeneration).
 		SetAllowBatchImageGeneration(groupIn.AllowBatchImageGeneration).
 		SetImageCountBilling(groupIn.ImageCountBilling).
@@ -425,11 +429,6 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		builder = builder.SetMonthlyLimitUsd(*groupIn.MonthlyLimitUSD)
 	} else {
 		builder = builder.ClearMonthlyLimitUsd()
-	}
-	if groupIn.TotalLimitUSD != nil {
-		builder = builder.SetTotalLimitUsd(*groupIn.TotalLimitUSD)
-	} else {
-		builder = builder.ClearTotalLimitUsd()
 	}
 	if groupIn.ImagePrice1K != nil {
 		builder = builder.SetImagePrice1k(*groupIn.ImagePrice1K)

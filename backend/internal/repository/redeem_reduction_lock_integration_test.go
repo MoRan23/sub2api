@@ -35,7 +35,7 @@ func newReductionLockFixture(t *testing.T, name string) (*service.RedeemService,
 	client := testEntClient(t)
 	user, err := client.User.Create().SetEmail(name + "@example.com").SetPasswordHash("test").Save(ctx)
 	require.NoError(t, err)
-	group, err := client.Group.Create().SetName(name).Save(ctx)
+	group, err := client.Group.Create().SetSubscriptionType(service.SubscriptionTypeSubscription).SetName(name).Save(ctx)
 	require.NoError(t, err)
 	// Redemption commits its own transaction; remove fixtures explicitly so
 	// repository list/count tests cannot observe this test's subscriptions.
@@ -58,7 +58,7 @@ func newReductionLockFixture(t *testing.T, name string) (*service.RedeemService,
 	for _, value := range values {
 		require.NoError(t, codes.Create(ctx, &service.RedeemCode{Code: value, Type: service.RedeemTypeSubscription, Status: service.StatusUnused, ValidityDays: -1, GroupID: &group.ID}))
 	}
-	subscriptions := service.NewSubscriptionService(nil, repo, nil, client, nil)
+	subscriptions := service.NewSubscriptionService(NewGroupRepository(client, integrationDB), repo, nil, client, nil)
 	redeem := service.NewRedeemService(codes, NewUserRepository(client, integrationDB), subscriptions, nil, nil, client, nil, nil)
 	return redeem, repo, userSubscriptionEntityToService(sub), user.ID, values
 }
@@ -74,7 +74,7 @@ func TestRedeemReductionPreservesRenewal(t *testing.T) {
 	require.NoError(t, err)
 	got, err := repo.GetByID(context.Background(), sub.ID)
 	require.NoError(t, err)
-	require.True(t, renewed.AddDate(0, 0, -1).Equal(got.ExpiresAt))
+	require.True(t, renewed.AddDate(0, 0, -1).Equal(*got.ExpiresAt))
 	require.Contains(t, got.Notes, "renewal")
 	require.Contains(t, got.Notes, codes[0])
 	require.EqualValues(t, 1, repo.lockReads.Load())
@@ -114,7 +114,7 @@ func TestRedeemConcurrentReductionsBothApply(t *testing.T) {
 	}
 	got, err := repo.GetByID(ctx, sub.ID)
 	require.NoError(t, err)
-	require.True(t, sub.ExpiresAt.AddDate(0, 0, -2).Equal(got.ExpiresAt))
+	require.True(t, sub.ExpiresAt.AddDate(0, 0, -2).Equal(*got.ExpiresAt))
 	for _, code := range codes {
 		require.Contains(t, got.Notes, code)
 	}

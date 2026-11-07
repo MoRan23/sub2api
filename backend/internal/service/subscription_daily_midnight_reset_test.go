@@ -36,7 +36,7 @@ func newMidnightTestSub(dailyWindowStart time.Time, base time.Time) *UserSubscri
 		UserID:           10,
 		GroupID:          20,
 		StartsAt:         base.AddDate(0, 0, -3),
-		ExpiresAt:        base.AddDate(0, 0, 30),
+		ExpiresAt:        ptrTime(base.AddDate(0, 0, 30)),
 		DailyUsageUSD:    43.34,
 		DailyWindowStart: &start,
 	}
@@ -150,7 +150,7 @@ func TestCheckAndResetWindows_OneTimeDailyCardStillExemptFromMidnightReset(t *te
 		UserID:           10,
 		GroupID:          20,
 		StartsAt:         startsAt,
-		ExpiresAt:        startsAt.AddDate(0, 0, 1),
+		ExpiresAt:        ptrTime(startsAt.AddDate(0, 0, 1)),
 		DailyUsageUSD:    10,
 		DailyWindowStart: &anchor,
 	}

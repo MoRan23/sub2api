@@ -29,6 +29,19 @@ async function openDialog() {
 }
 
 describe('UserBalanceHistoryModal request ordering', () => {
+  it('shows each issued amount and its saved duration without treating the legacy value as quota', async () => {
+    mocks.getUserBalanceHistory.mockResolvedValue({ items: [
+      { id: 1, code: 'PERMANENT-CODE', type: 'subscription', value: 10, quota_amount: 25.12345678, validity_days: 0, group: { name: 'Permanent' } },
+      { id: 2, code: 'FINITE-CODE', type: 'subscription', value: 10, quota_amount: 50, validity_days: 30, group: { name: 'Finite' } },
+      { id: 3, code: 'LEGACY-CODE', type: 'subscription', value: 7, group: { name: 'Legacy' } }
+    ], total: 3, total_recharged: 0 })
+    const wrapper = await openDialog()
+    await flushPromises()
+    expect(wrapper.text()).toContain('$25.12345678 · subscription.permanent - Permanent')
+    expect(wrapper.text()).toContain('$50.00 · 30d - Finite')
+    expect(wrapper.text()).toContain('7d - Legacy')
+  })
+
   it('keeps the new user history when an old response finishes later', async () => {
     const old = deferred()
     mocks.getUserBalanceHistory.mockReturnValueOnce(old.promise).mockResolvedValueOnce(result(20))

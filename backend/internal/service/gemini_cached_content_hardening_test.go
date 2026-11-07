@@ -460,7 +460,7 @@ func TestReserveFixedCharge(t *testing.T) {
 		daily := 5.0
 		group := &Group{ID: 2, SubscriptionType: SubscriptionTypeSubscription, DailyLimitUSD: &daily}
 		svc := newSvc(&fixedChargeCacheStub{sub: &SubscriptionCacheData{
-			Status: SubscriptionStatusActive, ExpiresAt: time.Now().Add(time.Hour), DailyUsage: 3,
+			Status: SubscriptionStatusActive, ExpiresAt: new(time.Now().Add(time.Hour)), DailyUsage: 3,
 		}})
 		sub := &UserSubscription{ID: 1}
 		require.NoError(t, reserve(svc, nil, group, sub, 2))

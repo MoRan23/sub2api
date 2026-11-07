@@ -296,6 +296,7 @@ export interface BalanceHistoryItem {
   created_at: string
   group_id: number | null
   validity_days: number
+  quota_amount?: number | null
   notes: string
   user?: { id: number; email: string } | null
   group?: { id: number; name: string } | null

@@ -27,7 +27,7 @@ type UserSubscriptionQuotaEvent struct {
 	// StartsAt holds the value of the "starts_at" field.
 	StartsAt time.Time `json:"starts_at,omitempty"`
 	// ExpiresAt holds the value of the "expires_at" field.
-	ExpiresAt time.Time `json:"expires_at,omitempty"`
+	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 	// SourceKind holds the value of the "source_kind" field.
 	SourceKind string `json:"source_kind,omitempty"`
 	// SourceRef holds the value of the "source_ref" field.
@@ -124,7 +124,8 @@ func (_m *UserSubscriptionQuotaEvent) assignValues(columns []string, values []an
 			if value, ok := values[i].(*sql.NullTime); !ok {
 				return fmt.Errorf("unexpected type %T for field expires_at", values[i])
 			} else if value.Valid {
-				_m.ExpiresAt = value.Time
+				_m.ExpiresAt = new(time.Time)
+				*_m.ExpiresAt = value.Time
 			}
 		case usersubscriptionquotaevent.FieldSourceKind:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -204,8 +205,10 @@ func (_m *UserSubscriptionQuotaEvent) String() string {
 	builder.WriteString("starts_at=")
 	builder.WriteString(_m.StartsAt.Format(time.ANSIC))
 	builder.WriteString(", ")
-	builder.WriteString("expires_at=")
-	builder.WriteString(_m.ExpiresAt.Format(time.ANSIC))
+	if v := _m.ExpiresAt; v != nil {
+		builder.WriteString("expires_at=")
+		builder.WriteString(v.Format(time.ANSIC))
+	}
 	builder.WriteString(", ")
 	builder.WriteString("source_kind=")
 	builder.WriteString(_m.SourceKind)

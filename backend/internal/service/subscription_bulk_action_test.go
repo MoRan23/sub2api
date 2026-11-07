@@ -50,7 +50,7 @@ func (r *bulkActionSubscriptionRepo) mutated(id int64) {
 }
 
 func (r *bulkActionSubscriptionRepo) ExtendExpiry(_ context.Context, id int64, expiresAt time.Time) error {
-	r.subscriptions[id].ExpiresAt = expiresAt
+	r.subscriptions[id].ExpiresAt = ptrTime(expiresAt)
 	r.mutated(id)
 	return nil
 }
@@ -100,7 +100,7 @@ func TestBulkSubscriptionAction_PartialSuccessAndDeduplication(t *testing.T) {
 			expiresAt := time.Now().AddDate(0, 0, 30)
 			repo := &bulkActionSubscriptionRepo{subscriptions: map[int64]*UserSubscription{}}
 			for _, id := range []int64{1, 2} {
-				sub := &UserSubscription{ID: id, UserID: id, GroupID: 10, Status: SubscriptionStatusActive, ExpiresAt: expiresAt, DailyUsageUSD: 2, WeeklyUsageUSD: 5, MonthlyUsageUSD: 8}
+				sub := &UserSubscription{ID: id, UserID: id, GroupID: 10, Status: SubscriptionStatusActive, ExpiresAt: ptrTime(expiresAt), DailyUsageUSD: 2, WeeklyUsageUSD: 5, MonthlyUsageUSD: 8}
 				if action == "restore" {
 					deletedAt := time.Now().Add(-time.Hour)
 					sub.DeletedAt = &deletedAt
@@ -125,7 +125,7 @@ func TestBulkSubscriptionAction_PartialSuccessAndDeduplication(t *testing.T) {
 			for _, sub := range repo.subscriptions {
 				switch action {
 				case "extend":
-					require.Equal(t, expiresAt.AddDate(0, 0, 7), sub.ExpiresAt)
+					require.Equal(t, expiresAt.AddDate(0, 0, 7), *sub.ExpiresAt)
 				case "reset_quota":
 					require.Zero(t, sub.DailyUsageUSD)
 					require.Zero(t, sub.WeeklyUsageUSD)
@@ -146,9 +146,9 @@ func TestBulkSubscriptionAction_PreservesTotalQuotaRestrictions(t *testing.T) {
 		t.Run(action, func(t *testing.T) {
 			expiresAt := time.Now().AddDate(0, 0, 30)
 			repo := &bulkActionSubscriptionRepo{subscriptions: map[int64]*UserSubscription{
-				1: {ID: 1, UserID: 1, GroupID: 10, Status: SubscriptionStatusActive, ExpiresAt: expiresAt, DailyUsageUSD: 2,
+				1: {ID: 1, UserID: 1, GroupID: 10, Status: SubscriptionStatusActive, ExpiresAt: ptrTime(expiresAt), DailyUsageUSD: 2,
 					Group: &Group{ID: 10, SubscriptionType: "subscription"}},
-				2: {ID: 2, UserID: 2, GroupID: 20, Status: SubscriptionStatusActive, ExpiresAt: expiresAt, DailyUsageUSD: 2,
+				2: {ID: 2, UserID: 2, GroupID: 20, Status: SubscriptionStatusActive, ExpiresAt: ptrTime(expiresAt), DailyUsageUSD: 2,
 					Group: &Group{ID: 20, SubscriptionType: "total_quota"}},
 			}}
 			svc := NewSubscriptionService(nil, repo, nil, nil, nil)
@@ -161,7 +161,7 @@ func TestBulkSubscriptionAction_PreservesTotalQuotaRestrictions(t *testing.T) {
 			require.Equal(t, 1, result.FailedCount)
 			require.False(t, result.Results[0].Success)
 			require.Equal(t, []int64{1}, repo.mutations)
-			require.Equal(t, expiresAt, repo.subscriptions[2].ExpiresAt)
+			require.Equal(t, expiresAt, *repo.subscriptions[2].ExpiresAt)
 			require.Equal(t, float64(2), repo.subscriptions[2].DailyUsageUSD)
 		})
 	}

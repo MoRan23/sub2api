@@ -89,3 +89,11 @@ export function getRemainingExpiryDuration(
     minutes: totalMinutes % 60
   }
 }
+
+/** Explicit grant amounts use the same eight-decimal precision as the API. */
+export function isValidQuotaAmount(value: unknown): value is number {
+  if (typeof value !== 'number' || !Number.isFinite(value) || value <= 0 || value >= 1e12) return false
+  const [coefficient, exponentText] = value.toString().toLowerCase().split('e')
+  const decimals = (coefficient?.split('.')[1] ?? '').length - Number(exponentText ?? 0)
+  return decimals <= 8
+}

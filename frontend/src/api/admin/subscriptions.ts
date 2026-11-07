@@ -113,8 +113,9 @@ export async function getProgress(id: number): Promise<SubscriptionProgress> {
  * @param request - Assignment request
  * @returns Created subscription
  */
-export async function assign(request: AssignSubscriptionRequest): Promise<UserSubscription> {
-  const { data } = await apiClient.post<UserSubscription>('/admin/subscriptions/assign', request)
+export async function assign(request: AssignSubscriptionRequest, idempotencyKey?: string): Promise<UserSubscription> {
+  const { data } = await apiClient.post<UserSubscription>('/admin/subscriptions/assign', request,
+    idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : undefined)
   return data
 }
 
@@ -124,11 +125,13 @@ export async function assign(request: AssignSubscriptionRequest): Promise<UserSu
  * @returns Per-user assignment outcomes and created or reused subscriptions
  */
 export async function bulkAssign(
-  request: BulkAssignSubscriptionRequest
+  request: BulkAssignSubscriptionRequest,
+  idempotencyKey?: string
 ): Promise<BulkAssignSubscriptionResult> {
   const { data } = await apiClient.post<BulkAssignSubscriptionResult>(
     '/admin/subscriptions/bulk-assign',
-    request
+    request,
+    idempotencyKey ? { headers: { 'Idempotency-Key': idempotencyKey } } : undefined
   )
   return data
 }

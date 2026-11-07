@@ -120,7 +120,13 @@
                       <span v-if="redeemResult.group?.name || redeemResult.group_name">
                         - {{ redeemResult.group?.name || redeemResult.group_name }}
                       </span>
-                      <span v-if="redeemResult.validity_days">
+                      <span v-if="redeemResult.quota_amount != null">
+                        · ${{ formatWalletAmount(redeemResult.quota_amount) }}
+                      </span>
+                      <span v-if="redeemResult.validity_days === 0 && redeemResult.quota_amount != null">
+                        ({{ t('subscription.permanent') }})
+                      </span>
+                      <span v-else-if="redeemResult.validity_days">
                         ({{
                           t('redeem.subscriptionDays', { days: redeemResult.validity_days })
                         }})</span
@@ -464,10 +470,13 @@ const formatHistoryValue = (item: RedeemHistoryItem) => {
     const sign = total >= 0 ? '+' : ''
     return `${sign}$${formatWalletAmount(total)}`
   } else if (isSubscriptionType(item.type)) {
-    // 订阅类型显示有效天数和分组名称
-    const days = item.validity_days || Math.round(item.value)
+    const days = item.validity_days ?? Math.round(item.value)
+    const duration = days === 0 && item.quota_amount != null
+      ? t('subscription.permanent')
+      : `${days}${t('redeem.days')}`
+    const amount = item.quota_amount != null ? `$${formatWalletAmount(item.quota_amount)} · ` : ''
     const groupName = item.group?.name || ''
-    return groupName ? `${days}${t('redeem.days')} - ${groupName}` : `${days}${t('redeem.days')}`
+    return `${amount}${duration}${groupName ? ` - ${groupName}` : ''}`
   } else {
     const sign = item.value >= 0 ? '+' : ''
     return `${sign}${item.value} ${t('redeem.requests')}`

@@ -96,11 +96,18 @@
                 t('userSubscriptions.expires')
               }}</span>
               <span class="text-gray-700 dark:text-gray-300">{{
-                t('userSubscriptions.noExpiration')
+                t('subscription.permanent')
               }}</span>
             </div>
 
-            <template v-if="isTotalQuotaSubscription(subscription)">
+            <div
+              v-if="isTotalQuotaSubscription(subscription) && subscription.expires_at === null"
+              class="flex items-center justify-between text-sm"
+            >
+              <span class="font-medium text-gray-700 dark:text-gray-300">{{ t('subscription.remainingQuota') }}</span>
+              <span class="text-gray-700 dark:text-gray-300">${{ formatWalletAmount(subscription.total_remaining_usd ?? 0) }}</span>
+            </div>
+            <template v-else-if="isTotalQuotaSubscription(subscription)">
               <div class="space-y-2">
                 <div class="flex items-center justify-between">
                   <span class="text-sm font-medium text-gray-700 dark:text-gray-300">
@@ -108,7 +115,7 @@
                   </span>
                   <span class="text-sm text-gray-500 dark:text-dark-400">
                     ${{ (subscription.total_used_usd || 0).toFixed(2) }} / ${{
-                      (subscription.total_limit_usd ?? subscription.group?.total_limit_usd ?? 0).toFixed(2)
+                      (subscription.total_limit_usd ?? 0).toFixed(2)
                     }}
                   </span>
                 </div>
@@ -118,13 +125,13 @@
                     :class="
                       getProgressBarClass(
                         subscription.total_used_usd,
-                        subscription.total_limit_usd ?? subscription.group?.total_limit_usd
+                        subscription.total_limit_usd
                       )
                     "
                     :style="{
                       width: getProgressWidth(
                         subscription.total_used_usd,
-                        subscription.total_limit_usd ?? subscription.group?.total_limit_usd
+                        subscription.total_limit_usd
                       )
                     }"
                   ></div>
@@ -301,6 +308,7 @@ import type { UserSubscription } from '@/types'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { formatDateTimeToMinute } from '@/utils/format'
+import { formatWalletAmount } from '@/components/payment/orderUtils'
 import { hasPeakRate, formatPeakRateWindow, serverTimezoneLabel } from '@/utils/peak-rate'
 import { platformBorderClass, platformBadgeClass, platformButtonClass, platformLabel } from '@/utils/platformColors'
 import {

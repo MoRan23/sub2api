@@ -145,6 +145,11 @@ func MonthlyLimitUsd(v float64) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldMonthlyLimitUsd, v))
 }
 
+// TotalQuotaNoExpiry applies equality check predicate on the "total_quota_no_expiry" field. It's identical to TotalQuotaNoExpiryEQ.
+func TotalQuotaNoExpiry(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldTotalQuotaNoExpiry, v))
+}
+
 // TotalLimitUsd applies equality check predicate on the "total_limit_usd" field. It's identical to TotalLimitUsdEQ.
 func TotalLimitUsd(v float64) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldTotalLimitUsd, v))
@@ -1283,6 +1288,16 @@ func MonthlyLimitUsdIsNil() predicate.Group {
 // MonthlyLimitUsdNotNil applies the NotNil predicate on the "monthly_limit_usd" field.
 func MonthlyLimitUsdNotNil() predicate.Group {
 	return predicate.Group(sql.FieldNotNull(FieldMonthlyLimitUsd))
+}
+
+// TotalQuotaNoExpiryEQ applies the EQ predicate on the "total_quota_no_expiry" field.
+func TotalQuotaNoExpiryEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldTotalQuotaNoExpiry, v))
+}
+
+// TotalQuotaNoExpiryNEQ applies the NEQ predicate on the "total_quota_no_expiry" field.
+func TotalQuotaNoExpiryNEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldTotalQuotaNoExpiry, v))
 }
 
 // TotalLimitUsdEQ applies the EQ predicate on the "total_limit_usd" field.

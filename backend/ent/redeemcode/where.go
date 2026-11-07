@@ -70,6 +70,11 @@ func Value(v float64) predicate.RedeemCode {
 	return predicate.RedeemCode(sql.FieldEQ(FieldValue, v))
 }
 
+// QuotaAmount applies equality check predicate on the "quota_amount" field. It's identical to QuotaAmountEQ.
+func QuotaAmount(v float64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldEQ(FieldQuotaAmount, v))
+}
+
 // GiftRatio applies equality check predicate on the "gift_ratio" field. It's identical to GiftRatioEQ.
 func GiftRatio(v float64) predicate.RedeemCode {
 	return predicate.RedeemCode(sql.FieldEQ(FieldGiftRatio, v))
@@ -288,6 +293,56 @@ func ValueLT(v float64) predicate.RedeemCode {
 // ValueLTE applies the LTE predicate on the "value" field.
 func ValueLTE(v float64) predicate.RedeemCode {
 	return predicate.RedeemCode(sql.FieldLTE(FieldValue, v))
+}
+
+// QuotaAmountEQ applies the EQ predicate on the "quota_amount" field.
+func QuotaAmountEQ(v float64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldEQ(FieldQuotaAmount, v))
+}
+
+// QuotaAmountNEQ applies the NEQ predicate on the "quota_amount" field.
+func QuotaAmountNEQ(v float64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldNEQ(FieldQuotaAmount, v))
+}
+
+// QuotaAmountIn applies the In predicate on the "quota_amount" field.
+func QuotaAmountIn(vs ...float64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldIn(FieldQuotaAmount, vs...))
+}
+
+// QuotaAmountNotIn applies the NotIn predicate on the "quota_amount" field.
+func QuotaAmountNotIn(vs ...float64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldNotIn(FieldQuotaAmount, vs...))
+}
+
+// QuotaAmountGT applies the GT predicate on the "quota_amount" field.
+func QuotaAmountGT(v float64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldGT(FieldQuotaAmount, v))
+}
+
+// QuotaAmountGTE applies the GTE predicate on the "quota_amount" field.
+func QuotaAmountGTE(v float64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldGTE(FieldQuotaAmount, v))
+}
+
+// QuotaAmountLT applies the LT predicate on the "quota_amount" field.
+func QuotaAmountLT(v float64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldLT(FieldQuotaAmount, v))
+}
+
+// QuotaAmountLTE applies the LTE predicate on the "quota_amount" field.
+func QuotaAmountLTE(v float64) predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldLTE(FieldQuotaAmount, v))
+}
+
+// QuotaAmountIsNil applies the IsNil predicate on the "quota_amount" field.
+func QuotaAmountIsNil() predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldIsNull(FieldQuotaAmount))
+}
+
+// QuotaAmountNotNil applies the NotNil predicate on the "quota_amount" field.
+func QuotaAmountNotNil() predicate.RedeemCode {
+	return predicate.RedeemCode(sql.FieldNotNull(FieldQuotaAmount))
 }
 
 // GiftRatioEQ applies the EQ predicate on the "gift_ratio" field.

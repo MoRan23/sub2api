@@ -236,7 +236,8 @@ describe('admin RedeemView', () => {
       undefined,
       undefined,
       undefined,
-      12.5
+      12.5,
+      undefined
     )
   })
 
@@ -269,5 +270,52 @@ describe('admin RedeemView', () => {
     expect(wrapper.text()).toContain('$0.01000001')
     expect(wrapper.text()).toContain('admin.redeem.ordinaryAmount $0.01')
     expect(wrapper.text()).toContain('admin.redeem.giftAmount $0.00000001')
+  })
+
+  it.each([false, true])('requires an explicit per-code grant and handles permanent=%s', async (permanent) => {
+    getAllGroups.mockResolvedValue([{ id: 7, name: 'Quota', platform: 'openai', status: 'active', subscription_type: 'total_quota', total_quota_no_expiry: permanent }])
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('[data-test="generate-open"]').trigger('click')
+    let form = wrapper.get('[data-test="generate-form"]')
+    form.findAllComponents(SelectStub)[0]!.vm.$emit('update:modelValue', 'subscription')
+    await flushPromises()
+    form = wrapper.get('[data-test="generate-form"]')
+    await form.findAll('select')[1]!.setValue('7')
+    await flushPromises()
+    form = wrapper.get('[data-test="generate-form"]')
+    const amount = form.get<HTMLInputElement>('#redeem-quota-amount')
+    expect(amount.element.value).toBe('')
+    expect(form.text()).toContain('subscription.amountPerCode')
+    expect(form.text().includes('subscription.permanent')).toBe(permanent)
+    await form.trigger('submit')
+    expect(generateRedeemCodes).not.toHaveBeenCalled()
+    expect(showError).toHaveBeenCalledWith('subscription.invalidAmount')
+    await amount.setValue('12.12345678')
+    await form.trigger('submit')
+    await flushPromises()
+    expect(generateRedeemCodes).toHaveBeenCalledWith(1, 'subscription', 10, 7, permanent ? undefined : 30, undefined, 0, 12.12345678)
+    wrapper.unmount()
+  })
+
+  it('resets the draft grant when switching the target group', async () => {
+    getAllGroups.mockResolvedValue([7, 8].map(id => ({ id, name: `Quota ${id}`, platform: 'openai', status: 'active', subscription_type: 'total_quota' })))
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('[data-test="generate-open"]').trigger('click')
+    let form = wrapper.get('[data-test="generate-form"]')
+    form.findAllComponents(SelectStub)[0]!.vm.$emit('update:modelValue', 'subscription')
+    await flushPromises()
+    form = wrapper.get('[data-test="generate-form"]')
+    await form.findAll('select')[1]!.setValue('7')
+    await flushPromises()
+    form = wrapper.get('[data-test="generate-form"]')
+    await form.get('#redeem-quota-amount').setValue('55')
+    form = wrapper.get('[data-test="generate-form"]')
+    await form.findAll('select')[1]!.setValue('8')
+    await flushPromises()
+    form = wrapper.get('[data-test="generate-form"]')
+    expect(form.get<HTMLInputElement>('#redeem-quota-amount').element.value).toBe('')
+    wrapper.unmount()
   })
 })

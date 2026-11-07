@@ -186,6 +186,7 @@ import { ref, computed, watch, onUnmounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { adminAPI, type BalanceHistoryItem } from '@/api/admin'
 import { formatDateTime } from '@/utils/format'
+import { formatWalletAmount } from '@/components/payment/orderUtils'
 import type { AdminUser } from '@/types'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
@@ -344,9 +345,13 @@ const formatValue = (item: BalanceHistoryItem) => {
     return `${sign}$${totalValue.toFixed(2)}`
   }
   if (isSubscriptionType(item.type)) {
-    const days = item.validity_days || Math.round(item.value)
+    const days = item.validity_days ?? Math.round(item.value)
+    const duration = days === 0 && item.quota_amount != null
+      ? t('subscription.permanent')
+      : `${days}d`
+    const amount = item.quota_amount != null ? `$${formatWalletAmount(item.quota_amount)} · ` : ''
     const groupName = item.group?.name || ''
-    return groupName ? `${days}d - ${groupName}` : `${days}d`
+    return `${amount}${duration}${groupName ? ` - ${groupName}` : ''}`
   }
   // concurrency types
   const sign = item.value >= 0 ? '+' : ''

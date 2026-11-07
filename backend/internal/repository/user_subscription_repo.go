@@ -3,6 +3,7 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"strings"
 	"time"
 
@@ -34,7 +35,7 @@ func (r *userSubscriptionRepository) Create(ctx context.Context, sub *service.Us
 	builder := client.UserSubscription.Create().
 		SetUserID(sub.UserID).
 		SetGroupID(sub.GroupID).
-		SetExpiresAt(sub.ExpiresAt).
+		SetNillableExpiresAt(sub.ExpiresAt).
 		SetNillableDailyWindowStart(sub.DailyWindowStart).
 		SetNillableWeeklyWindowStart(sub.WeeklyWindowStart).
 		SetNillableMonthlyWindowStart(sub.MonthlyWindowStart).
@@ -147,7 +148,7 @@ func (r *userSubscriptionRepository) GetActiveByUserIDAndGroupID(ctx context.Con
 			usersubscription.UserIDEQ(userID),
 			usersubscription.GroupIDEQ(groupID),
 			usersubscription.StatusEQ(service.SubscriptionStatusActive),
-			usersubscription.ExpiresAtGT(time.Now()),
+			usersubscription.Or(usersubscription.ExpiresAtIsNil(), usersubscription.ExpiresAtGT(time.Now())),
 		).
 		WithGroup().
 		Only(ctx)
@@ -178,7 +179,7 @@ func (r *userSubscriptionRepository) Update(ctx context.Context, sub *service.Us
 		SetUserID(sub.UserID).
 		SetGroupID(sub.GroupID).
 		SetStartsAt(sub.StartsAt).
-		SetExpiresAt(sub.ExpiresAt).
+		SetNillableExpiresAt(sub.ExpiresAt).
 		SetStatus(sub.Status).
 		SetNillableDailyWindowStart(sub.DailyWindowStart).
 		SetNillableWeeklyWindowStart(sub.WeeklyWindowStart).
@@ -189,6 +190,9 @@ func (r *userSubscriptionRepository) Update(ctx context.Context, sub *service.Us
 		SetNillableAssignedBy(sub.AssignedBy).
 		SetAssignedAt(sub.AssignedAt).
 		SetNotes(sub.Notes)
+	if sub.ExpiresAt == nil {
+		builder.ClearExpiresAt()
+	}
 
 	updated, err := builder.Save(ctx)
 	if err == nil {
@@ -242,7 +246,7 @@ func (r *userSubscriptionRepository) ListActiveByUserID(ctx context.Context, use
 		Where(
 			usersubscription.UserIDEQ(userID),
 			usersubscription.StatusEQ(service.SubscriptionStatusActive),
-			usersubscription.ExpiresAtGT(time.Now()),
+			usersubscription.Or(usersubscription.ExpiresAtIsNil(), usersubscription.ExpiresAtGT(time.Now())),
 		).
 		WithGroup().
 		Order(dbent.Desc(usersubscription.FieldCreatedAt)).
@@ -309,7 +313,7 @@ func (r *userSubscriptionRepository) List(ctx context.Context, params pagination
 		// Active: status is active AND not yet expired
 		q = q.Where(
 			usersubscription.StatusEQ(service.SubscriptionStatusActive),
-			usersubscription.ExpiresAtGT(now),
+			usersubscription.Or(usersubscription.ExpiresAtIsNil(), usersubscription.ExpiresAtGT(now)),
 		)
 	case service.SubscriptionStatusExpired:
 		// Expired: status is expired OR (status is active but already expired)
@@ -524,6 +528,17 @@ func (r *userSubscriptionRepository) IncrementUsage(ctx context.Context, id int6
 	return incrementSubscriptionUsage(ctx, client, id, costUSD)
 }
 
+// LockQuotaAssignment serializes grants before a subscription row exists. The
+// caller must hold a transaction, so the lock is released with the grant.
+func (r *userSubscriptionRepository) LockQuotaAssignment(ctx context.Context, userID, groupID int64) error {
+	if dbent.TxFromContext(ctx) == nil {
+		return errors.New("total quota assignment lock requires a transaction")
+	}
+	_, err := clientFromContext(ctx, r.client).ExecContext(ctx,
+		`SELECT pg_advisory_xact_lock(hashtextextended('total-quota:' || $1::text || ':' || $2::text, 0))`, userID, groupID)
+	return err
+}
+
 func (r *userSubscriptionRepository) CreateQuotaEvent(ctx context.Context, event *service.UserSubscriptionQuotaEvent) error {
 	if event == nil {
 		return service.ErrSubscriptionNilInput
@@ -534,7 +549,7 @@ func (r *userSubscriptionRepository) CreateQuotaEvent(ctx context.Context, event
 		SetQuotaTotalUsd(event.QuotaTotalUSD).
 		SetQuotaUsedUsd(event.QuotaUsedUSD).
 		SetStartsAt(event.StartsAt).
-		SetExpiresAt(event.ExpiresAt).
+		SetNillableExpiresAt(event.ExpiresAt).
 		SetSourceKind(event.SourceKind)
 	if strings.TrimSpace(event.SourceRef) != "" {
 		builder.SetSourceRef(event.SourceRef)
@@ -569,12 +584,13 @@ func (r *userSubscriptionRepository) RetireDepletedQuotaEventsOnAppend(ctx conte
 		return err
 	}
 
-	var maxActiveExpiry time.Time
+	var maxActiveExpiry sql.NullTime
 	if err := scanSingleRow(ctx, exec, `
-		SELECT COALESCE(MAX(expires_at), $2)
+		SELECT CASE WHEN COUNT(*) FILTER (WHERE expires_at IS NULL) > 0
+		       THEN NULL ELSE COALESCE(MAX(expires_at), $2) END
 		FROM user_subscription_quota_events
 		WHERE user_subscription_id = $1
-		  AND expires_at > $2
+		  AND (expires_at IS NULL OR expires_at > $2)
 	`, []any{subscriptionID, retireAt}, &maxActiveExpiry); err != nil {
 		return err
 	}
@@ -643,7 +659,7 @@ func (r *userSubscriptionRepository) GetQuotaSummaryBatch(ctx context.Context, s
 				GREATEST(quota_total_usd - quota_used_usd, 0) AS remaining
 			FROM user_subscription_quota_events
 			WHERE user_subscription_id = ANY($1)
-			  AND expires_at > $2
+			  AND (expires_at IS NULL OR expires_at > $2)
 		),
 		totals AS (
 			SELECT
@@ -722,8 +738,8 @@ func (r *userSubscriptionRepository) GetQuotaSpendSnapshot(ctx context.Context, 
 		SELECT id
 		FROM user_subscription_quota_events
 		WHERE user_subscription_id = $1
-		  AND expires_at > $2
-		ORDER BY expires_at ASC, id ASC
+		  AND (expires_at IS NULL OR expires_at > $2)
+		ORDER BY expires_at ASC NULLS LAST, id ASC
 	`, subscriptionID, now.UTC())
 	if err != nil {
 		return nil, err
@@ -822,7 +838,7 @@ func (r *userSubscriptionRepository) CountActiveByGroupID(ctx context.Context, g
 		Where(
 			usersubscription.GroupIDEQ(groupID),
 			usersubscription.StatusEQ(service.SubscriptionStatusActive),
-			usersubscription.ExpiresAtGT(time.Now()),
+			usersubscription.Or(usersubscription.ExpiresAtIsNil(), usersubscription.ExpiresAtGT(time.Now())),
 		).
 		Count(ctx)
 	return int64(count), err

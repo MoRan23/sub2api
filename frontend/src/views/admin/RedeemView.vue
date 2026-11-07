@@ -144,7 +144,9 @@
             </div>
             <span v-else class="text-sm font-medium text-gray-900 dark:text-white">
               <template v-if="row.type === 'subscription'">
-                {{ row.validity_days || 30 }} {{ t('admin.redeem.days') }}
+                <span v-if="row.quota_amount != null">${{ formatMoney(row.quota_amount) }} · </span>
+                <template v-if="row.quota_amount != null && row.validity_days === 0">{{ t('subscription.permanent') }}</template>
+                <template v-else>{{ row.validity_days || 30 }} {{ t('admin.redeem.days') }}</template>
                 <span v-if="row.group" class="ml-1 text-xs text-gray-500 dark:text-gray-400"
                   >({{ row.group.name }})</span
                 >
@@ -391,7 +393,12 @@
                   </template>
                 </Select>
               </div>
-              <div>
+              <div v-if="generateIsTotalQuota">
+                <label class="input-label" for="redeem-quota-amount">{{ t('subscription.amountPerCode') }}</label>
+                <input id="redeem-quota-amount" v-model.number="generateForm.quota_amount" type="number" min="0.00000001" step="0.00000001" required class="input" />
+              </div>
+              <p v-if="generateIsPermanent" class="input-hint">{{ t('subscription.permanent') }}</p>
+              <div v-else>
                 <label class="input-label">{{ t('admin.redeem.validityDays') }}</label>
                 <input
                   v-model.number="generateForm.validity_days"
@@ -664,6 +671,7 @@
 
 <script setup lang="ts">
 import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
+import { isValidQuotaAmount } from '@/utils/subscriptionQuota'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { useClipboard } from '@/composables/useClipboard'
@@ -895,11 +903,19 @@ const generateForm = reactive({
   count: 1,
   group_id: null as number | null,
   validity_days: 30,
+  quota_amount: null as number | null,
   expiry_option: 'never' as RedeemCodeExpiryOption,
   custom_expiry_days: 7
 })
 
 // 监听类型变化，邀请码类型时自动设置 value 为 0
+const generateGroup = computed(() => subscriptionGroups.value.find((group) => group.id === generateForm.group_id))
+const generateIsTotalQuota = computed(() => generateForm.type === 'subscription' && generateGroup.value?.subscription_type === 'total_quota')
+const generateIsPermanent = computed(() => generateIsTotalQuota.value && generateGroup.value?.total_quota_no_expiry === true)
+watch(() => [generateForm.type, generateForm.group_id, showGenerateDialog.value], () => {
+  generateForm.quota_amount = null
+})
+
 watch(
   () => generateForm.type,
   (newType) => {
@@ -1094,6 +1110,15 @@ const handleGenerateCodes = async () => {
     appStore.showError(t('admin.redeem.groupRequired'))
     return
   }
+  if (generateIsTotalQuota.value && !isValidQuotaAmount(generateForm.quota_amount)) {
+    appStore.showError(t('subscription.invalidAmount'))
+    return
+  }
+  if (generateForm.type === 'subscription' && !generateIsPermanent.value &&
+      (!Number.isInteger(generateForm.validity_days) || generateForm.validity_days < 1 || generateForm.validity_days > 36500)) {
+    appStore.showError(t('admin.subscriptions.validityDaysRequired'))
+    return
+  }
 
   if (
     generateForm.type === 'balance' &&
@@ -1120,9 +1145,10 @@ const handleGenerateCodes = async () => {
       generateForm.type,
       generateForm.value,
       generateForm.type === 'subscription' ? generateForm.group_id : undefined,
-      generateForm.type === 'subscription' ? generateForm.validity_days : undefined,
+      generateForm.type === 'subscription' && !generateIsPermanent.value ? generateForm.validity_days : undefined,
       expiresInDays,
-      generateForm.type === 'balance' ? generateForm.gift_ratio : 0
+      generateForm.type === 'balance' ? generateForm.gift_ratio : 0,
+      generateIsTotalQuota.value ? generateForm.quota_amount : undefined
     )
     showGenerateDialog.value = false
     generatedCodes.value = result
@@ -1130,6 +1156,7 @@ const handleGenerateCodes = async () => {
     // 重置表单
     generateForm.group_id = null
     generateForm.validity_days = 30
+    generateForm.quota_amount = null
     generateForm.gift_ratio = 0
     generateForm.expiry_option = 'never'
     generateForm.custom_expiry_days = 7

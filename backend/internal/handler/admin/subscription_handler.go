@@ -41,18 +41,20 @@ func NewSubscriptionHandler(subscriptionService *service.SubscriptionService) *S
 
 // AssignSubscriptionRequest represents assign subscription request
 type AssignSubscriptionRequest struct {
-	UserID       int64  `json:"user_id" binding:"required"`
-	GroupID      int64  `json:"group_id" binding:"required"`
-	ValidityDays int    `json:"validity_days" binding:"omitempty,max=36500"` // max 100 years
-	Notes        string `json:"notes"`
+	UserID       int64    `json:"user_id" binding:"required"`
+	GroupID      int64    `json:"group_id" binding:"required"`
+	ValidityDays int      `json:"validity_days" binding:"omitempty,max=36500"` // max 100 years
+	QuotaAmount  *float64 `json:"quota_amount"`
+	Notes        string   `json:"notes"`
 }
 
 // BulkAssignSubscriptionRequest represents bulk assign subscription request
 type BulkAssignSubscriptionRequest struct {
-	UserIDs      []int64 `json:"user_ids" binding:"required,min=1,max=100,dive,gt=0"`
-	GroupID      int64   `json:"group_id" binding:"required"`
-	ValidityDays int     `json:"validity_days" binding:"omitempty,max=36500"` // max 100 years
-	Notes        string  `json:"notes"`
+	UserIDs      []int64  `json:"user_ids" binding:"required,min=1,max=100,dive,gt=0"`
+	GroupID      int64    `json:"group_id" binding:"required"`
+	ValidityDays int      `json:"validity_days" binding:"omitempty,max=36500"` // max 100 years
+	QuotaAmount  *float64 `json:"quota_amount"`
+	Notes        string   `json:"notes"`
 }
 
 // AdjustSubscriptionRequest represents adjust subscription request (extend or shorten)
@@ -145,21 +147,22 @@ func (h *SubscriptionHandler) Assign(c *gin.Context) {
 	// Get admin user ID from context
 	adminID := getAdminIDFromContext(c)
 
-	subscription, err := h.subscriptionService.AssignSubscription(c.Request.Context(), &service.AssignSubscriptionInput{
-		UserID:          req.UserID,
-		GroupID:         req.GroupID,
-		ValidityDays:    req.ValidityDays,
-		AssignedBy:      adminID,
-		Notes:           req.Notes,
-		EventSourceKind: service.SubscriptionQuotaSourceAdminAssign,
-		EventSourceRef:  "admin:" + strconv.FormatInt(adminID, 10),
-	})
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-
-	response.Success(c, adminSubscriptionResponse(c, dto.UserSubscriptionFromServiceAdmin(subscription)))
+	executeAdminIdempotentJSONWithResponse(c, "admin.subscriptions.assign", req, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
+		subscription, err := h.subscriptionService.AssignSubscription(ctx, &service.AssignSubscriptionInput{
+			UserID:          req.UserID,
+			GroupID:         req.GroupID,
+			ValidityDays:    req.ValidityDays,
+			QuotaAmount:     req.QuotaAmount,
+			AssignedBy:      adminID,
+			Notes:           req.Notes,
+			EventSourceKind: service.SubscriptionQuotaSourceAdminAssign,
+			EventSourceRef:  "admin:" + strconv.FormatInt(adminID, 10),
+		})
+		if err != nil {
+			return nil, err
+		}
+		return dto.UserSubscriptionFromServiceAdmin(subscription), nil
+	}, func(data any) any { return adminSubscriptionResponse(c, data) })
 }
 
 // BulkAssign handles bulk assigning subscriptions to multiple users
@@ -174,19 +177,20 @@ func (h *SubscriptionHandler) BulkAssign(c *gin.Context) {
 	// Get admin user ID from context
 	adminID := getAdminIDFromContext(c)
 
-	result, err := h.subscriptionService.BulkAssignSubscription(c.Request.Context(), &service.BulkAssignSubscriptionInput{
-		UserIDs:      req.UserIDs,
-		GroupID:      req.GroupID,
-		ValidityDays: req.ValidityDays,
-		AssignedBy:   adminID,
-		Notes:        req.Notes,
-	})
-	if err != nil {
-		response.ErrorFrom(c, err)
-		return
-	}
-
-	response.Success(c, adminSubscriptionResponse(c, dto.BulkAssignResultFromService(result)))
+	executeAdminIdempotentJSONWithProjection(c, "admin.subscriptions.bulk-assign", req, service.DefaultWriteIdempotencyTTL(), 2*time.Minute, idempotencyStoreUnavailableFailClose, func(ctx context.Context) (any, error) {
+		result, err := h.subscriptionService.BulkAssignSubscription(ctx, &service.BulkAssignSubscriptionInput{
+			UserIDs:      req.UserIDs,
+			GroupID:      req.GroupID,
+			ValidityDays: req.ValidityDays,
+			QuotaAmount:  req.QuotaAmount,
+			AssignedBy:   adminID,
+			Notes:        req.Notes,
+		})
+		if err != nil {
+			return nil, err
+		}
+		return dto.BulkAssignResultFromService(result), nil
+	}, func(data any) any { return adminSubscriptionResponse(c, data) })
 }
 
 // BulkAction applies one operation to selected subscriptions, returning each outcome.

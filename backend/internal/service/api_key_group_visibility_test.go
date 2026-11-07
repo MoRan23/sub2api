@@ -50,10 +50,10 @@ func TestGetUserGroupVisibilityIncludesActiveSubscriptions(t *testing.T) {
 		t.Run(map[bool]string{false: "unrestricted", true: "restricted"}[restricted], func(t *testing.T) {
 			now := time.Now()
 			subs := &visibilitySubRepo{subscriptions: []UserSubscription{
-				{UserID: 1, GroupID: 42, Status: SubscriptionStatusActive, ExpiresAt: now.Add(time.Hour)},
-				{UserID: 1, GroupID: 43, Status: SubscriptionStatusActive, ExpiresAt: now.Add(-time.Hour)},
-				{UserID: 1, GroupID: 44, Status: "expired", ExpiresAt: now.Add(time.Hour)},
-				{UserID: 2, GroupID: 45, Status: SubscriptionStatusActive, ExpiresAt: now.Add(time.Hour)},
+				{UserID: 1, GroupID: 42, Status: SubscriptionStatusActive, ExpiresAt: new(now.Add(time.Hour))},
+				{UserID: 1, GroupID: 43, Status: SubscriptionStatusActive, ExpiresAt: new(now.Add(-time.Hour))},
+				{UserID: 1, GroupID: 44, Status: "expired", ExpiresAt: new(now.Add(time.Hour))},
+				{UserID: 2, GroupID: 45, Status: SubscriptionStatusActive, ExpiresAt: new(now.Add(time.Hour))},
 			}}
 			svc := &APIKeyService{
 				userRepo:    &visibilityUserRepo{user: &User{ID: 1, AllowedGroups: []int64{7}, RestrictPublicGroups: restricted}},

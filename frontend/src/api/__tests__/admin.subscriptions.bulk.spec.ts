@@ -23,7 +23,14 @@ describe('admin subscription batch APIs', () => {
     const request = { user_ids: [11, 12], group_id: 3, validity_days: 30 }
     const result = { success_count: 1, failed_count: 1, subscriptions: [], errors: ['User 12: conflict'], statuses: { 11: 'created', 12: 'failed' } }
     post.mockResolvedValue({ data: result })
-    expect(await subscriptionsAPI.bulkAssign(request)).toEqual(result)
-    expect(post).toHaveBeenCalledWith('/admin/subscriptions/bulk-assign', request)
+    expect(await subscriptionsAPI.bulkAssign(request, 'grant-123')).toEqual(result)
+    expect(post).toHaveBeenCalledWith('/admin/subscriptions/bulk-assign', request, { headers: { 'Idempotency-Key': 'grant-123' } })
+  })
+
+  it('sends the grant amount and stable key for a permanent single-user grant', async () => {
+    const request = { user_id: 11, group_id: 3, quota_amount: 12.12345678 }
+    post.mockResolvedValue({ data: { id: 1 } })
+    await subscriptionsAPI.assign(request, 'grant-456')
+    expect(post).toHaveBeenCalledWith('/admin/subscriptions/assign', request, { headers: { 'Idempotency-Key': 'grant-456' } })
   })
 })

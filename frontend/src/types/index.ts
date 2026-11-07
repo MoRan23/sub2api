@@ -598,6 +598,7 @@ export interface Group {
   weekly_limit_usd: number | null
   monthly_limit_usd: number | null
   total_limit_usd: number | null
+  total_quota_no_expiry?: boolean
   long_context_pricing_enabled: boolean
   model_pricing?: import('@/api/admin/channels').ChannelModelPricing[]
   // 图片生成计费配置
@@ -827,6 +828,7 @@ export interface CreateGroupRequest {
   weekly_limit_usd?: number | null
   monthly_limit_usd?: number | null
   total_limit_usd?: number | null
+  total_quota_no_expiry?: boolean
   long_context_pricing_enabled?: boolean
   force_openai_fast?: boolean
   free_openai_fast?: boolean
@@ -898,6 +900,7 @@ export interface UpdateGroupRequest {
   weekly_limit_usd?: number | null
   monthly_limit_usd?: number | null
   total_limit_usd?: number | null
+  total_quota_no_expiry?: boolean
   long_context_pricing_enabled?: boolean
   force_openai_fast?: boolean
   free_openai_fast?: boolean
@@ -2053,6 +2056,7 @@ export interface RedeemCode {
   notes?: string
   group_id?: number | null // 订阅类型专用
   validity_days?: number // 订阅类型专用
+  quota_amount?: number | null
   user?: User
   group?: Group // 关联的分组
 }
@@ -2064,6 +2068,7 @@ export interface GenerateRedeemCodesRequest {
   gift_ratio?: number
   group_id?: number | null // 订阅类型专用
   validity_days?: number // 订阅类型专用
+  quota_amount?: number | null
   expires_at?: string | null
   expires_in_days?: number
 }
@@ -2338,12 +2343,14 @@ export interface AssignSubscriptionRequest {
   user_id: number
   group_id: number
   validity_days?: number
+  quota_amount?: number | null
 }
 
 export interface BulkAssignSubscriptionRequest {
   user_ids: number[]
   group_id: number
   validity_days?: number
+  quota_amount?: number | null
 }
 
 export interface ExtendSubscriptionRequest {

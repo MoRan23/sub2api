@@ -78,3 +78,22 @@ func TestRedeemExportPreservesEightDecimalWalletPrecision(t *testing.T) {
 	require.Equal(t, "12.3456", records[1][4])
 	require.Equal(t, "0.15241579", records[1][5])
 }
+
+func TestRedeemExportIncludesFrozenQuotaAndDuration(t *testing.T) {
+	router, adminSvc := setupRedeemExportRouter()
+	adminSvc.redeems = []service.RedeemCode{
+		{ID: 1, Code: "FINITE", Type: service.RedeemTypeSubscription, GroupID: new(int64(7)), QuotaAmount: new(42.12345678), ValidityDays: 14},
+		{ID: 2, Code: "PERMANENT", Type: service.RedeemTypeSubscription, GroupID: new(int64(8)), QuotaAmount: new(7.5), ValidityDays: 0},
+		{ID: 3, Code: "LEGACY", Type: service.RedeemTypeSubscription, GroupID: new(int64(9)), ValidityDays: 30},
+	}
+	rec := httptest.NewRecorder()
+	router.ServeHTTP(rec, httptest.NewRequest(http.MethodGet, "/api/v1/admin/redeem-codes/export", nil))
+	require.Equal(t, http.StatusOK, rec.Code)
+	records, err := csv.NewReader(strings.NewReader(rec.Body.String())).ReadAll()
+	require.NoError(t, err)
+	require.Len(t, records, 4)
+	require.Equal(t, []string{"quota_amount", "group_id", "validity_days", "total_quota_no_expiry"}, records[0][12:])
+	require.Equal(t, []string{"42.12345678", "7", "14", "false"}, records[1][12:])
+	require.Equal(t, []string{"7.50000000", "8", "0", "true"}, records[2][12:])
+	require.Equal(t, []string{"", "9", "30", ""}, records[3][12:])
+}

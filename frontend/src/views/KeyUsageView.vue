@@ -425,6 +425,7 @@ import LocaleSwitcher from '@/components/common/LocaleSwitcher.vue'
 import Icon from '@/components/icons/Icon.vue'
 import { buildGatewayUrl } from '@/api/client'
 import { formatDateLocalInput } from '@/utils/format'
+import { formatWalletAmount } from '@/components/payment/orderUtils'
 import { sanitizeUrl } from '@/utils/url'
 
 const { t, locale } = useI18n()
@@ -637,7 +638,13 @@ const ringItems = computed<RingItem[]>(() => {
   } else {
     if (data.subscription) {
       const sub = data.subscription
-      if (sub.total_limit_usd > 0) {
+      if (sub.expires_at === null && sub.total_limit_usd > 0) {
+        items.push({
+          title: t('subscription.remainingQuota'), pct: 0,
+          amount: `$${formatWalletAmount(sub.total_remaining_usd ?? data.remaining ?? 0)}`,
+          isBalance: true, iconType: 'dollar'
+        })
+      } else if (sub.total_limit_usd > 0) {
         const pct = (sub.total_used_usd / sub.total_limit_usd) * 100
         items.push({
           title: t('keyUsage.totalQuota'),
@@ -746,7 +753,7 @@ const detailRows = computed<DetailRow[]>(() => {
 
     if (data.subscription) {
       const sub = data.subscription
-      if (sub.total_limit_usd > 0) {
+      if (sub.expires_at !== null && sub.total_limit_usd > 0) {
         const pct = (sub.total_used_usd / sub.total_limit_usd) * 100
         rows.push({
           iconBg: 'bg-amber-500/10', iconColor: 'text-amber-500', iconSvg: ICON_DOLLAR,
@@ -778,6 +785,11 @@ const detailRows = computed<DetailRow[]>(() => {
         rows.push({
           iconBg: 'bg-amber-500/10', iconColor: 'text-amber-500', iconSvg: ICON_CALENDAR,
           label: t('keyUsage.subscriptionExpires'), value: formatDate(sub.expires_at), valueClass: '',
+        })
+      } else if (sub.expires_at === null && sub.total_limit_usd > 0) {
+        rows.push({
+          iconBg: 'bg-amber-500/10', iconColor: 'text-amber-500', iconSvg: ICON_CALENDAR,
+          label: t('keyUsage.subscriptionExpires'), value: t('subscription.permanent'), valueClass: '',
         })
       }
       if (sub.next_expiring_quota_usd > 0 && sub.next_quota_expire_at) {

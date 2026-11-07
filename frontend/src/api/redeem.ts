@@ -21,6 +21,7 @@ export interface RedeemHistoryItem {
   // Subscription-specific fields
   group_id?: number
   validity_days?: number
+  quota_amount?: number | null
   group?: {
     id: number
     name: string
@@ -41,6 +42,7 @@ export interface RedeemResult {
     name: string
   }
   validity_days?: number
+  quota_amount?: number | null
 }
 
 /**

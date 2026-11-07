@@ -13,6 +13,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+func quotaExpiryPointer(value time.Time) *time.Time { return &value }
+
 func mustCreateUser(t *testing.T, client *dbent.Client, u *service.User) *service.User {
 	t.Helper()
 	ctx := context.Background()
@@ -91,6 +93,7 @@ func mustCreateGroup(t *testing.T, client *dbent.Client, g *service.Group) *serv
 		SetPlatform(g.Platform).
 		SetStatus(g.Status).
 		SetSubscriptionType(g.SubscriptionType).
+		SetTotalQuotaNoExpiry(g.TotalQuotaNoExpiry).
 		SetRateMultiplier(g.RateMultiplier).
 		SetIsExclusive(g.IsExclusive).
 		SetForceOpenaiFast(g.ForceOpenAIFast).
@@ -357,6 +360,7 @@ func mustCreateRedeemCode(t *testing.T, client *dbent.Client, c *service.RedeemC
 		SetCode(c.Code).
 		SetType(c.Type).
 		SetValue(c.Value).
+		SetNillableQuotaAmount(c.QuotaAmount).
 		SetStatus(c.Status).
 		SetNotes(c.Notes).
 		SetValidityDays(c.ValidityDays)
@@ -392,8 +396,9 @@ func mustCreateSubscription(t *testing.T, client *dbent.Client, s *service.UserS
 	if s.StartsAt.IsZero() {
 		s.StartsAt = now.Add(-1 * time.Hour)
 	}
-	if s.ExpiresAt.IsZero() {
-		s.ExpiresAt = now.Add(24 * time.Hour)
+	if s.ExpiresAt == nil {
+		expiry := now.Add(24 * time.Hour)
+		s.ExpiresAt = &expiry
 	}
 	if s.AssignedAt.IsZero() {
 		s.AssignedAt = now
@@ -409,7 +414,7 @@ func mustCreateSubscription(t *testing.T, client *dbent.Client, s *service.UserS
 		SetUserID(s.UserID).
 		SetGroupID(s.GroupID).
 		SetStartsAt(s.StartsAt).
-		SetExpiresAt(s.ExpiresAt).
+		SetNillableExpiresAt(s.ExpiresAt).
 		SetStatus(s.Status).
 		SetAssignedAt(s.AssignedAt).
 		SetNotes(s.Notes).

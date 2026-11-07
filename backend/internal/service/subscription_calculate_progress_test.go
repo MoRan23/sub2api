@@ -23,7 +23,7 @@ func TestCalculateProgress_BasicFields(t *testing.T) {
 
 	sub := &UserSubscription{
 		ID:        100,
-		ExpiresAt: now.Add(30 * 24 * time.Hour),
+		ExpiresAt: ptrTime(now.Add(30 * 24 * time.Hour)),
 	}
 	group := &Group{
 		Name: "Premium",
@@ -47,7 +47,7 @@ func TestCalculateProgress_DailyUsage(t *testing.T) {
 
 	sub := &UserSubscription{
 		ID:               1,
-		ExpiresAt:        now.Add(10 * 24 * time.Hour),
+		ExpiresAt:        ptrTime(now.Add(10 * 24 * time.Hour)),
 		DailyUsageUSD:    3.0,
 		DailyWindowStart: ptrTime(dailyStart),
 	}
@@ -75,7 +75,7 @@ func TestCalculateProgress_DailyCardUsesExpiryAsDailyResetTime(t *testing.T) {
 	sub := &UserSubscription{
 		ID:               1,
 		StartsAt:         startsAt,
-		ExpiresAt:        expiresAt,
+		ExpiresAt:        ptrTime(expiresAt),
 		DailyUsageUSD:    3.0,
 		DailyWindowStart: ptrTime(dailyStart),
 	}
@@ -97,7 +97,7 @@ func TestCalculateProgress_WeeklyUsage(t *testing.T) {
 
 	sub := &UserSubscription{
 		ID:                1,
-		ExpiresAt:         now.Add(10 * 24 * time.Hour),
+		ExpiresAt:         ptrTime(now.Add(10 * 24 * time.Hour)),
 		WeeklyUsageUSD:    25.0,
 		WeeklyWindowStart: ptrTime(weeklyStart),
 	}
@@ -125,7 +125,7 @@ func TestCalculateProgress_WeeklyResetsAt_LegacyMidnightAnchor(t *testing.T) {
 	sub := &UserSubscription{
 		ID:                1,
 		StartsAt:          startsAt,
-		ExpiresAt:         startsAt.AddDate(0, 0, 30),
+		ExpiresAt:         ptrTime(startsAt.AddDate(0, 0, 30)),
 		WeeklyUsageUSD:    2000.18,
 		WeeklyWindowStart: ptrTime(weeklyStart),
 	}
@@ -148,7 +148,7 @@ func TestCalculateProgress_MonthlyUsage(t *testing.T) {
 
 	sub := &UserSubscription{
 		ID:                 1,
-		ExpiresAt:          now.Add(10 * 24 * time.Hour),
+		ExpiresAt:          ptrTime(now.Add(10 * 24 * time.Hour)),
 		MonthlyUsageUSD:    80.0,
 		MonthlyWindowStart: ptrTime(monthlyStart),
 	}
@@ -172,7 +172,7 @@ func TestCalculateProgress_OverLimit_ClampedTo100Percent(t *testing.T) {
 
 	sub := &UserSubscription{
 		ID:               1,
-		ExpiresAt:        now.Add(10 * 24 * time.Hour),
+		ExpiresAt:        ptrTime(now.Add(10 * 24 * time.Hour)),
 		DailyUsageUSD:    15.0, // 超过限额
 		DailyWindowStart: ptrTime(now.Add(-1 * time.Hour)),
 	}
@@ -195,7 +195,7 @@ func TestCalculateProgress_NoWindowStart_NoProgress(t *testing.T) {
 	// 有限额但无窗口起始时间（订阅未激活）
 	sub := &UserSubscription{
 		ID:             1,
-		ExpiresAt:      now.Add(10 * 24 * time.Hour),
+		ExpiresAt:      ptrTime(now.Add(10 * 24 * time.Hour)),
 		DailyUsageUSD:  0,
 		WeeklyUsageUSD: 0,
 	}
@@ -217,7 +217,7 @@ func TestCalculateProgress_AllLimits(t *testing.T) {
 
 	sub := &UserSubscription{
 		ID:                 1,
-		ExpiresAt:          now.Add(10 * 24 * time.Hour),
+		ExpiresAt:          ptrTime(now.Add(10 * 24 * time.Hour)),
 		DailyUsageUSD:      5.0,
 		WeeklyUsageUSD:     20.0,
 		MonthlyUsageUSD:    60.0,
@@ -248,7 +248,7 @@ func TestCalculateProgress_ExpiredSubscription(t *testing.T) {
 
 	sub := &UserSubscription{
 		ID:        1,
-		ExpiresAt: time.Now().Add(-24 * time.Hour), // 已过期
+		ExpiresAt: ptrTime(time.Now().Add(-24 * time.Hour)), // 已过期
 	}
 	group := &Group{Name: "Expired"}
 
@@ -264,7 +264,7 @@ func TestCalculateProgress_ResetsInSeconds_NotNegative(t *testing.T) {
 
 	sub := &UserSubscription{
 		ID:               1,
-		ExpiresAt:        time.Now().Add(10 * 24 * time.Hour),
+		ExpiresAt:        ptrTime(time.Now().Add(10 * 24 * time.Hour)),
 		DailyUsageUSD:    1.0,
 		DailyWindowStart: ptrTime(pastStart),
 	}

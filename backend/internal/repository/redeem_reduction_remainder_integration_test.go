@@ -15,7 +15,7 @@ func TestRedeemReductionPreservesPartialDay(t *testing.T) {
 	client := testEntClient(t)
 	user, err := client.User.Create().SetEmail("reduction-remainder@example.com").SetPasswordHash("test").Save(ctx)
 	require.NoError(t, err)
-	group, err := client.Group.Create().SetName("reduction-remainder").Save(ctx)
+	group, err := client.Group.Create().SetSubscriptionType(service.SubscriptionTypeSubscription).SetName("reduction-remainder").Save(ctx)
 	require.NoError(t, err)
 	// Redemption commits its own transaction; remove fixtures explicitly so
 	// repository list/count tests cannot observe this test's subscriptions.
@@ -37,14 +37,14 @@ func TestRedeemReductionPreservesPartialDay(t *testing.T) {
 	codes := NewRedeemCodeRepository(client)
 	code := &service.RedeemCode{Code: "REDUCE-ONE-DAY", Type: service.RedeemTypeSubscription, Status: service.StatusUnused, ValidityDays: -1, GroupID: &group.ID}
 	require.NoError(t, codes.Create(ctx, code))
-	subscriptions := service.NewSubscriptionService(nil, repo, nil, client, nil)
+	subscriptions := service.NewSubscriptionService(NewGroupRepository(client, integrationDB), repo, nil, client, nil)
 	redeem := service.NewRedeemService(codes, NewUserRepository(client, integrationDB), subscriptions, nil, nil, client, nil, nil)
 	_, err = redeem.RedeemForAdminFulfillment(ctx, user.ID, code.Code)
 	require.NoError(t, err)
 	got, err := repo.GetByID(ctx, sub.ID)
 	require.NoError(t, err)
 	require.Equal(t, service.SubscriptionStatusActive, got.Status)
-	require.True(t, expiry.AddDate(0, 0, -1).Equal(got.ExpiresAt))
+	require.True(t, expiry.AddDate(0, 0, -1).Equal(*got.ExpiresAt))
 	used, err := codes.GetByID(ctx, code.ID)
 	require.NoError(t, err)
 	require.Equal(t, service.StatusUsed, used.Status)

@@ -88,7 +88,7 @@ var (
 	ErrSettingNotFound        = infraerrors.NotFound("SETTING_NOT_FOUND", "setting not found")
 	ErrDefaultSubGroupInvalid = infraerrors.BadRequest(
 		"DEFAULT_SUBSCRIPTION_GROUP_INVALID",
-		"default subscription group must exist and be subscription type",
+		"default subscription group must exist and use daily, weekly or monthly subscription limits",
 	)
 	ErrDefaultSubGroupDuplicate = infraerrors.BadRequest(
 		"DEFAULT_SUBSCRIPTION_GROUP_DUPLICATE",

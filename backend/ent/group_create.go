@@ -280,6 +280,20 @@ func (_c *GroupCreate) SetNillableMonthlyLimitUsd(v *float64) *GroupCreate {
 	return _c
 }
 
+// SetTotalQuotaNoExpiry sets the "total_quota_no_expiry" field.
+func (_c *GroupCreate) SetTotalQuotaNoExpiry(v bool) *GroupCreate {
+	_c.mutation.SetTotalQuotaNoExpiry(v)
+	return _c
+}
+
+// SetNillableTotalQuotaNoExpiry sets the "total_quota_no_expiry" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableTotalQuotaNoExpiry(v *bool) *GroupCreate {
+	if v != nil {
+		_c.SetTotalQuotaNoExpiry(*v)
+	}
+	return _c
+}
+
 // SetTotalLimitUsd sets the "total_limit_usd" field.
 func (_c *GroupCreate) SetTotalLimitUsd(v float64) *GroupCreate {
 	_c.mutation.SetTotalLimitUsd(v)
@@ -1149,6 +1163,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultSubscriptionType
 		_c.mutation.SetSubscriptionType(v)
 	}
+	if _, ok := _c.mutation.TotalQuotaNoExpiry(); !ok {
+		v := group.DefaultTotalQuotaNoExpiry
+		_c.mutation.SetTotalQuotaNoExpiry(v)
+	}
 	if _, ok := _c.mutation.DefaultValidityDays(); !ok {
 		v := group.DefaultDefaultValidityDays
 		_c.mutation.SetDefaultValidityDays(v)
@@ -1367,6 +1385,9 @@ func (_c *GroupCreate) check() error {
 		if err := group.SubscriptionTypeValidator(v); err != nil {
 			return &ValidationError{Name: "subscription_type", err: fmt.Errorf(`ent: validator failed for field "Group.subscription_type": %w`, err)}
 		}
+	}
+	if _, ok := _c.mutation.TotalQuotaNoExpiry(); !ok {
+		return &ValidationError{Name: "total_quota_no_expiry", err: errors.New(`ent: missing required field "Group.total_quota_no_expiry"`)}
 	}
 	if _, ok := _c.mutation.DefaultValidityDays(); !ok {
 		return &ValidationError{Name: "default_validity_days", err: errors.New(`ent: missing required field "Group.default_validity_days"`)}
@@ -1610,6 +1631,10 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.MonthlyLimitUsd(); ok {
 		_spec.SetField(group.FieldMonthlyLimitUsd, field.TypeFloat64, value)
 		_node.MonthlyLimitUsd = &value
+	}
+	if value, ok := _c.mutation.TotalQuotaNoExpiry(); ok {
+		_spec.SetField(group.FieldTotalQuotaNoExpiry, field.TypeBool, value)
+		_node.TotalQuotaNoExpiry = value
 	}
 	if value, ok := _c.mutation.TotalLimitUsd(); ok {
 		_spec.SetField(group.FieldTotalLimitUsd, field.TypeFloat64, value)
@@ -2236,6 +2261,18 @@ func (u *GroupUpsert) AddMonthlyLimitUsd(v float64) *GroupUpsert {
 // ClearMonthlyLimitUsd clears the value of the "monthly_limit_usd" field.
 func (u *GroupUpsert) ClearMonthlyLimitUsd() *GroupUpsert {
 	u.SetNull(group.FieldMonthlyLimitUsd)
+	return u
+}
+
+// SetTotalQuotaNoExpiry sets the "total_quota_no_expiry" field.
+func (u *GroupUpsert) SetTotalQuotaNoExpiry(v bool) *GroupUpsert {
+	u.Set(group.FieldTotalQuotaNoExpiry, v)
+	return u
+}
+
+// UpdateTotalQuotaNoExpiry sets the "total_quota_no_expiry" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateTotalQuotaNoExpiry() *GroupUpsert {
+	u.SetExcluded(group.FieldTotalQuotaNoExpiry)
 	return u
 }
 
@@ -3456,6 +3493,20 @@ func (u *GroupUpsertOne) UpdateMonthlyLimitUsd() *GroupUpsertOne {
 func (u *GroupUpsertOne) ClearMonthlyLimitUsd() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.ClearMonthlyLimitUsd()
+	})
+}
+
+// SetTotalQuotaNoExpiry sets the "total_quota_no_expiry" field.
+func (u *GroupUpsertOne) SetTotalQuotaNoExpiry(v bool) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetTotalQuotaNoExpiry(v)
+	})
+}
+
+// UpdateTotalQuotaNoExpiry sets the "total_quota_no_expiry" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateTotalQuotaNoExpiry() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateTotalQuotaNoExpiry()
 	})
 }
 
@@ -4986,6 +5037,20 @@ func (u *GroupUpsertBulk) UpdateMonthlyLimitUsd() *GroupUpsertBulk {
 func (u *GroupUpsertBulk) ClearMonthlyLimitUsd() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.ClearMonthlyLimitUsd()
+	})
+}
+
+// SetTotalQuotaNoExpiry sets the "total_quota_no_expiry" field.
+func (u *GroupUpsertBulk) SetTotalQuotaNoExpiry(v bool) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetTotalQuotaNoExpiry(v)
+	})
+}
+
+// UpdateTotalQuotaNoExpiry sets the "total_quota_no_expiry" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateTotalQuotaNoExpiry() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateTotalQuotaNoExpiry()
 	})
 }
 

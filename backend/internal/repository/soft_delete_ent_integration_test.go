@@ -139,7 +139,7 @@ func TestEntSoftDelete_UserSubscription_DefaultFilterAndSkip(t *testing.T) {
 		UserID:    u.ID,
 		GroupID:   g.ID,
 		Status:    service.SubscriptionStatusActive,
-		ExpiresAt: time.Now().Add(24 * time.Hour),
+		ExpiresAt: quotaExpiryPointer(time.Now().Add(24 * time.Hour)),
 	}
 	require.NoError(t, repo.Create(ctx, sub), "create user subscription")
 
@@ -171,7 +171,7 @@ func TestEntSoftDelete_UserSubscription_DeleteIdempotent(t *testing.T) {
 		UserID:    u.ID,
 		GroupID:   g.ID,
 		Status:    service.SubscriptionStatusActive,
-		ExpiresAt: time.Now().Add(24 * time.Hour),
+		ExpiresAt: quotaExpiryPointer(time.Now().Add(24 * time.Hour)),
 	}
 	require.NoError(t, repo.Create(ctx, sub), "create user subscription")
 
@@ -193,7 +193,7 @@ func TestEntSoftDelete_UserSubscription_ListExcludesDeleted(t *testing.T) {
 		UserID:    u.ID,
 		GroupID:   g1.ID,
 		Status:    service.SubscriptionStatusActive,
-		ExpiresAt: time.Now().Add(24 * time.Hour),
+		ExpiresAt: quotaExpiryPointer(time.Now().Add(24 * time.Hour)),
 	}
 	require.NoError(t, repo.Create(ctx, sub1), "create subscription 1")
 
@@ -201,7 +201,7 @@ func TestEntSoftDelete_UserSubscription_ListExcludesDeleted(t *testing.T) {
 		UserID:    u.ID,
 		GroupID:   g2.ID,
 		Status:    service.SubscriptionStatusActive,
-		ExpiresAt: time.Now().Add(24 * time.Hour),
+		ExpiresAt: quotaExpiryPointer(time.Now().Add(24 * time.Hour)),
 	}
 	require.NoError(t, repo.Create(ctx, sub2), "create subscription 2")
 

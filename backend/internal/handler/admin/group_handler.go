@@ -203,6 +203,7 @@ type CreateGroupRequest struct {
 	WeeklyLimitUSD            optionalLimitField            `json:"weekly_limit_usd"`
 	MonthlyLimitUSD           optionalLimitField            `json:"monthly_limit_usd"`
 	TotalLimitUSD             optionalLimitField            `json:"total_limit_usd"`
+	TotalQuotaNoExpiry        bool                          `json:"total_quota_no_expiry"`
 	LongContextPricingEnabled bool                          `json:"long_context_pricing_enabled"`
 	ModelPricing              []service.ChannelModelPricing `json:"model_pricing"`
 	// 图片生成计费配置（antigravity 和 gemini 平台使用，负数表示清除配置）
@@ -283,6 +284,7 @@ type UpdateGroupRequest struct {
 	WeeklyLimitUSD            optionalLimitField             `json:"weekly_limit_usd"`
 	MonthlyLimitUSD           optionalLimitField             `json:"monthly_limit_usd"`
 	TotalLimitUSD             optionalLimitField             `json:"total_limit_usd"`
+	TotalQuotaNoExpiry        *bool                          `json:"total_quota_no_expiry"`
 	LongContextPricingEnabled *bool                          `json:"long_context_pricing_enabled"`
 	ModelPricing              *[]service.ChannelModelPricing `json:"model_pricing"`
 	// 图片生成计费配置（antigravity 和 gemini 平台使用，负数表示清除配置）
@@ -702,6 +704,7 @@ func (h *GroupHandler) Create(c *gin.Context) {
 		WeeklyLimitUSD:                  weekLimit,
 		MonthlyLimitUSD:                 monthLimit,
 		TotalLimitUSD:                   req.TotalLimitUSD.ToServiceInput(),
+		TotalQuotaNoExpiry:              req.TotalQuotaNoExpiry,
 		LongContextPricingEnabled:       req.LongContextPricingEnabled,
 		ModelPricing:                    req.ModelPricing,
 		AllowImageGeneration:            req.AllowImageGeneration,
@@ -862,6 +865,7 @@ func (h *GroupHandler) Update(c *gin.Context) {
 		WeeklyLimitUSD:                  weekLimit,
 		MonthlyLimitUSD:                 monthLimit,
 		TotalLimitUSD:                   req.TotalLimitUSD.ToServiceInput(),
+		TotalQuotaNoExpiry:              req.TotalQuotaNoExpiry,
 		LongContextPricingEnabled:       req.LongContextPricingEnabled,
 		ModelPricing:                    req.ModelPricing,
 		AllowImageGeneration:            req.AllowImageGeneration,

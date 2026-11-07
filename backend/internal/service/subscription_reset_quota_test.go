@@ -224,7 +224,7 @@ func TestAdminResetQuota_BeforeStartsAtSameDayPreservesAutomaticBoundary(t *test
 			UserID:    10,
 			GroupID:   20,
 			StartsAt:  startsAt,
-			ExpiresAt: startsAt.Add(45 * 24 * time.Hour),
+			ExpiresAt: ptrTime(startsAt.Add(45 * 24 * time.Hour)),
 		},
 	}
 	svc := newResetQuotaSvc(stub)

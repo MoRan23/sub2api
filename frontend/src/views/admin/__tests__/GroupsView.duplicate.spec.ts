@@ -179,6 +179,7 @@ describe('GroupsView duplicate action', () => {
   beforeEach(() => {
     authState.isSimpleMode = false
     localStorage.clear()
+    vi.mocked(adminAPI.groups.create).mockReset()
     vi.spyOn(console, 'error').mockImplementation(() => {})
     for (const fn of [
       listGroups,
@@ -215,6 +216,86 @@ describe('GroupsView duplicate action', () => {
 
   afterEach(() => {
     vi.restoreAllMocks()
+  })
+
+  it.each([false, true])('creates total-quota groups with no-expiry mode %s and no group amount', async (permanent) => {
+    vi.mocked(adminAPI.groups.create).mockResolvedValue({
+      ...sourceGroup, subscription_type: 'total_quota', total_quota_no_expiry: permanent
+    })
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('[data-tour="groups-create-btn"]').trigger('click')
+    await wrapper.get('input[placeholder="admin.groups.enterGroupName"]').setValue('Issued quota')
+    const form = wrapper.get('#create-group-form')
+    const typeSelect = form.findAllComponents({ name: 'Select' }).find(component =>
+      component.props('options')?.some((option: { value: string }) => option.value === 'total_quota'))!
+    typeSelect.vm.$emit('update:modelValue', 'total_quota')
+    await wrapper.vm.$nextTick()
+
+    const quotaSection = form.get('.border-amber-200')
+    expect(quotaSection.text()).toContain('subscription.grantAmountHint')
+    expect(quotaSection.text()).toContain('subscription.creationOnlyHint')
+    expect(quotaSection.find('input').exists()).toBe(false)
+    const toggle = quotaSection.get('[role="switch"]')
+    expect(toggle.attributes('aria-checked')).toBe('false')
+    if (permanent) await toggle.trigger('click')
+    expect(toggle.attributes('aria-checked')).toBe(String(permanent))
+
+    await form.trigger('submit')
+    await flushPromises()
+    expect(adminAPI.groups.create).toHaveBeenCalledTimes(1)
+    const payload = vi.mocked(adminAPI.groups.create).mock.calls[0]![0]
+    expect(payload).toMatchObject({ name: 'Issued quota', subscription_type: 'total_quota', total_quota_no_expiry: permanent })
+    expect(payload).not.toHaveProperty('total_limit_usd')
+    wrapper.unmount()
+  })
+
+  it.each([false, true])('keeps existing total-quota no-expiry mode %s read-only while editing', async (permanent) => {
+    const group = { ...sourceGroup, subscription_type: 'total_quota' as const,
+      total_quota_no_expiry: permanent, total_limit_usd: 999 }
+    listGroups.mockResolvedValue({ items: [group], total: 1, page: 1, page_size: 20, pages: 1 })
+    updateGroup.mockResolvedValue(group)
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'common.edit')!.trigger('click')
+    await flushPromises()
+    const form = wrapper.get('#edit-group-form')
+    const quotaSection = form.get('.border-amber-200')
+    expect(quotaSection.text()).toContain(permanent ? 'subscription.permanent' : 'subscription.finite')
+    expect(quotaSection.text()).toContain('subscription.creationOnlyHint')
+    expect(quotaSection.find('[role="switch"]').exists()).toBe(false)
+    expect(quotaSection.find('input').exists()).toBe(false)
+    const typeSelect = form.findAllComponents({ name: 'Select' }).find(component =>
+      component.props('options')?.some((option: { value: string }) => option.value === 'total_quota'))!
+    expect(typeSelect.props('disabled')).toBe(true)
+
+    await form.trigger('submit')
+    await flushPromises()
+    expect(updateGroup).toHaveBeenCalledTimes(1)
+    const payload = updateGroup.mock.calls[0]![1]
+    expect(payload).not.toHaveProperty('total_limit_usd')
+    if ('total_quota_no_expiry' in payload) expect(payload.total_quota_no_expiry).toBe(permanent)
+    wrapper.unmount()
+  })
+
+  it('uses the copy endpoint and displays the copied permanent mode returned by the server', async () => {
+    const permanentGroup = { ...sourceGroup, subscription_type: 'total_quota' as const, total_quota_no_expiry: true }
+    const copy = { ...permanentGroup, id: 43, name: 'Primary (Copy)' }
+    listGroups
+      .mockResolvedValueOnce({ items: [permanentGroup], total: 1, page: 1, page_size: 20, pages: 1 })
+      .mockResolvedValueOnce({ items: [copy], total: 1, page: 1, page_size: 20, pages: 1 })
+    duplicateGroup.mockResolvedValueOnce(copy)
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('[data-testid="group-duplicate"]').trigger('click')
+    await flushPromises()
+    expect(duplicateGroup).toHaveBeenCalledTimes(1)
+    expect(duplicateGroup).toHaveBeenCalledWith(42)
+    expect(adminAPI.groups.create).not.toHaveBeenCalled()
+    await wrapper.findAll('button').find(button => button.text() === 'common.edit')!.trigger('click')
+    await flushPromises()
+    expect(wrapper.get('#edit-group-form .border-amber-200').text()).toContain('subscription.permanent')
+    wrapper.unmount()
   })
 
   it('duplicates the selected group, reports success, and refreshes the list', async () => {

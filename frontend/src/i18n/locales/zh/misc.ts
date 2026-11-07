@@ -113,6 +113,20 @@ export default {
     markReadHint: '点击"已读"标记此公告'
   },
 
+  subscription: {
+    permanent: '永久有效',
+    finite: '按发放期限有效',
+    remainingQuota: '剩余额度',
+    noExpirySwitch: '额度永不过期',
+    creationOnlyHint: '仅创建时设置，创建后不可修改。永久额度用完后仍会停止使用。',
+    grantAmountHint: '额度在创建兑换码或为用户添加订阅时填写。',
+    amountPerCode: '每个兑换码额度（USD）',
+    grantAmount: '本次增加额度（USD）',
+    amountPerUser: '每人本次增加额度（USD）',
+    appendHint: '本次金额追加到已有额度，不覆盖剩余额度。',
+    invalidAmount: '请输入大于 0、少于 1 万亿且最多八位小数的额度'
+  },
+
   // User Subscriptions Page
   userSubscriptions: {
     title: '我的订阅',

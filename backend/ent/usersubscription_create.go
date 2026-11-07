@@ -92,6 +92,14 @@ func (_c *UserSubscriptionCreate) SetExpiresAt(v time.Time) *UserSubscriptionCre
 	return _c
 }
 
+// SetNillableExpiresAt sets the "expires_at" field if the given value is not nil.
+func (_c *UserSubscriptionCreate) SetNillableExpiresAt(v *time.Time) *UserSubscriptionCreate {
+	if v != nil {
+		_c.SetExpiresAt(*v)
+	}
+	return _c
+}
+
 // SetStatus sets the "status" field.
 func (_c *UserSubscriptionCreate) SetStatus(v string) *UserSubscriptionCreate {
 	_c.mutation.SetStatus(v)
@@ -385,9 +393,6 @@ func (_c *UserSubscriptionCreate) check() error {
 	if _, ok := _c.mutation.StartsAt(); !ok {
 		return &ValidationError{Name: "starts_at", err: errors.New(`ent: missing required field "UserSubscription.starts_at"`)}
 	}
-	if _, ok := _c.mutation.ExpiresAt(); !ok {
-		return &ValidationError{Name: "expires_at", err: errors.New(`ent: missing required field "UserSubscription.expires_at"`)}
-	}
 	if _, ok := _c.mutation.Status(); !ok {
 		return &ValidationError{Name: "status", err: errors.New(`ent: missing required field "UserSubscription.status"`)}
 	}
@@ -459,7 +464,7 @@ func (_c *UserSubscriptionCreate) createSpec() (*UserSubscription, *sqlgraph.Cre
 	}
 	if value, ok := _c.mutation.ExpiresAt(); ok {
 		_spec.SetField(usersubscription.FieldExpiresAt, field.TypeTime, value)
-		_node.ExpiresAt = value
+		_node.ExpiresAt = &value
 	}
 	if value, ok := _c.mutation.Status(); ok {
 		_spec.SetField(usersubscription.FieldStatus, field.TypeString, value)
@@ -707,6 +712,12 @@ func (u *UserSubscriptionUpsert) SetExpiresAt(v time.Time) *UserSubscriptionUpse
 // UpdateExpiresAt sets the "expires_at" field to the value that was provided on create.
 func (u *UserSubscriptionUpsert) UpdateExpiresAt() *UserSubscriptionUpsert {
 	u.SetExcluded(usersubscription.FieldExpiresAt)
+	return u
+}
+
+// ClearExpiresAt clears the value of the "expires_at" field.
+func (u *UserSubscriptionUpsert) ClearExpiresAt() *UserSubscriptionUpsert {
+	u.SetNull(usersubscription.FieldExpiresAt)
 	return u
 }
 
@@ -1011,6 +1022,13 @@ func (u *UserSubscriptionUpsertOne) SetExpiresAt(v time.Time) *UserSubscriptionU
 func (u *UserSubscriptionUpsertOne) UpdateExpiresAt() *UserSubscriptionUpsertOne {
 	return u.Update(func(s *UserSubscriptionUpsert) {
 		s.UpdateExpiresAt()
+	})
+}
+
+// ClearExpiresAt clears the value of the "expires_at" field.
+func (u *UserSubscriptionUpsertOne) ClearExpiresAt() *UserSubscriptionUpsertOne {
+	return u.Update(func(s *UserSubscriptionUpsert) {
+		s.ClearExpiresAt()
 	})
 }
 
@@ -1509,6 +1527,13 @@ func (u *UserSubscriptionUpsertBulk) SetExpiresAt(v time.Time) *UserSubscription
 func (u *UserSubscriptionUpsertBulk) UpdateExpiresAt() *UserSubscriptionUpsertBulk {
 	return u.Update(func(s *UserSubscriptionUpsert) {
 		s.UpdateExpiresAt()
+	})
+}
+
+// ClearExpiresAt clears the value of the "expires_at" field.
+func (u *UserSubscriptionUpsertBulk) ClearExpiresAt() *UserSubscriptionUpsertBulk {
+	return u.Update(func(s *UserSubscriptionUpsert) {
+		s.ClearExpiresAt()
 	})
 }
 

@@ -76,10 +76,13 @@ type RedeemCodeRepository interface {
 
 // GenerateCodesRequest 生成兑换码请求
 type GenerateCodesRequest struct {
-	Count     int     `json:"count"`
-	Value     float64 `json:"value"`
-	Type      string  `json:"type"`
-	GiftRatio float64 `json:"gift_ratio"`
+	Count        int      `json:"count"`
+	Value        float64  `json:"value"`
+	Type         string   `json:"type"`
+	GiftRatio    float64  `json:"gift_ratio"`
+	GroupID      *int64   `json:"group_id"`
+	ValidityDays int      `json:"validity_days"`
+	QuotaAmount  *float64 `json:"quota_amount"`
 }
 
 // RedeemCodeResponse 兑换码响应
@@ -108,8 +111,9 @@ type RedeemCodeBatchUpdateFields struct {
 
 	// Core fields are intentionally modeled only so service validation can
 	// reject payloads that try to mutate redemption value semantics in bulk.
-	Type  *string
-	Value *float64
+	Type        *string
+	Value       *float64
+	QuotaAmount *float64
 }
 
 func (f RedeemCodeBatchUpdateFields) HasChanges() bool {
@@ -118,11 +122,11 @@ func (f RedeemCodeBatchUpdateFields) HasChanges() bool {
 		f.Notes != nil ||
 		f.GroupID.Set ||
 		f.Type != nil ||
-		f.Value != nil
+		f.Value != nil || f.QuotaAmount != nil
 }
 
 func (f RedeemCodeBatchUpdateFields) HasCoreFieldChanges() bool {
-	return f.Type != nil || f.Value != nil
+	return f.Type != nil || f.Value != nil || f.QuotaAmount != nil
 }
 
 func (f RedeemCodeBatchUpdateFields) TouchesUsedSensitiveFields() bool {
@@ -205,7 +209,7 @@ func (s *RedeemService) GenerateCodes(ctx context.Context, req GenerateCodesRequ
 	}
 
 	// 邀请码类型不需要数值，其他类型需要非零值（支持负数用于退款）
-	if req.Type != RedeemTypeInvitation && req.Value == 0 {
+	if req.Type != RedeemTypeInvitation && req.Type != RedeemTypeSubscription && req.Value == 0 {
 		return nil, errors.New("value must not be zero")
 	}
 
@@ -227,6 +231,16 @@ func (s *RedeemService) GenerateCodes(ctx context.Context, req GenerateCodesRequ
 	if codeType == RedeemTypeInvitation {
 		value = 0
 	}
+	grant := RedeemCode{Type: codeType}
+	if codeType == RedeemTypeSubscription {
+		grant.GroupID, grant.ValidityDays, grant.QuotaAmount = req.GroupID, req.ValidityDays, req.QuotaAmount
+		if err := s.validateSubscriptionCode(ctx, &grant); err != nil {
+			return nil, err
+		}
+		if grant.QuotaAmount == nil && value == 0 {
+			return nil, errors.New("value must not be zero for windowed subscription codes")
+		}
+	}
 
 	codes := make([]RedeemCode, 0, req.Count)
 	for i := 0; i < req.Count; i++ {
@@ -236,12 +250,15 @@ func (s *RedeemService) GenerateCodes(ctx context.Context, req GenerateCodesRequ
 		}
 
 		codes = append(codes, RedeemCode{
-			Code:      code,
-			Type:      codeType,
-			Value:     value,
-			GiftRatio: giftRatio,
-			GiftValue: calculateGiftBalance(value, giftRatio),
-			Status:    StatusUnused,
+			Code:         code,
+			Type:         codeType,
+			Value:        value,
+			GiftRatio:    giftRatio,
+			GiftValue:    calculateGiftBalance(value, giftRatio),
+			Status:       StatusUnused,
+			GroupID:      grant.GroupID,
+			ValidityDays: grant.ValidityDays,
+			QuotaAmount:  copySubscriptionQuotaAmount(grant.QuotaAmount),
 		})
 	}
 
@@ -267,8 +284,19 @@ func (s *RedeemService) CreateCode(ctx context.Context, code *RedeemCode) error 
 	if code.Type == "" {
 		code.Type = RedeemTypeBalance
 	}
-	if code.Type != RedeemTypeInvitation && code.Value == 0 {
+	if code.Type != RedeemTypeInvitation && code.Type != RedeemTypeSubscription && code.Value == 0 {
 		return errors.New("value must not be zero")
+	}
+	if code.Type == RedeemTypeSubscription {
+		if err := s.validateSubscriptionCode(ctx, code); err != nil {
+			return err
+		}
+		if code.QuotaAmount == nil && code.Value == 0 {
+			return errors.New("value must not be zero for windowed subscription codes")
+		}
+		code.QuotaAmount = copySubscriptionQuotaAmount(code.QuotaAmount)
+	} else {
+		code.QuotaAmount = nil
 	}
 	if err := validateRedeemGift(code.Type, code.Value, code.GiftRatio); err != nil {
 		return err
@@ -299,7 +327,7 @@ func (s *RedeemService) BatchUpdate(ctx context.Context, input *RedeemCodeBatchU
 		return nil, infraerrors.BadRequest("REDEEM_CODE_BATCH_UPDATE_EMPTY", "at least one field must be selected")
 	}
 	if input.Fields.HasCoreFieldChanges() {
-		return nil, infraerrors.BadRequest("REDEEM_CODE_CORE_FIELDS_IMMUTABLE", "type and value cannot be batch updated")
+		return nil, infraerrors.BadRequest("REDEEM_CODE_CORE_FIELDS_IMMUTABLE", "type, value and quota_amount cannot be batch updated")
 	}
 
 	ids := make([]int64, 0, len(input.IDs))
@@ -335,12 +363,61 @@ func (s *RedeemService) BatchUpdate(ctx context.Context, input *RedeemCodeBatchU
 	if input.Fields.GroupID.Set && input.Fields.GroupID.Value != nil && *input.Fields.GroupID.Value <= 0 {
 		return nil, infraerrors.BadRequest("REDEEM_CODE_GROUP_ID_INVALID", "group_id must be positive")
 	}
+	if input.Fields.GroupID.Set || (input.Fields.Status != nil && *input.Fields.Status == StatusUnused) {
+		for _, id := range ids {
+			code, err := s.redeemRepo.GetByID(ctx, id)
+			if err != nil {
+				return nil, err
+			}
+			if code.Type != RedeemTypeSubscription {
+				continue
+			}
+			candidate := *code
+			if input.Fields.GroupID.Set {
+				candidate.GroupID = input.Fields.GroupID.Value
+			}
+			if err := s.validateSubscriptionCode(ctx, &candidate); err != nil {
+				return nil, err
+			}
+		}
+	}
 
 	updated, err := s.redeemRepo.BatchUpdate(ctx, ids, input.Fields)
 	if err != nil {
 		return nil, err
 	}
 	return &RedeemCodeBatchUpdateResult{Updated: updated}, nil
+}
+
+func (s *RedeemService) validateSubscriptionCode(ctx context.Context, code *RedeemCode) error {
+	return s.prepareSubscriptionCode(ctx, code, false)
+}
+
+func (s *RedeemService) prepareSubscriptionCode(ctx context.Context, code *RedeemCode, redeeming bool) error {
+	if code.GroupID == nil || *code.GroupID <= 0 {
+		return infraerrors.BadRequest("REDEEM_CODE_GROUP_ID_INVALID", "group_id is required for subscription codes")
+	}
+	if s.subscriptionService == nil || s.subscriptionService.groupRepo == nil {
+		return infraerrors.ServiceUnavailable("SUBSCRIPTION_SERVICE_UNAVAILABLE", "subscription service is unavailable")
+	}
+	group, err := s.subscriptionService.groupRepo.GetByID(ctx, *code.GroupID)
+	if err != nil {
+		return err
+	}
+	// Historical windowed codes allowed an omitted duration and granted 30 days.
+	if redeeming && group != nil && group.IsWindowedSubscriptionType() && code.ValidityDays == 0 {
+		code.ValidityDays = 30
+	}
+	if err := ValidateSubscriptionRedeemGrant(group, code.QuotaAmount, code.ValidityDays); err != nil {
+		return err
+	}
+	if group.IsTotalQuotaSubscriptionType() && group.TotalQuotaNoExpiry {
+		code.ValidityDays = 0
+	}
+	if !group.IsTotalQuotaSubscriptionType() {
+		code.QuotaAmount = nil
+	}
+	return nil
 }
 
 // checkRedeemRateLimit 检查用户兑换错误次数是否超限
@@ -533,6 +610,15 @@ func (s *RedeemService) redeem(ctx context.Context, userID int64, code string, r
 		}
 
 	case RedeemTypeSubscription:
+		// Use has acquired the code row lock. Reload its grant fields so a
+		// concurrent administrator group change cannot redeem a stale snapshot.
+		redeemCode, err = s.redeemRepo.GetByID(txCtx, redeemCode.ID)
+		if err != nil {
+			return nil, fmt.Errorf("reload subscription redeem code: %w", err)
+		}
+		if err := s.prepareSubscriptionCode(txCtx, redeemCode, true); err != nil {
+			return nil, err
+		}
 		validityDays := redeemCode.ValidityDays
 		if validityDays < 0 {
 			// 负数天数：缩短订阅，减到 0 则取消订阅
@@ -540,13 +626,11 @@ func (s *RedeemService) redeem(ctx context.Context, userID int64, code string, r
 				return nil, fmt.Errorf("reduce or cancel subscription: %w", err)
 			}
 		} else {
-			if validityDays == 0 {
-				validityDays = 30
-			}
 			_, _, err := s.subscriptionService.AssignOrExtendSubscription(txCtx, &AssignSubscriptionInput{
 				UserID:          userID,
 				GroupID:         *redeemCode.GroupID,
 				ValidityDays:    validityDays,
+				QuotaAmount:     redeemCode.QuotaAmount,
 				AssignedBy:      0, // 系统分配
 				Notes:           fmt.Sprintf("通过兑换码 %s 兑换", redeemCode.Code),
 				EventSourceKind: SubscriptionQuotaSourceRedeemCode,
@@ -618,6 +702,12 @@ func (s *RedeemService) invalidateRedeemCaches(ctx context.Context, userID int64
 	case RedeemTypeSubscription:
 		if s.authCacheInvalidator != nil {
 			s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, userID)
+		}
+		if s.subscriptionService != nil && redeemCode.GroupID != nil {
+			if err := s.subscriptionService.invalidateSubscriptionCaches(userID, *redeemCode.GroupID); err != nil {
+				logger.LegacyPrintf("service.redeem", "subscription redemption committed but cache invalidation failed: %v", err)
+			}
+			return
 		}
 		if s.billingCacheService == nil {
 			return
@@ -739,6 +829,9 @@ func (s *RedeemService) reduceOrCancelSubscription(ctx context.Context, userID, 
 	if err != nil {
 		return fmt.Errorf("lock subscription for reduction: %w", err)
 	}
+	if sub.ExpiresAt == nil {
+		return infraerrors.BadRequest("SUBSCRIPTION_EXPIRY_REQUIRED", "cannot reduce the duration of a permanent subscription")
+	}
 
 	now := time.Now()
 	if s.subscriptionService.now != nil {
@@ -774,9 +867,6 @@ func (s *RedeemService) reduceOrCancelSubscription(ctx context.Context, userID, 
 	if err := s.subscriptionService.userSubRepo.UpdateNotes(ctx, sub.ID, newNotes); err != nil {
 		return fmt.Errorf("update subscription notes: %w", err)
 	}
-
-	// 失效缓存
-	s.subscriptionService.InvalidateSubCache(userID, groupID)
 
 	return nil
 }

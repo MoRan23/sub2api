@@ -2,14 +2,14 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import SubscriptionsView from '../SubscriptionsView.vue'
 
-const { list, bulkAction, bulkAssign, listUsers, showError } = vi.hoisted(() => ({
-  list: vi.fn(), bulkAction: vi.fn(), bulkAssign: vi.fn(), listUsers: vi.fn(), showError: vi.fn()
+const { list, bulkAction, bulkAssign, assign, getAllGroups, listUsers, showError } = vi.hoisted(() => ({
+  list: vi.fn(), bulkAction: vi.fn(), bulkAssign: vi.fn(), assign: vi.fn(), getAllGroups: vi.fn(), listUsers: vi.fn(), showError: vi.fn()
 }))
 
 vi.mock('@/api/admin', () => ({
   adminAPI: {
-    subscriptions: { list, bulkAction, bulkAssign },
-    groups: { getAll: vi.fn().mockResolvedValue([]) },
+    subscriptions: { list, bulkAction, bulkAssign, assign },
+    groups: { getAll: getAllGroups },
     users: { list: listUsers }
   }
 }))
@@ -49,6 +49,7 @@ beforeEach(async () => {
   sessionStorage.clear()
   localStorage.setItem('auth_user', JSON.stringify({ id: 777 }))
   list.mockResolvedValue({ items: rows, total: 60, pages: 3 })
+  getAllGroups.mockResolvedValue([])
   wrapper = mountView()
   await flushPromises()
 })
@@ -141,7 +142,7 @@ describe('subscription bulk operations', () => {
     await form.trigger('submit')
     await form.trigger('submit')
     expect(bulkAssign).toHaveBeenCalledTimes(1)
-    expect(bulkAssign).toHaveBeenCalledWith({ user_ids: [11, 22], group_id: 7, validity_days: 30 })
+    expect(bulkAssign).toHaveBeenCalledWith({ user_ids: [11, 22], group_id: 7, validity_days: 30 }, expect.any(String))
     resolveAssign({ success_count: 1, failed_count: 1, subscriptions: [{ user_id: 11 }], errors: ['User 22: conflict'] })
     await flushPromises()
     expect(form.get('[data-test="assign-users"]').text()).not.toContain('user11@example.com')
@@ -150,7 +151,46 @@ describe('subscription bulk operations', () => {
     bulkAssign.mockResolvedValueOnce({ success_count: 1, failed_count: 0, subscriptions: [{ user_id: 22 }], errors: [] })
     await form.trigger('submit')
     await flushPromises()
-    expect(bulkAssign).toHaveBeenLastCalledWith({ user_ids: [22], group_id: 7, validity_days: 30 })
+    expect(bulkAssign).toHaveBeenLastCalledWith({ user_ids: [22], group_id: 7, validity_days: 30 }, expect.any(String))
     expect(form.find('[data-test="assign-users"]').exists()).toBe(false)
+  })
+
+  it.each([false, true])('adds an explicit quota for a permanent subscription (batch=%s)', async (batch) => {
+    wrapper.unmount()
+    getAllGroups.mockResolvedValue([{ id: 7, name: 'Permanent quota', platform: 'openai', status: 'active', subscription_type: 'total_quota', total_quota_no_expiry: true, total_limit_usd: 999 }])
+    wrapper = mountView()
+    await flushPromises()
+    vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
+    await wrapper.findAll('button').find(button => button.text() === 'admin.subscriptions.assignSubscription')!.trigger('click')
+    const form = wrapper.get('#assign-subscription-form')
+    if (batch) await form.get('input[type="checkbox"]').setValue(true)
+    form.getComponent({ name: 'Select' }).vm.$emit('update:modelValue', 7)
+    await flushPromises()
+    expect(form.get<HTMLInputElement>('#assign-quota-amount').element.value).toBe('')
+    expect(form.text()).toContain(batch ? 'subscription.amountPerUser' : 'subscription.grantAmount')
+    expect(form.text()).toContain('subscription.permanent')
+    expect(form.findAll('input[type="number"]')).toHaveLength(1)
+    listUsers.mockResolvedValue({ items: [{ id: 11, email: 'user11@example.com' }] })
+    const search = form.get('[data-assign-user-search] input')
+    await search.trigger('focus')
+    await search.setValue('user11')
+    await vi.advanceTimersByTimeAsync(300)
+    await flushPromises()
+    await form.get('[data-assign-user-search] button').trigger('click')
+    await form.trigger('submit')
+    expect(assign).not.toHaveBeenCalled()
+    expect(bulkAssign).not.toHaveBeenCalled()
+    expect(showError).toHaveBeenCalledWith('subscription.invalidAmount')
+    assign.mockResolvedValue({})
+    bulkAssign.mockResolvedValue({ success_count: 1, failed_count: 0, subscriptions: [{ user_id: 11 }], errors: [] })
+    await form.get('#assign-quota-amount').setValue('0.12345678')
+    await form.trigger('submit')
+    await flushPromises()
+    expect(batch ? bulkAssign : assign).toHaveBeenCalledWith({
+      ...(batch ? { user_ids: [11] } : { user_id: 11 }),
+      group_id: 7,
+      quota_amount: 0.12345678,
+      validity_days: undefined
+    }, expect.any(String))
   })
 })

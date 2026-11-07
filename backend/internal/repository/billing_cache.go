@@ -16,7 +16,7 @@ import (
 
 const (
 	billingBalanceKeyPrefix   = "billing:balance:v2:"
-	billingSubKeyPrefix       = "billing:sub:"
+	billingSubKeyPrefix       = "billing:sub:v2:"
 	billingRateLimitKeyPrefix = "apikey:rate:"
 	subCacheInvalidateChannel = "subscription:cache:invalidate"
 	billingCacheTTL           = 5 * time.Minute
@@ -52,6 +52,7 @@ func billingSubKey(userID, groupID int64) string {
 const (
 	subFieldStatus       = "status"
 	subFieldExpiresAt    = "expires_at"
+	subFieldExpiryMode   = "expiry_mode"
 	subFieldDailyUsage   = "daily_usage"
 	subFieldWeeklyUsage  = "weekly_usage"
 	subFieldMonthlyUsage = "monthly_usage"
@@ -198,11 +199,20 @@ func (c *billingCache) parseSubscriptionCache(data map[string]string) (*service.
 		return nil, errors.New("invalid cache: missing status")
 	}
 
-	if expiresStr, ok := data[subFieldExpiresAt]; ok {
-		expiresAt, err := strconv.ParseInt(expiresStr, 10, 64)
-		if err == nil {
-			result.ExpiresAt = time.Unix(expiresAt, 0)
+	switch data[subFieldExpiryMode] {
+	case "permanent":
+		if data[subFieldExpiresAt] != "" {
+			return nil, errors.New("invalid cache: permanent expiry has a timestamp")
 		}
+	case "finite":
+		expiresAt, err := strconv.ParseInt(data[subFieldExpiresAt], 10, 64)
+		if err != nil || expiresAt <= 0 {
+			return nil, errors.New("invalid cache: missing or malformed finite expiry")
+		}
+		value := time.Unix(expiresAt, 0)
+		result.ExpiresAt = &value
+	default:
+		return nil, errors.New("invalid cache: missing expiry mode")
 	}
 
 	if dailyStr, ok := data[subFieldDailyUsage]; ok {
@@ -251,7 +261,8 @@ func (c *billingCache) SetSubscriptionCache(ctx context.Context, userID, groupID
 
 	fields := map[string]any{
 		subFieldStatus:       data.Status,
-		subFieldExpiresAt:    data.ExpiresAt.Unix(),
+		subFieldExpiryMode:   "permanent",
+		subFieldExpiresAt:    "",
 		subFieldDailyUsage:   data.DailyUsage,
 		subFieldWeeklyUsage:  data.WeeklyUsage,
 		subFieldMonthlyUsage: data.MonthlyUsage,
@@ -260,6 +271,10 @@ func (c *billingCache) SetSubscriptionCache(ctx context.Context, userID, groupID
 		subFieldTotalRemain:  data.TotalRemaining,
 		subFieldNextExpiring: data.NextExpiringQuotaUSD,
 		subFieldVersion:      data.Version,
+	}
+	if data.ExpiresAt != nil {
+		fields[subFieldExpiryMode] = "finite"
+		fields[subFieldExpiresAt] = data.ExpiresAt.Unix()
 	}
 	if data.NextQuotaExpireAt != nil {
 		fields[subFieldNextExpireAt] = data.NextQuotaExpireAt.Unix()

@@ -251,6 +251,7 @@ type CreateGroupInput struct {
 	WeeklyLimitUSD            *float64 // 周限额 (USD)
 	MonthlyLimitUSD           *float64 // 月限额 (USD)
 	TotalLimitUSD             *float64 // 总额度限额 (USD)
+	TotalQuotaNoExpiry        bool
 	LongContextPricingEnabled bool
 	ModelPricing              []ChannelModelPricing
 	// 图片生成计费配置（仅 antigravity 平台使用）
@@ -337,6 +338,7 @@ type UpdateGroupInput struct {
 	WeeklyLimitUSD            *float64 // 周限额 (USD)
 	MonthlyLimitUSD           *float64 // 月限额 (USD)
 	TotalLimitUSD             *float64 // 总额度限额 (USD)
+	TotalQuotaNoExpiry        *bool
 	LongContextPricingEnabled *bool
 	ModelPricing              *[]ChannelModelPricing
 	// 图片生成计费配置（仅 antigravity 平台使用）
@@ -584,6 +586,7 @@ type GenerateRedeemCodesInput struct {
 	GiftRatio    float64
 	GroupID      *int64 // 订阅类型专用：关联的分组ID
 	ValidityDays int    // 订阅类型专用：有效天数
+	QuotaAmount  *float64
 	ExpiresAt    *time.Time
 }
 

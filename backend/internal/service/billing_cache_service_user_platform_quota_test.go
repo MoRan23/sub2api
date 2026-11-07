@@ -529,7 +529,7 @@ func (f *fakeZeroQuotaCache) SetUserPlatformQuotaCache(_ context.Context, _ int6
 func (f *fakeZeroQuotaCache) GetSubscriptionCache(_ context.Context, _ int64, _ int64) (*SubscriptionCacheData, error) {
 	return &SubscriptionCacheData{
 		Status:       SubscriptionStatusActive,
-		ExpiresAt:    time.Now().Add(30 * 24 * time.Hour),
+		ExpiresAt:    new(time.Now().Add(30 * 24 * time.Hour)),
 		DailyUsage:   0,
 		WeeklyUsage:  0,
 		MonthlyUsage: 0,

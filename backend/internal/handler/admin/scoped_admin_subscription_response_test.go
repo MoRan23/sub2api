@@ -23,7 +23,7 @@ type scopedSubscriptionRepo struct {
 }
 
 func (*scopedSubscriptionRepo) GetByID(context.Context, int64) (*service.UserSubscription, error) {
-	return &service.UserSubscription{ID: 1, UserID: 2, GroupID: 3, DailyUsageUSD: 4, ExpiresAt: time.Now().Add(time.Hour),
+	return &service.UserSubscription{ID: 1, UserID: 2, GroupID: 3, DailyUsageUSD: 4, ExpiresAt: func() *time.Time { v := time.Now().Add(time.Hour); return &v }(),
 		User:           &service.User{ID: 2, Email: "private-user@example.com", Balance: 987},
 		AssignedByUser: &service.User{ID: 8, Email: "private-admin@example.com", Balance: 654},
 		Group:          &service.Group{ID: 3, Name: "group", RateMultiplier: 42}}, nil

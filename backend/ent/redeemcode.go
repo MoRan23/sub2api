@@ -25,6 +25,8 @@ type RedeemCode struct {
 	Type string `json:"type,omitempty"`
 	// Value holds the value of the "value" field.
 	Value float64 `json:"value,omitempty"`
+	// QuotaAmount holds the value of the "quota_amount" field.
+	QuotaAmount *float64 `json:"quota_amount,omitempty"`
 	// GiftRatio holds the value of the "gift_ratio" field.
 	GiftRatio float64 `json:"gift_ratio,omitempty"`
 	// GiftValue holds the value of the "gift_value" field.
@@ -89,7 +91,7 @@ func (*RedeemCode) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case redeemcode.FieldValue, redeemcode.FieldGiftRatio, redeemcode.FieldGiftValue:
+		case redeemcode.FieldValue, redeemcode.FieldQuotaAmount, redeemcode.FieldGiftRatio, redeemcode.FieldGiftValue:
 			values[i] = new(sql.NullFloat64)
 		case redeemcode.FieldID, redeemcode.FieldUsedBy, redeemcode.FieldGroupID, redeemcode.FieldValidityDays:
 			values[i] = new(sql.NullInt64)
@@ -135,6 +137,13 @@ func (_m *RedeemCode) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field value", values[i])
 			} else if value.Valid {
 				_m.Value = value.Float64
+			}
+		case redeemcode.FieldQuotaAmount:
+			if value, ok := values[i].(*sql.NullFloat64); !ok {
+				return fmt.Errorf("unexpected type %T for field quota_amount", values[i])
+			} else if value.Valid {
+				_m.QuotaAmount = new(float64)
+				*_m.QuotaAmount = value.Float64
 			}
 		case redeemcode.FieldGiftRatio:
 			if value, ok := values[i].(*sql.NullFloat64); !ok {
@@ -255,6 +264,11 @@ func (_m *RedeemCode) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("value=")
 	builder.WriteString(fmt.Sprintf("%v", _m.Value))
+	builder.WriteString(", ")
+	if v := _m.QuotaAmount; v != nil {
+		builder.WriteString("quota_amount=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
 	builder.WriteString(", ")
 	builder.WriteString("gift_ratio=")
 	builder.WriteString(fmt.Sprintf("%v", _m.GiftRatio))

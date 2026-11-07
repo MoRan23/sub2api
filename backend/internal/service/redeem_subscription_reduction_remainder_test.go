@@ -23,7 +23,7 @@ func TestRedeemReductionPreservesRemainingTime(t *testing.T) {
 		{"multiple days", 84 * time.Hour, 2, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			sub := UserSubscription{ID: 7, ExpiresAt: now.Add(tc.remaining), Status: SubscriptionStatusActive, Notes: "original"}
+			sub := UserSubscription{ID: 7, ExpiresAt: new(now.Add(tc.remaining)), Status: SubscriptionStatusActive, Notes: "original"}
 			repo := &lockingRenewalRepo{stale: sub, current: sub}
 			subscriptions := NewSubscriptionService(nil, repo, nil, nil, nil)
 			subscriptions.now = func() time.Time { return now }
@@ -35,7 +35,7 @@ func TestRedeemReductionPreservesRemainingTime(t *testing.T) {
 				want = now
 				status = SubscriptionStatusExpired
 			}
-			require.Equal(t, want, repo.current.ExpiresAt)
+			require.Equal(t, want, *repo.current.ExpiresAt)
 			require.Equal(t, status, repo.current.Status)
 			require.Contains(t, repo.current.Notes, "original")
 			require.Contains(t, repo.current.Notes, "deduct")

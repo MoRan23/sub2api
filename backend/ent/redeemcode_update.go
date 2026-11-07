@@ -79,6 +79,33 @@ func (_u *RedeemCodeUpdate) AddValue(v float64) *RedeemCodeUpdate {
 	return _u
 }
 
+// SetQuotaAmount sets the "quota_amount" field.
+func (_u *RedeemCodeUpdate) SetQuotaAmount(v float64) *RedeemCodeUpdate {
+	_u.mutation.ResetQuotaAmount()
+	_u.mutation.SetQuotaAmount(v)
+	return _u
+}
+
+// SetNillableQuotaAmount sets the "quota_amount" field if the given value is not nil.
+func (_u *RedeemCodeUpdate) SetNillableQuotaAmount(v *float64) *RedeemCodeUpdate {
+	if v != nil {
+		_u.SetQuotaAmount(*v)
+	}
+	return _u
+}
+
+// AddQuotaAmount adds value to the "quota_amount" field.
+func (_u *RedeemCodeUpdate) AddQuotaAmount(v float64) *RedeemCodeUpdate {
+	_u.mutation.AddQuotaAmount(v)
+	return _u
+}
+
+// ClearQuotaAmount clears the value of the "quota_amount" field.
+func (_u *RedeemCodeUpdate) ClearQuotaAmount() *RedeemCodeUpdate {
+	_u.mutation.ClearQuotaAmount()
+	return _u
+}
+
 // SetGiftRatio sets the "gift_ratio" field.
 func (_u *RedeemCodeUpdate) SetGiftRatio(v float64) *RedeemCodeUpdate {
 	_u.mutation.ResetGiftRatio()
@@ -368,6 +395,15 @@ func (_u *RedeemCodeUpdate) sqlSave(ctx context.Context) (_node int, err error) 
 	if value, ok := _u.mutation.AddedValue(); ok {
 		_spec.AddField(redeemcode.FieldValue, field.TypeFloat64, value)
 	}
+	if value, ok := _u.mutation.QuotaAmount(); ok {
+		_spec.SetField(redeemcode.FieldQuotaAmount, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedQuotaAmount(); ok {
+		_spec.AddField(redeemcode.FieldQuotaAmount, field.TypeFloat64, value)
+	}
+	if _u.mutation.QuotaAmountCleared() {
+		_spec.ClearField(redeemcode.FieldQuotaAmount, field.TypeFloat64)
+	}
 	if value, ok := _u.mutation.GiftRatio(); ok {
 		_spec.SetField(redeemcode.FieldGiftRatio, field.TypeFloat64, value)
 	}
@@ -531,6 +567,33 @@ func (_u *RedeemCodeUpdateOne) SetNillableValue(v *float64) *RedeemCodeUpdateOne
 // AddValue adds value to the "value" field.
 func (_u *RedeemCodeUpdateOne) AddValue(v float64) *RedeemCodeUpdateOne {
 	_u.mutation.AddValue(v)
+	return _u
+}
+
+// SetQuotaAmount sets the "quota_amount" field.
+func (_u *RedeemCodeUpdateOne) SetQuotaAmount(v float64) *RedeemCodeUpdateOne {
+	_u.mutation.ResetQuotaAmount()
+	_u.mutation.SetQuotaAmount(v)
+	return _u
+}
+
+// SetNillableQuotaAmount sets the "quota_amount" field if the given value is not nil.
+func (_u *RedeemCodeUpdateOne) SetNillableQuotaAmount(v *float64) *RedeemCodeUpdateOne {
+	if v != nil {
+		_u.SetQuotaAmount(*v)
+	}
+	return _u
+}
+
+// AddQuotaAmount adds value to the "quota_amount" field.
+func (_u *RedeemCodeUpdateOne) AddQuotaAmount(v float64) *RedeemCodeUpdateOne {
+	_u.mutation.AddQuotaAmount(v)
+	return _u
+}
+
+// ClearQuotaAmount clears the value of the "quota_amount" field.
+func (_u *RedeemCodeUpdateOne) ClearQuotaAmount() *RedeemCodeUpdateOne {
+	_u.mutation.ClearQuotaAmount()
 	return _u
 }
 
@@ -852,6 +915,15 @@ func (_u *RedeemCodeUpdateOne) sqlSave(ctx context.Context) (_node *RedeemCode, 
 	}
 	if value, ok := _u.mutation.AddedValue(); ok {
 		_spec.AddField(redeemcode.FieldValue, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.QuotaAmount(); ok {
+		_spec.SetField(redeemcode.FieldQuotaAmount, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedQuotaAmount(); ok {
+		_spec.AddField(redeemcode.FieldQuotaAmount, field.TypeFloat64, value)
+	}
+	if _u.mutation.QuotaAmountCleared() {
+		_spec.ClearField(redeemcode.FieldQuotaAmount, field.TypeFloat64)
 	}
 	if value, ok := _u.mutation.GiftRatio(); ok {
 		_spec.SetField(redeemcode.FieldGiftRatio, field.TypeFloat64, value)

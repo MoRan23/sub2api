@@ -41,6 +41,8 @@ func (UserSubscription) Fields() []ent.Field {
 		field.Time("starts_at").
 			SchemaType(map[string]string{dialect.Postgres: "timestamptz"}),
 		field.Time("expires_at").
+			Optional().
+			Nillable().
 			SchemaType(map[string]string{dialect.Postgres: "timestamptz"}),
 		field.String("status").
 			MaxLen(20).

@@ -296,6 +296,25 @@ describe('KeyUsageView subscription feature flag', () => {
     wrapper.unmount()
   })
 
+  it('shows only the remaining grant for a permanent total-quota subscription', async () => {
+    vi.mocked(fetch).mockResolvedValueOnce({
+      ok: true,
+      json: async () => ({
+        mode: 'subscription', planName: 'Permanent', remaining: 12.12345678,
+        subscription: { expires_at: null, total_limit_usd: 123, total_used_usd: 110.87654322, total_remaining_usd: 12.12345678 },
+        usage: { today: {}, total: {} }, daily_usage: []
+      })
+    } as Response)
+    const wrapper = await mountAndQuery()
+    expect(wrapper.text()).toContain('subscription.permanent')
+    expect(wrapper.text()).toContain('subscription.remainingQuota')
+    expect(wrapper.text()).toContain('$12.12345678')
+    expect(wrapper.text()).not.toContain('Total Quota')
+    expect(wrapper.text()).not.toContain('Used Quota')
+    expect(wrapper.text()).not.toContain('$123.00')
+    wrapper.unmount()
+  })
+
   it('drops the "Subscription" wording from the wallet row when subscriptions are disabled', async () => {
     appStoreState.cachedPublicSettings = { subscription_enabled: false }
     const wrapper = await mountAndQuery()

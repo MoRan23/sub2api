@@ -55,6 +55,25 @@ describe('RedeemView refresh after redemption', () => {
     vi.restoreAllMocks()
   })
 
+  it.each([0, 30])('shows the issued quota amount and duration for %s-day subscription codes', async (days) => {
+    const item = { id: 5, code: 'QUOTA-CODE', type: 'subscription', value: 10,
+      quota_amount: 25.12345678, validity_days: days, group: { name: 'Quota group' },
+      used_at: '2026-03-08T00:00:00Z' }
+    redeem.mockResolvedValue(item)
+    getHistory.mockResolvedValue({ items: [item], total: 1 })
+    const wrapper = await submitCode()
+    expect(wrapper.text()).toContain('$25.12345678')
+    expect(wrapper.text()).toContain('Quota group')
+    if (days === 0) {
+      expect(wrapper.text()).toContain('subscription.permanent')
+      expect(wrapper.text()).not.toContain('10redeem.days')
+    } else {
+      expect(wrapper.text()).toContain('30redeem.days')
+      expect(wrapper.text()).not.toContain('subscription.permanent')
+    }
+    wrapper.unmount()
+  })
+
   it.each(['balance', 'concurrency', 'subscription'])(
     'keeps a successful %s redemption when profile refresh fails', async (type) => {
       redeem.mockResolvedValue({ type, value: 20, message: 'Code applied' })

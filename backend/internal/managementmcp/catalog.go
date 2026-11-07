@@ -64,6 +64,7 @@ func ToolCatalog() []ToolSpec {
 
 	groupCreateFields := catalogGroupFields()
 	groupCreateFields["platform"] = catalogNonemptyText("Platform identifier, for example anthropic, openai, gemini or composite", 64)
+	groupCreateFields["total_quota_no_expiry"] = catalogBool("Permanent quota for a total_quota group; immutable after creation")
 	groupCreate := catalogObject(groupCreateFields, "name", "platform", "rate_multiplier")
 	groupUpdateFields := catalogGroupFields()
 	groupUpdateFields["status"] = catalogEnum("Group availability", "active", "inactive")
@@ -139,10 +140,11 @@ func ToolCatalog() []ToolSpec {
 			"status": catalogEnum("Subscription status", "active", "expired", "revoked"), "platform": catalogText("Platform identifier", 64),
 		}), nil),
 		catalogTool("admin_get_subscription", "Get one platform subscription and its user/group association by ID.", "GET", "/admin/subscriptions/:id", nil, nil),
-		catalogTool("admin_assign_subscription", "Assign a subscription group to a user for the specified number of days. An existing subscription may be extended; do not retry blindly. Returns the resulting subscription.", "POST", "/admin/subscriptions/assign", nil, catalogObject(map[string]any{
+		catalogTool("admin_assign_subscription", "Assign a subscription group to a user. Total-quota groups require quota_amount and add an independent grant; permanent groups do not require validity_days. Existing windowed subscriptions may be extended. Do not retry blindly.", "POST", "/admin/subscriptions/assign", nil, catalogObject(map[string]any{
 			"user_id": catalogID("Recipient user ID"), "group_id": catalogID("Subscription group ID"),
-			"validity_days": catalogInteger("Validity in days", 1, 36500), "notes": catalogText("Assignment notes", 2000),
-		}, "user_id", "group_id", "validity_days")),
+			"validity_days": catalogInteger("Validity in days; required for expiring subscriptions", 1, 36500), "notes": catalogText("Assignment notes", 2000),
+			"quota_amount": catalogNumber("Amount in USD to add for a total-quota subscription; must be greater than zero", 0),
+		}, "user_id", "group_id")),
 		catalogTool("admin_extend_subscription", "Extend a subscription by the specified positive number of days. Changes billing entitlement; returns the updated subscription.", "POST", "/admin/subscriptions/:id/extend", nil, catalogObject(map[string]any{
 			"days": catalogInteger("Additional validity in days", 1, 36500),
 		}, "days")),
@@ -179,7 +181,7 @@ func catalogTool(name, description, method, path string, query, body map[string]
 	// These existing routes require an idempotency key. Keep retries within
 	// their established coordinator rather than inventing MCP-side settlement.
 	switch name {
-	case "user_create_api_key", "admin_update_user_balance", "admin_extend_subscription":
+	case "user_create_api_key", "admin_update_user_balance", "admin_extend_subscription", "admin_assign_subscription":
 		properties["idempotency_key"] = map[string]any{
 			"type": "string", "minLength": 1, "maxLength": 128, "pattern": "^[!-~]+$",
 			"description": "Unique operation ID (for example a UUID). Reuse the same value and arguments when retrying this operation; use a new value for a new intended operation.",
@@ -267,7 +269,7 @@ func catalogGroupFields() map[string]any {
 		"name": catalogNonemptyText("Group name", 100), "description": catalogText("Group description", 2000),
 		"rate_multiplier":   map[string]any{"type": "number", "exclusiveMinimum": 0, "description": "Positive user billing multiplier; 1 is standard pricing"},
 		"is_exclusive":      catalogBool("Limit access to users explicitly assigned this group"),
-		"subscription_type": catalogEnum("Group billing mode", "standard", "subscription"),
+		"subscription_type": catalogEnum("Group billing mode", "standard", "subscription", "total_quota"),
 		"daily_limit_usd":   catalogNumber("Daily subscription spending limit in USD; -1 means unlimited", -1),
 		"weekly_limit_usd":  catalogNumber("Weekly subscription spending limit in USD; -1 means unlimited", -1),
 		"monthly_limit_usd": catalogNumber("Monthly subscription spending limit in USD; -1 means unlimited", -1),

@@ -51,7 +51,7 @@ func TestRevokeSubscription_InvalidatesL1CacheSynchronously(t *testing.T) {
 			UserID:    10,
 			GroupID:   20,
 			Status:    SubscriptionStatusActive,
-			ExpiresAt: time.Now().Add(time.Hour),
+			ExpiresAt: ptrTime(time.Now().Add(time.Hour)),
 		},
 	}
 	svc := NewSubscriptionService(groupRepoNoop{}, repo, nil, nil, &config.Config{
@@ -117,7 +117,7 @@ func TestRestoreSubscription_ExpiredActiveRestoresAsExpired(t *testing.T) {
 			UserID:    10,
 			GroupID:   20,
 			Status:    SubscriptionStatusActive,
-			ExpiresAt: time.Now().Add(-time.Minute),
+			ExpiresAt: ptrTime(time.Now().Add(-time.Minute)),
 			DeletedAt: &deletedAt,
 		},
 	}
@@ -139,7 +139,7 @@ func TestRestoreSubscription_NotRevokedReturnsConflict(t *testing.T) {
 			UserID:    10,
 			GroupID:   20,
 			Status:    SubscriptionStatusActive,
-			ExpiresAt: time.Now().Add(time.Hour),
+			ExpiresAt: ptrTime(time.Now().Add(time.Hour)),
 		},
 	}
 	svc := NewSubscriptionService(groupRepoNoop{}, repo, nil, nil, nil)
@@ -159,7 +159,7 @@ func TestRestoreSubscription_LiveSubscriptionConflict(t *testing.T) {
 			UserID:    10,
 			GroupID:   20,
 			Status:    SubscriptionStatusExpired,
-			ExpiresAt: time.Now().Add(-time.Hour),
+			ExpiresAt: ptrTime(time.Now().Add(-time.Hour)),
 			DeletedAt: &deletedAt,
 		},
 	}

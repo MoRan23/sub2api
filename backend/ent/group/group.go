@@ -54,6 +54,8 @@ const (
 	FieldWeeklyLimitUsd = "weekly_limit_usd"
 	// FieldMonthlyLimitUsd holds the string denoting the monthly_limit_usd field in the database.
 	FieldMonthlyLimitUsd = "monthly_limit_usd"
+	// FieldTotalQuotaNoExpiry holds the string denoting the total_quota_no_expiry field in the database.
+	FieldTotalQuotaNoExpiry = "total_quota_no_expiry"
 	// FieldTotalLimitUsd holds the string denoting the total_limit_usd field in the database.
 	FieldTotalLimitUsd = "total_limit_usd"
 	// FieldDefaultValidityDays holds the string denoting the default_validity_days field in the database.
@@ -252,6 +254,7 @@ var Columns = []string{
 	FieldDailyLimitUsd,
 	FieldWeeklyLimitUsd,
 	FieldMonthlyLimitUsd,
+	FieldTotalQuotaNoExpiry,
 	FieldTotalLimitUsd,
 	FieldDefaultValidityDays,
 	FieldAllowImageGeneration,
@@ -373,6 +376,8 @@ var (
 	DefaultSubscriptionType string
 	// SubscriptionTypeValidator is a validator for the "subscription_type" field. It is called by the builders before save.
 	SubscriptionTypeValidator func(string) error
+	// DefaultTotalQuotaNoExpiry holds the default value on creation for the "total_quota_no_expiry" field.
+	DefaultTotalQuotaNoExpiry bool
 	// DefaultDefaultValidityDays holds the default value on creation for the "default_validity_days" field.
 	DefaultDefaultValidityDays int
 	// DefaultAllowImageGeneration holds the default value on creation for the "allow_image_generation" field.
@@ -555,6 +560,11 @@ func ByWeeklyLimitUsd(opts ...sql.OrderTermOption) OrderOption {
 // ByMonthlyLimitUsd orders the results by the monthly_limit_usd field.
 func ByMonthlyLimitUsd(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldMonthlyLimitUsd, opts...).ToFunc()
+}
+
+// ByTotalQuotaNoExpiry orders the results by the total_quota_no_expiry field.
+func ByTotalQuotaNoExpiry(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldTotalQuotaNoExpiry, opts...).ToFunc()
 }
 
 // ByTotalLimitUsd orders the results by the total_limit_usd field.

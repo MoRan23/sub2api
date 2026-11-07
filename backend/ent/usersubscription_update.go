@@ -114,6 +114,12 @@ func (_u *UserSubscriptionUpdate) SetNillableExpiresAt(v *time.Time) *UserSubscr
 	return _u
 }
 
+// ClearExpiresAt clears the value of the "expires_at" field.
+func (_u *UserSubscriptionUpdate) ClearExpiresAt() *UserSubscriptionUpdate {
+	_u.mutation.ClearExpiresAt()
+	return _u
+}
+
 // SetStatus sets the "status" field.
 func (_u *UserSubscriptionUpdate) SetStatus(v string) *UserSubscriptionUpdate {
 	_u.mutation.SetStatus(v)
@@ -514,6 +520,9 @@ func (_u *UserSubscriptionUpdate) sqlSave(ctx context.Context) (_node int, err e
 	if value, ok := _u.mutation.ExpiresAt(); ok {
 		_spec.SetField(usersubscription.FieldExpiresAt, field.TypeTime, value)
 	}
+	if _u.mutation.ExpiresAtCleared() {
+		_spec.ClearField(usersubscription.FieldExpiresAt, field.TypeTime)
+	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(usersubscription.FieldStatus, field.TypeString, value)
 	}
@@ -838,6 +847,12 @@ func (_u *UserSubscriptionUpdateOne) SetNillableExpiresAt(v *time.Time) *UserSub
 	if v != nil {
 		_u.SetExpiresAt(*v)
 	}
+	return _u
+}
+
+// ClearExpiresAt clears the value of the "expires_at" field.
+func (_u *UserSubscriptionUpdateOne) ClearExpiresAt() *UserSubscriptionUpdateOne {
+	_u.mutation.ClearExpiresAt()
 	return _u
 }
 
@@ -1270,6 +1285,9 @@ func (_u *UserSubscriptionUpdateOne) sqlSave(ctx context.Context) (_node *UserSu
 	}
 	if value, ok := _u.mutation.ExpiresAt(); ok {
 		_spec.SetField(usersubscription.FieldExpiresAt, field.TypeTime, value)
+	}
+	if _u.mutation.ExpiresAtCleared() {
+		_spec.ClearField(usersubscription.FieldExpiresAt, field.TypeTime)
 	}
 	if value, ok := _u.mutation.Status(); ok {
 		_spec.SetField(usersubscription.FieldStatus, field.TypeString, value)

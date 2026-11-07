@@ -57,25 +57,25 @@ func TestBillingSubKey(t *testing.T) {
 			name:     "normal_ids",
 			userID:   123,
 			groupID:  456,
-			expected: "billing:sub:123:456",
+			expected: "billing:sub:v2:123:456",
 		},
 		{
 			name:     "zero_ids",
 			userID:   0,
 			groupID:  0,
-			expected: "billing:sub:0:0",
+			expected: "billing:sub:v2:0:0",
 		},
 		{
 			name:     "negative_ids",
 			userID:   -1,
 			groupID:  -2,
-			expected: "billing:sub:-1:-2",
+			expected: "billing:sub:v2:-1:-2",
 		},
 		{
 			name:     "max_int64_ids",
 			userID:   math.MaxInt64,
 			groupID:  math.MaxInt64,
-			expected: "billing:sub:9223372036854775807:9223372036854775807",
+			expected: "billing:sub:v2:9223372036854775807:9223372036854775807",
 		},
 	}
 

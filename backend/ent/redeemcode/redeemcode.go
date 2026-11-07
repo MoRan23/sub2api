@@ -20,6 +20,8 @@ const (
 	FieldType = "type"
 	// FieldValue holds the string denoting the value field in the database.
 	FieldValue = "value"
+	// FieldQuotaAmount holds the string denoting the quota_amount field in the database.
+	FieldQuotaAmount = "quota_amount"
 	// FieldGiftRatio holds the string denoting the gift_ratio field in the database.
 	FieldGiftRatio = "gift_ratio"
 	// FieldGiftValue holds the string denoting the gift_value field in the database.
@@ -68,6 +70,7 @@ var Columns = []string{
 	FieldCode,
 	FieldType,
 	FieldValue,
+	FieldQuotaAmount,
 	FieldGiftRatio,
 	FieldGiftValue,
 	FieldStatus,
@@ -134,6 +137,11 @@ func ByType(opts ...sql.OrderTermOption) OrderOption {
 // ByValue orders the results by the value field.
 func ByValue(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldValue, opts...).ToFunc()
+}
+
+// ByQuotaAmount orders the results by the quota_amount field.
+func ByQuotaAmount(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldQuotaAmount, opts...).ToFunc()
 }
 
 // ByGiftRatio orders the results by the gift_ratio field.

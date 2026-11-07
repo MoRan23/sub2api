@@ -98,6 +98,7 @@ func (Group) Fields() []ent.Field {
 			Optional().
 			Nillable().
 			SchemaType(map[string]string{dialect.Postgres: "decimal(20,8)"}),
+		field.Bool("total_quota_no_expiry").Default(false),
 		field.Float("total_limit_usd").
 			Optional().
 			Nillable().

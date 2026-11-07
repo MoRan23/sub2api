@@ -22,6 +22,7 @@ type RedeemCode struct {
 
 	GroupID      *int64
 	ValidityDays int
+	QuotaAmount  *float64
 
 	User  *User
 	Group *Group

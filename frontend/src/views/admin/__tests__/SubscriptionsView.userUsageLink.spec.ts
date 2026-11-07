@@ -46,6 +46,7 @@ const DataTableStub = {
     <div>
       <div v-for="row in data" :key="row.id">
         <slot name="cell-user" :row="row" />
+        <div v-if="row.group?.subscription_type === 'total_quota'" data-test="quota-cell"><slot name="cell-usage" :row="row" /></div>
       </div>
     </div>
   `
@@ -117,6 +118,23 @@ describe('admin subscription users', () => {
     }
   })
 
+  it('shows permanent remaining quota without total, used ratio, or progress', async () => {
+    listSubscriptions.mockResolvedValueOnce({ items: [{
+      id: 9, user_id: 42, group_id: 3, status: 'active', expires_at: null,
+      group: { subscription_type: 'total_quota', total_limit_usd: 999 },
+      total_limit_usd: 100, total_used_usd: 87.87654322, total_remaining_usd: 12.12345678
+    }], total: 1, pages: 1 })
+    const wrapper = mountView()
+    await flushPromises()
+    const cell = wrapper.get('[data-test="quota-cell"]')
+    expect(cell.text()).toContain('subscription.remainingQuota $12.12345678')
+    expect(cell.text()).not.toContain('$100')
+    expect(cell.text()).not.toContain('$87')
+    expect(cell.text()).not.toContain('$999')
+    expect(cell.find('.usage-bar').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('searches current users when assigning a subscription', async () => {
     vi.useFakeTimers({ toFake: ['setTimeout', 'clearTimeout'] })
     const wrapper = mountView()
@@ -183,7 +201,7 @@ describe('admin subscription users', () => {
       expect(assignSubscription).toHaveBeenCalledTimes(1)
       expect(assignSubscription).toHaveBeenCalledWith({
         user_id: 84, group_id: 3, validity_days: 30
-      })
+      }, expect.any(String))
     } finally {
       wrapper.unmount()
       vi.useRealTimers()

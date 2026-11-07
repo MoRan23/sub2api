@@ -390,6 +390,16 @@ func ExpiresAtLTE(v time.Time) predicate.UserSubscription {
 	return predicate.UserSubscription(sql.FieldLTE(FieldExpiresAt, v))
 }
 
+// ExpiresAtIsNil applies the IsNil predicate on the "expires_at" field.
+func ExpiresAtIsNil() predicate.UserSubscription {
+	return predicate.UserSubscription(sql.FieldIsNull(FieldExpiresAt))
+}
+
+// ExpiresAtNotNil applies the NotNil predicate on the "expires_at" field.
+func ExpiresAtNotNil() predicate.UserSubscription {
+	return predicate.UserSubscription(sql.FieldNotNull(FieldExpiresAt))
+}
+
 // StatusEQ applies the EQ predicate on the "status" field.
 func StatusEQ(v string) predicate.UserSubscription {
 	return predicate.UserSubscription(sql.FieldEQ(FieldStatus, v))

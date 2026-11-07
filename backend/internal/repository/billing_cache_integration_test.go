@@ -18,6 +18,38 @@ type BillingCacheSuite struct {
 	IntegrationRedisSuite
 }
 
+func (s *BillingCacheSuite) TestSubscriptionExpiryModes() {
+	ctx := context.Background()
+	rdb := testRedis(s.T())
+	cache := NewBillingCache(rdb)
+	key := billingSubKey(10001, 10002)
+	data := &service.SubscriptionCacheData{Status: service.SubscriptionStatusActive, TotalLimit: 12.12345678, TotalRemaining: 7.12345678}
+	require.NoError(s.T(), cache.SetSubscriptionCache(ctx, 10001, 10002, data))
+	fields, err := rdb.HGetAll(ctx, key).Result()
+	require.NoError(s.T(), err)
+	require.Equal(s.T(), "permanent", fields[subFieldExpiryMode])
+	require.Equal(s.T(), "", fields[subFieldExpiresAt])
+	stored, err := cache.GetSubscriptionCache(ctx, 10001, 10002)
+	require.NoError(s.T(), err)
+	require.Nil(s.T(), stored.ExpiresAt)
+	require.Equal(s.T(), data.TotalRemaining, stored.TotalRemaining)
+	data.ExpiresAt = quotaExpiryPointer(time.Now().Add(time.Hour).Truncate(time.Second))
+	require.NoError(s.T(), cache.SetSubscriptionCache(ctx, 10001, 10002, data))
+	stored, err = cache.GetSubscriptionCache(ctx, 10001, 10002)
+	require.NoError(s.T(), err)
+	require.True(s.T(), stored.ExpiresAt.Equal(*data.ExpiresAt))
+	for _, mode := range []string{"", "unknown", "permanent"} {
+		s.Run(mode+"_with_finite_timestamp_is_invalid", func() {
+			require.NoError(s.T(), rdb.HSet(ctx, key, subFieldExpiryMode, mode).Err())
+			_, err := cache.GetSubscriptionCache(ctx, 10001, 10002)
+			require.Error(s.T(), err)
+		})
+	}
+	require.NoError(s.T(), rdb.HDel(ctx, key, subFieldExpiryMode).Err())
+	_, err = cache.GetSubscriptionCache(ctx, 10001, 10002)
+	require.Error(s.T(), err)
+}
+
 func (s *BillingCacheSuite) TestUserBalance() {
 	tests := []struct {
 		name string
@@ -168,7 +200,7 @@ func (s *BillingCacheSuite) TestSubscriptionCache() {
 
 				data := &service.SubscriptionCacheData{
 					Status:       "active",
-					ExpiresAt:    time.Now().Add(1 * time.Hour),
+					ExpiresAt:    quotaExpiryPointer(time.Now().Add(1 * time.Hour)),
 					DailyUsage:   1.0,
 					WeeklyUsage:  2.0,
 					MonthlyUsage: 3.0,
@@ -195,7 +227,7 @@ func (s *BillingCacheSuite) TestSubscriptionCache() {
 
 				data := &service.SubscriptionCacheData{
 					Status:       "active",
-					ExpiresAt:    time.Now().Add(1 * time.Hour),
+					ExpiresAt:    quotaExpiryPointer(time.Now().Add(1 * time.Hour)),
 					DailyUsage:   1.0,
 					WeeklyUsage:  2.0,
 					MonthlyUsage: 3.0,
@@ -221,7 +253,7 @@ func (s *BillingCacheSuite) TestSubscriptionCache() {
 
 				data := &service.SubscriptionCacheData{
 					Status:       "active",
-					ExpiresAt:    time.Now().Add(1 * time.Hour),
+					ExpiresAt:    quotaExpiryPointer(time.Now().Add(1 * time.Hour)),
 					DailyUsage:   1.0,
 					WeeklyUsage:  2.0,
 					MonthlyUsage: 3.0,
@@ -349,7 +381,7 @@ func (s *BillingCacheSuite) TestUpdateSubscriptionUsage_ErrorPropagation() {
 
 		data := &service.SubscriptionCacheData{
 			Status:    "active",
-			ExpiresAt: time.Now().Add(1 * time.Hour),
+			ExpiresAt: quotaExpiryPointer(time.Now().Add(1 * time.Hour)),
 			Version:   1,
 		}
 		require.NoError(s.T(), cache.SetSubscriptionCache(ctx, 301, 401, data))

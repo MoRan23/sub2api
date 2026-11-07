@@ -61,6 +61,14 @@ func (_c *UserSubscriptionQuotaEventCreate) SetExpiresAt(v time.Time) *UserSubsc
 	return _c
 }
 
+// SetNillableExpiresAt sets the "expires_at" field if the given value is not nil.
+func (_c *UserSubscriptionQuotaEventCreate) SetNillableExpiresAt(v *time.Time) *UserSubscriptionQuotaEventCreate {
+	if v != nil {
+		_c.SetExpiresAt(*v)
+	}
+	return _c
+}
+
 // SetSourceKind sets the "source_kind" field.
 func (_c *UserSubscriptionQuotaEventCreate) SetSourceKind(v string) *UserSubscriptionQuotaEventCreate {
 	_c.mutation.SetSourceKind(v)
@@ -183,9 +191,6 @@ func (_c *UserSubscriptionQuotaEventCreate) check() error {
 	if _, ok := _c.mutation.StartsAt(); !ok {
 		return &ValidationError{Name: "starts_at", err: errors.New(`ent: missing required field "UserSubscriptionQuotaEvent.starts_at"`)}
 	}
-	if _, ok := _c.mutation.ExpiresAt(); !ok {
-		return &ValidationError{Name: "expires_at", err: errors.New(`ent: missing required field "UserSubscriptionQuotaEvent.expires_at"`)}
-	}
 	if _, ok := _c.mutation.SourceKind(); !ok {
 		return &ValidationError{Name: "source_kind", err: errors.New(`ent: missing required field "UserSubscriptionQuotaEvent.source_kind"`)}
 	}
@@ -244,7 +249,7 @@ func (_c *UserSubscriptionQuotaEventCreate) createSpec() (*UserSubscriptionQuota
 	}
 	if value, ok := _c.mutation.ExpiresAt(); ok {
 		_spec.SetField(usersubscriptionquotaevent.FieldExpiresAt, field.TypeTime, value)
-		_node.ExpiresAt = value
+		_node.ExpiresAt = &value
 	}
 	if value, ok := _c.mutation.SourceKind(); ok {
 		_spec.SetField(usersubscriptionquotaevent.FieldSourceKind, field.TypeString, value)
@@ -400,6 +405,12 @@ func (u *UserSubscriptionQuotaEventUpsert) SetExpiresAt(v time.Time) *UserSubscr
 // UpdateExpiresAt sets the "expires_at" field to the value that was provided on create.
 func (u *UserSubscriptionQuotaEventUpsert) UpdateExpiresAt() *UserSubscriptionQuotaEventUpsert {
 	u.SetExcluded(usersubscriptionquotaevent.FieldExpiresAt)
+	return u
+}
+
+// ClearExpiresAt clears the value of the "expires_at" field.
+func (u *UserSubscriptionQuotaEventUpsert) ClearExpiresAt() *UserSubscriptionQuotaEventUpsert {
+	u.SetNull(usersubscriptionquotaevent.FieldExpiresAt)
 	return u
 }
 
@@ -571,6 +582,13 @@ func (u *UserSubscriptionQuotaEventUpsertOne) SetExpiresAt(v time.Time) *UserSub
 func (u *UserSubscriptionQuotaEventUpsertOne) UpdateExpiresAt() *UserSubscriptionQuotaEventUpsertOne {
 	return u.Update(func(s *UserSubscriptionQuotaEventUpsert) {
 		s.UpdateExpiresAt()
+	})
+}
+
+// ClearExpiresAt clears the value of the "expires_at" field.
+func (u *UserSubscriptionQuotaEventUpsertOne) ClearExpiresAt() *UserSubscriptionQuotaEventUpsertOne {
+	return u.Update(func(s *UserSubscriptionQuotaEventUpsert) {
+		s.ClearExpiresAt()
 	})
 }
 
@@ -915,6 +933,13 @@ func (u *UserSubscriptionQuotaEventUpsertBulk) SetExpiresAt(v time.Time) *UserSu
 func (u *UserSubscriptionQuotaEventUpsertBulk) UpdateExpiresAt() *UserSubscriptionQuotaEventUpsertBulk {
 	return u.Update(func(s *UserSubscriptionQuotaEventUpsert) {
 		s.UpdateExpiresAt()
+	})
+}
+
+// ClearExpiresAt clears the value of the "expires_at" field.
+func (u *UserSubscriptionQuotaEventUpsertBulk) ClearExpiresAt() *UserSubscriptionQuotaEventUpsertBulk {
+	return u.Update(func(s *UserSubscriptionQuotaEventUpsert) {
+		s.ClearExpiresAt()
 	})
 }
 

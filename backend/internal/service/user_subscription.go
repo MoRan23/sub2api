@@ -14,21 +14,21 @@ type UserSubscription struct {
 	GroupID int64
 
 	StartsAt  time.Time
-	ExpiresAt time.Time
+	ExpiresAt *time.Time
 	Status    string
 
 	DailyWindowStart   *time.Time
 	WeeklyWindowStart  *time.Time
 	MonthlyWindowStart *time.Time
 
-	DailyUsageUSD   float64
-	WeeklyUsageUSD  float64
-	MonthlyUsageUSD float64
-	TotalLimitUSD   float64
-	TotalUsedUSD    float64
-	TotalRemainingUSD float64
+	DailyUsageUSD        float64
+	WeeklyUsageUSD       float64
+	MonthlyUsageUSD      float64
+	TotalLimitUSD        float64
+	TotalUsedUSD         float64
+	TotalRemainingUSD    float64
 	NextExpiringQuotaUSD float64
-	NextQuotaExpireAt *time.Time
+	NextQuotaExpireAt    *time.Time
 
 	AssignedBy *int64
 	AssignedAt time.Time
@@ -50,7 +50,7 @@ type UserSubscriptionQuotaEvent struct {
 	QuotaTotalUSD      float64
 	QuotaUsedUSD       float64
 	StartsAt           time.Time
-	ExpiresAt          time.Time
+	ExpiresAt          *time.Time
 	SourceKind         string
 	SourceRef          string
 	CreatedAt          time.Time
@@ -73,11 +73,16 @@ type TotalQuotaSpendSnapshot struct {
 }
 
 func (s *UserSubscription) IsActive() bool {
-	return s.Status == SubscriptionStatusActive && time.Now().Before(s.ExpiresAt)
+	return s != nil && s.Status == SubscriptionStatusActive && !s.expiredAt(time.Now())
 }
 
 func (s *UserSubscription) IsExpired() bool {
-	return time.Now().After(s.ExpiresAt)
+	return s != nil && s.expiredAt(time.Now())
+}
+
+// expiredAt keeps NULL expiry distinct from an expired finite subscription.
+func (s *UserSubscription) expiredAt(now time.Time) bool {
+	return s.ExpiresAt != nil && !s.ExpiresAt.After(now)
 }
 
 func (s *UserSubscription) DaysRemaining() int {
@@ -85,6 +90,9 @@ func (s *UserSubscription) DaysRemaining() int {
 }
 
 func (s *UserSubscription) daysRemainingAt(now time.Time) int {
+	if s.ExpiresAt == nil {
+		return -1 // permanent; callers display expiry explicitly rather than as days
+	}
 	remaining := s.ExpiresAt.Sub(now)
 	if remaining <= 0 {
 		return 0
@@ -102,7 +110,7 @@ func (s *UserSubscription) IsWindowActivated() bool {
 }
 
 func (s *UserSubscription) HasOneTimeDailyQuota() bool {
-	if s == nil || s.StartsAt.IsZero() || s.ExpiresAt.IsZero() {
+	if s == nil || s.StartsAt.IsZero() || s.ExpiresAt == nil || s.ExpiresAt.IsZero() {
 		return false
 	}
 	return !s.ExpiresAt.After(s.StartsAt.AddDate(0, 0, 1))
@@ -191,13 +199,13 @@ func (s *UserSubscription) windowResetAnchor(previous time.Time) time.Time {
 // 窗口从锚点按整数个 period 步进，且不越过订阅到期时间，避免最后一个不完整
 // 周期重复发放额度（issue #5051）。日窗口不走此函数，见 automaticDailyWindowStartAt。
 func (s *UserSubscription) automaticWindowStartAt(previous *time.Time, period time.Duration, now time.Time) (time.Time, bool) {
-	if previous == nil {
+	if previous == nil || s.ExpiresAt == nil {
 		return time.Time{}, false
 	}
 
 	anchor := s.windowResetAnchor(*previous)
 	next := anchor.Add(period)
-	if now.Before(next) || !next.Before(s.ExpiresAt) {
+	if now.Before(next) || !next.Before(*s.ExpiresAt) {
 		return time.Time{}, false
 	}
 
@@ -214,7 +222,7 @@ func (s *UserSubscription) DailyResetTime() *time.Time {
 		return nil
 	}
 	if s.HasOneTimeDailyQuota() {
-		t := s.ExpiresAt
+		t := *s.ExpiresAt
 		return &t
 	}
 	// 日窗口按日历日对齐：下次刷新固定在窗口起点所在日的次日 0 点。
@@ -267,8 +275,8 @@ func (s *UserSubscription) CheckAllLimits(group *Group, additionalCost float64) 
 }
 
 func (s *UserSubscription) CheckTotalLimit(group *Group, additionalCost float64) bool {
-	if group == nil || !group.HasTotalLimit() {
+	if group == nil || !group.IsTotalQuotaSubscriptionType() {
 		return true
 	}
-	return s.TotalRemainingUSD >= additionalCost
+	return s.TotalRemainingUSD > 0 && s.TotalRemainingUSD >= additionalCost
 }

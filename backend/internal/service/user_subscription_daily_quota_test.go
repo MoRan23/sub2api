@@ -33,7 +33,7 @@ func TestAssignOrExtendSubscription_ExpiredDailyCardStartsNewOneTimeQuota(t *tes
 		UserID:             200,
 		GroupID:            1,
 		StartsAt:           oldStart,
-		ExpiresAt:          oldStart.AddDate(0, 0, 1),
+		ExpiresAt:          ptrTime(oldStart.AddDate(0, 0, 1)),
 		Status:             SubscriptionStatusExpired,
 		DailyWindowStart:   &oldWindowStart,
 		WeeklyWindowStart:  &oldWindowStart,
@@ -77,7 +77,7 @@ func TestAssignOrExtendSubscription_ExpiredSubscriptionAppendsMatchingNotes(t *t
 		UserID:    201,
 		GroupID:   1,
 		StartsAt:  oldStart,
-		ExpiresAt: oldStart.AddDate(0, 0, 1),
+		ExpiresAt: ptrTime(oldStart.AddDate(0, 0, 1)),
 		Status:    SubscriptionStatusExpired,
 		Notes:     "same",
 	})
@@ -100,7 +100,7 @@ func TestUserSubscriptionNeedsDailyReset_DailyCardKeepsOneTimeQuota(t *testing.T
 	dailyWindowStart := time.Date(2026, 5, 18, 0, 0, 0, 0, time.UTC)
 	sub := &UserSubscription{
 		StartsAt:         start,
-		ExpiresAt:        start.Add(24 * time.Hour),
+		ExpiresAt:        ptrTime(start.Add(24 * time.Hour)),
 		DailyWindowStart: &dailyWindowStart,
 		DailyUsageUSD:    10,
 	}
@@ -114,7 +114,7 @@ func TestUserSubscriptionNeedsDailyReset_MultiDaySubscriptionStillRefreshes(t *t
 	dailyWindowStart := time.Date(2026, 5, 18, 0, 0, 0, 0, time.UTC)
 	sub := &UserSubscription{
 		StartsAt:         start,
-		ExpiresAt:        start.AddDate(0, 0, 2),
+		ExpiresAt:        ptrTime(start.AddDate(0, 0, 2)),
 		DailyWindowStart: &dailyWindowStart,
 	}
 
@@ -128,7 +128,7 @@ func TestUserSubscriptionDailyResetTime_DailyCardReturnsExpiry(t *testing.T) {
 	expiresAt := start.Add(24 * time.Hour)
 	sub := &UserSubscription{
 		StartsAt:         start,
-		ExpiresAt:        expiresAt,
+		ExpiresAt:        ptrTime(expiresAt),
 		DailyWindowStart: &dailyWindowStart,
 	}
 
@@ -148,7 +148,7 @@ func TestCheckAndResetWindows_DailyCardDoesNotResetDailyUsage(t *testing.T) {
 		UserID:           10,
 		GroupID:          20,
 		StartsAt:         startsAt,
-		ExpiresAt:        startsAt.Add(24 * time.Hour),
+		ExpiresAt:        ptrTime(startsAt.Add(24 * time.Hour)),
 		DailyUsageUSD:    10,
 		DailyWindowStart: &dailyWindowStart,
 	}
@@ -172,7 +172,7 @@ func TestCheckAndResetWindows_MultiDaySubscriptionStillResetsDailyUsage(t *testi
 		UserID:           10,
 		GroupID:          20,
 		StartsAt:         startsAt,
-		ExpiresAt:        startsAt.AddDate(0, 0, 4),
+		ExpiresAt:        ptrTime(startsAt.AddDate(0, 0, 4)),
 		DailyUsageUSD:    10,
 		DailyWindowStart: &dailyWindowStart,
 	}
@@ -191,7 +191,7 @@ func TestValidateAndCheckLimits_DailyCardDoesNotAllowSecondQuotaAfterMidnight(t 
 	sub := &UserSubscription{
 		Status:           SubscriptionStatusActive,
 		StartsAt:         start,
-		ExpiresAt:        start.Add(24 * time.Hour),
+		ExpiresAt:        ptrTime(start.Add(24 * time.Hour)),
 		DailyWindowStart: &dailyWindowStart,
 		DailyUsageUSD:    dailyLimit + 0.01,
 	}

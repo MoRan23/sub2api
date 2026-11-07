@@ -280,6 +280,16 @@ func ExpiresAtLTE(v time.Time) predicate.UserSubscriptionQuotaEvent {
 	return predicate.UserSubscriptionQuotaEvent(sql.FieldLTE(FieldExpiresAt, v))
 }
 
+// ExpiresAtIsNil applies the IsNil predicate on the "expires_at" field.
+func ExpiresAtIsNil() predicate.UserSubscriptionQuotaEvent {
+	return predicate.UserSubscriptionQuotaEvent(sql.FieldIsNull(FieldExpiresAt))
+}
+
+// ExpiresAtNotNil applies the NotNil predicate on the "expires_at" field.
+func ExpiresAtNotNil() predicate.UserSubscriptionQuotaEvent {
+	return predicate.UserSubscriptionQuotaEvent(sql.FieldNotNull(FieldExpiresAt))
+}
+
 // SourceKindEQ applies the EQ predicate on the "source_kind" field.
 func SourceKindEQ(v string) predicate.UserSubscriptionQuotaEvent {
 	return predicate.UserSubscriptionQuotaEvent(sql.FieldEQ(FieldSourceKind, v))

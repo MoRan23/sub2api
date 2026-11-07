@@ -248,22 +248,23 @@
           <template #cell-usage="{ row }">
             <div class="min-w-[280px] space-y-2">
               <template v-if="isTotalQuotaSubscription(row)">
-                <div class="usage-row">
+                <p v-if="row.expires_at === null" class="text-sm" data-test="permanent-remaining-quota">{{ t('subscription.remainingQuota') }} ${{ formatWalletAmount(row.total_remaining_usd ?? 0) }}</p>
+                <div v-else class="usage-row">
                   <div class="flex items-center gap-2">
                     <span class="usage-label">{{ t('admin.subscriptions.total') }}</span>
                     <div class="h-1.5 flex-1 rounded-full bg-gray-200 dark:bg-dark-600">
                       <div
                         class="h-1.5 rounded-full transition-all"
-                        :class="getProgressClass(row.total_used_usd, row.total_limit_usd ?? row.group?.total_limit_usd ?? null)"
+                        :class="getProgressClass(row.total_used_usd, row.total_limit_usd ?? null)"
                         :style="{
-                          width: getProgressWidth(row.total_used_usd, row.total_limit_usd ?? row.group?.total_limit_usd ?? null)
+                          width: getProgressWidth(row.total_used_usd, row.total_limit_usd ?? null)
                         }"
                       ></div>
                     </div>
                     <span class="usage-amount">
                       ${{ row.total_used_usd?.toFixed(2) || '0.00' }}
                       <span class="text-gray-400">/</span>
-                      ${{ (row.total_limit_usd ?? row.group?.total_limit_usd ?? 0).toFixed(2) }}
+                      ${{ (row.total_limit_usd ?? 0).toFixed(2) }}
                     </span>
                   </div>
                   <div class="reset-info" v-if="row.next_expiring_quota_usd > 0 && row.next_quota_expire_at">
@@ -436,7 +437,7 @@
               </template>
             </div>
             <span v-else class="text-sm text-gray-500">{{
-              t('admin.subscriptions.noExpiration')
+              t('subscription.permanent')
             }}</span>
           </template>
 
@@ -645,7 +646,13 @@
           </Select>
           <p class="input-hint">{{ t('admin.subscriptions.groupHint') }}</p>
         </div>
-        <div>
+        <div v-if="assignIsTotalQuota">
+          <label class="input-label" for="assign-quota-amount">{{ t(batchAssignEnabled ? 'subscription.amountPerUser' : 'subscription.grantAmount') }}</label>
+          <input id="assign-quota-amount" v-model.number="assignForm.quota_amount" type="number" min="0.00000001" step="0.00000001" :disabled="submitting" required class="input" />
+          <p class="input-hint">{{ t('subscription.appendHint') }}</p>
+        </div>
+        <p v-if="assignIsPermanent" class="input-hint">{{ t('subscription.permanent') }}</p>
+        <div v-else>
           <label class="input-label">{{ t('admin.subscriptions.form.validityDays') }}</label>
           <input v-model.number="assignForm.validity_days" type="number" min="1" max="36500" step="1" :disabled="submitting" class="input" />
           <p class="input-hint">{{ t('admin.subscriptions.validityHint') }}</p>
@@ -879,7 +886,8 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, watch } from 'vue'
+import { isValidQuotaAmount } from '@/utils/subscriptionQuota'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminAPI } from '@/api/admin'
@@ -890,6 +898,8 @@ import { useTableSelection } from '@/composables/useTableSelection'
 import BulkSubscriptionActionDialog from '@/components/admin/subscription/BulkSubscriptionActionDialog.vue'
 import type { Column } from '@/components/common/types'
 import { formatDateTimeToMinute } from '@/utils/format'
+import { formatWalletAmount } from '@/components/payment/orderUtils'
+import { prepareSubscriptionGrant, completeSubscriptionGrant } from '@/components/admin/subscription/subscriptionGrantOperation'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import TablePageLayout from '@/components/layout/TablePageLayout.vue'
@@ -1135,8 +1145,14 @@ const restoringSubscription = ref<UserSubscription | null>(null)
 const assignForm = reactive({
   user_id: null as number | null,
   group_id: null as number | null,
-  validity_days: 30
+  validity_days: 30,
+  quota_amount: null as number | null
 })
+
+const assignGroup = computed(() => groups.value.find((group) => group.id === assignForm.group_id))
+const assignIsTotalQuota = computed(() => assignGroup.value?.subscription_type === 'total_quota')
+const assignIsPermanent = computed(() => assignIsTotalQuota.value && assignGroup.value?.total_quota_no_expiry === true)
+watch(() => assignForm.group_id, () => { assignForm.quota_amount = null })
 
 const extendForm = reactive({
   days: 30
@@ -1372,6 +1388,7 @@ const closeAssignModal = () => {
   assignForm.user_id = null
   assignForm.group_id = null
   assignForm.validity_days = 30
+  assignForm.quota_amount = null
   // Clear user search state
   selectedUser.value = null
   userSearchKeyword.value = ''
@@ -1389,7 +1406,11 @@ const handleAssignSubscription = async () => {
     appStore.showError(t('admin.subscriptions.pleaseSelectGroup'))
     return
   }
-  if (!Number.isInteger(assignForm.validity_days) || assignForm.validity_days < 1 || assignForm.validity_days > 36500) {
+  if (assignIsTotalQuota.value && !isValidQuotaAmount(assignForm.quota_amount)) {
+    appStore.showError(t('subscription.invalidAmount'))
+    return
+  }
+  if (!assignIsPermanent.value && (!Number.isInteger(assignForm.validity_days) || assignForm.validity_days < 1 || assignForm.validity_days > 36500)) {
     appStore.showError(t('admin.subscriptions.validityDaysRequired'))
     return
   }
@@ -1397,11 +1418,14 @@ const handleAssignSubscription = async () => {
   submitting.value = true
   try {
     if (batchAssignEnabled.value) {
-      batchAssignResult.value = await adminAPI.subscriptions.bulkAssign({
+      const operation = prepareSubscriptionGrant({
         user_ids: assignUsers.value.map((user) => user.id),
         group_id: assignForm.group_id,
-        validity_days: assignForm.validity_days
+        validity_days: assignIsPermanent.value ? undefined : assignForm.validity_days,
+        quota_amount: assignIsTotalQuota.value ? assignForm.quota_amount : undefined
       })
+      batchAssignResult.value = await adminAPI.subscriptions.bulkAssign(operation.request, operation.key)
+      completeSubscriptionGrant(operation)
       const result = batchAssignResult.value
       const successIds = new Set(result.subscriptions.map((subscription) => subscription.user_id))
       assignUsers.value = assignUsers.value.filter((user) => !successIds.has(user.id))
@@ -1411,11 +1435,14 @@ const handleAssignSubscription = async () => {
       }
       return
     }
-    await adminAPI.subscriptions.assign({
+    const operation = prepareSubscriptionGrant({
       user_id: assignForm.user_id!,
       group_id: assignForm.group_id,
-      validity_days: assignForm.validity_days
+      validity_days: assignIsPermanent.value ? undefined : assignForm.validity_days,
+      quota_amount: assignIsTotalQuota.value ? assignForm.quota_amount : undefined
     })
+    await adminAPI.subscriptions.assign(operation.request, operation.key)
+    completeSubscriptionGrant(operation)
     appStore.showSuccess(t('admin.subscriptions.subscriptionAssigned'))
     submitting.value = false
     closeAssignModal()

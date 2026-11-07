@@ -40,6 +40,7 @@ type GenerateRedeemCodesRequest struct {
 	GiftRatio     float64    `json:"gift_ratio"`
 	GroupID       *int64     `json:"group_id"`      // 订阅类型必填
 	ValidityDays  int        `json:"validity_days"` // 订阅类型使用，正数增加/负数退款扣减
+	QuotaAmount   *float64   `json:"quota_amount"`
 	ExpiresAt     *time.Time `json:"expires_at"`
 	ExpiresInDays *int       `json:"expires_in_days" binding:"omitempty,min=1,max=3650"`
 }
@@ -49,11 +50,12 @@ type GenerateRedeemCodesRequest struct {
 type CreateAndRedeemCodeRequest struct {
 	Code          string     `json:"code" binding:"required,min=3,max=128"`
 	Type          string     `json:"type" binding:"omitempty,oneof=balance concurrency subscription invitation"` // 不传时默认 balance（向后兼容）
-	Value         float64    `json:"value" binding:"required"`
+	Value         float64    `json:"value"`
 	GiftRatio     float64    `json:"gift_ratio"`
 	UserID        int64      `json:"user_id" binding:"required,gt=0"`
 	GroupID       *int64     `json:"group_id"`      // subscription 类型必填
 	ValidityDays  int        `json:"validity_days"` // subscription 类型：正数增加，负数退款扣减
+	QuotaAmount   *float64   `json:"quota_amount"`
 	Notes         string     `json:"notes"`
 	ExpiresAt     *time.Time `json:"expires_at"`
 	ExpiresInDays *int       `json:"expires_in_days" binding:"omitempty,min=1,max=3650"`
@@ -152,6 +154,7 @@ func (h *RedeemHandler) Generate(c *gin.Context) {
 			GiftRatio:    req.GiftRatio,
 			GroupID:      req.GroupID,
 			ValidityDays: req.ValidityDays,
+			QuotaAmount:  req.QuotaAmount,
 			ExpiresAt:    expiresAt,
 		})
 		if execErr != nil {
@@ -185,13 +188,17 @@ func (h *RedeemHandler) CreateAndRedeem(c *gin.Context) {
 	if req.Type == "" {
 		req.Type = "balance"
 	}
+	if req.Type != service.RedeemTypeSubscription && req.Value == 0 {
+		response.BadRequest(c, "value must not be zero")
+		return
+	}
 
 	if req.Type == "subscription" {
 		if req.GroupID == nil {
 			response.BadRequest(c, "group_id is required for subscription type")
 			return
 		}
-		if req.ValidityDays == 0 {
+		if req.ValidityDays == 0 && req.QuotaAmount == nil {
 			response.BadRequest(c, "validity_days must not be zero for subscription type")
 			return
 		}
@@ -221,6 +228,7 @@ func (h *RedeemHandler) CreateAndRedeem(c *gin.Context) {
 			Notes:        req.Notes,
 			GroupID:      req.GroupID,
 			ValidityDays: req.ValidityDays,
+			QuotaAmount:  req.QuotaAmount,
 			ExpiresAt:    expiresAt,
 		})
 		if createErr != nil {
@@ -342,10 +350,11 @@ func (h *RedeemHandler) BatchUpdate(c *gin.Context) {
 
 func redeemBatchUpdateFieldsFromDTO(in dto.BatchUpdateRedeemCodeFields) service.RedeemCodeBatchUpdateFields {
 	out := service.RedeemCodeBatchUpdateFields{
-		Status: in.Status,
-		Notes:  in.Notes,
-		Type:   in.Type,
-		Value:  in.Value,
+		Status:      in.Status,
+		Notes:       in.Notes,
+		Type:        in.Type,
+		Value:       in.Value,
+		QuotaAmount: in.QuotaAmount,
 	}
 	if in.ExpiresAt.Set {
 		out.ExpiresAt = service.NullableTimeUpdate{Set: true, Value: in.ExpiresAt.Value}
@@ -416,7 +425,7 @@ func (h *RedeemHandler) Export(c *gin.Context) {
 	writer := csv.NewWriter(&buf)
 
 	// Write header
-	if err := writer.Write([]string{"id", "code", "type", "value", "gift_ratio", "gift_value", "status", "used_by", "used_by_email", "used_at", "expires_at", "created_at"}); err != nil {
+	if err := writer.Write([]string{"id", "code", "type", "value", "gift_ratio", "gift_value", "status", "used_by", "used_by_email", "used_at", "expires_at", "created_at", "quota_amount", "group_id", "validity_days", "total_quota_no_expiry"}); err != nil {
 		response.InternalError(c, "Failed to export redeem codes: "+err.Error())
 		return
 	}
@@ -439,6 +448,14 @@ func (h *RedeemHandler) Export(c *gin.Context) {
 		if code.ExpiresAt != nil {
 			expiresAt = code.ExpiresAt.Format("2006-01-02 15:04:05")
 		}
+		quotaAmount, groupID, noExpiry := "", "", ""
+		if code.QuotaAmount != nil {
+			quotaAmount = strconv.FormatFloat(*code.QuotaAmount, 'f', 8, 64)
+			noExpiry = strconv.FormatBool(code.ValidityDays == 0)
+		}
+		if code.GroupID != nil {
+			groupID = strconv.FormatInt(*code.GroupID, 10)
+		}
 		if err := writer.Write([]string{
 			fmt.Sprintf("%d", code.ID),
 			code.Code,
@@ -452,6 +469,10 @@ func (h *RedeemHandler) Export(c *gin.Context) {
 			usedAt,
 			expiresAt,
 			code.CreatedAt.Format("2006-01-02 15:04:05"),
+			quotaAmount,
+			groupID,
+			strconv.Itoa(code.ValidityDays),
+			noExpiry,
 		}); err != nil {
 			response.InternalError(c, "Failed to export redeem codes: "+err.Error())
 			return

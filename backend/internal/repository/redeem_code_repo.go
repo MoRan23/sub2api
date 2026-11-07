@@ -32,6 +32,7 @@ func (r *redeemCodeRepository) Create(ctx context.Context, code *service.RedeemC
 		SetStatus(code.Status).
 		SetNotes(code.Notes).
 		SetValidityDays(code.ValidityDays).
+		SetNillableQuotaAmount(code.QuotaAmount).
 		SetNillableExpiresAt(code.ExpiresAt).
 		SetNillableUsedBy(code.UsedBy).
 		SetNillableUsedAt(code.UsedAt).
@@ -62,6 +63,7 @@ func (r *redeemCodeRepository) CreateBatch(ctx context.Context, codes []service.
 			SetStatus(c.Status).
 			SetNotes(c.Notes).
 			SetValidityDays(c.ValidityDays).
+			SetNillableQuotaAmount(c.QuotaAmount).
 			SetNillableExpiresAt(c.ExpiresAt).
 			SetNillableUsedBy(c.UsedBy).
 			SetNillableUsedAt(c.UsedAt).
@@ -279,6 +281,8 @@ func (r *redeemCodeRepository) BatchUpdate(ctx context.Context, ids []int64, fie
 func (r *redeemCodeRepository) batchUpdate(ctx context.Context, client *dbent.Client, ids []int64, fields service.RedeemCodeBatchUpdateFields) (int64, error) {
 	existing, err := client.RedeemCode.Query().
 		Where(redeemcode.IDIn(ids...)).
+		Order(dbent.Asc(redeemcode.FieldID)).
+		ForUpdate().
 		All(ctx)
 	if err != nil {
 		return 0, err
@@ -290,6 +294,42 @@ func (r *redeemCodeRepository) batchUpdate(ctx context.Context, client *dbent.Cl
 		for _, code := range existing {
 			if code.Status == service.StatusUsed {
 				return 0, service.ErrRedeemCodeUsed
+			}
+		}
+	}
+	if fields.GroupID.Set || (fields.Status != nil && *fields.Status == service.StatusUnused) {
+		groups := make(map[int64]*service.Group)
+		for _, code := range existing {
+			if code.Type != service.RedeemTypeSubscription {
+				continue
+			}
+			groupID := code.GroupID
+			if fields.GroupID.Set {
+				groupID = fields.GroupID.Value
+			}
+			if groupID == nil {
+				return 0, service.ErrGroupNotFound
+			}
+			g := groups[*groupID]
+			if g == nil {
+				entity, err := client.Group.Get(ctx, *groupID)
+				if err != nil {
+					return 0, translatePersistenceError(err, service.ErrGroupNotFound, nil)
+				}
+				g = groupEntityToService(entity)
+				groups[*groupID] = g
+			}
+			if err := service.ValidateSubscriptionRedeemGrant(g, code.QuotaAmount, code.ValidityDays); err != nil {
+				return 0, err
+			}
+			if g.IsTotalQuotaSubscriptionType() && g.TotalQuotaNoExpiry {
+				if err := client.RedeemCode.UpdateOneID(code.ID).SetValidityDays(0).Exec(ctx); err != nil {
+					return 0, err
+				}
+			} else if !g.IsTotalQuotaSubscriptionType() && code.QuotaAmount != nil {
+				if err := client.RedeemCode.UpdateOneID(code.ID).ClearQuotaAmount().Exec(ctx); err != nil {
+					return 0, err
+				}
 			}
 		}
 	}
@@ -432,6 +472,7 @@ func redeemCodeEntityToService(m *dbent.RedeemCode) *service.RedeemCode {
 		ExpiresAt:    m.ExpiresAt,
 		GroupID:      m.GroupID,
 		ValidityDays: m.ValidityDays,
+		QuotaAmount:  m.QuotaAmount,
 	}
 	if m.Edges.User != nil {
 		out.User = userEntityToService(m.Edges.User)

@@ -141,6 +141,21 @@ func TestCreateAndRedeem_BalanceIgnoresSubscriptionFields(t *testing.T) {
 		"balance type should not require group_id or validity_days")
 }
 
+func TestCreateAndRedeem_TotalQuotaDoesNotRequireBalanceValue(t *testing.T) {
+	code := postCreateAndRedeemValidation(t, newCreateAndRedeemHandler(), map[string]any{
+		"code": "permanent-quota", "type": "subscription", "user_id": 1,
+		"group_id": 5, "quota_amount": 12.12345678,
+	})
+	assert.NotEqual(t, http.StatusBadRequest, code)
+}
+
+func TestCreateAndRedeem_BalanceStillRequiresValue(t *testing.T) {
+	code := postCreateAndRedeemValidation(t, newCreateAndRedeemHandler(), map[string]any{
+		"code": "missing-value", "type": "balance", "user_id": 1, "quota_amount": 12,
+	})
+	assert.Equal(t, http.StatusBadRequest, code)
+}
+
 func TestResolveRedeemCodeExpiresAt_FromDays(t *testing.T) {
 	days := 3
 	expiresAt, err := resolveRedeemCodeExpiresAt(nil, &days)

@@ -112,6 +112,7 @@ type Group struct {
 	WeeklyLimitUSD            *float64 `json:"weekly_limit_usd"`
 	MonthlyLimitUSD           *float64 `json:"monthly_limit_usd"`
 	TotalLimitUSD             *float64 `json:"total_limit_usd"`
+	TotalQuotaNoExpiry        bool     `json:"total_quota_no_expiry"`
 	LongContextPricingEnabled bool     `json:"long_context_pricing_enabled"`
 
 	// 图片生成计费配置（仅 antigravity 平台使用）
@@ -542,8 +543,9 @@ type RedeemCode struct {
 	CreatedAt time.Time  `json:"created_at"`
 	ExpiresAt *time.Time `json:"expires_at,omitempty"`
 
-	GroupID      *int64 `json:"group_id"`
-	ValidityDays int    `json:"validity_days"`
+	GroupID      *int64   `json:"group_id"`
+	ValidityDays int      `json:"validity_days"`
+	QuotaAmount  *float64 `json:"quota_amount"`
 
 	// Notes is only populated for admin_balance/admin_concurrency types
 	// so users can see why they were charged or credited
@@ -605,8 +607,9 @@ type BatchUpdateRedeemCodeFields struct {
 	Notes     *string            `json:"notes,omitempty"`
 	GroupID   NullableInt64Field `json:"group_id,omitempty"`
 
-	Type  *string  `json:"type,omitempty"`
-	Value *float64 `json:"value,omitempty"`
+	Type        *string  `json:"type,omitempty"`
+	Value       *float64 `json:"value,omitempty"`
+	QuotaAmount *float64 `json:"quota_amount,omitempty"`
 }
 
 type BatchUpdateRedeemCodesRequest struct {
@@ -781,9 +784,9 @@ type UserSubscription struct {
 	UserID  int64 `json:"user_id"`
 	GroupID int64 `json:"group_id"`
 
-	StartsAt  time.Time `json:"starts_at"`
-	ExpiresAt time.Time `json:"expires_at"`
-	Status    string    `json:"status"`
+	StartsAt  time.Time  `json:"starts_at"`
+	ExpiresAt *time.Time `json:"expires_at"`
+	Status    string     `json:"status"`
 
 	DailyWindowStart   *time.Time `json:"daily_window_start"`
 	WeeklyWindowStart  *time.Time `json:"weekly_window_start"`

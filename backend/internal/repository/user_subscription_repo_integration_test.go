@@ -92,7 +92,7 @@ func (s *UserSubscriptionRepoSuite) TestCreate() {
 		UserID:    user.ID,
 		GroupID:   group.ID,
 		Status:    service.SubscriptionStatusActive,
-		ExpiresAt: time.Now().Add(24 * time.Hour),
+		ExpiresAt: quotaExpiryPointer(time.Now().Add(24 * time.Hour)),
 	}
 
 	err := s.repo.Create(s.ctx, sub)
@@ -611,7 +611,7 @@ func (s *UserSubscriptionRepoSuite) TestExtendExpiry() {
 
 	got, err := s.repo.GetByID(s.ctx, sub.ID)
 	s.Require().NoError(err)
-	s.Require().WithinDuration(newExpiry, got.ExpiresAt, time.Microsecond)
+	s.Require().WithinDuration(newExpiry, *got.ExpiresAt, time.Microsecond)
 }
 
 func (s *UserSubscriptionRepoSuite) TestUpdateNotes() {
@@ -727,7 +727,7 @@ func (s *UserSubscriptionRepoSuite) TestRetireDepletedQuotaEventsOnAppend_Retire
 
 	gotSub, err := s.repo.GetByID(s.ctx, sub.ID)
 	s.Require().NoError(err, "GetByID")
-	s.Require().WithinDuration(newExpiry, gotSub.ExpiresAt, time.Second, "subscription expiry should match the latest active event")
+	s.Require().WithinDuration(newExpiry, *gotSub.ExpiresAt, time.Second, "subscription expiry should match the latest active event")
 }
 
 func (s *UserSubscriptionRepoSuite) TestRetireDepletedQuotaEventsOnAppend_KeepsPartiallyUsedEventsActive() {
@@ -788,7 +788,7 @@ func (s *UserSubscriptionRepoSuite) TestRetireDepletedQuotaEventsOnAppend_KeepsP
 
 	gotSub, err := s.repo.GetByID(s.ctx, sub.ID)
 	s.Require().NoError(err, "GetByID")
-	s.Require().WithinDuration(oldExpiry, gotSub.ExpiresAt, time.Second, "subscription expiry should remain at the latest active event")
+	s.Require().WithinDuration(oldExpiry, *gotSub.ExpiresAt, time.Second, "subscription expiry should remain at the latest active event")
 }
 
 func (s *UserSubscriptionRepoSuite) TestDeleteExpiredQuotaEventsBatch() {
@@ -1018,9 +1018,21 @@ func (s *UserSubscriptionRepoSuite) TestUpdate_NilInput() {
 // --- 并发用量更新测试 ---
 
 func (s *UserSubscriptionRepoSuite) TestIncrementUsage_Concurrent() {
-	user := s.mustCreateUser("concurrent@test.com", service.RoleUser)
-	group := s.mustCreateGroup("g-concurrent")
-	sub := s.mustCreateSubscription(user.ID, group.ID, nil)
+	// The suite's transaction has one SQL connection. Concurrency must use
+	// independent pooled connections, as separate requests do in production.
+	client := testEntClient(s.T())
+	user := mustCreateUser(s.T(), client, &service.User{Email: "concurrent@test.com"})
+	group := mustCreateGroup(s.T(), client, &service.Group{Name: "g-concurrent"})
+	sub := mustCreateSubscription(s.T(), client, &service.UserSubscription{UserID: user.ID, GroupID: group.ID})
+	repo := NewUserSubscriptionRepository(client)
+	s.T().Cleanup(func() {
+		_, err := integrationDB.Exec(`DELETE FROM user_subscriptions WHERE id=$1`, sub.ID)
+		s.Require().NoError(err)
+		_, err = integrationDB.Exec(`DELETE FROM groups WHERE id=$1`, group.ID)
+		s.Require().NoError(err)
+		_, err = integrationDB.Exec(`DELETE FROM users WHERE id=$1`, user.ID)
+		s.Require().NoError(err)
+	})
 
 	const numGoroutines = 10
 	const incrementPerGoroutine = 1.5
@@ -1029,7 +1041,7 @@ func (s *UserSubscriptionRepoSuite) TestIncrementUsage_Concurrent() {
 	errCh := make(chan error, numGoroutines)
 	for i := 0; i < numGoroutines; i++ {
 		go func() {
-			errCh <- s.repo.IncrementUsage(s.ctx, sub.ID, incrementPerGoroutine)
+			errCh <- repo.IncrementUsage(s.ctx, sub.ID, incrementPerGoroutine)
 		}()
 	}
 
@@ -1040,7 +1052,7 @@ func (s *UserSubscriptionRepoSuite) TestIncrementUsage_Concurrent() {
 	}
 
 	// 验证累加结果正确
-	got, err := s.repo.GetByID(s.ctx, sub.ID)
+	got, err := repo.GetByID(s.ctx, sub.ID)
 	s.Require().NoError(err)
 	expectedUsage := float64(numGoroutines) * incrementPerGoroutine
 	s.Require().InDelta(expectedUsage, got.DailyUsageUSD, 1e-6, "daily usage should be correctly accumulated")
@@ -1076,7 +1088,7 @@ func (s *UserSubscriptionRepoSuite) TestTxContext_RollbackIsolation() {
 	sub := &service.UserSubscription{
 		UserID:     userEnt.ID,
 		GroupID:    groupEnt.ID,
-		ExpiresAt:  time.Now().AddDate(0, 0, 30),
+		ExpiresAt:  quotaExpiryPointer(time.Now().AddDate(0, 0, 30)),
 		Status:     service.SubscriptionStatusActive,
 		AssignedAt: time.Now(),
 		Notes:      "tx",
