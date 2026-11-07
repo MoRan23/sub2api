@@ -1339,6 +1339,10 @@ export interface Account {
   openai_oauth_os_profiles?: OpenAIOAuthOSProfiles
   candy_test?: import('@/api/admin/candyTests').CandyTestSummary | null
   model_attribution?: import('@/api/admin/modelAttribution').AttributionSummary | null
+  codex_engine_capacity?: {
+    limit: number
+    scheduling_paused_by_capacity: boolean
+  } | null
   ollama_cloud_usage?: OllamaCloudUsageState
   opencode_go_usage?: OpenCodeGoUsageState
   // Extra fields including Codex usage, OpenAI compact capability, and model-level rate limits.

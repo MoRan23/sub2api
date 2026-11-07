@@ -231,6 +231,7 @@ type Account struct {
 	Extra                        map[string]any                 `json:"extra"`
 	OllamaCloudUsage             *service.OllamaCloudUsageState `json:"ollama_cloud_usage,omitempty"`
 	OpenCodeGoUsage              *service.OpenCodeGoUsageState  `json:"opencode_go_usage,omitempty"`
+	CodexEngineCapacity          *CodexEngineCapacity           `json:"codex_engine_capacity,omitempty"`
 	ProxyID                      *int64                         `json:"proxy_id"`
 	ProxyFallbackOriginID        *int64                         `json:"proxy_fallback_origin_id"`
 	ProxyFallbackOriginName      *string                        `json:"proxy_fallback_origin_name,omitempty"`
@@ -354,11 +355,12 @@ type AccountListItem struct {
 	Platform string  `json:"platform"`
 	Type     string  `json:"type"`
 
-	Credentials       map[string]any                 `json:"credentials,omitempty"`
-	CredentialsStatus map[string]bool                `json:"credentials_status,omitempty"`
-	Extra             map[string]any                 `json:"extra,omitempty"`
-	OllamaCloudUsage  *service.OllamaCloudUsageState `json:"ollama_cloud_usage,omitempty"`
-	OpenCodeGoUsage   *service.OpenCodeGoUsageState  `json:"opencode_go_usage,omitempty"`
+	Credentials         map[string]any                 `json:"credentials,omitempty"`
+	CredentialsStatus   map[string]bool                `json:"credentials_status,omitempty"`
+	Extra               map[string]any                 `json:"extra,omitempty"`
+	OllamaCloudUsage    *service.OllamaCloudUsageState `json:"ollama_cloud_usage,omitempty"`
+	OpenCodeGoUsage     *service.OpenCodeGoUsageState  `json:"opencode_go_usage,omitempty"`
+	CodexEngineCapacity *CodexEngineCapacity           `json:"codex_engine_capacity,omitempty"`
 
 	ProxyID                 *int64     `json:"proxy_id"`
 	ProxyFallbackOriginID   *int64     `json:"proxy_fallback_origin_id"`

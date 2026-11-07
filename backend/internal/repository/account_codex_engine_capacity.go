@@ -94,19 +94,13 @@ func (r *accountRepository) ApplyCodexEngineCapacity(ctx context.Context, expect
 	if !bytes.Equal(previous, expectedPrevious) {
 		return false, nil
 	}
-	var saved struct {
-		Identity      string `json:"identity"`
-		Limit         *int   `json:"limit"`
-		PauseRevision *int64 `json:"pause_revision"`
-		ObservationID string `json:"observation_id"`
-	}
+	var saved service.CodexEngineCapacitySyncState
 	validSaved := json.Unmarshal(previous, &saved) == nil
 	// Pause ownership follows the scheduling revision across Engine endpoint/key
 	// edits. Only a fresh response for the current identity may release that pause;
 	// the configuration/previous-state checks above reject responses from before
 	// the edit. An explicit admin false write advances the revision and revokes it.
-	owned := validSaved && !current.Schedulable && saved.Identity != "" && saved.Limit != nil && *saved.Limit == 0 &&
-		saved.PauseRevision != nil && *saved.PauseRevision == current.SchedulingRevision
+	owned := validSaved && saved.OwnsSchedulingPause(current)
 	next := map[string]any{"limit": limit, "identity": identity}
 	if saved.ObservationID != "" {
 		next["observation_id"] = saved.ObservationID

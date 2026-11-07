@@ -51,6 +51,68 @@ function makeAccount(overrides: Partial<Account>): Account {
 }
 
 describe('AccountStatusIndicator', () => {
+  it('shows the upstream capacity pause and follows capacity recovery', async () => {
+    const account = makeAccount({
+      platform: 'openai', type: 'apikey', concurrency: 20, schedulable: false,
+      codex_engine_capacity: { limit: 0, scheduling_paused_by_capacity: true }
+    })
+    const wrapper = mount(AccountStatusIndicator, { props: { account } })
+    expect(wrapper.get('.badge').text()).toBe('admin.accounts.status.engineNoCapacity')
+    expect(wrapper.get('.badge').classes()).toContain('badge-warning')
+    expect(wrapper.get('[data-testid="engine-capacity-hint"]').text()).toBe('admin.accounts.status.engineCapacityAutoResume')
+    expect(wrapper.get('[data-testid="engine-capacity-hint"]').attributes('title')).toBe('admin.accounts.status.engineCapacityDetail')
+
+    await wrapper.setProps({ account: { ...account, schedulable: true, concurrency: 30,
+      codex_engine_capacity: { limit: 30, scheduling_paused_by_capacity: false }
+    } })
+    expect(wrapper.get('.badge').text()).toBe('admin.accounts.status.active')
+    expect(wrapper.find('[data-testid="engine-capacity-hint"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
+  it('does not promise automatic recovery after an administrator takes over the pause', async () => {
+    const account = makeAccount({
+      platform: 'openai', type: 'apikey', schedulable: false,
+      codex_engine_capacity: { limit: 0, scheduling_paused_by_capacity: false }
+    })
+    const wrapper = mount(AccountStatusIndicator, { props: { account } })
+    expect(wrapper.get('.badge').text()).toBe('admin.accounts.status.paused')
+    expect(wrapper.get('[data-testid="engine-capacity-hint"]').text()).toBe('admin.accounts.status.engineCapacityNoAutoResume')
+    expect(wrapper.text()).not.toContain('engineCapacityAutoResume')
+    await wrapper.setProps({ account: { ...account, schedulable: true } })
+    expect(wrapper.get('.badge').text()).toBe('admin.accounts.status.active')
+    expect(wrapper.get('[data-testid="engine-capacity-hint"]').text()).toBe('admin.accounts.status.engineCapacityAwaitingSync')
+    wrapper.unmount()
+  })
+
+  it('preserves health status while explaining the capacity pause', async () => {
+    const account = makeAccount({
+      platform: 'openai', type: 'apikey', schedulable: false, status: 'error',
+      codex_engine_capacity: { limit: 0, scheduling_paused_by_capacity: true }
+    })
+    const wrapper = mount(AccountStatusIndicator, { props: { account } })
+    expect(wrapper.get('.badge').text()).toBe('admin.accounts.status.error')
+    expect(wrapper.get('[data-testid="engine-capacity-hint"]').exists()).toBe(true)
+    await wrapper.setProps({ account: { ...account, status: 'inactive' } })
+    expect(wrapper.get('.badge').text()).toBe('admin.accounts.status.inactive')
+    await wrapper.setProps({ account: { ...account, status: 'active', rate_limit_reset_at: '2099-07-11T13:00:00Z' } })
+    expect(wrapper.get('.badge').text()).toBe('admin.accounts.status.rateLimited')
+    expect(wrapper.get('[data-testid="engine-capacity-hint"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
+
+  it('does not infer capacity pause ownership from old raw extra or a missing summary', () => {
+    for (const summary of [undefined, null]) {
+      const wrapper = mount(AccountStatusIndicator, { props: { account: makeAccount({
+        platform: 'openai', type: 'apikey', schedulable: false, codex_engine_capacity: summary,
+        extra: { codex_engine_capacity_sync: { limit: 0, identity: 'legacy', pause_revision: 0 } }
+      }) } })
+      expect(wrapper.get('.badge').text()).toBe('admin.accounts.status.paused')
+      expect(wrapper.find('[data-testid="engine-capacity-hint"]').exists()).toBe(false)
+      wrapper.unmount()
+    }
+  })
+
   it('distinguishes attribution pauses from manual pauses without overriding other account states', async () => {
     const account = makeAccount({ platform: 'openai', schedulable: false, model_attribution: { scheduling_paused_by_attribution: true } })
     const wrapper = mount(AccountStatusIndicator, { props: { account } })

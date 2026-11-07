@@ -1,36 +1,47 @@
 <template>
   <div class="flex items-center gap-2">
-    <!-- Rate Limit Display (429) - Two-line layout -->
-    <div v-if="isRateLimited" class="flex flex-col items-center gap-1">
-      <span class="badge text-xs badge-warning">{{ t('admin.accounts.status.rateLimited') }}</span>
-      <span class="text-[11px] text-gray-400 dark:text-gray-500">{{ rateLimitResumeText }}</span>
-    </div>
-
-    <!-- Overload Display (529) - Two-line layout -->
-    <div v-else-if="isOverloaded" class="flex flex-col items-center gap-1">
-      <span class="badge text-xs badge-danger">{{ t('admin.accounts.status.overloaded') }}</span>
-      <span class="text-[11px] text-gray-400 dark:text-gray-500">{{ overloadCountdown }}</span>
-    </div>
-
-    <!-- Main Status Badge (shown when not rate limited/overloaded) -->
-    <template v-else>
-      <div v-if="isTempUnschedulable" class="flex flex-col items-center gap-1">
-        <button
-          type="button"
-          :class="['badge text-xs', statusClass, 'cursor-pointer']"
-          :title="t('admin.accounts.status.viewTempUnschedDetails')"
-          @click="handleTempUnschedClick"
-        >
-          {{ statusText }}
-        </button>
-        <span class="max-w-[180px] text-center text-[11px] leading-4 text-gray-500 dark:text-gray-400">
-          {{ tempUnschedRecoveryText }}
-        </span>
+    <div class="flex flex-col items-center gap-1">
+      <!-- Rate Limit Display (429) - Two-line layout -->
+      <div v-if="isRateLimited" class="flex flex-col items-center gap-1">
+        <span class="badge text-xs badge-warning">{{ t('admin.accounts.status.rateLimited') }}</span>
+        <span class="text-[11px] text-gray-400 dark:text-gray-500">{{ rateLimitResumeText }}</span>
       </div>
-      <span v-else :class="['badge text-xs', statusClass]">
-        {{ statusText }}
+
+      <!-- Overload Display (529) - Two-line layout -->
+      <div v-else-if="isOverloaded" class="flex flex-col items-center gap-1">
+        <span class="badge text-xs badge-danger">{{ t('admin.accounts.status.overloaded') }}</span>
+        <span class="text-[11px] text-gray-400 dark:text-gray-500">{{ overloadCountdown }}</span>
+      </div>
+
+      <!-- Main Status Badge (shown when not rate limited/overloaded) -->
+      <template v-else>
+        <div v-if="isTempUnschedulable" class="flex flex-col items-center gap-1">
+          <button
+            type="button"
+            :class="['badge text-xs', statusClass, 'cursor-pointer']"
+            :title="t('admin.accounts.status.viewTempUnschedDetails')"
+            @click="handleTempUnschedClick"
+          >
+            {{ statusText }}
+          </button>
+          <span class="max-w-[180px] text-center text-[11px] leading-4 text-gray-500 dark:text-gray-400">
+            {{ tempUnschedRecoveryText }}
+          </span>
+        </div>
+        <span v-else :class="['badge text-xs', statusClass]">
+          {{ statusText }}
+        </span>
+      </template>
+
+      <span
+        v-if="hasZeroEngineCapacity"
+        data-testid="engine-capacity-hint"
+        class="max-w-[220px] text-center text-[11px] leading-4 text-amber-700 dark:text-amber-300"
+        :title="t('admin.accounts.status.engineCapacityDetail')"
+      >
+        {{ engineCapacityHint }}
       </span>
-    </template>
+    </div>
 
     <!-- Error Info Indicator -->
     <div v-if="hasError && account.error_message" class="group/error relative">
@@ -284,6 +295,21 @@ const hasError = computed(() => {
   return props.account.status === 'error'
 })
 
+// The server checks pause ownership against the scheduling revision. A stored
+// zero capacity alone must not imply that a manual pause will auto-resume.
+const hasZeroEngineCapacity = computed(() => props.account.codex_engine_capacity?.limit === 0)
+const isPausedByEngineCapacity = computed(() =>
+  hasZeroEngineCapacity.value &&
+  !props.account.schedulable &&
+  props.account.codex_engine_capacity?.scheduling_paused_by_capacity === true
+)
+const engineCapacityHint = computed(() => {
+  if (isPausedByEngineCapacity.value) return t('admin.accounts.status.engineCapacityAutoResume')
+  return t(props.account.schedulable
+    ? 'admin.accounts.status.engineCapacityAwaitingSync'
+    : 'admin.accounts.status.engineCapacityNoAutoResume')
+})
+
 const isQuotaExceeded = computed(() => {
   const exceeded = (used?: number | null, limit?: number | null) =>
     typeof limit === 'number' && limit > 0 && typeof used === 'number' && used >= limit
@@ -331,6 +357,7 @@ const statusClass = computed(() => {
     return 'badge-warning'
   }
   if (!props.account.schedulable) {
+    if (isPausedByEngineCapacity.value) return 'badge-warning'
     if (props.account.model_attribution?.scheduling_paused_by_attribution) return 'badge-warning'
     return 'badge-gray'
   }
@@ -352,6 +379,7 @@ const statusText = computed(() => {
     return t('admin.accounts.status.quotaExceeded')
   }
   if (!props.account.schedulable) {
+    if (isPausedByEngineCapacity.value) return t('admin.accounts.status.engineNoCapacity')
     if (props.account.model_attribution?.scheduling_paused_by_attribution) return t('attribution.pausedByAttribution')
     return t('admin.accounts.status.paused')
   }
