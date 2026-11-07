@@ -120,7 +120,7 @@ func (s *adminServiceImpl) prepareDaybreakUpdate(ctx context.Context, account *A
 	if err != nil {
 		return ctx, nil, err
 	}
-	if !daybreakSettingsEnable(account, patch) {
+	if !daybreakSettingsEnable(account, patch) || account.IsOpenAIApiKey() {
 		return ctx, patch, nil
 	}
 	if s.daybreakCapabilities == nil {
@@ -143,9 +143,11 @@ func validateNewAccountDaybreak(account *Account) error {
 	if err != nil {
 		return err
 	}
-	for _, key := range []string{OpenAIDaybreakBlueEnabledKey, OpenAIDaybreakRedEnabledKey} {
-		if enabled, _ := patch[key].(bool); enabled {
-			return infraerrors.BadRequest("DAYBREAK_AUTHORIZE_FIRST", "new accounts start with Daybreak disabled; save account credentials and check capabilities before enabling it")
+	if !account.IsOpenAIApiKey() {
+		for _, key := range []string{OpenAIDaybreakBlueEnabledKey, OpenAIDaybreakRedEnabledKey} {
+			if enabled, _ := patch[key].(bool); enabled {
+				return infraerrors.BadRequest("DAYBREAK_AUTHORIZE_FIRST", "new OAuth accounts start with Daybreak disabled; save account credentials and check capabilities before enabling it")
+			}
 		}
 	}
 	account.Extra = patch

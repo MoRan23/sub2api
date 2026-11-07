@@ -862,6 +862,36 @@ func (s *CRSSyncService) SyncFromCRS(ctx context.Context, input SyncFromCRSInput
 		if existing != nil {
 			credentials = mergeMap(existing.Credentials, credentials)
 		}
+		daybreakAccount := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: credentials, Extra: extra}
+		if existing != nil {
+			// Existing preferences are local administrator state. The repository
+			// preserves the latest locked values when this snapshot is written.
+			for _, key := range []string{OpenAIDaybreakBlueEnabledKey, OpenAIDaybreakRedEnabledKey} {
+				delete(extra, key)
+				if value, exists := existingExtra[key]; exists {
+					extra[key] = value
+				}
+			}
+			if HasOpenAIDaybreakSettings(src.Extra) {
+				item.Warning = "Daybreak settings on existing accounts are managed locally; imported values were ignored"
+			}
+		}
+		if !IsOpenAIDaybreakAccount(daybreakAccount) {
+			delete(extra, OpenAIDaybreakBlueEnabledKey)
+			delete(extra, OpenAIDaybreakRedEnabledKey)
+			if HasOpenAIDaybreakSettings(src.Extra) {
+				item.Warning = "Daybreak settings were omitted because this account type does not support Daybreak"
+			}
+		} else {
+			extra, err = NormalizeOpenAIDaybreakSettings(daybreakAccount, extra)
+			if err != nil {
+				item.Action = "failed"
+				item.Error = err.Error()
+				result.Failed++
+				result.Items = append(result.Items, item)
+				continue
+			}
+		}
 		reconcileCRSUpstreamBillingProbeExtra(existing, PlatformOpenAI, AccountTypeAPIKey, credentials, extra)
 
 		if existing == nil {

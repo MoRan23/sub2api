@@ -817,10 +817,11 @@ export default {
       // OpenAI specific hints
       openai: {
         daybreak: {
-          description: '按授权档位为支持模型补充未指定的 access_programs.cyber，保留客户端显式选择。关闭仅停止自动补充，不强制关闭上游 Daybreak。',
+          description: '按每次请求的原始模型选择 Daybreak 档位并补充未指定的 access_programs.cyber，模型映射照常生效。OAuth 还会检查实际出站模型是否支持所选值。保留客户端显式选择，关闭开关仅停止自动补充。',
           redRequiresBlue: 'Red 需要先开启 Blue；关闭 Blue 将同时关闭 Red。',
-          createHint: '默认关闭。完成凭据配置并保存账号后，请在编辑页检查真实上游模型能力并开启。',
-          saveHint: '上游地址、API Key、接入模式或有效请求头覆写已修改，请先保存账号，再检查模型能力并开启；已开启的开关仍可关闭。',
+          createHint: 'OAuth 账号默认关闭。完成授权并保存账号后，请在编辑页检查真实上游模型能力并开启。',
+          apiKeyHint: '普通 API Key 默认关闭，可在创建或编辑账号时直接开启，无需检查上游模型能力。自动补充仍需系统和当前分组开启对应档位。',
+          saveHint: '账号凭据已修改，请先保存账号，再检查模型能力并开启；已开启的开关仍可关闭。',
           checking: '正在检查模型能力…',
           refresh: '刷新能力',
           checkFailed: '无法读取上游模型能力，暂不能开启；已开启的开关仍可关闭。',

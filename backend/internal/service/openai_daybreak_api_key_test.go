@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"fmt"
 	"io"
 	"maps"
 	"net/http"
@@ -12,6 +13,7 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 func TestOpenAIDaybreakAPIKeyCatalogUsesRawProgramsAndSingleflight(t *testing.T) {
@@ -169,7 +171,7 @@ func TestOpenAIDaybreakAPIKeyCredentialChangeFetchesNewEvidence(t *testing.T) {
 	require.EqualValues(t, 2, calls.Load())
 }
 
-func TestDaybreakAdminAPIKeySettingsAndEvidence(t *testing.T) {
+func TestDaybreakAdminAPIKeySettingsWithoutEvidence(t *testing.T) {
 	account := newCodexModelsAPIKeyTestAccount("https://daybreak.invalid")
 	account.Extra = map[string]any{}
 	calls := 0
@@ -179,16 +181,14 @@ func TestDaybreakAdminAPIKeySettingsAndEvidence(t *testing.T) {
 	})}
 	ctx, patch, err := s.prepareDaybreakUpdate(context.Background(), account, map[string]any{OpenAIDaybreakBlueEnabledKey: true, OpenAIDaybreakRedEnabledKey: true})
 	require.NoError(t, err)
-	evidence, ok := AccountDaybreakEvidenceFromContext(ctx, account.ID)
-	require.True(t, ok)
-	require.NotEmpty(t, evidence.CredentialIdentity)
-	require.Empty(t, evidence.AuthorizationGeneration)
-	require.Equal(t, 1, calls)
+	_, ok := AccountDaybreakEvidenceFromContext(ctx, account.ID)
+	require.False(t, ok)
+	require.Zero(t, calls)
 	account.Extra = patch
-	require.Error(t, validateNewAccountDaybreak(account))
+	require.NoError(t, validateNewAccountDaybreak(account))
 	_, _, err = s.prepareDaybreakUpdate(context.Background(), account, map[string]any{OpenAIAPIKeyModeExtraKey: "codex_engine", OpenAIDaybreakBlueEnabledKey: true})
 	require.Error(t, err)
-	require.Equal(t, 1, calls, "Engine rejects the preference before any discovery")
+	require.Zero(t, calls, "Engine rejects the preference before any discovery")
 	current := *account
 	target := *account
 	target.Extra = map[string]any{}
@@ -197,4 +197,60 @@ func TestDaybreakAdminAPIKeySettingsAndEvidence(t *testing.T) {
 	target.Extra[OpenAIAPIKeyModeExtraKey] = "codex_engine"
 	require.NoError(t, PreserveAccountConfiguration(&current, &target, AccountConfigurationIntent{}))
 	require.NotContains(t, target.Extra, OpenAIDaybreakBlueEnabledKey)
+}
+
+func TestDaybreakAdminAPIKeyNoReaderAndDependency(t *testing.T) {
+	account := newCodexModelsAPIKeyTestAccount("https://daybreak.invalid/v4")
+	account.Extra = map[string]any{}
+	s := &adminServiceImpl{}
+	_, patch, err := s.prepareDaybreakUpdate(context.Background(), account, map[string]any{OpenAIDaybreakBlueEnabledKey: true, OpenAIDaybreakRedEnabledKey: true})
+	require.NoError(t, err)
+	account.Extra = patch
+	_, disabled, err := s.prepareDaybreakUpdate(context.Background(), account, map[string]any{OpenAIDaybreakBlueEnabledKey: false})
+	require.NoError(t, err)
+	require.Equal(t, false, disabled[OpenAIDaybreakRedEnabledKey])
+	account.Extra = disabled
+	_, _, err = s.prepareDaybreakUpdate(context.Background(), account, map[string]any{OpenAIDaybreakRedEnabledKey: true})
+	require.ErrorContains(t, err, "enable Daybreak Blue")
+	_, _, err = s.prepareDaybreakUpdate(context.Background(), account, map[string]any{OpenAIDaybreakBlueEnabledKey: "true"})
+	require.ErrorContains(t, err, "must be a boolean")
+}
+
+func TestDaybreakAPIKeyInjectionWithoutCatalog(t *testing.T) {
+	for _, tc := range []struct {
+		name, model, extra, want, reason string
+		red                              bool
+	}{
+		{name: "blue", model: "gpt-6-sol", want: "daybreak_blue", reason: "automatic"},
+		{name: "astra red tier blue wire", model: "gpt-6-astra", red: true, want: "daybreak_blue", reason: "automatic"},
+		{name: "6 cyber red", model: "gpt-6-cyber", red: true, want: "daybreak_red", reason: "automatic"},
+		{name: "6 cyber requires red", model: "gpt-6-cyber", reason: "red_disabled"},
+		{name: "unknown suffix", model: "gpt-6-cyber-other", red: true, reason: "unrecognized_model"},
+		{name: "explicit value", model: "gpt-6-cyber", red: true, extra: `,"access_programs":{"cyber":"standard"}`, want: "standard", reason: "client_supplied"},
+		{name: "explicit null", model: "gpt-6-cyber", red: true, extra: `,"access_programs":{"cyber":null}`, reason: "client_supplied"},
+		{name: "ws frame", model: "gpt-6-cyber", red: true, extra: `,"type":"response.create"`, want: "daybreak_red", reason: "automatic"},
+		{name: "prewarm", model: "gpt-6-cyber", red: true, extra: `,"type":"response.create","generate":false`, reason: "prewarm"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			var calls atomic.Int32
+			s := newCodexModelsAPIKeyTestService(&codexModelsHTTPUpstreamStub{do: func(*http.Request, string, int64, int) (*http.Response, error) {
+				calls.Add(1)
+				return nil, fmt.Errorf("catalog is unavailable")
+			}})
+			account := newCodexModelsAPIKeyTestAccount("https://daybreak.invalid/v4")
+			account.Extra = map[string]any{OpenAIDaybreakBlueEnabledKey: true, OpenAIDaybreakRedEnabledKey: tc.red}
+			body := []byte(fmt.Sprintf(`{"model":%q,"opaque":9007199254740993%s}`, tc.model, tc.extra))
+			original := string(body)
+			got, reason, err := s.applyOpenAIDaybreakWithDecision(daybreakEnabledTestContext(), account, body)
+			require.NoError(t, err)
+			require.Equal(t, tc.reason, reason)
+			require.Equal(t, tc.want, gjson.GetBytes(got, "access_programs.cyber").String())
+			require.Equal(t, original, string(body), "retry source must remain unmodified")
+			require.Equal(t, "9007199254740993", gjson.GetBytes(got, "opaque").Raw)
+			if reason != "automatic" {
+				require.Equal(t, body, got)
+			}
+			require.Zero(t, calls.Load(), "API-key opt-in must never query the model catalog")
+		})
+	}
 }

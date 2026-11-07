@@ -2109,7 +2109,7 @@
         v-if="supportsOpenAIDaybreakSettings"
         :account-id="account.id"
         :active="show"
-        :requires-save="daybreakCredentialsChanged"
+        :api-key="account.type === 'apikey'"
         v-model:blue="openAIDaybreakBlueEnabled"
         v-model:red="openAIDaybreakRedEnabled"
       />
@@ -3630,7 +3630,6 @@ import {
   applyInterceptWarmup,
   applyOpenCodeGoProtocolRules,
   applyPlanType,
-  buildHeaderOverridesObject,
   buildPlanTypeOptions,
   cloneOpenCodeGoProtocolRules,
   defaultOpenCodeProtocolRules,
@@ -4353,23 +4352,6 @@ const supportsOpenAIDaybreakSettings = computed(() => {
   const account = props.account
   return !!account && (supportsManagedOpenAIOAuthIdentity(account) ||
     (account.platform === 'openai' && account.type === 'apikey' && openAIAPIKeyMode.value === 'generic'))
-})
-const daybreakCredentialsChanged = computed(() => {
-  const account = props.account
-  if (account?.platform !== 'openai' || account.type !== 'apikey') return false
-  const savedBaseUrl = String(account.credentials?.base_url || 'https://api.openai.com').trim()
-  const savedMode = account.extra?.openai_api_key_mode === 'codex_engine' ? 'codex_engine' : 'generic'
-  const effectiveHeaders = (enabled: boolean, rows: HeaderOverrideRow[]) => JSON.stringify(
-    enabled ? Object.entries(buildHeaderOverridesObject(rows)).sort(([left], [right]) => left.localeCompare(right)) : []
-  )
-  const savedHeaders = effectiveHeaders(
-    account.credentials?.[HEADER_OVERRIDE_ENABLED_CREDENTIAL_KEY] === true,
-    splitHeaderOverridesObject(account.credentials?.[HEADER_OVERRIDES_CREDENTIAL_KEY])
-  )
-  return !!editApiKey.value.trim() ||
-    (editBaseUrl.value.trim() || 'https://api.openai.com') !== savedBaseUrl ||
-    openAIAPIKeyMode.value !== savedMode ||
-    effectiveHeaders(headerOverrideEnabled.value, headerOverrideRows.value) !== savedHeaders
 })
 // OpenAI Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)

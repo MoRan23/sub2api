@@ -57,6 +57,57 @@ func TestDaybreakImportDisabledAndReportsPerAccountWarning(t *testing.T) {
 	require.Equal(t, "Daybreak backup", reply.Data.Warnings[0].Name)
 }
 
+func TestDaybreakAPIKeyImportPreservesAndNormalizesPreferences(t *testing.T) {
+	for _, tc := range []struct {
+		name        string
+		extra       map[string]any
+		want        map[string]any
+		wantFailed  bool
+		wantWarning bool
+	}{
+		{name: "omitted preferences stay absent"},
+		{name: "explicit preferences enabled", extra: map[string]any{service.OpenAIDaybreakBlueEnabledKey: true, service.OpenAIDaybreakRedEnabledKey: true}, want: map[string]any{service.OpenAIDaybreakBlueEnabledKey: true, service.OpenAIDaybreakRedEnabledKey: true}},
+		{name: "disabling Blue disables Red", extra: map[string]any{service.OpenAIDaybreakBlueEnabledKey: false, service.OpenAIDaybreakRedEnabledKey: true}, want: map[string]any{service.OpenAIDaybreakBlueEnabledKey: false, service.OpenAIDaybreakRedEnabledKey: false}},
+		{name: "Red requires Blue", extra: map[string]any{service.OpenAIDaybreakRedEnabledKey: true}, wantFailed: true},
+		{name: "boolean required", extra: map[string]any{service.OpenAIDaybreakBlueEnabledKey: "true"}, wantFailed: true},
+		{name: "Engine excluded", extra: map[string]any{service.OpenAIAPIKeyModeExtraKey: "codex_engine", service.OpenAIDaybreakBlueEnabledKey: true, service.OpenAIDaybreakRedEnabledKey: true}, wantWarning: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			router, adminSvc := setupAccountDataRouter()
+			data := DataImportRequest{Data: DataPayload{Proxies: []DataProxy{}, Accounts: []DataAccount{{Name: "API Key backup", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+				Credentials: map[string]any{"api_key": "test-key"}, Extra: tc.extra}}}}
+			body, err := json.Marshal(data)
+			require.NoError(t, err)
+			rec := httptest.NewRecorder()
+			req := httptest.NewRequest(http.MethodPost, "/api/v1/admin/accounts/data", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			router.ServeHTTP(rec, req)
+			require.Equal(t, http.StatusOK, rec.Code, rec.Body.String())
+			var reply struct {
+				Data DataImportResult `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &reply))
+			if tc.wantFailed {
+				require.Empty(t, adminSvc.createdAccounts)
+				require.Equal(t, 1, reply.Data.AccountFailed)
+				require.Len(t, reply.Data.Errors, 1)
+				return
+			}
+			require.Len(t, adminSvc.createdAccounts, 1)
+			require.Equal(t, 1, reply.Data.AccountCreated)
+			require.Zero(t, reply.Data.AccountFailed)
+			require.Equal(t, tc.wantWarning, len(reply.Data.Warnings) > 0)
+			for _, key := range []string{service.OpenAIDaybreakBlueEnabledKey, service.OpenAIDaybreakRedEnabledKey} {
+				if value, exists := tc.want[key]; exists {
+					require.Equal(t, value, adminSvc.createdAccounts[0].Extra[key])
+				} else {
+					require.NotContains(t, adminSvc.createdAccounts[0].Extra, key)
+				}
+			}
+		})
+	}
+}
+
 func TestDaybreakCodexSessionImportDefaultsOff(t *testing.T) {
 	svc := newCodexImportMemoryAdminService(nil)
 	handler := NewAccountHandler(svc, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil)

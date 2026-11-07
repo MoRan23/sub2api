@@ -140,10 +140,17 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	}
 
 	account.Extra = service.StripRetiredCodexStateExtra(account.Extra)
-	// A new row has no locally validated capability evidence. All creation
-	// paths, including external sync imports, begin with Daybreak disabled.
-	delete(account.Extra, service.OpenAIDaybreakBlueEnabledKey)
-	delete(account.Extra, service.OpenAIDaybreakRedEnabledKey)
+	if service.IsOpenAIDaybreakAccount(account) && account.IsOpenAIApiKey() {
+		extra, err := service.NormalizeOpenAIDaybreakSettings(account, account.Extra)
+		if err != nil {
+			return err
+		}
+		account.Extra = extra
+	} else {
+		// OAuth imports have no locally validated authorization evidence.
+		delete(account.Extra, service.OpenAIDaybreakBlueEnabledKey)
+		delete(account.Extra, service.OpenAIDaybreakRedEnabledKey)
+	}
 	delete(account.Extra, service.CodexEngineCapacitySyncExtraKey)
 	builder := client.Account.Create().
 		SetName(account.Name).

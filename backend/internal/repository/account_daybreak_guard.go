@@ -39,8 +39,8 @@ func lockDaybreakEvidenceOwners(ctx context.Context, client *dbent.Client, ids [
 	return nil
 }
 
-// All capability I/O completed before this transaction. Only the exact checked
-// grant may enable a tier; a concurrent reauthorization makes the save stale.
+// Ordinary API keys need only the locked settings validation. OAuth capability
+// I/O completes before this transaction and remains bound to the checked grant.
 func validateDaybreakPatchLocked(ctx context.Context, client *dbent.Client, current *service.Account, target *service.Account, patch map[string]any) error {
 	if !service.HasOpenAIDaybreakSettings(patch) {
 		return nil
@@ -48,6 +48,9 @@ func validateDaybreakPatchLocked(ctx context.Context, client *dbent.Client, curr
 	normalized, err := service.NormalizeOpenAIDaybreakSettings(target, patch)
 	if err != nil {
 		return err
+	}
+	if target.IsOpenAIApiKey() {
+		return nil
 	}
 	enabling := false
 	for _, key := range []string{service.OpenAIDaybreakBlueEnabledKey, service.OpenAIDaybreakRedEnabledKey} {
@@ -66,17 +69,6 @@ func validateDaybreakPatchLocked(ctx context.Context, client *dbent.Client, curr
 	evidence, ok := service.AccountDaybreakEvidenceFromContext(ctx, current.ID)
 	if !ok {
 		return stale()
-	}
-	if current.IsOpenAIApiKey() || target.IsOpenAIApiKey() {
-		// Both rows must match: a stale full snapshot must not reinstate the old
-		// key after a concurrent edit. A combined credential edit and enable must
-		// save its new credentials and obtain fresh evidence first.
-		if evidence.CredentialOwnerID != current.ID || evidence.CredentialIdentity == "" ||
-			service.OpenAIDaybreakAPIKeyCredentialIdentity(current) != evidence.CredentialIdentity ||
-			service.OpenAIDaybreakAPIKeyCredentialIdentity(target) != evidence.CredentialIdentity {
-			return stale()
-		}
-		return nil
 	}
 	if evidence.AuthorizationGeneration == "" || evidence.CredentialOS == "" {
 		return stale()

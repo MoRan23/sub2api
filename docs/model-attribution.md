@@ -48,9 +48,9 @@ docker compose -f docker-compose.yml -f docker-compose.lm-detector.yml up -d --b
 
 ## Daybreak 测试条件
 
-手动、定时、新账号首测归因及鹈鹕测试，按任务开始时冻结的账号 Blue／Red 偏好自动补充 `access_programs.cyber`，独立于系统 Daybreak 总开关和分组开关。适用于普通 OpenAI OAuth 和普通 API Key 账号，不新增 API Key 首测；Codex-Engine、普通业务请求和账号连接测试不获得这个例外。共享凭据账号使用被测业务账号的偏好，能力证据仍来自实际凭据源。
+手动、定时、新账号首测归因及鹈鹕测试，按任务开始时冻结的账号 Blue／Red 偏好自动补充 `access_programs.cyber`，独立于系统 Daybreak 总开关和分组开关。适用于普通 OpenAI OAuth 和普通 API Key 账号，不新增 API Key 首测；Codex-Engine、普通业务请求和账号连接测试不获得这个例外。共享 OAuth 凭据账号使用被测业务账号的偏好，能力证据仍来自实际凭据源。
 
-仍使用现有模型档位和真实上游目录能力校验。GPT-6 Astra／6.1 Sol 需要 Blue＋Red，但发送值是 `daybreak_blue`；Cyber 型号使用 `daybreak_red`。未开启所需档位、型号未识别、目录查询失败或能力不足时，继续测试且不添加字段，并记录原因；每次发送按现有缓存期限核实能力，不无限沿用过期证据。
+Daybreak 档位和值由任务所选的原始探针模型确定，探针不经过业务模型映射。普通 API Key 按模型档位直接补充，无需查询上游模型目录或检查 `available_access_programs.cyber`。OAuth 仍需真实上游目录声明实际出站模型支持已选定的 `cyber` 值，每次发送按现有缓存期限核实能力。GPT-6 Astra／6.1 Sol 需要 Blue＋Red，但发送值是 `daybreak_blue`；已识别的 Cyber 型号（包括 `gpt-6-cyber`）需要 Blue＋Red，使用 `daybreak_red`。未开启所需档位、原始探针型号未识别，或 OAuth 目录查询失败、能力不足时，继续测试且不添加字段，并记录原因。
 
 归因快照保存冻结偏好，503 等待及重启恢复沿用；每条成功探针保存实际出站字段或未添加原因，失败尝试不替代成功回答的证据。中途修改账号开关不中断任务，但完成时偏好与快照不一致，不更新名单、不累计升级。三条成功回答的实际 `cyber` 条件不一致或缺少证据时，仍完成分析并展示真实判定，不改名单并打断连续通过。连续通过基线包含冻结偏好及一致的实际字段值，带字段和不带字段的两轮不能混合累计。
 

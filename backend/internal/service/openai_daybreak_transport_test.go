@@ -20,7 +20,7 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-const daybreakTransportManifest = `{"models":[{"slug":"gpt-6-astra","available_access_programs":{"cyber":["standard","daybreak_blue"]}},{"slug":"gpt-5.6-cyber","available_access_programs":{"cyber":["daybreak_red"]}}]}`
+const daybreakTransportManifest = `{"models":[{"slug":"gpt-6-astra","available_access_programs":{"cyber":["standard","daybreak_blue","daybreak_red"]}},{"slug":"gpt-5.6-cyber","available_access_programs":{"cyber":["daybreak_blue","daybreak_red"]}}]}`
 
 func daybreakTransportGroup() *Group {
 	return &Group{ID: 991, Platform: PlatformOpenAI, Status: StatusActive, Hydrated: true,
@@ -34,7 +34,7 @@ func daybreakTransportContext(ctx context.Context) context.Context {
 func seedDaybreakTransportCapabilities(t *testing.T, svc *OpenAIGatewayService, account *Account) *Account {
 	t.Helper()
 	if account.IsOpenAIApiKey() {
-		svc.codexModelCapabilities.observeManifest(openAIDaybreakCapabilitiesNamespace(account), []byte(daybreakTransportManifest), time.Now())
+		// Ordinary API keys opt in without an upstream capability declaration.
 		return account
 	}
 	for _, family := range OpenAIOAuthOSFamilies() {
@@ -194,25 +194,25 @@ func testDaybreakHTTPToWSDoesNotInjectPrewarmOrSourceMap(t *testing.T, accountTy
 	c.Request = c.Request.WithContext(daybreakTransportContext(c.Request.Context()))
 	source := map[string]any{"model": "gpt-6-astra", "input": []any{map[string]any{"role": "user", "content": "hello"}}}
 	_, err := svc.forwardOpenAIWSV2(context.Background(), c, account, source, "", "", "mock-oauth-token",
-		OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2}, false, false, "client-alias", "gpt-6-astra", time.Now(), 1, "", nil)
+		OpenAIWSProtocolDecision{Transport: OpenAIUpstreamTransportResponsesWebsocketV2}, false, false, "gpt-6-cyber", "gpt-6-astra", time.Now(), 1, "", nil)
 	require.NoError(t, err)
 	require.Len(t, conn.writes, 2)
 	prewarm := requestToJSONString(conn.writes[0])
 	inference := requestToJSONString(conn.writes[1])
 	require.Equal(t, gjson.False, gjson.Get(prewarm, "generate").Type)
 	require.False(t, gjson.Get(prewarm, "access_programs").Exists())
-	require.Equal(t, "daybreak_blue", gjson.Get(inference, "access_programs.cyber").String())
+	require.Equal(t, "daybreak_red", gjson.Get(inference, "access_programs.cyber").String())
 	require.NotContains(t, source, "access_programs")
 	observed := SnapshotFingerprintObservations(1)[0].Daybreak
 	require.Equal(t, "automatic", observed.Source)
-	require.Equal(t, "daybreak_blue", observed.CyberValue)
+	require.Equal(t, "daybreak_red", observed.CyberValue)
 }
 
-func TestDaybreakWSPhysicalSendUsesEachTurnMappedModel(t *testing.T) {
-	runDaybreakTransportAccountTypes(t, testDaybreakWSPhysicalSendUsesEachTurnMappedModel)
+func TestDaybreakWSPhysicalSendUsesEachTurnInboundModel(t *testing.T) {
+	runDaybreakTransportAccountTypes(t, testDaybreakWSPhysicalSendUsesEachTurnInboundModel)
 }
 
-func testDaybreakWSPhysicalSendUsesEachTurnMappedModel(t *testing.T, accountType string) {
+func testDaybreakWSPhysicalSendUsesEachTurnInboundModel(t *testing.T, accountType string) {
 	gin.SetMode(gin.TestMode)
 	for _, mode := range []string{OpenAIWSIngressModeCtxPool, OpenAIWSIngressModePassthrough, OpenAIWSIngressModeHTTPBridge} {
 		t.Run(mode, func(t *testing.T) {
@@ -234,7 +234,7 @@ func testDaybreakWSPhysicalSendUsesEachTurnMappedModel(t *testing.T, accountType
 			upstream := &httpUpstreamRecorder{}
 			if mode == OpenAIWSIngressModeHTTPBridge {
 				svc.httpUpstream = upstream
-				for turn := 1; turn <= 3; turn++ {
+				for turn := 1; turn <= 4; turn++ {
 					upstream.responses = append(upstream.responses, &http.Response{StatusCode: http.StatusOK, Header: http.Header{"Content-Type": {"text/event-stream"}}, Body: io.NopCloser(strings.NewReader(fmt.Sprintf("data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_daybreak_%d\",\"status\":\"completed\",\"output\":[],\"usage\":{\"input_tokens\":1,\"output_tokens\":1}}}\n\n", turn)))})
 				}
 			}
@@ -259,12 +259,13 @@ func testDaybreakWSPhysicalSendUsesEachTurnMappedModel(t *testing.T, accountType
 			client, _, err := coderws.Dial(ctx, "ws"+strings.TrimPrefix(server.URL, "http")+"/v1/responses", nil)
 			require.NoError(t, err)
 			defer func() { _ = client.CloseNow() }()
-			for turn, want := range []string{"daybreak_blue", "daybreak_red", "standard"} {
+			models := []string{"gpt-6-cyber", "gpt-6-sol", "client-alias", "gpt-6-cyber"}
+			for turn, want := range []string{"daybreak_red", "daybreak_blue", "", "standard"} {
 				explicit := ""
-				if turn == 2 {
+				if turn == 3 {
 					explicit = `,"access_programs":{"cyber":"standard"}`
 				}
-				baseline := []byte(fmt.Sprintf(`{"type":"response.create","model":"client-alias","stream":true,"input":[{"role":"user","content":"turn %d"}]%s}`, turn+1, explicit))
+				baseline := []byte(fmt.Sprintf(`{"type":"response.create","model":%q,"stream":true,"input":[{"role":"user","content":"turn %d"}]%s}`, models[turn], turn+1, explicit))
 				require.NoError(t, client.Write(ctx, coderws.MessageText, baseline))
 				var wire []byte
 				if mode != OpenAIWSIngressModeHTTPBridge {
@@ -277,7 +278,12 @@ func testDaybreakWSPhysicalSendUsesEachTurnMappedModel(t *testing.T, accountType
 					wire = upstream.lastBody
 				}
 				require.Equal(t, want, gjson.GetBytes(wire, "access_programs.cyber").String())
-				if turn < 2 {
+				mappedModel := "gpt-6-astra"
+				if turn == 1 {
+					mappedModel = "gpt-5.6-cyber"
+				}
+				require.Equal(t, mappedModel, gjson.GetBytes(wire, "model").String())
+				if turn < 3 {
 					require.False(t, gjson.GetBytes(baseline, "access_programs").Exists())
 				}
 			}
@@ -293,12 +299,14 @@ func testDaybreakWSPhysicalSendUsesEachTurnMappedModel(t *testing.T, accountType
 					observations = append(observations, entry.Daybreak)
 				}
 			}
-			require.Len(t, observations, 3)
-			for index, want := range []string{"standard", "daybreak_red", "daybreak_blue"} {
+			require.Len(t, observations, 4)
+			for index, want := range []string{"standard", "", "daybreak_blue", "daybreak_red"} {
 				require.Equal(t, want, observations[index].CyberValue)
 				source := "automatic"
 				if index == 0 {
 					source = "client"
+				} else if index == 1 {
+					source = "not_added"
 				}
 				require.Equal(t, source, observations[index].Source)
 			}
@@ -415,51 +423,63 @@ func TestDaybreakWSGlobalSwitchUpdatesOnEveryPhysicalTurn(t *testing.T) {
 	}
 }
 
-func TestDaybreakHTTPAdaptersInjectAfterMapping(t *testing.T) {
-	runDaybreakTransportAccountTypes(t, testDaybreakHTTPAdaptersInjectAfterMapping)
+func TestDaybreakHTTPAdaptersUseInboundModelBeforeMapping(t *testing.T) {
+	runDaybreakTransportAccountTypes(t, testDaybreakHTTPAdaptersUseInboundModelBeforeMapping)
 }
 
-func testDaybreakHTTPAdaptersInjectAfterMapping(t *testing.T, accountType string) {
+func testDaybreakHTTPAdaptersUseInboundModelBeforeMapping(t *testing.T, accountType string) {
 	gin.SetMode(gin.TestMode)
 	for _, mode := range []string{"responses", "passthrough", "chat", "messages"} {
 		t.Run(mode, func(t *testing.T) {
-			endpoint, body := "/v1/responses", []byte(`{"model":"client-alias","input":"hello","stream":true}`)
-			if mode == "passthrough" {
-				// This established mode deliberately preserves the caller's model.
-				body = []byte(`{"model":"gpt-6-astra","input":"hello","stream":true}`)
+			for _, tc := range []struct{ inbound, want string }{
+				{"gpt-6-cyber", "daybreak_red"},
+				{"gpt-6-sol", "daybreak_blue"},
+				{"client-alias", ""},
+			} {
+				t.Run(tc.inbound, func(t *testing.T) {
+					endpoint, body := "/v1/responses", []byte(fmt.Sprintf(`{"model":%q,"input":"hello","stream":true}`, tc.inbound))
+					if mode == "passthrough" {
+						// Channel routing has already selected a model; the handler still
+						// retains the original inbound model in its trusted context.
+						body = []byte(`{"model":"gpt-6-astra","input":"hello","stream":true}`)
+					}
+					if mode == "chat" || mode == "messages" {
+						endpoint = "/v1/messages"
+						if mode == "chat" {
+							endpoint = "/v1/chat/completions"
+						}
+						body = []byte(fmt.Sprintf(`{"model":%q,"messages":[{"role":"user","content":"hello"}],"stream":true}`, tc.inbound))
+					}
+					c, _ := gin.CreateTestContext(httptest.NewRecorder())
+					c.Request = httptest.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
+					c.Request = c.Request.WithContext(daybreakTransportContext(c.Request.Context()))
+					if mode == "passthrough" {
+						c.Request = c.Request.WithContext(context.WithValue(c.Request.Context(), ctxkey.Model, tc.inbound))
+					}
+					upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusBadRequest,
+						Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"type":"invalid_request_error","message":"mock validation error"}}`))}}
+					account := &Account{ID: 8140, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
+						Credentials: map[string]any{"access_token": "mock-oauth-token", "model_mapping": map[string]any{tc.inbound: "gpt-6-astra"}},
+						Extra:       map[string]any{OpenAIDaybreakBlueEnabledKey: true, OpenAIDaybreakRedEnabledKey: true, "openai_passthrough": mode == "passthrough"}}
+					configureDaybreakTransportAccount(account, accountType)
+					svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream, accountRepo: newAuthorizedOpenAIOAuthTestRepo(account), cache: &stubGatewayCache{}, toolCorrector: NewCodexToolCorrector()}
+					seedDaybreakTransportCapabilities(t, svc, account)
+					var err error
+					switch mode {
+					case "chat":
+						_, err = svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "gpt-6-astra")
+					case "messages":
+						_, err = svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "gpt-6-astra")
+					default:
+						_, err = svc.Forward(context.Background(), c, account, body)
+					}
+					require.Error(t, err)
+					require.NotNil(t, upstream.lastReq)
+					require.Equal(t, "gpt-6-astra", gjson.GetBytes(upstream.lastBody, "model").String())
+					require.Equal(t, tc.want, gjson.GetBytes(upstream.lastBody, "access_programs.cyber").String())
+					require.False(t, gjson.GetBytes(body, "access_programs").Exists())
+				})
 			}
-			if mode == "chat" || mode == "messages" {
-				endpoint = "/v1/messages"
-				if mode == "chat" {
-					endpoint = "/v1/chat/completions"
-				}
-				body = []byte(`{"model":"client-alias","messages":[{"role":"user","content":"hello"}],"stream":true}`)
-			}
-			c, _ := gin.CreateTestContext(httptest.NewRecorder())
-			c.Request = httptest.NewRequest(http.MethodPost, endpoint, bytes.NewReader(body))
-			c.Request = c.Request.WithContext(daybreakTransportContext(c.Request.Context()))
-			upstream := &httpUpstreamRecorder{resp: &http.Response{StatusCode: http.StatusBadRequest,
-				Header: http.Header{"Content-Type": {"application/json"}}, Body: io.NopCloser(strings.NewReader(`{"error":{"type":"invalid_request_error","message":"mock validation error"}}`))}}
-			account := &Account{ID: 8140, Platform: PlatformOpenAI, Type: AccountTypeOAuth, Concurrency: 1,
-				Credentials: map[string]any{"access_token": "mock-oauth-token", "model_mapping": map[string]any{"client-alias": "gpt-6-astra"}},
-				Extra:       map[string]any{OpenAIDaybreakBlueEnabledKey: true, OpenAIDaybreakRedEnabledKey: true, "openai_passthrough": mode == "passthrough"}}
-			configureDaybreakTransportAccount(account, accountType)
-			svc := &OpenAIGatewayService{cfg: &config.Config{}, httpUpstream: upstream, accountRepo: newAuthorizedOpenAIOAuthTestRepo(account), cache: &stubGatewayCache{}, toolCorrector: NewCodexToolCorrector()}
-			seedDaybreakTransportCapabilities(t, svc, account)
-			var err error
-			switch mode {
-			case "chat":
-				_, err = svc.ForwardAsChatCompletions(context.Background(), c, account, body, "", "gpt-6-astra")
-			case "messages":
-				_, err = svc.ForwardAsAnthropic(context.Background(), c, account, body, "", "gpt-6-astra")
-			default:
-				_, err = svc.Forward(context.Background(), c, account, body)
-			}
-			require.Error(t, err)
-			require.NotNil(t, upstream.lastReq)
-			require.Equal(t, "gpt-6-astra", gjson.GetBytes(upstream.lastBody, "model").String())
-			require.Equal(t, "daybreak_blue", gjson.GetBytes(upstream.lastBody, "access_programs.cyber").String())
-			require.False(t, gjson.GetBytes(body, "access_programs").Exists())
 		})
 	}
 }

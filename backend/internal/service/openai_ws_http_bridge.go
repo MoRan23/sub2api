@@ -505,6 +505,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	if writeClientMessage == nil {
 		return nil, errors.New("client websocket writer is nil")
 	}
+	ctx = withOpenAIDaybreakInboundModel(ctx, originalModel)
 	telemetryTurnCtx, finishTelemetryTurn := context.WithCancel(ctx)
 	defer finishTelemetryTurn()
 	responseModelObserver := &upstreamResponseModelObserver{}

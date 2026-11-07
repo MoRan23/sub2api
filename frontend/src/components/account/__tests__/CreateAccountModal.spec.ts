@@ -15,6 +15,7 @@ const {
   importCodexSessionMock,
   createOpenAICodexPATMock,
   getSettingsMock,
+  getDaybreakCapabilitiesMock,
   authIsSimpleMode,
 } = vi.hoisted(() => ({
   createAccountMock: vi.fn(),
@@ -24,6 +25,7 @@ const {
   importCodexSessionMock: vi.fn(),
   createOpenAICodexPATMock: vi.fn(),
   getSettingsMock: vi.fn(),
+  getDaybreakCapabilitiesMock: vi.fn(),
   authIsSimpleMode: { value: true },
 }))
 
@@ -52,6 +54,7 @@ vi.mock('@/api/admin', () => ({
       checkMixedChannelRisk: vi.fn().mockResolvedValue({ has_risk: false }),
       importCodexSession: importCodexSessionMock,
       createOpenAICodexPAT: createOpenAICodexPATMock,
+      getDaybreakCapabilities: getDaybreakCapabilitiesMock,
     },
     settings: {
       getWebSearchEmulationConfig: vi.fn().mockResolvedValue({ enabled: false, providers: [] }),
@@ -226,6 +229,7 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
   })
   beforeEach(() => {
     authIsSimpleMode.value = true
+    getDaybreakCapabilitiesMock.mockReset()
     createAccountMock.mockReset().mockResolvedValue({ id: 42, platform: 'openai', type: 'apikey' })
     probeUpstreamBillingMock.mockReset().mockResolvedValue({})
     syncUpstreamModelsMock.mockReset().mockResolvedValue({ models: [], metadata: {} })
@@ -319,11 +323,73 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
     wrapper.unmount()
   })
 
-  it.each(['oauth', 'apikey'])('keeps Daybreak disabled until the new %s account has been configured and saved', async (kind) => {
+  it('keeps Daybreak disabled until the new OAuth account has been configured and saved', async () => {
     const wrapper = mountModal()
     await selectButtonByText(wrapper, 'OpenAI')
-    if (kind === 'apikey') await selectButtonByText(wrapper, 'API Key')
     expect(wrapper.get('[data-testid="daybreak-create-hint"]').exists()).toBe(true)
+    for (const key of ['blue', 'red']) {
+      expect(wrapper.get(`[data-testid="daybreak-${key}"]`).attributes('aria-checked')).toBe('false')
+      expect(wrapper.get(`[data-testid="daybreak-${key}"]`).attributes('disabled')).toBeDefined()
+    }
+    wrapper.unmount()
+  })
+
+  it.each([false, true])('saves new API Key Daybreak choices with Blue disabled again=%s', async (disableBlue) => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'API Key')
+    expect(wrapper.get('[data-testid="daybreak-api-key-hint"]').exists()).toBe(true)
+    expect(wrapper.get('[data-testid="daybreak-blue"]').attributes('aria-checked')).toBe('false')
+    expect(wrapper.get('[data-testid="daybreak-blue"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('[data-testid="daybreak-red"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-testid="daybreak-blue"]').trigger('click')
+    await wrapper.get('[data-testid="daybreak-red"]').trigger('click')
+    expect(wrapper.get('[data-testid="daybreak-red"]').attributes('aria-checked')).toBe('true')
+    if (disableBlue) await wrapper.get('[data-testid="daybreak-blue"]').trigger('click')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Daybreak key')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('test-api-key')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock.mock.calls[0]?.[0]?.extra).toMatchObject({
+      openai_daybreak_blue_enabled: !disableBlue, openai_daybreak_red_enabled: !disableBlue
+    })
+    expect(getDaybreakCapabilitiesMock).not.toHaveBeenCalled()
+    await wrapper.setProps({ show: false })
+    await wrapper.setProps({ show: true })
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'API Key')
+    expect(wrapper.get('[data-testid="daybreak-blue"]').attributes('aria-checked')).toBe('false')
+    expect(wrapper.get('[data-testid="daybreak-red"]').attributes('aria-checked')).toBe('false')
+    wrapper.unmount()
+  })
+
+  it('omits pending Daybreak preferences when creating a Codex-Engine account', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'API Key')
+    await wrapper.get('[data-testid="daybreak-blue"]').trigger('click')
+    await wrapper.get('[data-testid="daybreak-red"]').trigger('click')
+    await wrapper.get('[data-testid="openai-api-key-mode"]').setValue('codex_engine')
+    expect(wrapper.find('[data-testid="openai-daybreak-settings"]').exists()).toBe(false)
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Engine')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('test-api-key')
+    await wrapper.get('form#create-account-form input[placeholder="https://api.openai.com"]').setValue('https://engine.example.com')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    expect(createAccountMock.mock.calls[0]?.[0]?.extra).not.toHaveProperty('openai_daybreak_blue_enabled')
+    expect(createAccountMock.mock.calls[0]?.[0]?.extra).not.toHaveProperty('openai_daybreak_red_enabled')
+    expect(getDaybreakCapabilitiesMock).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('resets API Key Daybreak choices when returning to a new OAuth form', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'API Key')
+    await wrapper.get('[data-testid="daybreak-blue"]').trigger('click')
+    await wrapper.get('[data-testid="daybreak-red"]').trigger('click')
+    await selectButtonByText(wrapper, 'admin.accounts.types.chatgptOauth')
     for (const key of ['blue', 'red']) {
       expect(wrapper.get(`[data-testid="daybreak-${key}"]`).attributes('aria-checked')).toBe('false')
       expect(wrapper.get(`[data-testid="daybreak-${key}"]`).attributes('disabled')).toBeDefined()

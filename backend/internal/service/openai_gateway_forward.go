@@ -30,6 +30,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		return s.forwardCodexEngine(ctx, c, account, body, endpoint, "")
 	}
+	ctx = withOpenAIDaybreakHTTPInboundModel(ctx, c, gjson.GetBytes(body, "model").String())
 	ctx, account, scopeErr := s.prepareOpenAIOAuthRequestScope(ctx, c, account, body)
 	if scopeErr != nil {
 		return nil, scopeErr

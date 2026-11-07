@@ -693,10 +693,11 @@ export default {
       // OpenAI specific hints
       openai: {
         daybreak: {
-          description: 'Fill missing access_programs.cyber for supported models according to the approval tier. Explicit client choices are preserved. Turning switches off stops automatic additions; it does not force upstream Daybreak off.',
+          description: 'Use the original model in each request to choose the Daybreak tier and missing access_programs.cyber value. Model mapping stays unchanged. OAuth also checks that the actual outbound model supports that value. Explicit client choices are preserved. Turning switches off stops automatic additions.',
           redRequiresBlue: 'Red requires Blue. Turning Blue off also turns Red off.',
-          createHint: 'Off by default. Configure credentials and save the account, then check live upstream model capabilities in the edit dialog to enable Daybreak.',
-          saveHint: 'The upstream URL, API key, access mode, or effective header overrides have changed. Save the account before checking capabilities and enabling Daybreak. Enabled switches can still be turned off.',
+          createHint: 'Off by default for OAuth accounts. Complete authorization and save the account, then check live upstream model capabilities in the edit dialog to enable Daybreak.',
+          apiKeyHint: 'Off by default for ordinary API Key accounts. Enable directly when creating or editing an account without checking upstream model capabilities. Automatic fields still require the system and current group to allow the matching tier.',
+          saveHint: 'Account credentials have changed. Save the account before checking capabilities and enabling Daybreak. Enabled switches can still be turned off.',
           checking: 'Checking model capabilities…',
           refresh: 'Refresh capabilities',
           checkFailed: 'Unable to read upstream model capabilities. Enabling is unavailable; enabled switches can still be turned off.',

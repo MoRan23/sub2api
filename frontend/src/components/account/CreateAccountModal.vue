@@ -3377,8 +3377,10 @@
 
       <OpenAIDaybreakSettings
         v-if="form.platform === 'openai' && ((accountCategory === 'apikey' && openAIAPIKeyMode === 'generic') || (form.type === 'oauth' && oauthFlowRef?.inputMethod !== 'codex_pat' && oauthFlowRef?.inputMethod !== 'agent_identity'))"
-        :blue="false"
-        :red="false"
+        :active="show"
+        :api-key="isOpenAIAPIKeyDaybreak"
+        v-model:blue="openAIDaybreakBlueEnabled"
+        v-model:red="openAIDaybreakRedEnabled"
       />
 
       <!-- OpenAI Codex namespace 工具摊平（兼容开关，仅 OAuth） -->
@@ -4841,6 +4843,11 @@ const openaiPassthroughEnabled = ref(false)
 const openAIAPIKeyMode = ref<OpenAIAPIKeyMode>('generic')
 const openAIAPIKeyAutoAttributionEnabled = ref(false)
 const openAIAttributionReplaceWhitelistEnabled = ref(true)
+const openAIDaybreakBlueEnabled = ref(false)
+const openAIDaybreakRedEnabled = ref(false)
+const isOpenAIAPIKeyDaybreak = computed(() =>
+  form.platform === 'openai' && accountCategory.value === 'apikey' && openAIAPIKeyMode.value === 'generic'
+)
 // OpenAI Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
 const openAILongContextBillingEnabled = ref(false)
@@ -5257,6 +5264,14 @@ watch(
     }
   }
 )
+
+// Only ordinary API Key creation can submit Daybreak preferences.
+watch(isOpenAIAPIKeyDaybreak, (enabled) => {
+  if (!enabled) {
+    openAIDaybreakBlueEnabled.value = false
+    openAIDaybreakRedEnabled.value = false
+  }
+})
 
 // Sync form.type based on accountCategory, addMethod, and platform-specific type
 watch(
@@ -5828,6 +5843,8 @@ const resetForm = () => {
   openAIAPIKeyMode.value = 'generic'
   openAIAPIKeyAutoAttributionEnabled.value = false
   openAIAttributionReplaceWhitelistEnabled.value = true
+  openAIDaybreakBlueEnabled.value = false
+  openAIDaybreakRedEnabled.value = false
   openaiFlattenNamespacesEnabled.value = false
   openAILongContextBillingEnabled.value = false
   openAILongContextBillingTouched.value = false
@@ -5901,6 +5918,13 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
   }
 
   const extra: Record<string, unknown> = { ...(base || {}) }
+  if (isOpenAIAPIKeyDaybreak.value) {
+    extra.openai_daybreak_blue_enabled = openAIDaybreakBlueEnabled.value
+    extra.openai_daybreak_red_enabled = openAIDaybreakBlueEnabled.value && openAIDaybreakRedEnabled.value
+  } else {
+    delete extra.openai_daybreak_blue_enabled
+    delete extra.openai_daybreak_red_enabled
+  }
   if (form.type === 'oauth' || accountCategory.value === 'apikey') {
     extra.openai_attribution_replace_whitelist_enabled = openAIAttributionReplaceWhitelistEnabled.value
   }

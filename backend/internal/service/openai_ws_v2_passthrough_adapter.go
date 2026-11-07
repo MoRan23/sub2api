@@ -1157,7 +1157,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 				payload = updated
 			}
-			payload, daybreakDecision, daybreakErr := s.applyOpenAIDaybreakForPlanWithContext(ctx, c, account, framePlan, payload)
+			inboundModel, _ := usageMeta.turnModels("")
+			daybreakContext := withOpenAIDaybreakInboundModel(ctx, inboundModel)
+			payload, daybreakDecision, daybreakErr := s.applyOpenAIDaybreakForPlanWithContext(daybreakContext, c, account, framePlan, payload)
 			if daybreakErr != nil {
 				return payload, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to prepare websocket Daybreak policy", daybreakErr)
 			}

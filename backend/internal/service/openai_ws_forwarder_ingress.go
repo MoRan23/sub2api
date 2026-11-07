@@ -1204,7 +1204,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		guardedRetryPayload := append([]byte(nil), payload...)
 		var daybreakDecision string
 		var daybreakErr error
-		payload, daybreakDecision, daybreakErr = s.applyOpenAIDaybreakForPlanWithContext(ctx, c, account, pinnedIdentityPlan, payload)
+		daybreakContext := withOpenAIDaybreakInboundModel(ctx, originalModel)
+		payload, daybreakDecision, daybreakErr = s.applyOpenAIDaybreakForPlanWithContext(daybreakContext, c, account, pinnedIdentityPlan, payload)
 		if daybreakErr != nil {
 			return nil, wrapOpenAIWSIngressTurnError("write_upstream_daybreak", daybreakErr, false)
 		}

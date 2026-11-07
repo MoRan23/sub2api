@@ -42,8 +42,9 @@ type OpenAIDaybreakCapabilities struct {
 	CredentialIdentity      string `json:"-"`
 }
 
-// This is a tier policy, not an availability list: every entry also requires
-// the selected authorization's live available_access_programs declaration.
+// This is an inbound-model tier policy, not an availability list. OAuth also requires the
+// selected authorization's live available_access_programs declaration; ordinary
+// API keys use the administrator's explicit preference without catalog evidence.
 // Unknown models are not classified by prefix or by the account's plan name.
 // https://help.openai.com/en/articles/20001258-openai-daybreak-trusted-access-for-cyber-overview
 // https://developers.openai.com/api/docs/guides/daybreak (2026-10-05)
@@ -57,6 +58,7 @@ var openAIDaybreakModels = map[string]OpenAIDaybreakModel{
 	"gpt-6.1-sol":              {Model: "gpt-6.1-sol", RequiredTier: "red", Cyber: "daybreak_blue"},
 	"gpt-5.5-cyber":            {Model: "gpt-5.5-cyber", RequiredTier: "red", Cyber: "daybreak_red"},
 	"gpt-5.6-cyber":            {Model: "gpt-5.6-cyber", RequiredTier: "red", Cyber: "daybreak_red"},
+	"gpt-6-cyber":              {Model: "gpt-6-cyber", RequiredTier: "red", Cyber: "daybreak_red"},
 	"gpt-daybreak-red-latest":  {Model: "gpt-daybreak-red-latest", RequiredTier: "red", Cyber: "daybreak_red"},
 }
 
@@ -66,9 +68,9 @@ func IsOpenAIDaybreakAccount(account *Account) bool {
 		(account.IsOpenAIApiKey() && !account.IsCodexEngine()))
 }
 
-// OpenAIDaybreakAPIKeyCredentialIdentity binds capability evidence to the real
-// upstream credential and endpoint. It contains no plaintext credential and is
-// used only internally for cache isolation and the locked settings save.
+// OpenAIDaybreakAPIKeyCredentialIdentity isolates read-only catalog evidence by
+// the real upstream credential and endpoint. It contains no plaintext credential;
+// API key settings and inference no longer require this evidence.
 func OpenAIDaybreakAPIKeyCredentialIdentity(account *Account) string {
 	if account == nil || !account.IsOpenAIApiKey() || account.IsCodexEngine() {
 		return ""
@@ -335,7 +337,8 @@ func (s *OpenAIGatewayService) applyOpenAIDaybreakWithContext(ctx context.Contex
 	if s == nil {
 		return body, "catalog_unavailable", nil
 	}
-	model, recognized := openAIDaybreakModels[strings.TrimSpace(gjson.GetBytes(body, "model").String())]
+	outboundModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
+	model, recognized := openAIDaybreakModels[openAIDaybreakInboundModel(ctx, outboundModel)]
 	if !recognized {
 		return body, "unrecognized_model", nil
 	}
@@ -354,16 +357,20 @@ func (s *OpenAIGatewayService) applyOpenAIDaybreakWithContext(ctx context.Contex
 			return body, "group_red_disabled", nil
 		}
 	}
-	capabilities := s.openAICodexModelCapabilities(openAIDaybreakCapabilitiesNamespace(account), model.Model)
-	if !capabilities.Known {
-		credential, _, err := s.fetchOpenAIDaybreakCatalog(ctx, account)
-		if err != nil {
-			return body, "catalog_unavailable", nil
+	if !account.IsOpenAIApiKey() {
+		// Approval follows the requested model, but a live OAuth grant must cover
+		// the selected program on the model that actually receives the request.
+		capabilities := s.openAICodexModelCapabilities(openAIDaybreakCapabilitiesNamespace(account), outboundModel)
+		if !capabilities.Known {
+			credential, _, err := s.fetchOpenAIDaybreakCatalog(ctx, account)
+			if err != nil {
+				return body, "catalog_unavailable", nil
+			}
+			capabilities = s.openAICodexModelCapabilities(openAIDaybreakCapabilitiesNamespace(credential), outboundModel)
 		}
-		capabilities = s.openAICodexModelCapabilities(openAIDaybreakCapabilitiesNamespace(credential), model.Model)
-	}
-	if !openAIDaybreakModelSupported(model, capabilities) {
-		return body, "capability_unavailable", nil
+		if !openAIDaybreakModelSupported(model, capabilities) {
+			return body, "capability_unavailable", nil
+		}
 	}
 	patched, err := sjson.SetBytes(body, "access_programs.cyber", model.Cyber)
 	if err != nil {

@@ -498,12 +498,26 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 			AutoPauseOnExpired:            item.AutoPauseOnExpired,
 			SkipDefaultGroupBind:          skipDefaultGroupBind,
 		}
-		daybreakRequested := false
-		for _, key := range []string{service.OpenAIDaybreakBlueEnabledKey, service.OpenAIDaybreakRedEnabledKey} {
-			if enabled, _ := accountInput.Extra[key].(bool); enabled {
-				daybreakRequested = true
+		daybreakWarning := ""
+		daybreakAccount := &service.Account{Platform: item.Platform, Type: item.Type, Credentials: item.Credentials, Extra: accountInput.Extra}
+		if daybreakAccount.IsOpenAIApiKey() && service.IsOpenAIDaybreakAccount(daybreakAccount) {
+			accountInput.Extra, err = service.NormalizeOpenAIDaybreakSettings(daybreakAccount, accountInput.Extra)
+			if err != nil {
+				result.AccountFailed++
+				result.Errors = append(result.Errors, DataImportError{Kind: "account", Name: item.Name, Message: err.Error()})
+				continue
 			}
-			delete(accountInput.Extra, key)
+		} else {
+			for _, key := range []string{service.OpenAIDaybreakBlueEnabledKey, service.OpenAIDaybreakRedEnabledKey} {
+				if enabled, _ := accountInput.Extra[key].(bool); enabled {
+					if service.IsOpenAIDaybreakAccount(daybreakAccount) {
+						daybreakWarning = "Daybreak was imported disabled; save account credentials and check its live model capabilities before enabling Blue or Red"
+					} else {
+						daybreakWarning = "Daybreak settings were omitted because this account type does not support Daybreak"
+					}
+				}
+				delete(accountInput.Extra, key)
+			}
 		}
 
 		created, err := h.adminService.CreateAccount(ctx, accountInput)
@@ -522,8 +536,8 @@ func (h *AccountHandler) importData(ctx context.Context, req DataImportRequest) 
 		}
 		h.scheduleGrokImportProbe(created)
 		result.AccountCreated++
-		if daybreakRequested {
-			result.Warnings = append(result.Warnings, DataImportError{Kind: "account", Name: item.Name, Message: "Daybreak was imported disabled; save account credentials and check its live model capabilities before enabling Blue or Red"})
+		if daybreakWarning != "" {
+			result.Warnings = append(result.Warnings, DataImportError{Kind: "account", Name: item.Name, Message: daybreakWarning})
 		}
 	}
 

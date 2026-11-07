@@ -1081,6 +1081,9 @@ func (s *AccountTestService) testOpenAIAccountConnection(c *gin.Context, account
 	if testModelID == "" {
 		testModelID = openai.DefaultTestModel
 	}
+	if mode != AccountTestModeCompact {
+		ctx = withOpenAIDaybreakInboundModel(ctx, testModelID)
+	}
 
 	// Align test routing with gateway behavior: OpenAI accounts apply normal
 	// account model mapping. Native remote compaction v2 rides the ordinary
@@ -3512,6 +3515,7 @@ func (s *AccountTestService) testOpenAIImageAPIKey(c *gin.Context, ctx context.C
 
 // OAuth 图片测试与正式转发共用 Codex Images / Responses 分流规则。
 func (s *AccountTestService) testOpenAIImageOAuth(c *gin.Context, ctx context.Context, account *Account, modelID, prompt string) error {
+	ctx = withOpenAIDaybreakInboundModelFallback(ctx, modelID)
 	ctx = s.freezeOpenAIAccountTestPolicy(ctx, c, account)
 	credentialAccount := account
 	if account.IsShadow() && account.OpenAIOAuthCredentialOS == "" {

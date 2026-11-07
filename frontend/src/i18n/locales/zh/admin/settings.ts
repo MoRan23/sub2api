@@ -537,7 +537,7 @@ export default {
       },
       gatewayForwarding: {
         daybreakTitle: 'Daybreak 总开关',
-        daybreakHint: '默认开启：按分组、账号开关和真实模型能力自动补充客户端未指定的字段。关闭后停止自动补充，并从所有 OpenAI 出站请求中删除 access_programs.cyber（包含 API Key 与 Codex-Engine）；账号和分组偏好仍保留。分组默认关闭，需单独开启。',
+        daybreakHint: '默认开启：按每次请求的原始模型选择档位与字段值，在分组和账号允许时自动补充客户端未指定的字段。普通 API Key 可直接开启，OAuth 还会检查实际出站模型的能力，Codex-Engine 不自动补充。关闭后停止自动补充，并从所有 OpenAI 出站请求中删除 access_programs.cyber（包含 API Key 与 Codex-Engine）；账号和分组偏好仍保留。分组默认关闭，需单独开启。',
         title: '请求转发行为',
         description: '控制请求转发到上游 OAuth 账号时的行为',
         grokDefaultTextModel: '默认 Grok 文本模型',

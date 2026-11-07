@@ -1465,13 +1465,13 @@ describe('EditAccountModal', () => {
     wrapper.unmount()
   })
 
-  it('enables ordinary API Key Daybreak after checking live capabilities', async () => {
+  it('enables ordinary API Key Daybreak without checking live capabilities', async () => {
     const account = buildAccount()
     updateAccountMock.mockReset().mockResolvedValue(account)
     checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
     const wrapper = mountModal(account)
     await flushPromises()
-    expect(getDaybreakCapabilitiesMock).toHaveBeenCalledWith(account.id)
+    expect(getDaybreakCapabilitiesMock).not.toHaveBeenCalled()
     await wrapper.get('[data-testid="daybreak-blue"]').trigger('click')
     await wrapper.get('[data-testid="daybreak-red"]').trigger('click')
     await wrapper.get('form#edit-account-form').trigger('submit.prevent')
@@ -1497,9 +1497,11 @@ describe('EditAccountModal', () => {
     wrapper.unmount()
   })
 
-  it.each(['base_url', 'api_key', 'mode'])('requires saving an API Key %s change before enabling Daybreak', async (field) => {
+  it.each(['base_url', 'api_key', 'mode'])('enables Daybreak alongside an API Key %s change', async (field) => {
     const account = buildAccount()
     if (field === 'mode') account.extra = { openai_api_key_mode: 'codex_engine' }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
     const wrapper = mountModal(account)
     await flushPromises()
     if (field === 'base_url') {
@@ -1510,14 +1512,20 @@ describe('EditAccountModal', () => {
       await wrapper.get('[data-testid="openai-api-key-mode"]').setValue('generic')
     }
     await flushPromises()
-    expect(wrapper.get('[data-testid="daybreak-save-hint"]').exists()).toBe(true)
-    expect(wrapper.get('[data-testid="daybreak-blue"]').attributes('disabled')).toBeDefined()
-    expect(wrapper.get('[data-testid="daybreak-refresh"]').attributes('disabled')).toBeDefined()
-    if (field === 'mode') expect(getDaybreakCapabilitiesMock).not.toHaveBeenCalled()
+    expect(wrapper.find('[data-testid="daybreak-save-hint"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="daybreak-blue"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.find('[data-testid="daybreak-refresh"]').exists()).toBe(false)
+    expect(getDaybreakCapabilitiesMock).not.toHaveBeenCalled()
+    await wrapper.get('[data-testid="daybreak-blue"]').trigger('click')
+    await wrapper.get('[data-testid="daybreak-red"]').trigger('click')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    expect(updateAccountMock.mock.calls[0]?.[1]?.extra).toMatchObject({
+      openai_daybreak_blue_enabled: true, openai_daybreak_red_enabled: true
+    })
     wrapper.unmount()
   })
 
-  it('rechecks Daybreak evidence only when effective header overrides change', async () => {
+  it('keeps API Key Daybreak available when effective header overrides change', async () => {
     const account = buildAccount()
     account.credentials.header_override_enabled = true
     account.credentials.header_overrides = { 'OpenAI-Project': 'old-project' }
@@ -1530,18 +1538,19 @@ describe('EditAccountModal', () => {
     expect(wrapper.find('[data-testid="daybreak-save-hint"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="daybreak-blue"]').attributes('disabled')).toBeUndefined()
     await value.setValue('new-project')
-    expect(wrapper.get('[data-testid="daybreak-save-hint"]').exists()).toBe(true)
-    expect(wrapper.get('[data-testid="daybreak-blue"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-testid="daybreak-save-hint"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="daybreak-blue"]').attributes('disabled')).toBeUndefined()
     await value.setValue('old-project')
     await flushPromises()
     expect(wrapper.find('[data-testid="daybreak-save-hint"]').exists()).toBe(false)
-    expect(getDaybreakCapabilitiesMock).toHaveBeenCalledTimes(2)
+    expect(getDaybreakCapabilitiesMock).not.toHaveBeenCalled()
     await wrapper.get('[data-testid="edit-header-override-toggle"]').trigger('click')
-    expect(wrapper.get('[data-testid="daybreak-save-hint"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="daybreak-save-hint"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="daybreak-blue"]').attributes('disabled')).toBeUndefined()
     wrapper.unmount()
   })
 
-  it('ignores stored disabled header overrides until they are enabled', async () => {
+  it('keeps API Key Daybreak available when stored header overrides are enabled', async () => {
     const account = buildAccount()
     account.credentials.header_override_enabled = false
     account.credentials.header_overrides = { Authorization: 'Bearer override-token' }
@@ -1549,8 +1558,9 @@ describe('EditAccountModal', () => {
     await flushPromises()
     expect(wrapper.find('[data-testid="daybreak-save-hint"]').exists()).toBe(false)
     await wrapper.get('[data-testid="edit-header-override-toggle"]').trigger('click')
-    expect(wrapper.get('[data-testid="daybreak-save-hint"]').exists()).toBe(true)
-    expect(wrapper.get('[data-testid="daybreak-blue"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.find('[data-testid="daybreak-save-hint"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="daybreak-blue"]').attributes('disabled')).toBeUndefined()
+    expect(getDaybreakCapabilitiesMock).not.toHaveBeenCalled()
     wrapper.unmount()
   })
 

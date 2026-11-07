@@ -1,6 +1,6 @@
 # Daybreak 系统、分组与账号开关
 
-在**系统设置 → 网关**中设置 Daybreak 总开关，默认开启。在 **OpenAI／Composite 分组的创建或编辑页**允许对应的 Blue／Red 档位，再到**账号管理 → 编辑 OpenAI OAuth 或普通 API Key 账号 → Daybreak**读取上游能力并开启账号档位。分组与账号的 Red 均依赖 Blue，关闭 Blue 会一起关闭 Red。新账号默认关闭，先保存凭据，再检查能力并开启。
+在**系统设置 → 网关**中设置 Daybreak 总开关，默认开启。在 **OpenAI／Composite 分组的创建或编辑页**允许对应的 Blue／Red 档位，再到**账号管理 → Daybreak**开启账号档位。普通 OpenAI API Key 可在创建或编辑账号时直接开启，无需读取上游模型目录或检查能力声明。OAuth 账号需先完成授权并保存，再在编辑页读取真实上游能力并开启。新账号默认关闭；分组与账号的 Red 均依赖 Blue，关闭 Blue 会一起关闭 Red。
 
 **升级后已有分组的 Blue／Red 均为关闭，需要管理员手动开启才能恢复自动补充。**新建和复制分组也默认关闭。账号偏好保留，不会随总开关或分组开关关闭而清空。
 
@@ -8,21 +8,24 @@
 | --- | --- |
 | 系统关闭 | 不自动补充，并删除 OpenAI 账号出站请求的 `access_programs.cyber`，包括客户端显式值 |
 | 系统开启，分组或账号未允许所需档位 | 不自动补充，保留客户端原有字段 |
-| 系统、分组、账号均允许，且真实目录支持 | 仅在客户端未指定 `access_programs.cyber` 时自动补充 |
+| 系统、分组、普通 API Key 账号均允许 | 仅在客户端未指定 `access_programs.cyber` 时按模型规则自动补充 |
+| 系统、分组、OAuth 账号均允许，且真实目录支持 | 仅在客户端未指定 `access_programs.cyber` 时按模型规则自动补充 |
 
 自动补充适用于普通 OpenAI OAuth 和普通 API Key。Codex-Engine 继续同协议透传，不启用账号 Daybreak 自动补充；Setup Token、PAT 和 Agent Identity 也不提供账号 Blue／Red 开关。所有 OpenAI 账号仍受系统关闭的清除策略约束，其他平台不受影响。清除时不添加 `standard`，上游仍可能采用自身默认行为。
 
 ## 按模型填写请求
 
-模型映射完成后，只有请求所属分组与所选账号同时开启所需档位，且当前凭据的真实模型目录 `available_access_programs.cyber` 明确支持目标值，Sub2API 才会补充。普通 API Key 从其配置的上游模型目录读取；只返回模型 ID、没有该字段的目录不能开启 Daybreak。档位和请求值不是同一个概念：
+Daybreak 根据每次请求或 WS 帧最初传入的模型名确定所需档位和 `cyber` 值；实际发给上游的模型仍按现有映射执行。系统总开关需开启，请求所属分组与所选账号需同时开启所需档位。普通 API Key 直接按以下模型规则补充，不依赖上游模型目录中的 `available_access_programs.cyber`；OAuth 还需当前凭据的真实目录声明实际出站模型支持已选定的 `cyber` 值。档位和请求值不是同一个概念：
 
-| 模型 | 分组与账号均需开启 | 自动补充值 |
+| 原始入站模型 | 分组与账号均需开启 | 自动补充值 |
 | --- | --- | --- |
 | GPT-5.5、5.6 Sol、6 Sol、6 Luna、`gpt-daybreak-blue-latest` | Blue | `daybreak_blue` |
 | GPT-6 Astra、6.1 Sol | Blue + Red | `daybreak_blue` |
-| GPT-5.5 Cyber、5.6 Cyber、`gpt-daybreak-red-latest` | Blue + Red | `daybreak_red` |
+| GPT-5.5 Cyber、5.6 Cyber、6 Cyber（`gpt-6-cyber`）、`gpt-daybreak-red-latest` | Blue + Red | `daybreak_red` |
 
-例如 Astra 获得相应授权后，发送的字段是 `"access_programs":{"cyber":"daybreak_blue"}`，而不是 `daybreak_red`。未知型号不会按名称前缀推断，也不会自动改成 Daybreak alias。规则依据 [官方档位说明](https://help.openai.com/en/articles/20001258-openai-daybreak-trusted-access-for-cyber-overview)及 [Responses 参数文档](https://developers.openai.com/api/docs/guides/daybreak)，具体可用性始终以账号上游目录为准。
+例如原始入站模型为 Astra 时，满足相应条件后发送 `"access_programs":{"cyber":"daybreak_blue"}`。原始入站 `gpt-6-cyber` 即使映射到其他上游模型，仍按 Blue＋Red 选择 `daybreak_red`；普通 API Key 直接补充，OAuth 则校验映射后的实际出站模型是否支持 `daybreak_red`。未知别名即使映射为 `gpt-6-cyber`，也不会触发自动补充。未知型号不会按名称前缀推断，也不会自动改成 Daybreak alias。
+
+相关说明见 [官方档位说明](https://help.openai.com/en/articles/20001258-openai-daybreak-trusted-access-for-cyber-overview)及 [Responses 参数文档](https://developers.openai.com/api/docs/guides/daybreak)。OAuth 的可用性以账号真实上游目录为准；普通 API Key 根据管理员配置发送字段，由其上游处理。
 
 HTTP Responses、WS `response.create`，以及 Chat／Messages 转换后的 Responses 使用相同规则。独立压缩、计数和 WS 预热不会自动添加；正常 Responses 中的 `compaction_trigger` 不影响补充。系统开启时，客户端显式值（包括 `null` 或其他无效值）交由上游验证。
 
@@ -36,16 +39,16 @@ HTTP Responses、WS `response.create`，以及 Chat／Messages 转换后的 Resp
 - 系统设置通过现有管理员设置接口保存 `openai_daybreak_enabled`，缺失时默认 `true`。省略或传入 `null` 不覆盖原值。
 - 分组通过现有分组接口保存 `openai_daybreak_blue_enabled`、`openai_daybreak_red_enabled`；新增迁移为已有分组写入 `false` 默认值。部分更新省略字段时保留原值，切换到其他平台时清零。
 - 账号偏好保存在 `extra.openai_daybreak_blue_enabled`、`extra.openai_daybreak_red_enabled`，默认均为 `false`。
-- 静态目录、分组名及导入文件不能作为能力证明。查询失败或没有能力证据时禁止开启，始终允许关闭。
-- 能力沿用账号目录缓存及单飞刷新，按凭据所有者、授权槽位和授权代际隔离。普通令牌刷新保留开关；重新授权后的请求重新检查能力。
-- API Key 能力同时绑定实际密钥、上游地址、接入模式及请求头覆盖配置；修改凭据后需先保存再重新检查。静态补全的模型元数据不作为授权证据，304 复用真实目录，目录撤回能力后停止自动补充。
-- 共享凭据账号各自保存开关，能力来自实际凭据账号；不会互相继承开关。
-- 辅助目录读取失败时，本次推理保持原请求，不因该失败改变账号健康状态。系统关闭、分组／账号未允许或客户端已经指定时不额外查询目录。
-- 导出保留开关偏好。新导入账号默认关闭；导入内容要求开启时返回警告，需完成授权后在编辑页重新验证。更新已有账号且未修改开关时保留原偏好。
+- OAuth 以真实模型目录为能力依据，静态目录、分组名及导入文件不能作为能力证明。查询失败或没有能力证据时禁止开启，始终允许关闭。
+- OAuth 能力沿用账号目录缓存及单飞刷新，按凭据所有者、授权槽位和授权代际隔离。普通令牌刷新保留开关；重新授权后的请求重新检查能力。
+- 普通 API Key 不进行 Daybreak 能力查询，可与上游地址、密钥或请求头覆盖等修改一起保存开关。上游目录只返回模型 ID 或省略能力字段时，仍按账号和分组开关执行已知模型规则。切换到 Codex-Engine 后停止账号自动补充。
+- 共享 OAuth 凭据账号各自保存开关，能力来自实际凭据账号；不会互相继承开关。
+- OAuth 辅助目录读取失败时，本次推理保持原请求，不因该失败改变账号健康状态。系统关闭、分组／账号未允许或客户端已经指定时不额外查询目录。
+- 导出保留开关偏好。导入普通 API Key 时保留显式开关配置，缺失时默认关闭，并按 Red 依赖 Blue 的规则归一化。新导入 OAuth 账号默认关闭；导入内容要求开启时返回警告，需完成授权后在编辑页重新验证。更新已有账号且未修改开关时保留原偏好。
 
-自动添加只发生在实际推理发送前，原始重试正文和预热正文保持未注入状态。换号后依据新账号的开关、模型映射及能力重新判断。
+自动添加只发生在实际推理发送前，原始重试正文和预热正文保持未注入状态。重试或换号时仍用本次原始入站模型确定档位和值，再按新账号开关判断；OAuth 另按新账号映射后的实际出站模型检查能力。WS 后续轮按各自入站帧判断，不沿用上一轮模型。
 
-归因与鹈鹕测试沿用专用诊断规则：普通 OAuth 和普通 API Key 按任务冻结的账号偏好补充，独立于系统及分组开关，仍需真实模型能力。Engine 不获得此例外。详见[归因检测](model-attribution.md#daybreak-测试条件)。
+归因与鹈鹕测试沿用专用诊断规则：普通 OAuth 和普通 API Key 按任务冻结的账号偏好及所选探针模型补充，独立于系统及分组开关；探针不经过业务模型映射。普通 API Key 直接补充，OAuth 仍需实际出站模型的真实能力支持。Engine 不获得此例外。详见[归因检测](model-attribution.md#daybreak-测试条件)。
 
 系统设置在本进程保存成功后立即生效，其他实例最长约 60 秒刷新。读取失败时暂用最近有效值并短期重试，首次没有有效值时默认开启。每次物理请求或 WS 帧发送重新取值，不冻结到整条连接。HTTP 使用当前鉴权分组快照；长连接 WS 在需要自动补充的新一轮按可信分组 ID 读取配置，分组失效或读取失败时跳过补充，不阻断原请求。
 

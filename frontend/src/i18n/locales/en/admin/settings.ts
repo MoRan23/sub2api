@@ -544,7 +544,7 @@ export default {
       },
       gatewayForwarding: {
         daybreakTitle: 'Daybreak system switch',
-        daybreakHint: 'Enabled by default: automatically add missing client fields only when the group, account, and actual model capabilities allow them. Disabling stops automatic fields and removes access_programs.cyber from every OpenAI outbound request, including API Key and Codex-Engine accounts. Account and group preferences are preserved. Groups default to off and must be enabled separately.',
+        daybreakHint: 'Enabled by default: use each original request model to choose the Daybreak tier and value, and add missing client fields when the group and account allow them. Ordinary API Key accounts can enable directly; OAuth also checks the actual outbound model capability. Codex-Engine does not add fields automatically. Disabling stops automatic fields and removes access_programs.cyber from every OpenAI outbound request, including API Key and Codex-Engine accounts. Account and group preferences are preserved. Groups default to off and must be enabled separately.',
         title: 'Request Forwarding',
         description: 'Control how requests are forwarded to upstream OAuth accounts',
         grokDefaultTextModel: 'Default Grok text model',

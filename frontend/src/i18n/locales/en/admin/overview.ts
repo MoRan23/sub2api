@@ -1290,8 +1290,8 @@ export default {
       },
       daybreak: {
         title: 'Daybreak automatic fields',
-        hint: 'Automatic access_programs.cyber fields require the matching tier on the system, current group, and selected OAuth account. Disabling a group only stops automatic fields and preserves client values; disabling the system switch removes the field. Existing, new, and duplicated groups default to off and must be enabled manually.',
-        redHint: 'Red requires Blue. GPT-6 Astra / GPT-6.1 Sol require both switches while their request value remains daybreak_blue. The account must also support the required capability.',
+        hint: 'Automatic access_programs.cyber fields use the original request model to select the tier and value, and require the system, current group, and selected ordinary OpenAI OAuth or API Key account to allow that tier. OAuth also checks the actual outbound model capability. Disabling a group only stops automatic fields and preserves client values; disabling the system switch removes the field. Existing, new, and duplicated groups default to off and must be enabled manually.',
+        redHint: 'Red requires Blue. Original requests for GPT-6 Astra / GPT-6.1 Sol require both switches and use daybreak_blue. Original requests for GPT-6 Cyber use daybreak_red. Mapping another model to GPT-6 Cyber does not select Red.',
       },
       openaiFast: {
         title: 'OpenAI Fast mode',

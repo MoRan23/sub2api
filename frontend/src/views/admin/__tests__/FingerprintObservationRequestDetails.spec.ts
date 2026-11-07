@@ -88,7 +88,7 @@ describe('FingerprintObservationRequestDetails', () => {
     await openDetails()
     const detail = within(screen.getByTestId('daybreak-details'))
     expect(detail.getByText('Not present')).toBeTruthy()
-    expect(detail.getByText('Current model catalog does not declare the required capability')).toBeTruthy()
+    expect(detail.getByText('The actual outbound model catalog does not declare the selected capability')).toBeTruthy()
     expect(detail.queryByText('Automatically added')).toBeNull()
   })
 

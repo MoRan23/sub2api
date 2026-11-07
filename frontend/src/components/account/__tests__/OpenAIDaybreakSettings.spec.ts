@@ -36,7 +36,7 @@ describe('OpenAIDaybreakSettings', () => {
   beforeEach(() => getCapabilities.mockReset().mockResolvedValue(available))
   afterEach(() => { wrappers.splice(0).forEach(wrapper => wrapper.unmount()) })
 
-  it('does not check an unsaved account and keeps both switches off and disabled', async () => {
+  it('does not check an unsaved OAuth account and keeps both switches off and disabled', async () => {
     const wrapper = mountSettings({ accountId: undefined })
     await flushPromises()
     expect(getCapabilities).not.toHaveBeenCalled()
@@ -46,6 +46,50 @@ describe('OpenAIDaybreakSettings', () => {
       expect(toggle.attributes('aria-checked')).toBe('false')
       expect(toggle.attributes('disabled')).toBeDefined()
     }
+  })
+
+  it.each([undefined, 1])('enables API Key Daybreak without capabilities for account %s', async (accountId) => {
+    const wrapper = mountSettings({ accountId, apiKey: true, requiresSave: true })
+    await flushPromises()
+    expect(getCapabilities).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-testid="daybreak-api-key-hint"]').exists()).toBe(true)
+    expect(wrapper.find('[data-testid="daybreak-create-hint"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="daybreak-save-hint"]').exists()).toBe(false)
+    expect(wrapper.find('[data-testid="daybreak-refresh"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="daybreak-blue"]').attributes('disabled')).toBeUndefined()
+    expect(wrapper.get('[data-testid="daybreak-red"]').attributes('disabled')).toBeDefined()
+    await wrapper.get('[data-testid="daybreak-blue"]').trigger('click')
+    expect(wrapper.emitted('update:blue')).toEqual([[true]])
+    await wrapper.setProps({ blue: true })
+    await wrapper.get('[data-testid="daybreak-red"]').trigger('click')
+    expect(wrapper.emitted('update:red')).toEqual([[true]])
+    await wrapper.setProps({ red: true })
+    await wrapper.get('[data-testid="daybreak-blue"]').trigger('click')
+    expect(wrapper.emitted('update:blue')?.at(-1)).toEqual([false])
+    expect(wrapper.emitted('update:red')?.at(-1)).toEqual([false])
+  })
+
+  it('invalidates OAuth evidence when switching to API Key and checks again when returning to OAuth', async () => {
+    const pending = deferred<OpenAIDaybreakCapabilities>()
+    getCapabilities.mockReturnValueOnce(pending.promise)
+    const wrapper = mountSettings()
+    await wrapper.setProps({ apiKey: true })
+    pending.resolve(available)
+    await flushPromises()
+    expect(wrapper.find('[data-testid="daybreak-models"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="daybreak-blue"]').attributes('disabled')).toBeUndefined()
+    getCapabilities.mockResolvedValueOnce({ ...available, blue_available: false, red_available: false, models: [] })
+    await wrapper.setProps({ apiKey: false })
+    await flushPromises()
+    expect(getCapabilities).toHaveBeenCalledTimes(2)
+    expect(wrapper.get('[data-testid="daybreak-blue"]').attributes('disabled')).toBeDefined()
+  })
+
+  it('keeps API Key switches unavailable when the form is inactive', async () => {
+    const wrapper = mountSettings({ apiKey: true, active: false })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="daybreak-blue"]').attributes('disabled')).toBeDefined()
+    expect(getCapabilities).not.toHaveBeenCalled()
   })
 
   it('requires evidence and Blue before enabling Red, then turns both off together', async () => {

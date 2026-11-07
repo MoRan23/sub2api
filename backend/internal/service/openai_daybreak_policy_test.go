@@ -54,24 +54,33 @@ func TestOpenAIDaybreakPolicyRequiresSystemGroupAndAccountTier(t *testing.T) {
 		{name: "6.1 Sol Red tier sends Blue", model: "gpt-6.1-sol", groupBlue: true, groupRed: true, accountBlue: true, accountRed: true, want: "daybreak_blue"},
 		{name: "Cyber requires group Red", model: "gpt-5.6-cyber", groupBlue: true, accountBlue: true, accountRed: true},
 		{name: "Cyber all Red enabled", model: "gpt-5.6-cyber", groupBlue: true, groupRed: true, accountBlue: true, accountRed: true, want: "daybreak_red"},
+		{name: "6 Cyber requires group Red", model: "gpt-6-cyber", groupBlue: true, accountBlue: true, accountRed: true},
+		{name: "6 Cyber all Red enabled", model: "gpt-6-cyber", groupBlue: true, groupRed: true, accountBlue: true, accountRed: true, want: "daybreak_red"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			svc := daybreakPolicyTestService(true)
-			account := daybreakPolicyTestAccount(tc.accountBlue, tc.accountRed)
-			manifest := fmt.Sprintf(`{"models":[{"slug":%q,"available_access_programs":{"cyber":["daybreak_blue","daybreak_red"]}}]}`, tc.model)
-			svc.codexModelCapabilities.observeManifest(openAICodexModelCapabilitiesNamespace(account), []byte(manifest), time.Now())
-			body := []byte(fmt.Sprintf(`{"model":%q,"input":"history","opaque":9007199254740993}`, tc.model))
-			before := string(body)
-			wire, reason, err := svc.applyOpenAIDaybreakWithDecision(daybreakTestContext(daybreakTestGroup(tc.groupBlue, tc.groupRed)), account, body)
-			require.NoError(t, err)
-			require.Equal(t, before, string(body), "the retry source remains unchanged")
-			require.Equal(t, "9007199254740993", gjson.GetBytes(wire, "opaque").Raw)
-			if tc.want == "" {
-				require.Equal(t, body, wire)
-				require.NotEqual(t, "automatic", reason)
-			} else {
-				require.Equal(t, tc.want, gjson.GetBytes(wire, "access_programs.cyber").String())
-				require.Equal(t, "automatic", reason)
+			for _, accountType := range []string{AccountTypeOAuth, AccountTypeAPIKey} {
+				t.Run(accountType, func(t *testing.T) {
+					svc := daybreakPolicyTestService(true)
+					account := daybreakPolicyTestAccount(tc.accountBlue, tc.accountRed)
+					account.Type = accountType
+					if accountType == AccountTypeOAuth {
+						manifest := fmt.Sprintf(`{"models":[{"slug":%q,"available_access_programs":{"cyber":["daybreak_blue","daybreak_red"]}}]}`, tc.model)
+						svc.codexModelCapabilities.observeManifest(openAICodexModelCapabilitiesNamespace(account), []byte(manifest), time.Now())
+					}
+					body := []byte(fmt.Sprintf(`{"model":%q,"input":"history","opaque":9007199254740993}`, tc.model))
+					before := string(body)
+					wire, reason, err := svc.applyOpenAIDaybreakWithDecision(daybreakTestContext(daybreakTestGroup(tc.groupBlue, tc.groupRed)), account, body)
+					require.NoError(t, err)
+					require.Equal(t, before, string(body), "the retry source remains unchanged")
+					require.Equal(t, "9007199254740993", gjson.GetBytes(wire, "opaque").Raw)
+					if tc.want == "" {
+						require.Equal(t, body, wire)
+						require.NotEqual(t, "automatic", reason)
+					} else {
+						require.Equal(t, tc.want, gjson.GetBytes(wire, "access_programs.cyber").String())
+						require.Equal(t, "automatic", reason)
+					}
+				})
 			}
 		})
 	}

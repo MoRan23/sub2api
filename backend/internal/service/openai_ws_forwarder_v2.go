@@ -38,6 +38,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 	if s == nil || account == nil {
 		return nil, wrapOpenAIWSFallback("invalid_state", errors.New("service or account is nil"))
 	}
+	ctx = withOpenAIDaybreakInboundModelFallback(ctx, originalModel)
 	ctx = s.freezeOpenAIRequestPolicy(ctx, c)
 	rawRequest := payloadAsJSONBytes(reqBody)
 	if account.UsesOpenAICodexProtocol() {

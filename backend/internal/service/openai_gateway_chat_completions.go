@@ -75,6 +75,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 	if account.IsCodexEngine() {
 		return s.forwardCodexEngine(ctx, c, account, body, "/v1/chat/completions", defaultMappedModel)
 	}
+	ctx = withOpenAIDaybreakHTTPInboundModel(ctx, c, gjson.GetBytes(body, "model").String())
 	clientAccessPrograms := json.RawMessage(gjson.GetBytes(body, "access_programs").Raw)
 	if account != nil && account.IsOpenAIOAuth() {
 		var scopeErr error

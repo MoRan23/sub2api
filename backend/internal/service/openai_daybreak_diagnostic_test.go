@@ -158,7 +158,7 @@ func TestDiagnosticDaybreakProbeAndPelicanObserveFinalWire(t *testing.T) {
 }
 
 func TestAPIKeyDiagnosticDaybreakProbeAndPelicanObserveFinalWire(t *testing.T) {
-	for _, kind := range []string{"pelican", "attribution", "unavailable"} {
+	for _, kind := range []string{"pelican", "attribution", "standard_only"} {
 		t.Run(kind, func(t *testing.T) {
 			owner := &Account{ID: 8911, Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
 				Status: StatusActive, Schedulable: true, Concurrency: 1,
@@ -169,11 +169,9 @@ func TestAPIKeyDiagnosticDaybreakProbeAndPelicanObserveFinalWire(t *testing.T) {
 			upstream := &httpUpstreamRecorder{responses: []*http.Response{diagnosticDaybreakSuccessResponse()}}
 			gateway := newOpenAIRejectedFieldTestService(upstream)
 			gateway.accountRepo, gateway.settingService = repo, daybreakHTTPSettings(false)
-			program := "daybreak_blue"
-			if kind == "unavailable" {
-				program = "standard"
+			if kind == "standard_only" {
+				gateway.observeOpenAIDaybreakAPIKeyCatalog(owner, []byte(`{"data":[{"id":"gpt-5.5","available_access_programs":{"cyber":["standard"]}}]}`), time.Now())
 			}
-			gateway.observeOpenAIDaybreakAPIKeyCatalog(owner, []byte(fmt.Sprintf(`{"data":[{"id":"gpt-5.5","available_access_programs":{"cyber":[%q]}}]}`, program)), time.Now())
 			runner := newCandySyntheticCatalogTransport(repo, gateway)
 			ctx := context.Background()
 			var result *CandyTestExecution
@@ -189,13 +187,8 @@ func TestAPIKeyDiagnosticDaybreakProbeAndPelicanObserveFinalWire(t *testing.T) {
 			require.NoError(t, err)
 			require.True(t, result.Completed)
 			require.Len(t, upstream.bodies, 1)
-			if kind == "unavailable" {
-				require.False(t, gjson.GetBytes(upstream.bodies[0], "access_programs.cyber").Exists())
-				require.Equal(t, &DiagnosticDaybreakEvidence{Reason: "capability_unavailable"}, result.Daybreak)
-			} else {
-				require.Equal(t, "daybreak_blue", gjson.GetBytes(upstream.bodies[0], "access_programs.cyber").String())
-				require.Equal(t, &DiagnosticDaybreakEvidence{Cyber: "daybreak_blue", Reason: "automatic"}, result.Daybreak)
-			}
+			require.Equal(t, "daybreak_blue", gjson.GetBytes(upstream.bodies[0], "access_programs.cyber").String())
+			require.Equal(t, &DiagnosticDaybreakEvidence{Cyber: "daybreak_blue", Reason: "automatic"}, result.Daybreak)
 		})
 	}
 }
