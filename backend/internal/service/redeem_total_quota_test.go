@@ -60,10 +60,10 @@ func quotaRedeemGroups() *quotaRedeemGroupRepo {
 }
 
 func TestValidateSubscriptionQuotaAmount(t *testing.T) {
-	for _, amount := range []float64{0.00000001, 1, 12.34567891, 999999999999.1234} {
+	for _, amount := range []float64{0.00000001, 1, 12.34567891, 9999999999.1234} {
 		require.NoError(t, ValidateSubscriptionQuotaAmount(&amount))
 	}
-	for _, amount := range []*float64{nil, new(0.0), new(-1.0), new(math.NaN()), new(math.Inf(1)), new(0.000000001), new(1.123456789), new(1e12)} {
+	for _, amount := range []*float64{nil, new(0.0), new(-1.0), new(math.NaN()), new(math.Inf(1)), new(0.000000001), new(1.123456789), new(1e10), new(999999999999.1234), new(1e12)} {
 		require.Error(t, ValidateSubscriptionQuotaAmount(amount))
 	}
 }

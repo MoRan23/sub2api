@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"strconv"
@@ -41,6 +42,7 @@ var (
 
 // subscriptionCacheData 订阅缓存数据结构（内部使用）
 type subscriptionCacheData struct {
+	Generation           string
 	Status               string
 	ExpiresAt            *time.Time
 	DailyUsage           float64
@@ -120,19 +122,25 @@ type BillingCacheService struct {
 	circuitBreaker        *billingCircuitBreaker
 	userPlatformQuotaRepo UserPlatformQuotaRepository
 
-	cacheWriteChan     chan cacheWriteTask
-	cacheWriteWg       sync.WaitGroup
-	cacheWriteStopOnce sync.Once
-	cacheWriteMu       sync.RWMutex
-	stopped            atomic.Bool
-	balanceLoadSF      singleflight.Group
-	quotaLoadSF        singleflight.Group
+	cacheWriteChan        chan cacheWriteTask
+	cacheWriteWg          sync.WaitGroup
+	cacheWriteStopOnce    sync.Once
+	cacheWriteMu          sync.RWMutex
+	stopped               atomic.Bool
+	balanceLoadSF         singleflight.Group
+	subscriptionLoadSF    singleflight.Group
+	subscriptionDirty     sync.Map // subscriptionCacheIdentity -> *subscriptionInvalidation
+	subscriptionRetryStop chan struct{}
+	quotaLoadSF           singleflight.Group
 	// 丢弃日志节流计数器（减少高负载下日志噪音）
 	cacheWriteDropFullCount     uint64
 	cacheWriteDropFullLastLog   int64
 	cacheWriteDropClosedCount   uint64
 	cacheWriteDropClosedLastLog int64
 }
+
+type subscriptionCacheIdentity struct{ userID, groupID int64 }
+type subscriptionInvalidation struct{ pending bool }
 
 // NewBillingCacheService 创建计费缓存服务
 func NewBillingCacheService(
@@ -166,6 +174,10 @@ func (s *BillingCacheService) Stop() {
 		s.stopped.Store(true)
 
 		s.cacheWriteMu.Lock()
+		if s.subscriptionRetryStop != nil {
+			close(s.subscriptionRetryStop)
+			s.subscriptionRetryStop = nil
+		}
 		ch := s.cacheWriteChan
 		if ch != nil {
 			close(ch)
@@ -192,6 +204,31 @@ func (s *BillingCacheService) startCacheWriteWorkers() {
 		s.cacheWriteWg.Add(1)
 		go s.cacheWriteWorker(ch)
 	}
+	stop := make(chan struct{})
+	s.subscriptionRetryStop = stop
+	s.cacheWriteWg.Add(1)
+	go func() {
+		defer s.cacheWriteWg.Done()
+		ticker := time.NewTicker(time.Second)
+		defer ticker.Stop()
+		for {
+			select {
+			case <-stop:
+				return
+			case <-ticker.C:
+				s.subscriptionDirty.Range(func(key, marker any) bool {
+					if s.stopped.Load() {
+						return false
+					}
+					id := key.(subscriptionCacheIdentity)
+					ctx, cancel := context.WithTimeout(context.Background(), cacheWriteTimeout)
+					_ = s.retrySubscriptionInvalidation(ctx, id, marker)
+					cancel()
+					return true
+				})
+			}
+		}
+	}()
 }
 
 // enqueueCacheWrite 尝试将任务入队，队列满时返回 false（并记录告警）。
@@ -422,37 +459,83 @@ func (s *BillingCacheService) GetSubscriptionStatus(ctx context.Context, userID,
 	if s.cache == nil {
 		return s.getSubscriptionFromDB(ctx, userID, groupID)
 	}
+	id := subscriptionCacheIdentity{userID, groupID}
+	if marker, dirty := s.subscriptionDirty.Load(id); dirty {
+		// A failed post-commit invalidation must not make this instance trust
+		// or republish its old snapshot while Redis recovers.
+		if err := s.retrySubscriptionInvalidation(ctx, id, marker); err != nil {
+			return s.getSubscriptionFromDB(ctx, userID, groupID)
+		}
+		// Another mutation may replace the marker while this attempt is in
+		// flight. Its failed/pending invalidation still forbids cache reads.
+		if _, dirty := s.subscriptionDirty.Load(id); dirty {
+			return s.getSubscriptionFromDB(ctx, userID, groupID)
+		}
+	}
 
 	// 尝试从缓存读取
 	cacheData, err := s.cache.GetSubscriptionCache(ctx, userID, groupID)
 	if err == nil && cacheData != nil {
 		data := s.convertFromPortsData(cacheData)
 		if data.NextQuotaExpireAt != nil && !time.Now().Before(*data.NextQuotaExpireAt) {
-			_ = s.cache.InvalidateSubscriptionCache(ctx, userID, groupID)
+			if err := s.InvalidateSubscription(ctx, userID, groupID); err != nil {
+				return s.getSubscriptionFromDB(ctx, userID, groupID)
+			}
 		} else {
 			return data, nil
 		}
 	}
 
-	// 缓存未命中，从数据库读取
-	data, err := s.getSubscriptionFromDB(ctx, userID, groupID)
-	if err != nil {
-		return nil, err
+	fence, ok := s.cache.(SubscriptionCacheGeneration)
+	if !ok {
+		// Adapters without generation support may serve their own cache, but
+		// cannot safely publish an asynchronously loaded DB snapshot.
+		return s.getSubscriptionFromDB(ctx, userID, groupID)
 	}
-
-	// 异步建立缓存
-	_ = s.enqueueCacheWrite(cacheWriteTask{
-		kind:             cacheWriteSetSubscription,
-		userID:           userID,
-		groupID:          groupID,
-		subscriptionData: data,
-	})
-
-	return data, nil
+	for attempt := 0; attempt < 3; attempt++ {
+		generation, err := fence.GetSubscriptionCacheGeneration(ctx, userID, groupID)
+		if err != nil {
+			return s.getSubscriptionFromDB(ctx, userID, groupID)
+		}
+		key := subCacheKey(userID, groupID) + ":" + generation
+		value, err, _ := s.subscriptionLoadSF.Do(key, func() (any, error) {
+			loadCtx, cancel := context.WithTimeout(context.Background(), balanceLoadTimeout)
+			defer cancel()
+			data, err := s.getSubscriptionFromDB(loadCtx, userID, groupID)
+			if err != nil {
+				return nil, err
+			}
+			current, err := fence.GetSubscriptionCacheGeneration(loadCtx, userID, groupID)
+			if err != nil {
+				return data, nil
+			} // Redis unavailable: do not publish.
+			if current != generation {
+				return nil, ErrSubscriptionCacheStale
+			}
+			if _, dirty := s.subscriptionDirty.Load(id); dirty {
+				return data, nil
+			}
+			data.Generation = generation
+			_ = s.enqueueCacheWrite(cacheWriteTask{kind: cacheWriteSetSubscription, userID: userID, groupID: groupID, subscriptionData: data})
+			return data, nil
+		})
+		if errors.Is(err, ErrSubscriptionCacheStale) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		data := *value.(*subscriptionCacheData)
+		return &data, nil
+	}
+	// A busy subscription can change generations on every read. Obtain a fresh
+	// authoritative snapshot without scheduling any cache write in that case.
+	return s.getSubscriptionFromDB(ctx, userID, groupID)
 }
 
 func (s *BillingCacheService) convertFromPortsData(data *SubscriptionCacheData) *subscriptionCacheData {
 	return &subscriptionCacheData{
+		Generation:           data.Generation,
 		Status:               data.Status,
 		ExpiresAt:            data.ExpiresAt,
 		DailyUsage:           data.DailyUsage,
@@ -469,6 +552,7 @@ func (s *BillingCacheService) convertFromPortsData(data *SubscriptionCacheData) 
 
 func (s *BillingCacheService) convertToPortsData(data *subscriptionCacheData) *SubscriptionCacheData {
 	return &SubscriptionCacheData{
+		Generation:           data.Generation,
 		Status:               data.Status,
 		ExpiresAt:            data.ExpiresAt,
 		DailyUsage:           data.DailyUsage,
@@ -510,7 +594,16 @@ func (s *BillingCacheService) setSubscriptionCache(ctx context.Context, userID, 
 	if s.cache == nil || data == nil {
 		return
 	}
+	if data.Generation == "" {
+		return
+	}
+	if _, dirty := s.subscriptionDirty.Load(subscriptionCacheIdentity{userID, groupID}); dirty {
+		return
+	}
 	if err := s.cache.SetSubscriptionCache(ctx, userID, groupID, s.convertToPortsData(data)); err != nil {
+		if errors.Is(err, ErrSubscriptionCacheStale) {
+			return
+		}
 		logger.LegacyPrintf("service.billing_cache", "Warning: set subscription cache failed for user %d group %d: %v", userID, groupID, err)
 	}
 }
@@ -549,10 +642,21 @@ func (s *BillingCacheService) InvalidateSubscription(ctx context.Context, userID
 	if s.cache == nil {
 		return nil
 	}
-	if err := s.cache.InvalidateSubscriptionCache(ctx, userID, groupID); err != nil {
-		logger.LegacyPrintf("service.billing_cache", "Warning: invalidate subscription cache failed for user %d group %d: %v", userID, groupID, err)
+	id := subscriptionCacheIdentity{userID, groupID}
+	marker := &subscriptionInvalidation{pending: true}
+	s.subscriptionDirty.Store(id, marker)
+	return s.retrySubscriptionInvalidation(ctx, id, marker)
+}
+
+func (s *BillingCacheService) retrySubscriptionInvalidation(ctx context.Context, id subscriptionCacheIdentity, marker any) error {
+	if current, exists := s.subscriptionDirty.Load(id); !exists || current != marker {
+		return nil
+	}
+	if err := s.cache.InvalidateSubscriptionCache(ctx, id.userID, id.groupID); err != nil {
+		logger.LegacyPrintf("service.billing_cache", "Warning: invalidate subscription cache failed for user %d group %d: %v", id.userID, id.groupID, err)
 		return err
 	}
+	s.subscriptionDirty.CompareAndDelete(id, marker)
 	return nil
 }
 

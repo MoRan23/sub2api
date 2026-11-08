@@ -11,17 +11,19 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
+	"github.com/google/uuid"
 	"github.com/redis/go-redis/v9"
 )
 
 const (
-	billingBalanceKeyPrefix   = "billing:balance:v2:"
-	billingSubKeyPrefix       = "billing:sub:v2:"
-	billingRateLimitKeyPrefix = "apikey:rate:"
-	subCacheInvalidateChannel = "subscription:cache:invalidate"
-	billingCacheTTL           = 5 * time.Minute
-	billingCacheJitter        = 30 * time.Second
-	rateLimitCacheTTL         = 7 * 24 * time.Hour // 7 days matches the longest window
+	billingBalanceKeyPrefix    = "billing:balance:v2:"
+	billingSubKeyPrefix        = "billing:sub:v3:"
+	billingSubGenerationPrefix = "billing:sub:generation:"
+	billingRateLimitKeyPrefix  = "apikey:rate:"
+	subCacheInvalidateChannel  = "subscription:cache:invalidate"
+	billingCacheTTL            = 5 * time.Minute
+	billingCacheJitter         = 30 * time.Second
+	rateLimitCacheTTL          = 7 * 24 * time.Hour // 7 days matches the longest window
 
 	// Rate limit window durations — must match service.RateLimitWindow* constants.
 	rateLimitWindow5h = 5 * time.Hour
@@ -49,6 +51,10 @@ func billingSubKey(userID, groupID int64) string {
 	return fmt.Sprintf("%s%d:%d", billingSubKeyPrefix, userID, groupID)
 }
 
+func billingSubGenerationKey(userID, groupID int64) string {
+	return fmt.Sprintf("%s%d:%d", billingSubGenerationPrefix, userID, groupID)
+}
+
 const (
 	subFieldStatus       = "status"
 	subFieldExpiresAt    = "expires_at"
@@ -62,6 +68,7 @@ const (
 	subFieldNextExpireAt = "next_quota_expire_at"
 	subFieldNextExpiring = "next_expiring_quota_usd"
 	subFieldVersion      = "version"
+	subFieldGeneration   = "generation"
 )
 
 // billingRateLimitKey generates the Redis key for API key rate limit cache.
@@ -79,6 +86,31 @@ const (
 )
 
 var (
+	// Generation keys deliberately do not expire: an old queued write must never
+	// become valid again after a data TTL, Redis eviction, or an extended DB read.
+	getSubGenerationScript = redis.NewScript(`
+		redis.call('SETNX', KEYS[1], ARGV[1])
+		return redis.call('GET', KEYS[1])
+	`)
+	getSubCacheScript = redis.NewScript(`
+		local generation = redis.call('GET', KEYS[2])
+		if not generation or redis.call('HGET', KEYS[1], 'generation') ~= generation then
+			return {}
+		end
+		return redis.call('HGETALL', KEYS[1])
+	`)
+	setSubCacheScript = redis.NewScript(`
+		if redis.call('GET', KEYS[2]) ~= ARGV[1] then return 0 end
+		redis.call('HSET', KEYS[1], unpack(ARGV, 3))
+		redis.call('EXPIRE', KEYS[1], ARGV[2])
+		return 1
+	`)
+	invalidateSubCacheScript = redis.NewScript(`
+		redis.call('SET', KEYS[2], ARGV[1])
+		redis.call('DEL', KEYS[1])
+		redis.call('PUBLISH', ARGV[2], ARGV[3])
+		return 1
+	`)
 	deductBalanceScript = redis.NewScript(`
 		local current = redis.call('GET', KEYS[1])
 		if current == false then
@@ -181,18 +213,26 @@ func (c *billingCache) InvalidateUserBalance(ctx context.Context, userID int64) 
 
 func (c *billingCache) GetSubscriptionCache(ctx context.Context, userID, groupID int64) (*service.SubscriptionCacheData, error) {
 	key := billingSubKey(userID, groupID)
-	result, err := c.rdb.HGetAll(ctx, key).Result()
+	values, err := getSubCacheScript.Run(ctx, c.rdb, []string{key, billingSubGenerationKey(userID, groupID)}).StringSlice()
 	if err != nil {
 		return nil, err
 	}
-	if len(result) == 0 {
+	if len(values) == 0 {
 		return nil, redis.Nil
+	}
+	result := make(map[string]string, len(values)/2)
+	for i := 0; i+1 < len(values); i += 2 {
+		result[values[i]] = values[i+1]
 	}
 	return c.parseSubscriptionCache(result)
 }
 
+func (c *billingCache) GetSubscriptionCacheGeneration(ctx context.Context, userID, groupID int64) (string, error) {
+	return getSubGenerationScript.Run(ctx, c.rdb, []string{billingSubGenerationKey(userID, groupID)}, uuid.NewString()).Text()
+}
+
 func (c *billingCache) parseSubscriptionCache(data map[string]string) (*service.SubscriptionCacheData, error) {
-	result := &service.SubscriptionCacheData{}
+	result := &service.SubscriptionCacheData{Generation: data[subFieldGeneration]}
 
 	result.Status = data[subFieldStatus]
 	if result.Status == "" {
@@ -258,8 +298,19 @@ func (c *billingCache) SetSubscriptionCache(ctx context.Context, userID, groupID
 	}
 
 	key := billingSubKey(userID, groupID)
+	generation := data.Generation
+	if generation == "" {
+		// Direct cache initialization callers have no prior database read. Service
+		// read-through always supplies the token captured before its DB snapshot.
+		var err error
+		generation, err = c.GetSubscriptionCacheGeneration(ctx, userID, groupID)
+		if err != nil {
+			return err
+		}
+	}
 
 	fields := map[string]any{
+		subFieldGeneration:   generation,
 		subFieldStatus:       data.Status,
 		subFieldExpiryMode:   "permanent",
 		subFieldExpiresAt:    "",
@@ -282,11 +333,18 @@ func (c *billingCache) SetSubscriptionCache(ctx context.Context, userID, groupID
 		fields[subFieldNextExpireAt] = 0
 	}
 
-	pipe := c.rdb.Pipeline()
-	pipe.HSet(ctx, key, fields)
-	pipe.Expire(ctx, key, jitteredTTL())
-	_, err := pipe.Exec(ctx)
-	return err
+	args := []any{generation, int(jitteredTTL().Seconds())}
+	for field, value := range fields {
+		args = append(args, field, value)
+	}
+	stored, err := setSubCacheScript.Run(ctx, c.rdb, []string{key, billingSubGenerationKey(userID, groupID)}, args...).Int()
+	if err != nil {
+		return err
+	}
+	if stored == 0 {
+		return service.ErrSubscriptionCacheStale
+	}
+	return nil
 }
 
 func (c *billingCache) UpdateSubscriptionUsage(ctx context.Context, userID, groupID int64, cost float64) error {
@@ -301,7 +359,8 @@ func (c *billingCache) UpdateSubscriptionUsage(ctx context.Context, userID, grou
 
 func (c *billingCache) InvalidateSubscriptionCache(ctx context.Context, userID, groupID int64) error {
 	key := billingSubKey(userID, groupID)
-	return c.rdb.Del(ctx, key).Err()
+	return invalidateSubCacheScript.Run(ctx, c.rdb, []string{key, billingSubGenerationKey(userID, groupID)},
+		uuid.NewString(), subCacheInvalidateChannel, fmt.Sprintf("sub:%d:%d", userID, groupID)).Err()
 }
 
 func (c *billingCache) PublishSubscriptionCacheInvalidation(ctx context.Context, cacheKey string) error {

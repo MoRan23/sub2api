@@ -24,6 +24,15 @@ func (r *detachedIdempotencyRepo) MarkSucceeded(ctx context.Context, id int64, s
 	return r.inMemoryIdempotencyRepo.MarkSucceeded(ctx, id, status, body, expiresAt)
 }
 
+func (r *detachedIdempotencyRepo) MarkFailedRetryable(ctx context.Context, id int64, reason string, lockedUntil, expiresAt time.Time) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	deadline, bounded := ctx.Deadline()
+	r.savedWithBound = bounded && time.Until(deadline) <= 5*time.Second
+	return r.inMemoryIdempotencyRepo.MarkFailedRetryable(ctx, id, reason, lockedUntil, expiresAt)
+}
+
 func (r *detachedIdempotencyRepo) ExtendProcessingLock(ctx context.Context, id int64, fingerprint string, lockedUntil, expiresAt time.Time) (bool, error) {
 	ok, err := r.inMemoryIdempotencyRepo.ExtendProcessingLock(ctx, id, fingerprint, lockedUntil, expiresAt)
 	if ok && err == nil {
@@ -116,4 +125,39 @@ func TestIdempotencyCoordinator_DetachedExecutionRenewsLongBatchLease(t *testing
 	require.NoError(t, err)
 	require.True(t, replay.Replayed)
 	require.Equal(t, int32(1), executions.Load())
+}
+
+func TestIdempotencyCoordinator_DetachedExecutionDeadlineFailureRemainsRetryable(t *testing.T) {
+	repo := &detachedIdempotencyRepo{inMemoryIdempotencyRepo: newInMemoryIdempotencyRepo()}
+	cfg := DefaultIdempotencyConfig()
+	cfg.FailedRetryBackoff = 0
+	coordinator := NewIdempotencyCoordinator(repo, cfg)
+	opts := IdempotencyExecuteOptions{
+		Scope: "admin.subscriptions.assign", Method: "POST", Route: "/assign",
+		IdempotencyKey: "deadline-failure", RequireKey: true,
+		Payload: map[string]float64{"quota_amount": 12.5}, ExecutionTimeout: 10 * time.Millisecond,
+	}
+	_, err := coordinator.Execute(context.Background(), opts, func(ctx context.Context) (any, error) {
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.True(t, repo.savedWithBound, "deadline failure must be persisted with a fresh bounded context")
+	stored, err := repo.GetByScopeAndKeyHash(context.Background(), opts.Scope, HashIdempotencyKey(opts.IdempotencyKey))
+	require.NoError(t, err)
+	require.Equal(t, IdempotencyStatusFailedRetryable, stored.Status)
+	grants := 0
+	execute := func(context.Context) (any, error) {
+		grants++
+		return map[string]float64{"total_remaining_usd": 12.5}, nil
+	}
+	// Allow the successful retry ample time; the first execution alone tests the deadline.
+	opts.ExecutionTimeout = time.Second
+	result, err := coordinator.Execute(context.Background(), opts, execute)
+	require.NoError(t, err)
+	require.False(t, result.Replayed)
+	replay, err := coordinator.Execute(context.Background(), opts, execute)
+	require.NoError(t, err)
+	require.True(t, replay.Replayed)
+	require.Equal(t, 1, grants)
 }

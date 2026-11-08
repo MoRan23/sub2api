@@ -8,11 +8,12 @@ import (
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 )
 
-// ValidateSubscriptionQuotaAmount validates an explicitly supplied DECIMAL(20,8)
-// grant. A missing or zero amount never means unlimited subscription credit.
+// ValidateSubscriptionQuotaAmount accepts at most eight fractional digits while
+// respecting the ten integer digits in the quota event ledger's DECIMAL(20,10).
+// A missing or zero amount never means unlimited subscription credit.
 func ValidateSubscriptionQuotaAmount(amount *float64) error {
-	if amount == nil || math.IsNaN(*amount) || math.IsInf(*amount, 0) || *amount <= 0 || *amount >= 1e12 {
-		return infraerrors.BadRequest("SUBSCRIPTION_QUOTA_AMOUNT_INVALID", "quota_amount must be a finite positive amount with at most 8 decimal places")
+	if amount == nil || math.IsNaN(*amount) || math.IsInf(*amount, 0) || *amount <= 0 || *amount >= 1e10 {
+		return infraerrors.BadRequest("SUBSCRIPTION_QUOTA_AMOUNT_INVALID", "quota_amount must be finite, positive, less than 10000000000, and have at most 8 decimal places")
 	}
 	decimal := strconv.FormatFloat(*amount, 'f', -1, 64)
 	if dot := strings.IndexByte(decimal, '.'); dot >= 0 && len(decimal)-dot-1 > 8 {

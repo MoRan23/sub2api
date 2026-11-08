@@ -15,7 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 )
 
-const codexEnginePricingSnapshotVersion = 1
+const codexEnginePricingSnapshotVersion = 2
 const codexEnginePricingModelLimit = 512
 const codexEnginePricingSnapshotLimit = 256 * 1024
 
@@ -48,6 +48,8 @@ type codexEnginePricingSnapshot struct {
 	UpstreamEndpoint         string                            `json:"upstream_endpoint,omitempty"`
 	GroupID                  *int64                            `json:"group_id,omitempty"`
 	SubscriptionID           *int64                            `json:"subscription_id,omitempty"`
+	TotalQuotaBilling        bool                              `json:"total_quota_billing,omitempty"`
+	TotalQuotaSpendSnapshot  *codexEngineQuotaSpendSnapshot    `json:"total_quota_spend_snapshot,omitempty"`
 	ChannelID                int64                             `json:"channel_id,omitempty"`
 	ModelMappingChain        string                            `json:"model_mapping_chain,omitempty"`
 	QuotaPlatform            string                            `json:"quota_platform,omitempty"`
@@ -70,6 +72,43 @@ type codexEnginePricingSnapshot struct {
 	FreeFast                 bool                              `json:"free_fast"`
 	LongContext              bool                              `json:"long_context"`
 	Prices                   map[string]codexEngineFrozenPrice `json:"prices"`
+}
+
+// Persist the admitted batches, not a current balance. Recovery may occur after
+// their expiry or a new grant, and must still settle against the original grant.
+type codexEngineQuotaSpendSnapshot struct {
+	SubscriptionID  int64     `json:"subscription_id"`
+	EventIDs        []int64   `json:"event_ids"`
+	OverflowEventID int64     `json:"overflow_event_id"`
+	TakenAt         time.Time `json:"taken_at"`
+}
+
+func (f *codexEnginePricingSnapshot) validateTotalQuotaSpendSnapshot() error {
+	q := f.TotalQuotaSpendSnapshot
+	if !f.TotalQuotaBilling {
+		if q != nil {
+			return errors.New("unexpected engine quota spend snapshot")
+		}
+		return nil
+	}
+	if !f.SubscriptionBilling || f.SubscriptionID == nil || q == nil || q.SubscriptionID <= 0 ||
+		q.SubscriptionID != *f.SubscriptionID || len(q.EventIDs) == 0 || q.TakenAt.IsZero() {
+		return errors.New("engine admitted quota spend snapshot unavailable")
+	}
+	seen := make(map[int64]struct{}, len(q.EventIDs))
+	for _, id := range q.EventIDs {
+		if id <= 0 {
+			return errors.New("invalid engine quota event ID")
+		}
+		if _, exists := seen[id]; exists {
+			return errors.New("duplicate engine quota event ID")
+		}
+		seen[id] = struct{}{}
+	}
+	if _, exists := seen[q.OverflowEventID]; !exists {
+		return errors.New("engine quota overflow event was not admitted")
+	}
+	return nil
 }
 
 // Exported fields mirror the nonsecret resolved card, including the two private
@@ -151,6 +190,18 @@ func (s *OpenAIGatewayService) CaptureCodexEngineBillingSnapshot(ctx context.Con
 		id := in.Subscription.ID
 		f.SubscriptionID = &id
 		f.SubscriptionBilling = key.Group != nil && key.Group.IsSubscriptionType()
+	}
+	f.TotalQuotaBilling = f.SubscriptionBilling && key.Group.IsTotalQuotaSubscriptionType()
+	if f.TotalQuotaBilling {
+		if admitted, ok := TotalQuotaSpendSnapshotFromContext(ctx); ok && admitted != nil {
+			f.TotalQuotaSpendSnapshot = &codexEngineQuotaSpendSnapshot{
+				SubscriptionID: admitted.SubscriptionID, EventIDs: append([]int64(nil), admitted.EventIDs...),
+				OverflowEventID: admitted.OverflowEventID, TakenAt: admitted.TakenAt,
+			}
+		}
+		if err := f.validateTotalQuotaSpendSnapshot(); err != nil {
+			return nil, err
+		}
 	}
 	f.SimpleMode = s.cfg != nil && s.cfg.RunMode == config.RunModeSimple
 	f.SimpleKeyRateOnly = simpleModeKeyRateLimitBillingEnabled(s.cfg, key)
@@ -323,8 +374,13 @@ func decodeCodexEnginePricingSnapshot(raw json.RawMessage) (*codexEnginePricingS
 	if err := json.Unmarshal(raw, &f); err != nil {
 		return nil, fmt.Errorf("decode engine pricing snapshot: %w", err)
 	}
-	if f.Version != codexEnginePricingSnapshotVersion || len(f.Prices) > codexEnginePricingModelLimit || f.PricingAt.IsZero() {
+	// Version 1 jobs keep their legacy settlement semantics; their missing
+	// admission evidence cannot be reconstructed from today's grants.
+	if (f.Version != 1 && f.Version != codexEnginePricingSnapshotVersion) || len(f.Prices) > codexEnginePricingModelLimit || f.PricingAt.IsZero() {
 		return nil, errors.New("unsupported engine pricing snapshot")
+	}
+	if err := f.validateTotalQuotaSpendSnapshot(); err != nil {
+		return nil, err
 	}
 	for _, v := range []float64{f.AccountRate, f.TokenRate, f.ImageRate, f.BaseRate, f.SearchPrice} {
 		if math.IsNaN(v) || math.IsInf(v, 0) || v < 0 {
@@ -560,6 +616,15 @@ func (s *OpenAIGatewayService) SettleCodexEngineBillingEvent(ctx context.Context
 	quotaCost := log.ActualCost
 	if f.SimpleMode || f.SubscriptionBilling {
 		quotaCost = 0
+	}
+	// Workers restart with an independent context. Restore only this job's
+	// frozen admission evidence, never a snapshot supplied by another caller.
+	ctx = WithTotalQuotaSpendSnapshot(ctx, nil)
+	if q := f.TotalQuotaSpendSnapshot; q != nil {
+		ctx = WithTotalQuotaSpendSnapshot(ctx, &TotalQuotaSpendSnapshot{
+			SubscriptionID: q.SubscriptionID, EventIDs: append([]int64(nil), q.EventIDs...),
+			OverflowEventID: q.OverflowEventID, TakenAt: q.TakenAt,
+		})
 	}
 	result, err := store.ApplyEvent(ctx, &CodexEngineBillingEvent{JobID: job.ID, ClaimToken: job.ClaimToken, EventID: event.EventID, Fingerprint: event.Fingerprint, Sequence: event.Sequence, Summary: CodexEngineBillingSummaryGroup{Kind: event.Kind, Purpose: event.Purpose, Model: event.Model, ServiceTier: optionalTrimmedStringPtr(event.ServiceTier), Usage: event.UsageValues}, Platform: f.QuotaPlatform, PlatformQuotaCost: quotaCost, Command: *cmd, UsageLog: *log})
 	if err != nil {

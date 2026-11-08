@@ -16,6 +16,10 @@
 
 账号停调不影响原账单恢复；地址／密钥／接入模式改变后停止新查询，已用原身份取得并验证的事件仍可结算。租约控制多实例领取，重启后恢复待结算任务。事件账本独立于短期运维记录保留。
 
+价格快照 v2 同时保存总额度订阅的准入批次 ID、有序消费列表、超额承接批次和准入时间。后台恢复时使用这些冻结数据：即使原额度在执行中到期，也结算到原批次，不消费请求准入后追加的额度。新总额度请求缺少有效准入快照时在派发前报错。旧 v1 任务仍可读取并按原规则结算；其未保存的批次信息不能从当前额度推算，补丁不会伪造历史快照。新快照仍不保存正文或凭据，无需数据库列迁移。
+
+Pricing snapshot v2 persists the admitted total-quota batches, their spending order, overflow target and admission time. Recovery settles against those original batches after expiry or later top-ups. New total-quota dispatch requires valid admission evidence. Existing v1 jobs remain readable with their original settlement behavior; missing historical batch evidence is not reconstructed from current grants. No database-column migration is required.
+
 断连、写入失败及 Flush 失败立即取消 Engine 执行。迟到用量属于原请求，按真实已确认消耗收费；后台不重发推理，不恢复搜索或工具。同步图片同样取消；已创建的异步图片任务按自己的任务生命周期执行。
 
 ## 平台配额缓存

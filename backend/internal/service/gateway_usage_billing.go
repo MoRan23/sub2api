@@ -159,6 +159,10 @@ func postUsageBilling(ctx context.Context, p *postUsageBillingParams, deps *bill
 		if cost.ActualCost > 0 {
 			if err := deps.userSubRepo.IncrementUsage(billingCtx, p.Subscription.ID, cost.ActualCost); err != nil {
 				slog.Error("increment subscription usage failed", "subscription_id", p.Subscription.ID, "error", err)
+			} else if p.APIKey != nil && p.APIKey.Group != nil && p.APIKey.Group.IsTotalQuotaSubscriptionType() && deps.billingCacheService != nil {
+				if err := deps.billingCacheService.InvalidateSubscription(billingCtx, p.User.ID, p.APIKey.Group.ID); err != nil {
+					slog.Warn("invalidate total quota cache after legacy deduction failed", "subscription_id", p.Subscription.ID, "error", err)
+				}
 			}
 		}
 	} else {
@@ -422,8 +426,17 @@ func finalizePostUsageBilling(ctx context.Context, p *postUsageBillingParams, de
 	}
 
 	if p.IsSubscriptionBill {
-		if p.Cost.ActualCost > 0 && p.User != nil && p.APIKey != nil && p.APIKey.GroupID != nil {
-			deps.billingCacheService.QueueUpdateSubscriptionUsage(p.User.ID, *p.APIKey.GroupID, p.Cost.ActualCost)
+		if p.Cost.ActualCost > 0 && p.User != nil && p.APIKey != nil && p.APIKey.GroupID != nil && deps.billingCacheService != nil {
+			if p.APIKey.Group != nil && p.APIKey.Group.IsTotalQuotaSubscriptionType() {
+				// A charge can target an expired admission batch while new credit
+				// exists. Subtracting its cost from cached remaining would charge
+				// that new batch again; reload the committed ledger instead.
+				if err := deps.billingCacheService.InvalidateSubscription(ctx, p.User.ID, *p.APIKey.GroupID); err != nil {
+					slog.Warn("invalidate total quota cache after deduction failed", "user_id", p.User.ID, "group_id", *p.APIKey.GroupID, "error", err)
+				}
+			} else {
+				deps.billingCacheService.QueueUpdateSubscriptionUsage(p.User.ID, *p.APIKey.GroupID, p.Cost.ActualCost)
+			}
 		}
 	} else if p.Cost.ActualCost > 0 && p.User != nil {
 		syncBalanceCacheAfterDeduction(ctx, p, deps, result)

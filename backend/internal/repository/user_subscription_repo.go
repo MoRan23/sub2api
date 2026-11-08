@@ -579,8 +579,8 @@ func (r *userSubscriptionRepository) RetireDepletedQuotaEventsOnAppend(ctx conte
 		WHERE user_subscription_id = $1
 		  AND id <> $2
 		  AND expires_at > $3
-		  AND quota_total_usd - quota_used_usd <= $4
-	`, subscriptionID, keepEventID, retireAt, totalQuotaConsumeEpsilon); err != nil {
+		  AND quota_total_usd - quota_used_usd <= 0
+	`, subscriptionID, keepEventID, retireAt); err != nil {
 		return err
 	}
 

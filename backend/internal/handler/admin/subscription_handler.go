@@ -147,7 +147,8 @@ func (h *SubscriptionHandler) Assign(c *gin.Context) {
 	// Get admin user ID from context
 	adminID := getAdminIDFromContext(c)
 
-	executeAdminIdempotentJSONWithResponse(c, "admin.subscriptions.assign", req, service.DefaultWriteIdempotencyTTL(), func(ctx context.Context) (any, error) {
+	// Preserve the committed grant and its replay result if the client disconnects.
+	executeAdminIdempotentJSONWithProjection(c, "admin.subscriptions.assign", req, service.DefaultWriteIdempotencyTTL(), 2*time.Minute, idempotencyStoreUnavailableFailClose, func(ctx context.Context) (any, error) {
 		subscription, err := h.subscriptionService.AssignSubscription(ctx, &service.AssignSubscriptionInput{
 			UserID:          req.UserID,
 			GroupID:         req.GroupID,

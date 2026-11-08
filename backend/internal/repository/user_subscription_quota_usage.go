@@ -3,14 +3,18 @@ package repository
 import (
 	"context"
 	"database/sql"
+	"errors"
 	"math"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
+	"github.com/shopspring/decimal"
 )
 
-const totalQuotaConsumeEpsilon = 1e-9
+// Quota events retain ten decimal places, including historical usage recorded
+// before the shared billing command began quantizing new charges to eight.
+const totalQuotaLedgerScale = 10
 
 func incrementSubscriptionUsage(ctx context.Context, exec sqlExecutor, subscriptionID int64, costUSD float64) error {
 	if costUSD <= 0 {
@@ -75,6 +79,16 @@ func incrementWindowedSubscriptionUsage(ctx context.Context, exec sqlExecutor, s
 }
 
 func consumeTotalQuotaSubscriptionUsage(ctx context.Context, exec sqlExecutor, subscriptionID int64, costUSD float64) error {
+	if math.IsNaN(costUSD) || math.IsInf(costUSD, 0) {
+		return errors.New("total quota usage cost must be finite")
+	}
+	// Round once to the ledger's storage precision before splitting the charge.
+	// Scan and allocate the persisted decimals exactly: even its smallest positive
+	// remainder must be spendable, since it also permits request admission.
+	remainingCost := decimal.NewFromFloat(costUSD).Round(totalQuotaLedgerScale)
+	if !remainingCost.IsPositive() {
+		return nil
+	}
 	events, overflowTargetID, err := loadTotalQuotaSpendRows(ctx, exec, subscriptionID)
 	if err != nil {
 		return err
@@ -83,37 +97,33 @@ func consumeTotalQuotaSubscriptionUsage(ctx context.Context, exec sqlExecutor, s
 		return service.ErrTotalLimitExceeded
 	}
 
-	remainingCost := costUSD
 	for _, event := range events {
-		remaining := event.totalUSD - event.usedUSD
-		if remaining <= totalQuotaConsumeEpsilon {
+		remaining := event.totalUSD.Sub(event.usedUSD)
+		if !remaining.IsPositive() {
 			continue
 		}
-		delta := math.Min(remainingCost, remaining)
-		if delta <= totalQuotaConsumeEpsilon {
-			break
-		}
+		delta := decimal.Min(remainingCost, remaining)
 		if _, err := exec.ExecContext(ctx, `
 			UPDATE user_subscription_quota_events
 			SET quota_used_usd = quota_used_usd + $1,
 			    updated_at = NOW()
 			WHERE id = $2
-		`, delta, event.id); err != nil {
+		`, delta.String(), event.id); err != nil {
 			return err
 		}
-		remainingCost -= delta
-		if remainingCost <= totalQuotaConsumeEpsilon {
+		remainingCost = remainingCost.Sub(delta)
+		if !remainingCost.IsPositive() {
 			return nil
 		}
 	}
 
-	if remainingCost > totalQuotaConsumeEpsilon {
+	if remainingCost.IsPositive() {
 		if _, err := exec.ExecContext(ctx, `
 			UPDATE user_subscription_quota_events
 			SET quota_used_usd = quota_used_usd + $1,
 			    updated_at = NOW()
 			WHERE id = $2
-		`, remainingCost, overflowTargetID); err != nil {
+		`, remainingCost.String(), overflowTargetID); err != nil {
 			return err
 		}
 	}
@@ -122,8 +132,8 @@ func consumeTotalQuotaSubscriptionUsage(ctx context.Context, exec sqlExecutor, s
 
 type totalQuotaSpendRow struct {
 	id       int64
-	totalUSD float64
-	usedUSD  float64
+	totalUSD decimal.Decimal
+	usedUSD  decimal.Decimal
 }
 
 func loadTotalQuotaSpendRows(ctx context.Context, exec sqlExecutor, subscriptionID int64) ([]totalQuotaSpendRow, int64, error) {
