@@ -5,9 +5,9 @@
 ## 派发、恢复和去重
 
 1. 选定账号后，通过 `GET /v1/engine/capacity` 确认 `instance_id` 和 `capabilities.billing_contract=confirmed-events`。按地址及凭据身份缓存 60 秒，保存失败或合同不符时不派发模型请求。
-2. 派发前持久保存内部关联 ID、用户／Key／账号归属、冻结价格及非敏感请求摘要。快照不包含账户密钥、提示词、文件和密文正文。客户端提供的内部关联头不会被采用。
-3. 后台按原身份查询 `/v1/usage/receipts?client_request_id=...`，取得回执后查询 `/v1/usage/receipts/{id}`。404、网络故障或原响应头丢失继续等待；只读查询不会启动推理。已确认未派发的请求单独终止，无伪造封口。
-4. 先持久接收分页中的消费事实，再独立结算可定价事件。未定价或永久缺少必要信息的事件不会阻止后续页入账；事实与原因保留。源封口和费用结清分别记录。
+2. 派发前持久保存内部关联 ID、用户／Key／账号归属、原始分组、计费策略及非敏感请求摘要。v4 快照不再保存模型目录、渠道价卡、搜索或图片单价；收到确认用量后读取当前价格。快照不包含账户密钥、提示词、文件和密文正文。客户端提供的内部关联头不会被采用。
+3. 转发层确认正常终态响应已完整写出并 Flush 后，后台才按原身份查询 `/v1/usage/receipts?client_request_id=...`，取得回执后查询 `/v1/usage/receipts/{id}`。404、网络故障或原响应头丢失继续等待；只读查询不会启动推理。已确认未派发的请求单独终止，无伪造封口。
+4. 已交付任务先持久接收分页中的消费事实，再独立结算可定价事件。未定价或缺少必要信息的事件保留待处理；事实与原因保留。源封口和费用结清分别记录。未完整交付的任务清除暂存事件，退出回执查询和结算。
 5. `(instance_id, receipt_id, event_id)` 全局唯一。事件事实、扣款、各额度更新及使用记录同事务成功或回滚；重复回执不重复收费。汇总只用于核验，不是另一笔费用。
 
 扣款账本提交后，接收记录仍保留待处理状态；余额、Key 速率、订阅及平台配额缓存处理成功才确认完成。缓存失败或进程重启后，根据已提交账本去重，只重试缓存后处理，完成后才允许任务封账。
@@ -20,7 +20,11 @@
 
 Pricing snapshot v2 persists the admitted total-quota batches, their spending order, overflow target and admission time. Recovery settles against those original batches after expiry or later top-ups. New total-quota dispatch requires valid admission evidence. Existing v1 jobs remain readable with their original settlement behavior; missing historical batch evidence is not reconstructed from current grants. No database-column migration is required.
 
-断连、写入失败及 Flush 失败立即取消 Engine 执行。迟到用量属于原请求，按真实已确认消耗收费；后台不重发推理，不恢复搜索或工具。同步图片同样取消；已创建的异步图片任务按自己的任务生命周期执行。
+断连、写入失败及 Flush 失败立即取消 Engine 请求。新任务只有正常终态响应完整写出后才进入计费；断连或未完整交付时，任务转为免计费终态，不保存迟到 usage／费用记录、不扣余额、订阅、Key 额度／速率金额或用户平台额度，也不再查询该任务的迟到回执。仅保留内部终止标记，防止重启后重新补记。正常收到输出 token 上限终态的响应仍沿用原计费行为。后台不重发推理，不恢复搜索或工具。同步图片同样取消；已创建的异步图片任务按自己的任务生命周期执行。
+
+v4 结算使用任务原始分组 ID 查询当前分组、渠道和模型价格；Key 后续换组不会改变这笔请求的归属。请求发生时间、已确定倍率及准入额度批次仍保留。价格调整会影响尚未结算的 v4 事件；已提交的事件由账本去重，不重新计价或重复扣费。旧 v1／v2 快照继续按保存的价格结算。
+
+New v4 jobs retain request ownership and admission policy, but no price catalog. Confirmed events use current pricing for the original group at settlement. Client disconnection or incomplete delivery ends the job without usage logs, cost records or customer charges. Such jobs are not polled for late receipts. Legacy pricing snapshots retain their original semantics. A crash before the delivery outcome is persisted leaves the job pending and excluded from polling and settlement.
 
 ## 平台配额缓存
 
@@ -30,7 +34,7 @@ Pricing snapshot v2 persists the admitted total-quota batches, their spending or
 
 ## 升级和回退
 
-本变更需要迁移 276（任务／扣款事件账本）、277（平台配额分量）和 278（接收事件检查点）。不能混跑新旧结算进程或新旧配额 flusher。
+本变更需要迁移 276（任务／扣款事件账本）、277（平台配额分量）、278（接收事件检查点）和 280（交付结果）。280 保留旧任务原有计费语义，新任务显式以待确认交付状态创建。不能混跑新旧结算进程或新旧配额 flusher；旧程序不识别 v4 快照和交付门禁。
 
 升级顺序：
 
@@ -43,8 +47,10 @@ Pricing snapshot v2 persists the admitted total-quota batches, their spending or
 
 ## 离线验证
 
-本次在 Go 1.27.3（`greenteagc,jsonv2`）运行服务、处理器及仓储定向单元测试、相关竞态检查和后端编译，均通过。覆盖派发前持久化、缺头恢复、断连、取消、WS 每轮关联、冻结价格、事件去重、分页、源封口和未知值；无分组 Key 的长上下文定价与普通路径对照通过。
+在 Go 1.27.3（`greenteagc,jsonv2`）运行服务、处理器及仓储定向单元测试、相关竞态检查和后端编译。覆盖派发前持久化、缺头恢复、断连、取消、WS 每轮关联、v4 当前价格、旧 v1／v2 冻结价格、事件去重、分页、源封口和未知值；无分组 Key 的长上下文定价与普通路径对照通过。
 
 在 WSL Docker 的隔离 PostgreSQL 18.1／Redis 中验证真实扣款事务、回滚、跨账号回执归属、租约恢复、扣款后缓存失败重试、窗口重置及重复迁移。额度读取适配器、热刷新和冷填后普通增量重复刷回均有回归覆盖；普通消费与 Engine 分量不会重复合并。测试使用模拟 Engine，不依赖线上数据或真实模型。
+
+2026-11-10 增量验证：定向单元测试、服务／处理器竞态测试、后端编译及隔离仓储 `TestCodexEngineBilling*` 集成测试通过。新增覆盖待交付任务不领取、断连后暂存事件删除、旧 worker 租约失效、未交付不产生用量／账本／额度变更、正常 token 上限终态、原分组当前定价和 JSONB 快照边界。生产数据未修改，未调用真实模型。
 
 建议上线观察任务状态及 `last_error`、已接收／已结算事件差额、源封口积压、平台配额脏集合，以及运维中的 DNS／连接／TLS／请求发送阶段。未知请求只查询原回执，不能以重新发送推理作为账务恢复手段。

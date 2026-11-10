@@ -6,6 +6,7 @@ import (
 	"context"
 	"database/sql"
 	"errors"
+	"fmt"
 	"strings"
 	"testing"
 	"time"
@@ -33,10 +34,14 @@ func engineBillingJobRows() *sqlmock.Rows {
 }
 
 func engineBillingClaimedRows() *sqlmock.Rows {
+	return engineBillingClaimedRowsWithDelivery(service.CodexEngineBillingDelivered)
+}
+
+func engineBillingClaimedRowsWithDelivery(delivery string) *sqlmock.Rows {
 	now := time.Now()
 	return engineBillingJobRows().AddRow(int64(1), "client-original", int64(3), int64(4), int64(5),
 		"identity", "engine-instance", []byte(`{"version":1,"multiplier":1}`), "receipt", "pending", "", int64(0), int64(0), now,
-		"claim", now.Add(time.Minute), 1, nil, nil, "", now, now, nil, int64(0))
+		"claim", now.Add(time.Minute), 1, nil, nil, "", now, now, nil, int64(0), delivery)
 }
 
 func engineBillingEvent() *service.CodexEngineBillingEvent {
@@ -53,10 +58,14 @@ func expectEngineBillingClaim(mock sqlmock.Sqlmock) {
 }
 
 func expectEngineBillingNewEvent(mock sqlmock.Sqlmock) {
+	expectEngineBillingEventAndKey(mock)
+	mock.ExpectQuery(dualWalletBalanceDeductSQL).WithArgs(float64(2), int64(4)).WillReturnRows(sqlmock.NewRows([]string{"total_balance", "sufficient"}).AddRow(float64(98), true))
+}
+
+func expectEngineBillingEventAndKey(mock sqlmock.Sqlmock) {
 	mock.ExpectExec(`INSERT INTO codex_engine_billing_events`).WithArgs(int64(1), "event-1", strings.Repeat("a", 64), sqlmock.AnyArg(), int64(1), sqlmock.AnyArg()).WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(`INSERT INTO usage_billing_dedup`).WithArgs(sqlmock.AnyArg(), int64(5), strings.Repeat("a", 64)).WillReturnRows(sqlmock.NewRows([]string{"id"}).AddRow(int64(1)))
 	mock.ExpectQuery(`SELECT request_fingerprint.*FROM usage_billing_dedup_archive`).WithArgs(sqlmock.AnyArg(), int64(5)).WillReturnRows(sqlmock.NewRows([]string{"request_fingerprint"}))
-	mock.ExpectQuery(dualWalletBalanceDeductSQL).WithArgs(float64(2), int64(4)).WillReturnRows(sqlmock.NewRows([]string{"total_balance", "sufficient"}).AddRow(float64(98), true))
 }
 
 func TestCodexEngineBillingStoreApplyEventAtomic(t *testing.T) {
@@ -74,6 +83,83 @@ func TestCodexEngineBillingStoreApplyEventAtomic(t *testing.T) {
 	require.Equal(t, e.Command.RequestID, e.UsageLog.RequestID)
 	require.Regexp(t, `^ce2:[A-Za-z0-9_-]{43}$`, e.Command.RequestID)
 	require.Equal(t, int64(4), e.Command.UserID)
+}
+
+func TestCodexEngineBillingStoreDeliveryPendingStagesButDoesNotSettle(t *testing.T) {
+	r, mock := engineBillingUnitStore(t)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT .* FROM codex_engine_billing_jobs WHERE id=\$1 AND claim_token=\$2`).WithArgs(int64(1), "claim").WillReturnRows(engineBillingClaimedRowsWithDelivery(service.CodexEngineBillingDeliveryPending))
+	mock.ExpectRollback()
+	_, err := r.ApplyEvent(context.Background(), engineBillingEvent())
+	require.ErrorIs(t, err, service.ErrCodexEngineBillingDeliveryPending)
+}
+
+func TestCodexEngineBillingStoreDisconnectedDiscardsUsageAndCharge(t *testing.T) {
+	r, mock := engineBillingUnitStore(t)
+	mock.ExpectBegin()
+	mock.ExpectQuery(`SELECT .* FROM codex_engine_billing_jobs WHERE id=\$1 AND claim_token=\$2`).WithArgs(int64(1), "claim").WillReturnRows(engineBillingClaimedRowsWithDelivery(service.CodexEngineBillingNoCustomerCharge))
+	mock.ExpectRollback()
+
+	e := engineBillingEvent()
+	e.Command.SubscriptionCost = 1
+	e.Command.APIKeyQuotaCost = 3
+	e.Command.APIKeyRateLimitCost = 4
+	e.Command.AccountQuotaCost = 5
+	e.PlatformQuotaCost = 6
+	e.UsageLog.TotalCost = 2
+	e.UsageLog.ActualCost = 2.5
+	out, err := r.ApplyEvent(context.Background(), e)
+	require.ErrorIs(t, err, service.ErrCodexEngineBillingClaimLost, "incomplete jobs must also skip post-apply cache effects")
+	require.Nil(t, out, "no usage log, quota update, or billing ledger may be written")
+	require.Zero(t, e.UsageLog.ID)
+}
+
+func TestCodexEngineBillingStoreFinalizeDeliveryIsIdempotentAndConflictSafe(t *testing.T) {
+	r, mock := engineBillingUnitStore(t)
+	query := `UPDATE codex_engine_billing_jobs SET delivery_outcome=\$2, updated_at=NOW\(\),.*WHERE id=\$1 AND \(delivery_outcome='pending' OR delivery_outcome=\$2\)`
+	mock.ExpectBegin()
+	mock.ExpectExec(query).WithArgs(int64(1), service.CodexEngineBillingDelivered).WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectCommit()
+	require.NoError(t, r.FinalizeDelivery(context.Background(), 1, service.CodexEngineBillingDelivered))
+	mock.ExpectBegin()
+	mock.ExpectExec(query).WithArgs(int64(1), service.CodexEngineBillingNoCustomerCharge).WillReturnResult(sqlmock.NewResult(0, 0))
+	mock.ExpectRollback()
+	require.ErrorIs(t, r.FinalizeDelivery(context.Background(), 1, service.CodexEngineBillingNoCustomerCharge), service.ErrCodexEngineBillingConflict)
+}
+
+func TestCodexEngineBillingStoreFinalizeIncompleteDiscardsStagedFactsAtomically(t *testing.T) {
+	for _, fail := range []bool{false, true} {
+		t.Run(fmt.Sprintf("discard failure=%t", fail), func(t *testing.T) {
+			r, mock := engineBillingUnitStore(t)
+			mock.ExpectBegin()
+			mock.ExpectExec(`UPDATE codex_engine_billing_jobs SET delivery_outcome`).WithArgs(int64(1), service.CodexEngineBillingNoCustomerCharge).WillReturnResult(sqlmock.NewResult(0, 1))
+			remove := mock.ExpectExec(`DELETE FROM codex_engine_billing_received_events WHERE job_id=\$1`).WithArgs(int64(1))
+			if fail {
+				remove.WillReturnError(errors.New("inbox unavailable"))
+				mock.ExpectRollback()
+			} else {
+				remove.WillReturnResult(sqlmock.NewResult(0, 3))
+				mock.ExpectCommit()
+			}
+			err := r.FinalizeDelivery(context.Background(), 1, service.CodexEngineBillingNoCustomerCharge)
+			if fail {
+				require.ErrorContains(t, err, "inbox unavailable")
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+func TestCodexEngineBillingStoreCreateStartsDeliveryPending(t *testing.T) {
+	r, mock := engineBillingUnitStore(t)
+	now := time.Now()
+	mock.ExpectQuery(`INSERT INTO codex_engine_billing_jobs`).WithArgs("client-new", int64(3), int64(4), int64(5), "identity", "engine-instance", `{"version":1}`, sqlmock.AnyArg()).WillReturnRows(engineBillingJobRows().AddRow(
+		int64(2), "client-new", int64(3), int64(4), int64(5), "identity", "engine-instance", []byte(`{"version":1}`), "", "pending", "", int64(0), int64(0), now,
+		"", nil, 0, nil, nil, "", now, now, nil, int64(0), service.CodexEngineBillingDeliveryPending))
+	job, err := r.CreatePending(context.Background(), &service.CodexEngineBillingPending{ClientRequestID: "client-new", AccountID: 3, UserID: 4, APIKeyID: 5, IdentityDigest: "identity", InstanceID: "engine-instance", Snapshot: []byte(`{"version":1}`)})
+	require.NoError(t, err)
+	require.Equal(t, service.CodexEngineBillingDeliveryPending, job.DeliveryOutcome)
 }
 
 func TestCodexEngineBillingStoreUsageInsertFailureRollsBackCharge(t *testing.T) {
@@ -177,7 +263,7 @@ func TestCodexEngineBillingStoreReadSummaryPreservesMissingCounters(t *testing.T
 
 func TestCodexEngineBillingStoreClaimIsBounded(t *testing.T) {
 	r, mock := engineBillingUnitStore(t)
-	mock.ExpectQuery(`WITH due AS`).WithArgs(100, sqlmock.AnyArg(), int64(60000)).WillReturnRows(engineBillingClaimedRows())
+	mock.ExpectQuery(`WITH due AS .* AND delivery_outcome='delivered'`).WithArgs(100, sqlmock.AnyArg(), int64(60000)).WillReturnRows(engineBillingClaimedRows())
 	jobs, err := r.ClaimDue(context.Background(), 10000, time.Minute)
 	require.NoError(t, err)
 	require.Len(t, jobs, 1)

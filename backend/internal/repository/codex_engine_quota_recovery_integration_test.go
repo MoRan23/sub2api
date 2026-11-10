@@ -14,11 +14,21 @@ import (
 )
 
 func TestCodexEngineBillingRecoveryPreservesTotalQuotaAdmissionIntegration(t *testing.T) {
-	for _, appendPermanent := range []bool{false, true} {
-		t.Run(map[bool]string{false: "expired admission batch", true: "permanent credit appended after admission"}[appendPermanent], func(t *testing.T) {
+	for _, scenario := range []struct {
+		name            string
+		appendPermanent bool
+		delivered       bool
+	}{
+		{"expired admission batch", false, true},
+		{"permanent credit appended after admission", true, true},
+		{"undelivered expired admission batch", false, false},
+		{"undelivered with new permanent credit", true, false},
+	} {
+		t.Run(scenario.name, func(t *testing.T) {
 			ctx := context.Background()
 			client := testEntClient(t)
 			f := newEngineReceiptGatewayFixture(t)
+			mustSeedQuotaRow(t, ctx, NewUserPlatformQuotaRepository(client), f.user.ID, service.PlatformOpenAI)
 			group := mustCreateGroup(t, client, &service.Group{
 				Name: "engine-quota-recovery-" + uuid.NewString(), Platform: service.PlatformOpenAI,
 				SubscriptionType: service.SubscriptionTypeTotalQuota, RateMultiplier: 1,
@@ -73,7 +83,7 @@ func TestCodexEngineBillingRecoveryPreservesTotalQuotaAdmissionIntegration(t *te
 			_, err = integrationDB.ExecContext(ctx, `UPDATE user_subscriptions SET expires_at=$2 WHERE id=$1`, sub.ID, now.Add(-time.Minute))
 			require.NoError(t, err)
 			var appended *service.UserSubscriptionQuotaEvent
-			if appendPermanent {
+			if scenario.appendPermanent {
 				appended = &service.UserSubscriptionQuotaEvent{
 					UserSubscriptionID: sub.ID, QuotaTotalUSD: 10, StartsAt: now,
 					SourceKind: service.SubscriptionQuotaSourceAdminAssign,
@@ -82,10 +92,18 @@ func TestCodexEngineBillingRecoveryPreservesTotalQuotaAdmissionIntegration(t *te
 				require.NoError(t, subs.RetireDepletedQuotaEventsOnAppend(ctx, sub.ID, appended.ID, now))
 			}
 
-			// Recreate the storage and gateway with no live billing services or
-			// request metadata. Recovery must use the persisted admission snapshot.
+			// Recreate the storage and current pricing dependencies. Recovery still
+			// uses the original admitted quota batches from durable metadata.
 			worker := &engineBillingDBFixture{store: NewCodexEngineBillingStore(integrationDB)}
-			job = worker.claim(t, job.ID)
+			assertEngineSnapshotNotClaimed(t, worker.store, job.ID)
+			wantCharge := 0.0
+			if scenario.delivered {
+				wantCharge = expected.ActualCost
+				require.NoError(t, worker.store.(service.CodexEngineBillingDeliveryStore).FinalizeDelivery(ctx, job.ID, service.CodexEngineBillingDelivered))
+				job = worker.claim(t, job.ID)
+			} else {
+				job = claimEngineSnapshotAsLegacyWorker(t, worker.store, job.ID)
+			}
 			job, err = worker.store.BindReceipt(ctx, job.ID, job.InstanceID, "receipt-"+uuid.NewString(), job.ClaimToken)
 			require.NoError(t, err)
 			var persisted struct {
@@ -99,7 +117,7 @@ func TestCodexEngineBillingRecoveryPreservesTotalQuotaAdmissionIntegration(t *te
 				} `json:"total_quota_spend_snapshot"`
 			}
 			require.NoError(t, json.Unmarshal(job.Snapshot, &persisted))
-			require.Equal(t, 2, persisted.Version)
+			require.Equal(t, 4, persisted.Version)
 			require.True(t, persisted.TotalQuotaBilling)
 			require.Equal(t, admission.SubscriptionID, persisted.TotalQuotaSpendSnapshot.SubscriptionID)
 			require.Equal(t, admission.EventIDs, persisted.TotalQuotaSpendSnapshot.EventIDs)
@@ -120,13 +138,20 @@ func TestCodexEngineBillingRecoveryPreservesTotalQuotaAdmissionIntegration(t *te
 					Kind: event.Kind, Purpose: event.Purpose, Model: event.Model, ServiceTier: &event.ServiceTier, Usage: event.UsageValues,
 				},
 			})
-			for range 2 {
-				require.NoError(t, (&service.OpenAIGatewayService{}).SettleCodexEngineBillingEvent(context.Background(), worker.store, job, &event))
+			gateway := newEngineCurrentPricingWorker(t, f.cfg)
+			if scenario.delivered {
+				for range 2 {
+					require.NoError(t, gateway.SettleCodexEngineBillingEvent(context.Background(), worker.store, job, &event))
+				}
+			} else {
+				require.NoError(t, worker.store.(service.CodexEngineBillingDeliveryStore).FinalizeDelivery(ctx, job.ID, service.CodexEngineBillingNoCustomerCharge))
+				require.ErrorIs(t, gateway.SettleCodexEngineBillingEvent(ctx, worker.store, job, &event), service.ErrCodexEngineBillingClaimLost)
+				assertEngineSnapshotDiscarded(t, worker.store, job.ID, f.apiKey.ID)
 			}
 
 			var originalUsed, balance, totalUsage float64
 			require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT quota_used_usd FROM user_subscription_quota_events WHERE id=$1`, original.ID).Scan(&originalUsed))
-			require.InDelta(t, expected.ActualCost, originalUsed, 1e-8)
+			require.InDelta(t, wantCharge, originalUsed, 1e-8)
 			if appended != nil {
 				var appendedUsed float64
 				require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT quota_used_usd FROM user_subscription_quota_events WHERE id=$1`, appended.ID).Scan(&appendedUsed))
@@ -135,7 +160,15 @@ func TestCodexEngineBillingRecoveryPreservesTotalQuotaAdmissionIntegration(t *te
 			require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT balance FROM users WHERE id=$1`, f.user.ID).Scan(&balance))
 			require.Equal(t, f.user.Balance, balance)
 			require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT SUM(quota_used_usd) FROM user_subscription_quota_events WHERE user_subscription_id=$1`, sub.ID).Scan(&totalUsage))
-			require.InDelta(t, expected.ActualCost, totalUsage, 1e-8)
+			require.InDelta(t, wantCharge, totalUsage, 1e-8)
+			if !scenario.delivered {
+				assertEngineNoCustomerQuotaDebits(t, ctx, f.user.ID, f.apiKey.ID, f.account.ID)
+				return
+			}
+			var actual, total float64
+			require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT actual_cost, total_cost FROM usage_logs WHERE api_key_id=$1`, f.apiKey.ID).Scan(&actual, &total))
+			require.InDelta(t, wantCharge, actual, 1e-8)
+			require.InDelta(t, expected.TotalCost, total, 1e-8)
 			for _, query := range []string{
 				`SELECT COUNT(*) FROM usage_logs WHERE api_key_id=$1`,
 				`SELECT COUNT(*) FROM usage_billing_dedup WHERE api_key_id=$1`,

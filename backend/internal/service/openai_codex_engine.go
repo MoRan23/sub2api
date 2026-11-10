@@ -8,6 +8,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"log/slog"
 	"mime"
 	"mime/multipart"
 	"net/http"
@@ -36,6 +37,48 @@ var errCodexEngineFirstOutputTimeout = errors.New("Codex-Engine first output tim
 func (e *codexEngineResponseError) Error() string {
 	return fmt.Sprintf("Codex-Engine response error (%d) [%s]: %s", e.status, e.code, e.message)
 }
+
+func codexEngineBillingDeliveryOutcome(responseComplete bool) string {
+	if responseComplete {
+		return CodexEngineBillingDelivered
+	}
+	// Do not infer successful delivery from the absence of an observed socket
+	// error. Timeouts, truncated streams, and other ambiguous exits are fail-closed.
+	return CodexEngineBillingNoCustomerCharge
+}
+
+func codexEngineSuccessfulDeliveryPayload(data []byte) bool {
+	if !gjson.ValidBytes(data) {
+		return false
+	}
+	if trimmed := bytes.TrimSpace(data); len(trimmed) == 0 || trimmed[0] != '{' {
+		return false
+	}
+	for _, path := range []string{"error", "response.error", "message.error"} {
+		if err := gjson.GetBytes(data, path); err.Exists() && err.Type != gjson.Null {
+			return false
+		}
+	}
+	for _, path := range []string{"status", "response.status"} {
+		if status := gjson.GetBytes(data, path); status.Exists() && status.String() != "completed" {
+			if status.String() != "incomplete" || !codexEngineProtocolIncompleteDelivery(data) {
+				return false
+			}
+		}
+	}
+	return true
+}
+
+func codexEngineProtocolIncompleteDelivery(data []byte) bool {
+	for _, path := range []string{"incomplete_details", "response.incomplete_details"} {
+		details := gjson.GetBytes(data, path)
+		if reason := details.Get("reason"); details.IsObject() && reason.Type == gjson.String && strings.TrimSpace(reason.String()) != "" {
+			return true
+		}
+	}
+	return false
+}
+
 func isCodexEngineResponseError(err error) bool {
 	var target *codexEngineResponseError
 	return errors.As(err, &target)
@@ -236,6 +279,7 @@ func codexEngineImagesJSON(body []byte, contentType string) ([]byte, error) {
 
 func (s *OpenAIGatewayService) forwardCodexEngine(ctx context.Context, c *gin.Context, account *Account, body []byte, endpoint, defaultMappedModel string) (*OpenAIForwardResult, error) {
 	start := time.Now()
+	c.Set("codex_engine_delivery_complete", false)
 	ctx = s.freezeOpenAIRequestPolicy(ctx, c)
 	model := gjson.GetBytes(body, "model").String()
 	compact := endpoint == "/v1/responses/compact" || (endpoint == "/v1/responses" && !gjson.GetBytes(body, "stream").Bool() && HasCompactionTriggerInInput(body))
@@ -319,6 +363,19 @@ func (s *OpenAIGatewayService) forwardCodexEngine(ctx context.Context, c *gin.Co
 		req.Header.Set(CodexEngineBillingClientRequestHeader, billingJob.ClientRequestID)
 		defer s.codexEngineBilling.Wake()
 	}
+	if billingJob != nil {
+		defer func() {
+			complete := c != nil && c.GetBool("codex_engine_delivery_complete")
+			outcome := codexEngineBillingDeliveryOutcome(complete)
+			finalizeCtx, finalizeCancel := context.WithTimeout(context.Background(), 3*time.Second)
+			defer finalizeCancel()
+			if finalizeErr := s.codexEngineBilling.FinalizeDelivery(finalizeCtx, billingJob, outcome); finalizeErr != nil {
+				// A failed write leaves the durable gate pending; it cannot become
+				// customer-billable through a fallback path.
+				slog.Warn("Codex-Engine delivery outcome save failed", "job_id", billingJob.ID, "account_id", account.ID)
+			}
+		}()
+	}
 	if err := ctx.Err(); err != nil {
 		s.markCodexEngineBillingNotDispatched(billingJob)
 		return nil, err
@@ -392,10 +449,18 @@ func (s *OpenAIGatewayService) forwardCodexEngine(ctx context.Context, c *gin.Co
 			result.ClientDisconnect = true
 			cancel(writeErr)
 			err = errors.Join(err, writeErr)
-		} else if downstreamCtx.Err() != nil {
-			result.ClientDisconnect = true
-			cancel(downstreamCtx.Err())
-			err = errors.Join(err, downstreamCtx.Err())
+		} else {
+			if downstreamCtx.Err() != nil {
+				result.ClientDisconnect = true
+				cancel(downstreamCtx.Err())
+				err = errors.Join(err, downstreamCtx.Err())
+			} else if flushErr := flushCodexEngineWriter(c.Writer); flushErr != nil {
+				result.ClientDisconnect = true
+				cancel(flushErr)
+				err = errors.Join(err, flushErr)
+			} else if err == nil && resp.StatusCode >= 200 && resp.StatusCode < 300 && codexEngineSuccessfulDeliveryPayload(data) {
+				c.Set("codex_engine_delivery_complete", true)
+			}
 		}
 	}
 	if err == nil && (resp.StatusCode >= 300 || resp.StatusCode < 200) {
@@ -528,6 +593,7 @@ func (s *OpenAIGatewayService) relayCodexEngineStream(ctx, downstreamCtx context
 	}
 	c.Status(resp.StatusCode)
 	terminal := false
+	chatFinished, messagesFinished, deliveryFailed := false, false, false
 	var streamFailure *codexEngineResponseError
 	var clientDone <-chan struct{}
 	if downstreamCtx != nil {
@@ -562,7 +628,38 @@ func (s *OpenAIGatewayService) relayCodexEngineStream(ctx, downstreamCtx context
 				firstTimer.Stop()
 			}
 		}
+		protocolIncompleteCompletion := kind == "response.incomplete" && codexEngineProtocolIncompleteDelivery(payload) && codexEngineSuccessfulDeliveryPayload(payload)
 		failed := kind == "error" || kind == "response.failed" || kind == "response.incomplete" || gjson.GetBytes(payload, "error").IsObject()
+		if failed && !protocolIncompleteCompletion {
+			deliveryFailed = true
+		}
+		gjson.GetBytes(payload, "choices").ForEach(func(_, choice gjson.Result) bool {
+			if reason := choice.Get("finish_reason"); reason.Exists() && reason.Type != gjson.Null {
+				if reason.Type == gjson.String && strings.TrimSpace(reason.String()) != "" && gjson.ValidBytes(payload) {
+					chatFinished = true
+				} else {
+					deliveryFailed = true
+				}
+			}
+			return true
+		})
+		if kind == "message_delta" {
+			if reason := gjson.GetBytes(payload, "delta.stop_reason"); reason.Exists() && reason.Type != gjson.Null {
+				if reason.Type == gjson.String && strings.TrimSpace(reason.String()) != "" && gjson.ValidBytes(payload) {
+					messagesFinished = true
+				} else {
+					deliveryFailed = true
+				}
+			}
+		}
+		successfulTerminal := false
+		if bytes.Equal(bytes.TrimSpace(payload), []byte("[DONE]")) {
+			successfulTerminal = chatFinished
+		} else if kind == "message_stop" {
+			successfulTerminal = messagesFinished && codexEngineSuccessfulDeliveryPayload(payload)
+		} else if protocolIncompleteCompletion || kind == "response.completed" || kind == "response.done" || (imageRequest && strings.HasSuffix(kind, ".completed")) {
+			successfulTerminal = codexEngineSuccessfulDeliveryPayload(payload)
+		}
 		if failed {
 			if kind == "" {
 				kind = "error"
@@ -618,6 +715,11 @@ func (s *OpenAIGatewayService) relayCodexEngineStream(ctx, downstreamCtx context
 		}
 		if err := flushCodexEngineWriter(c.Writer); err != nil {
 			return markClientDisconnected(err)
+		}
+		if successfulTerminal && !deliveryFailed && (streamFailure == nil || protocolIncompleteCompletion) && resp.StatusCode >= 200 && resp.StatusCode < 300 {
+			// Once the terminal frame is fully written and flushed, a later socket
+			// close must not turn an already-delivered response into a free request.
+			c.Set("codex_engine_delivery_complete", true)
 		}
 		if downstreamCtx != nil && downstreamCtx.Err() != nil {
 			return markClientDisconnected(downstreamCtx.Err())

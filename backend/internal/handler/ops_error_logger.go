@@ -2396,10 +2396,20 @@ func hasOpsUpstreamErrorContext(c *gin.Context) bool {
 	}
 	if v, ok := c.Get(service.OpsUpstreamErrorsKey); ok {
 		if events, ok := v.([]*service.OpsUpstreamErrorEvent); ok && len(events) > 0 {
-			return true
+			for _, event := range events {
+				if event == nil || !isLocalCodexEngineBillingSnapshotFailure(event) {
+					return true
+				}
+			}
+			return false
 		}
 	}
 	return false
+}
+
+func isLocalCodexEngineBillingSnapshotFailure(event *service.OpsUpstreamErrorEvent) bool {
+	return event != nil && event.Kind == "billing_snapshot_error" &&
+		event.Stage == "billing_snapshot" && event.Scope == "local"
 }
 
 func hasOpsAccountAuthFailure(c *gin.Context) bool {

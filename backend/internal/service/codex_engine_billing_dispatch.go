@@ -2,6 +2,7 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"time"
@@ -60,11 +61,48 @@ func (s *OpenAIGatewayService) prepareCodexEngineBillingDispatch(ctx context.Con
 	}
 	snapshot, err := s.CaptureCodexEngineBillingSnapshot(ctx, &in)
 	if err != nil {
+		recordCodexEngineBillingSnapshotFailure(c, account, err)
 		return nil, err
 	}
 	return s.codexEngineBilling.Prepare(ctx, &CodexEngineBillingPending{
 		ClientRequestID: uuid.NewString(), AccountID: account.ID, UserID: in.User.ID, APIKeyID: in.APIKey.ID,
 		IdentityDigest: CodexEngineBillingIdentity(account), Snapshot: snapshot, NextAttemptAt: time.Now().Add(2 * time.Second),
+	})
+}
+
+// Snapshot capture is local preparation: no billing job or upstream attempt
+// exists yet. Keep its diagnostic separate from HTTP response evidence, and
+// never log the raw snapshot or an arbitrary underlying error.
+func recordCodexEngineBillingSnapshotFailure(c *gin.Context, account *Account, err error) {
+	reason, message := "billing_snapshot_failed", "Engine billing snapshot capture failed"
+	var snapshotErr *codexEngineBillingSnapshotError
+	var valueErr *json.UnsupportedValueError
+	var typeErr *json.UnsupportedTypeError
+	var marshalErr *json.MarshalerError
+	switch {
+	case errors.As(err, &snapshotErr):
+		reason, message = snapshotErr.Reason, snapshotErr.Error()
+	case errors.As(err, &valueErr), errors.As(err, &typeErr), errors.As(err, &marshalErr):
+		reason, message = "billing_snapshot_encode_failed", "Engine billing snapshot encoding failed"
+	case err != nil:
+		// These are fixed validation errors owned by snapshot capture. Unknown
+		// causes keep the generic diagnostic instead of exposing error contents.
+		switch err.Error() {
+		case "engine billing snapshot inputs unavailable":
+			reason, message = "billing_snapshot_inputs_unavailable", "Engine billing snapshot inputs unavailable"
+		case "engine admitted quota spend snapshot unavailable":
+			reason, message = "billing_snapshot_quota_unavailable", "Engine admitted quota spend snapshot unavailable"
+		case "unexpected engine quota spend snapshot", "invalid engine quota event ID", "duplicate engine quota event ID", "engine quota overflow event was not admitted":
+			reason, message = "billing_snapshot_quota_invalid", "Engine billing snapshot quota admission is invalid"
+		case "engine price interval exceeds token range":
+			reason, message = "billing_snapshot_interval_invalid", "Engine price interval exceeds token range"
+		}
+	}
+	appendOpsUpstreamError(c, OpsUpstreamErrorEvent{
+		Platform: account.Platform, AccountID: account.ID, AccountName: account.Name,
+		Kind: "billing_snapshot_error", Stage: "billing_snapshot", Scope: "local", Reason: reason, Message: message,
+		// Suppress automatic inheritance from a previous attempt on this account.
+		HeaderDiagnostics: &OpenAIHeaderDiagnostics{},
 	})
 }
 

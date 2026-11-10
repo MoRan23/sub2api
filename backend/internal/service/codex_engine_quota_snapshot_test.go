@@ -40,7 +40,7 @@ func TestCodexEngineQuotaSnapshotSurvivesRecoveryAndOwnsAdmission(t *testing.T) 
 	require.NoError(t, err)
 	f, err := decodeCodexEnginePricingSnapshot(raw)
 	require.NoError(t, err)
-	require.Equal(t, 2, f.Version)
+	require.Equal(t, codexEnginePricingSnapshotVersion, f.Version)
 	require.True(t, f.TotalQuotaBilling)
 	require.Equal(t, admitted.EventIDs, f.TotalQuotaSpendSnapshot.EventIDs)
 
@@ -59,7 +59,8 @@ func TestCodexEngineQuotaSnapshotSurvivesRecoveryAndOwnsAdmission(t *testing.T) 
 	event := engineFrozenTestModelEvent()
 	event.Model = "gpt-5.4"
 	store := &engineQuotaSnapshotStore{}
-	worker := &OpenAIGatewayService{}
+	worker := engineCurrentPricingTestService(in.APIKey.Group)
+	worker.billingService = svc.billingService
 	for range 2 {
 		// Even an unrelated ambient snapshot must not override the persisted one.
 		err = worker.SettleCodexEngineBillingEvent(WithTotalQuotaSpendSnapshot(context.Background(), admitted), store, job, event)
@@ -101,7 +102,7 @@ func TestCodexEngineQuotaSnapshotRejectsMissingOrInvalidAdmission(t *testing.T) 
 	f, err := decodeCodexEnginePricingSnapshot(raw)
 	require.NoError(t, err)
 	f.TotalQuotaSpendSnapshot = nil
-	raw, err = json.Marshal(f)
+	raw, err = marshalCodexEnginePricingSnapshot(f)
 	require.NoError(t, err)
 	_, err = decodeCodexEnginePricingSnapshot(raw)
 	require.ErrorContains(t, err, "quota spend snapshot unavailable")

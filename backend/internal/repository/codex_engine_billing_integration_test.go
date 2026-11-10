@@ -49,6 +49,15 @@ func (f *engineBillingDBFixture) pending(t *testing.T) *service.CodexEngineBilli
 	return j
 }
 
+func (f *engineBillingDBFixture) delivered(t *testing.T, j *service.CodexEngineBillingJob) *service.CodexEngineBillingJob {
+	t.Helper()
+	store, ok := f.store.(service.CodexEngineBillingDeliveryStore)
+	require.True(t, ok)
+	require.NoError(t, store.FinalizeDelivery(context.Background(), j.ID, service.CodexEngineBillingDelivered))
+	j.DeliveryOutcome = service.CodexEngineBillingDelivered
+	return j
+}
+
 func (f *engineBillingDBFixture) claim(t *testing.T, id int64) *service.CodexEngineBillingJob {
 	t.Helper()
 	jobs, err := f.store.ClaimDue(context.Background(), 100, time.Minute)
@@ -104,7 +113,7 @@ func (f *engineBillingDBFixture) ack(t *testing.T, j *service.CodexEngineBilling
 func TestCodexEngineBillingStoreAtomicRecoveryIntegration(t *testing.T) {
 	f := newEngineBillingDBFixture(t)
 	ctx := context.Background()
-	j := f.pending(t)
+	j := f.delivered(t, f.pending(t))
 	j = f.claim(t, j.ID)
 	var err error
 	j, err = f.store.BindReceipt(ctx, j.ID, f.instance, "receipt-original", j.ClaimToken)
@@ -201,15 +210,59 @@ func TestCodexEngineBillingStoreAtomicRecoveryIntegration(t *testing.T) {
 	require.Equal(t, 96.0, balance)
 }
 
+func TestCodexEngineBillingStoreDisconnectDiscardsUsageIntegration(t *testing.T) {
+	f := newEngineBillingDBFixture(t)
+	ctx := context.Background()
+	j := f.pending(t)
+	jobs, err := f.store.ClaimDue(ctx, 100, time.Minute)
+	require.NoError(t, err)
+	for _, job := range jobs {
+		require.NotEqual(t, j.ID, job.ID, "pending delivery is not eligible for receipt polling")
+	}
+	// Simulate an inbox staged by a stale process before the new claim filter.
+	j.ClaimToken = "old-worker"
+	_, err = integrationDB.Exec(`UPDATE codex_engine_billing_jobs SET claim_token=$2,lease_until=NOW()+INTERVAL '1 minute' WHERE id=$1`, j.ID, j.ClaimToken)
+	require.NoError(t, err)
+	j, err = f.store.BindReceipt(ctx, j.ID, f.instance, "disconnect-receipt", j.ClaimToken)
+	require.NoError(t, err)
+	f.stage(t, j, engineBillingDBReceived(1, false))
+	event := engineBillingDBEvent(j, 1)
+	_, err = f.store.ApplyEvent(ctx, event)
+	require.ErrorIs(t, err, service.ErrCodexEngineBillingDeliveryPending)
+	var balance float64
+	require.NoError(t, integrationDB.QueryRow(`SELECT balance FROM users WHERE id=$1`, f.user.ID).Scan(&balance))
+	require.Equal(t, 100.0, balance, "confirmed usage cannot be charged before delivery is finalized")
+	var count int
+	require.NoError(t, integrationDB.QueryRow(`SELECT COUNT(*) FROM codex_engine_billing_events WHERE job_id=$1`, j.ID).Scan(&count))
+	require.Zero(t, count)
+
+	deliveryStore, ok := f.store.(service.CodexEngineBillingDeliveryStore)
+	require.True(t, ok)
+	require.NoError(t, deliveryStore.FinalizeDelivery(ctx, j.ID, service.CodexEngineBillingNoCustomerCharge))
+	_, err = f.store.ApplyEvent(ctx, event)
+	require.ErrorIs(t, err, service.ErrCodexEngineBillingClaimLost)
+	require.NoError(t, integrationDB.QueryRow(`SELECT balance FROM users WHERE id=$1`, f.user.ID).Scan(&balance))
+	require.Equal(t, 100.0, balance, "disconnect usage does not debit the customer wallet")
+	require.NoError(t, integrationDB.QueryRow(`SELECT COUNT(*) FROM usage_logs WHERE api_key_id=$1`, f.key.ID).Scan(&count))
+	require.Zero(t, count, "incomplete delivery must not create usage records")
+	require.NoError(t, integrationDB.QueryRow(`SELECT COUNT(*) FROM codex_engine_billing_received_events WHERE job_id=$1`, j.ID).Scan(&count))
+	require.Zero(t, count, "already staged receipt facts are discarded")
+	jobs, err = f.store.ClaimDue(ctx, 100, time.Minute)
+	require.NoError(t, err)
+	for _, job := range jobs {
+		require.NotEqual(t, j.ID, job.ID, "incomplete delivery is terminal and never polled again")
+	}
+}
+
 func TestCodexEngineBillingStoreCanonicalAcrossAccountsIntegration(t *testing.T) {
 	f := newEngineBillingDBFixture(t)
-	first := f.pending(t)
+	first := f.delivered(t, f.pending(t))
 	first = f.claim(t, first.ID)
 	canonical, err := f.store.BindReceipt(context.Background(), first.ID, f.instance, "shared-receipt", first.ClaimToken)
 	require.NoError(t, err)
 	other := newEngineBillingDBFixture(t)
 	other.instance = f.instance
-	alias := other.pending(t)
+	alias := other.delivered(t, other.pending(t))
 	alias = other.claim(t, alias.ID)
 	bound, err := other.store.BindReceipt(context.Background(), alias.ID, other.instance, "shared-receipt", alias.ClaimToken)
 	require.NoError(t, err)
@@ -229,7 +282,7 @@ func TestCodexEngineBillingStoreCanonicalAcrossAccountsIntegration(t *testing.T)
 
 func TestCodexEngineBillingStoreConcurrentClaimsAndEventsIntegration(t *testing.T) {
 	f := newEngineBillingDBFixture(t)
-	j := f.pending(t)
+	j := f.delivered(t, f.pending(t))
 	claims := make(chan []*service.CodexEngineBillingJob, 2)
 	errs := make(chan error, 2)
 	var wg sync.WaitGroup
@@ -283,16 +336,15 @@ func TestCodexEngineBillingStoreConcurrentClaimsAndEventsIntegration(t *testing.
 func TestCodexEngineBillingStoreUndispatchedAndBlockedIntegration(t *testing.T) {
 	f := newEngineBillingDBFixture(t)
 	j := f.pending(t)
-	j = f.claim(t, j.ID)
 	require.NoError(t, f.store.MarkNotDispatched(context.Background(), j.ID))
 	require.NoError(t, f.store.MarkNotDispatched(context.Background(), j.ID))
 	saved, err := f.store.Get(context.Background(), j.ID)
 	require.NoError(t, err)
 	require.Equal(t, service.CodexEngineBillingNotDispatchedState, saved.State)
 	require.Empty(t, saved.TerminalSeal)
-	_, err = f.store.BindReceipt(context.Background(), j.ID, f.instance, "late", j.ClaimToken)
+	_, err = f.store.BindReceipt(context.Background(), j.ID, f.instance, "late", "stale-claim")
 	require.ErrorIs(t, err, service.ErrCodexEngineBillingClaimLost)
-	blocked := f.pending(t)
+	blocked := f.delivered(t, f.pending(t))
 	blocked = f.claim(t, blocked.ID)
 	require.NoError(t, f.store.SaveProgress(context.Background(), &service.CodexEngineBillingProgress{JobID: blocked.ID, ClaimToken: blocked.ClaimToken, State: service.CodexEngineBillingBlockedState, LastError: "identity_changed"}))
 	saved, err = f.store.Get(context.Background(), blocked.ID)
@@ -307,7 +359,7 @@ func TestCodexEngineBillingStoreUndispatchedAndBlockedIntegration(t *testing.T) 
 func TestCodexEngineBillingStoreInboxPartialDoesNotBlockLaterPagesIntegration(t *testing.T) {
 	f := newEngineBillingDBFixture(t)
 	ctx := context.Background()
-	j := f.pending(t)
+	j := f.delivered(t, f.pending(t))
 	j = f.claim(t, j.ID)
 	var err error
 	j, err = f.store.BindReceipt(ctx, j.ID, f.instance, "partial-receipt", j.ClaimToken)
@@ -371,7 +423,7 @@ func TestCodexEngineBillingStoreInboxPartialDoesNotBlockLaterPagesIntegration(t 
 func TestCodexEngineBillingStoreInboxConflictsRollBackCursorIntegration(t *testing.T) {
 	f := newEngineBillingDBFixture(t)
 	ctx := context.Background()
-	j := f.pending(t)
+	j := f.delivered(t, f.pending(t))
 	j = f.claim(t, j.ID)
 	var err error
 	j, err = f.store.BindReceipt(ctx, j.ID, f.instance, "conflict-receipt", j.ClaimToken)

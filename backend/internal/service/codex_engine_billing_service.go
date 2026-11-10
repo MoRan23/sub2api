@@ -26,7 +26,7 @@ const (
 )
 
 // CodexEngineBillingSettleFunc must atomically deduplicate the immutable event,
-// apply the original pricing snapshot, and insert its usage log. It then refreshes
+// apply the job's pricing policy, and insert its usage log. It then refreshes
 // required caches before acknowledging the received event. An error keeps the retry;
 // the committed ledger deduplicates money if a cache refresh needs another pass.
 type CodexEngineBillingSettleFunc func(context.Context, *CodexEngineBillingJob, *CodexEngineBillingUsageEvent) error
@@ -35,8 +35,8 @@ type codexEngineBillingAccountReader interface {
 	GetByID(context.Context, int64) (*Account, error)
 }
 
-// CodexEngineBillingService reconciles durable pending requests independently
-// of the client's connection. Network requests never hold a ledger transaction.
+// CodexEngineBillingService reconciles durable jobs after complete delivery.
+// Network requests never hold a ledger transaction.
 type CodexEngineBillingService struct {
 	store          CodexEngineBillingStore
 	accounts       codexEngineBillingAccountReader
@@ -141,6 +141,28 @@ func (s *CodexEngineBillingService) NotDispatched(ctx context.Context, job *Code
 		return ErrCodexEngineBillingConflict
 	}
 	return s.store.MarkNotDispatched(ctx, job.ID)
+}
+
+// FinalizeDelivery only makes completely delivered responses eligible for
+// receipt polling and settlement. Incomplete responses discard their receipts;
+// failure leaves the job pending, which the store treats as non-billable.
+func (s *CodexEngineBillingService) FinalizeDelivery(ctx context.Context, job *CodexEngineBillingJob, outcome string) error {
+	if s == nil || s.store == nil || job == nil || job.ID <= 0 {
+		return ErrCodexEngineBillingConflict
+	}
+	if outcome != CodexEngineBillingDelivered && outcome != CodexEngineBillingNoCustomerCharge {
+		return ErrCodexEngineBillingConflict
+	}
+	store, ok := s.store.(CodexEngineBillingDeliveryStore)
+	if !ok {
+		return errors.New("Engine billing delivery store unavailable")
+	}
+	if err := store.FinalizeDelivery(ctx, job.ID, outcome); err != nil {
+		return err
+	}
+	job.DeliveryOutcome = outcome
+	s.Wake()
+	return nil
 }
 
 func (s *CodexEngineBillingService) discoverIdentity(ctx context.Context, account *Account, identity string) (string, error) {
@@ -255,6 +277,9 @@ func (s *CodexEngineBillingService) query(ctx context.Context, account *Account,
 }
 
 func (s *CodexEngineBillingService) reconcile(parent context.Context, job *CodexEngineBillingJob) {
+	if job.DeliveryOutcome == CodexEngineBillingDeliveryPending || job.DeliveryOutcome == CodexEngineBillingNoCustomerCharge {
+		return
+	}
 	ctx, cancel := context.WithTimeout(parent, codexEngineBillingPassTimeout)
 	defer cancel()
 	state, reason := job.State, "query_pending"
@@ -432,6 +457,12 @@ func (s *CodexEngineBillingService) receivePages(ctx context.Context, job *Codex
 }
 
 func (s *CodexEngineBillingService) settleReceived(ctx context.Context, job *CodexEngineBillingJob) (bool, error) {
+	if job.DeliveryOutcome == CodexEngineBillingNoCustomerCharge {
+		return false, nil
+	}
+	if job.DeliveryOutcome == CodexEngineBillingDeliveryPending {
+		return true, nil
+	}
 	if job.ReceiptID == "" {
 		return false, nil
 	}
@@ -452,6 +483,9 @@ func (s *CodexEngineBillingService) settleReceived(ctx context.Context, job *Cod
 			}
 			if err == nil {
 				err = s.settle(ctx, job, &event)
+			}
+			if errors.Is(err, ErrCodexEngineBillingDeliveryPending) {
+				return true, nil
 			}
 			if err != nil && firstErr == nil {
 				firstErr = err

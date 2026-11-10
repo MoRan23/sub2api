@@ -28,7 +28,7 @@ func engineFrozenTestModelEvent() *CodexEngineBillingUsageEvent {
 	return &CodexEngineBillingUsageEvent{EventID: "event-model", Sequence: 1, Kind: "model", Purpose: "response", Model: "gpt-engine-fixture", ServiceTier: "default", UsageComplete: true, Usage: OpenAIUsage{InputTokens: 100, OutputTokens: 10, CacheReadInputTokens: 20}, ApplicableUsage: map[string]bool{"input_tokens": true, "output_tokens": true, "cached_input_tokens": true}, UsagePresent: map[string]bool{"input_tokens": true, "output_tokens": true, "cached_input_tokens": true}, UsageValues: map[string]int64{"input_tokens": 100, "output_tokens": 10, "cached_input_tokens": 20}}
 }
 
-func TestCodexEngineFrozenPricingCaptureOwnsPricesWithoutSecrets(t *testing.T) {
+func TestCodexEngineCurrentPricingCaptureExcludesPricesAndSecrets(t *testing.T) {
 	ctx := context.Background()
 	cfg := &config.Config{}
 	cfg.Default.RateMultiplier = 2
@@ -43,17 +43,18 @@ func TestCodexEngineFrozenPricingCaptureOwnsPricesWithoutSecrets(t *testing.T) {
 	require.NoError(t, err)
 	require.NotContains(t, string(raw), "secret")
 	require.NotContains(t, string(raw), "upstream.invalid")
-	price.InputPricePerToken, price.OutputPricePerToken = 1000, 2000
+	price.InputPricePerToken, price.OutputPricePerToken = .2, .3
 	cfg.Default.RateMultiplier = 999
 	input.Account.Credentials["api_key"] = "changed"
 	job := &CodexEngineBillingJob{CodexEngineBillingPending: CodexEngineBillingPending{UserID: 1, APIKeyID: 2, AccountID: input.Account.ID, Snapshot: raw}}
-	// A restarted settlement worker needs neither the account nor a price service.
+	// A restarted worker resolves today's card, retaining request multipliers.
 	event := engineFrozenTestModelEvent()
 	event.Model = "gpt-5.4"
-	cmd, log, err := (&OpenAIGatewayService{}).BuildCodexEngineBillingEvent(ctx, job, event)
+	restarted := &OpenAIGatewayService{billingService: svc.billingService}
+	cmd, log, err := restarted.BuildCodexEngineBillingEvent(ctx, job, event)
 	require.NoError(t, err)
-	require.InDelta(t, 10.2, log.TotalCost, 1e-9)
-	require.InDelta(t, 20.4, cmd.BalanceCost, 1e-9)
+	require.InDelta(t, 19.2, log.TotalCost, 1e-9)
+	require.InDelta(t, 38.4, cmd.BalanceCost, 1e-9)
 	require.True(t, log.OpenAIWSMode)
 	require.Equal(t, RequestTypeWSV2, log.RequestType)
 	require.Equal(t, "codex/1.0", *log.UserAgent)
@@ -62,6 +63,8 @@ func TestCodexEngineFrozenPricingCaptureOwnsPricesWithoutSecrets(t *testing.T) {
 	f, err := decodeCodexEnginePricingSnapshot(raw)
 	require.NoError(t, err)
 	require.Equal(t, input.RequestPayloadHash, f.RequestPayloadHash)
+	require.Empty(t, f.Prices)
+	require.Equal(t, 4, f.Version)
 }
 
 func TestCodexEngineFrozenPricingActualModelsTiersAndSearchAreSeparate(t *testing.T) {
@@ -241,19 +244,19 @@ func TestCodexEngineFrozenPricingImageUsesActualMetadataAndTokenCard(t *testing.
 	require.Equal(t, 5, log.ImageSizeBreakdown["image_cache_read_tokens"])
 }
 
-func TestCodexEngineFrozenPricingCaptureGroupImagePrice(t *testing.T) {
+func TestCodexEngineCurrentPricingUsesOriginalGroupCurrentImagePrice(t *testing.T) {
 	price := .5
 	group := &Group{ID: 4, RateMultiplier: 1, ModelPricing: []ChannelModelPricing{{Platform: PlatformOpenAI, Models: []string{"gpt-image-fixture"}, BillingMode: BillingModeImage, PerRequestPrice: &price}}}
-	svc := &OpenAIGatewayService{billingService: &BillingService{fallbackPrices: map[string]*ModelPricing{}}}
+	svc := engineCurrentPricingTestService(group)
 	input := &OpenAIRecordUsageInput{User: &User{ID: 1}, APIKey: &APIKey{ID: 2, GroupID: &group.ID, Group: group}, Account: engineReceiptTestAccount(), Result: &OpenAIForwardResult{Model: "gpt-image-fixture", ImageEndpoint: true}}
 	raw, err := svc.CaptureCodexEngineBillingSnapshot(context.Background(), input)
 	require.NoError(t, err)
 	price = 100
 	job := &CodexEngineBillingJob{CodexEngineBillingPending: CodexEngineBillingPending{UserID: 1, APIKeyID: 2, AccountID: input.Account.ID, Snapshot: raw}}
 	event := &CodexEngineBillingUsageEvent{Kind: "image", Model: "gpt-image-fixture", ImageCount: 2, ImageActual: &CodexEngineBillingImageMetadata{Size: "1024x1024"}}
-	_, log, err := (&OpenAIGatewayService{}).BuildCodexEngineBillingEvent(context.Background(), job, event)
+	_, log, err := svc.BuildCodexEngineBillingEvent(context.Background(), job, event)
 	require.NoError(t, err)
-	require.InDelta(t, 1, log.TotalCost, 1e-9)
+	require.InDelta(t, 200, log.TotalCost, 1e-9)
 }
 
 type engineFrozenStoreStub struct {
@@ -293,7 +296,7 @@ func TestCodexEngineFrozenPricingSettlementCarriesAtomicQuotaAndEvidence(t *test
 	require.InDelta(t, 20.4, store.received.PlatformQuotaCost, 1e-9)
 }
 
-func TestCodexEngineFrozenPricingRejectsOversizeCatalog(t *testing.T) {
+func TestCodexEngineCurrentPricingCaptureDoesNotEnumerateCatalog(t *testing.T) {
 	cfg := &config.Config{}
 	cfg.Default.RateMultiplier = 1
 	prices := map[string]*ModelPricing{}
@@ -302,6 +305,7 @@ func TestCodexEngineFrozenPricingRejectsOversizeCatalog(t *testing.T) {
 	}
 	svc := &OpenAIGatewayService{cfg: cfg, billingService: &BillingService{fallbackPrices: prices}}
 	in := engineReceiptTestInput("")
-	_, err := svc.CaptureCodexEngineBillingSnapshot(context.Background(), in)
-	require.ErrorContains(t, err, "catalog exceeds")
+	raw, err := svc.CaptureCodexEngineBillingSnapshot(context.Background(), in)
+	require.NoError(t, err)
+	require.Less(t, len(raw), 4096, "catalog size must not affect metadata-only capture")
 }

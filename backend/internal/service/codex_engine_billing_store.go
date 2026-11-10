@@ -8,9 +8,10 @@ import (
 )
 
 var (
-	ErrCodexEngineBillingNotFound  = errors.New("engine billing job not found")
-	ErrCodexEngineBillingConflict  = errors.New("engine billing identity or event conflict")
-	ErrCodexEngineBillingClaimLost = errors.New("engine billing job claim expired or changed")
+	ErrCodexEngineBillingNotFound        = errors.New("engine billing job not found")
+	ErrCodexEngineBillingConflict        = errors.New("engine billing identity or event conflict")
+	ErrCodexEngineBillingClaimLost       = errors.New("engine billing job claim expired or changed")
+	ErrCodexEngineBillingDeliveryPending = errors.New("engine billing delivery outcome is pending")
 )
 
 const (
@@ -19,6 +20,9 @@ const (
 	CodexEngineBillingSealedState        = "sealed"
 	CodexEngineBillingLinkedState        = "linked"
 	CodexEngineBillingNotDispatchedState = "not_dispatched"
+	CodexEngineBillingDeliveryPending    = "pending"
+	CodexEngineBillingDelivered          = "delivered"
+	CodexEngineBillingNoCustomerCharge   = "no_customer_charge"
 )
 
 // CodexEngineBillingPending is persisted before dispatch. Snapshot contains only
@@ -40,6 +44,7 @@ type CodexEngineBillingJob struct {
 	ID               int64
 	ReceiptID        string
 	State            string
+	DeliveryOutcome  string
 	Cursor           string
 	Revision         int64
 	ConsumedSequence int64
@@ -129,4 +134,13 @@ type CodexEngineBillingStore interface {
 	// Until then the received event remains pending, including after a restart.
 	AckReceivedSettled(ctx context.Context, jobID int64, claimToken, eventID, fingerprint string, sequence int64) error
 	ReadSummary(ctx context.Context, jobID, throughSequence int64) ([]CodexEngineBillingSummaryGroup, error)
+}
+
+// CodexEngineBillingDeliveryStore finalizes whether the downstream received a
+// complete response; incomplete delivery permanently discards receipt facts.
+// It is deliberately separate from the polling store so
+// legacy test doubles and non-Engine billing implementations do not gain a
+// delivery mutation surface.
+type CodexEngineBillingDeliveryStore interface {
+	FinalizeDelivery(context.Context, int64, string) error
 }

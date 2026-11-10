@@ -8,16 +8,31 @@ import (
 	"fmt"
 	"math"
 	"net"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 )
 
-const codexEnginePricingSnapshotVersion = 2
+const codexEnginePricingSnapshotVersion = 4
 const codexEnginePricingModelLimit = 512
 const codexEnginePricingSnapshotLimit = 256 * 1024
+
+// Only bounded numeric diagnostics leave the snapshot builder; prices and
+// request metadata must never be included in an error event.
+type codexEngineBillingSnapshotError struct {
+	Reason     string
+	SizeBytes  int
+	ModelCount int
+	LimitBytes int
+}
+
+func (e *codexEngineBillingSnapshotError) Error() string {
+	if e.Reason == "billing_snapshot_model_limit" {
+		return fmt.Sprintf("engine applicable pricing catalog exceeds snapshot limit (models=%d, limit=%d)", e.ModelCount, codexEnginePricingModelLimit)
+	}
+	return fmt.Sprintf("engine applicable pricing snapshot exceeds storage limit (bytes=%d, limit=%d, models=%d)", e.SizeBytes, e.LimitBytes, e.ModelCount)
+}
 
 // SetCodexEngineBillingAPIKeyService supplies cache invalidation only. Recovered
 // settlement must never reload prices or billing ownership through this service.
@@ -68,10 +83,13 @@ type codexEnginePricingSnapshot struct {
 	TokenRate                float64                           `json:"token_rate"`
 	ImageRate                float64                           `json:"image_rate"`
 	BaseRate                 float64                           `json:"base_rate"`
-	SearchPrice              float64                           `json:"search_price"`
+	SearchPrice              float64                           `json:"search_price,omitempty"`
 	FreeFast                 bool                              `json:"free_fast"`
 	LongContext              bool                              `json:"long_context"`
-	Prices                   map[string]codexEngineFrozenPrice `json:"prices"`
+	GroupLongContextPricing  bool                              `json:"group_long_context_pricing,omitempty"`
+	ImageCountBilling        bool                              `json:"image_count_billing,omitempty"`
+	ImageEndpoint            bool                              `json:"image_endpoint,omitempty"`
+	Prices                   map[string]codexEngineFrozenPrice `json:"prices,omitempty"`
 }
 
 // Persist the admitted batches, not a current balance. Recovery may occur after
@@ -132,8 +150,8 @@ type codexEngineFrozenTokenInterval struct {
 	Price     *ModelPricing `json:"price"`
 }
 
-// CaptureCodexEngineBillingSnapshot freezes the applicable catalog before the
-// physical dispatch. Event settlement has no dependency on live pricing.
+// CaptureCodexEngineBillingSnapshot freezes request identity and billing policy,
+// but leaves model, channel, image and search prices to settlement-time lookup.
 func (s *OpenAIGatewayService) CaptureCodexEngineBillingSnapshot(ctx context.Context, in *OpenAIRecordUsageInput) (json.RawMessage, error) {
 	if s == nil || s.billingService == nil || in == nil || in.Result == nil || in.Account == nil || !in.Account.IsCodexEngine() || in.APIKey == nil || in.User == nil {
 		return nil, errors.New("engine billing snapshot inputs unavailable")
@@ -167,7 +185,7 @@ func (s *OpenAIGatewayService) CaptureCodexEngineBillingSnapshot(ctx context.Con
 		KeyQuota: key.Quota > 0 && in.APIKeyService != nil, KeyRateLimit: key.HasRateLimits() && in.APIKeyService != nil,
 		AccountQuota: a.SupportsAccountQuota() && a.HasAnyQuotaLimit(), AccountDailyQuota: a.GetQuotaDailyLimit() > 0, AccountWeeklyQuota: a.GetQuotaWeeklyLimit() > 0,
 		AccountRate: a.BillingRateMultiplier(), TokenRate: tokenRate, ImageRate: imageRate, BaseRate: baseRate,
-		SearchPrice: defaultWebSearchPricePerCall, LongContext: a.IsOpenAILongContextBillingEnabled(), Prices: make(map[string]codexEngineFrozenPrice),
+		SearchPrice: 0, LongContext: a.IsOpenAILongContextBillingEnabled(), ImageEndpoint: result.ImageEndpoint,
 	}
 	if in.CyberBlocked {
 		f.RequestType = RequestTypeCyberBlocked
@@ -180,11 +198,10 @@ func (s *OpenAIGatewayService) CaptureCodexEngineBillingSnapshot(ctx context.Con
 			f.RequestPayloadHash = strings.ToLower(digest)
 		}
 	}
-	if p := webSearchPricePerCallFromAPIKey(key); p != nil {
-		f.SearchPrice = *p
-	}
 	if key.Group != nil {
 		f.FreeFast = key.Group.FreeOpenAIFast && groupSupportsOpenAIFast(key.Group.Platform)
+		f.GroupLongContextPricing = key.Group.LongContextPricingEnabled
+		f.ImageCountBilling = key.Group.ImageCountBilling
 	}
 	if in.Subscription != nil {
 		id := in.Subscription.ID
@@ -205,151 +222,7 @@ func (s *OpenAIGatewayService) CaptureCodexEngineBillingSnapshot(ctx context.Con
 	}
 	f.SimpleMode = s.cfg != nil && s.cfg.RunMode == config.RunModeSimple
 	f.SimpleKeyRateOnly = simpleModeKeyRateLimitBillingEnabled(s.cfg, key)
-	candidates := map[string]struct{}{}
-	add := func(v string) {
-		v = strings.TrimSpace(v)
-		if v != "" && !strings.Contains(v, "*") {
-			candidates[v] = struct{}{}
-		}
-	}
-	for _, model := range []string{f.RequestedModel, f.UpstreamModel, billingModel, in.ChannelMappedModel} {
-		add(model)
-	}
-	for _, model := range a.GetModelMapping() {
-		add(model)
-	}
-	if key.Group != nil {
-		for _, card := range key.Group.ModelPricing {
-			for _, model := range card.Models {
-				add(model)
-			}
-		}
-	}
-	for _, model := range s.billingService.ListSupportedModels() {
-		if strings.HasPrefix(model, "gpt-") || strings.HasPrefix(model, "codex-") {
-			add(model)
-		}
-	}
-	if ps := s.billingService.pricingService; ps != nil {
-		for _, model := range ps.ListModelNamesByProvider("openai") {
-			add(model)
-		}
-	}
-	if len(candidates) > codexEnginePricingModelLimit {
-		return nil, errors.New("engine applicable pricing catalog exceeds snapshot limit")
-	}
-	resolver := s.resolver
-	if resolver == nil {
-		resolver = NewModelPricingResolver(s.channelService, s.billingService)
-	}
-	imagePricer := &OpenAIGatewayService{billingService: s.billingService, resolver: resolver, channelService: s.channelService}
-	var statsChannel *Channel
-	statsPlatform := ""
-	if key.GroupID != nil && s.channelService != nil {
-		statsChannel, _ = s.channelService.GetChannelForGroup(ctx, *key.GroupID)
-		statsPlatform = s.channelService.GetGroupPlatform(ctx, *key.GroupID)
-	}
-	if statsChannel != nil {
-		for _, card := range statsChannel.ModelPricing {
-			if card.Platform != PlatformOpenAI {
-				continue
-			}
-			for _, model := range card.Models {
-				add(model)
-			}
-		}
-	}
-	if len(candidates) > codexEnginePricingModelLimit {
-		return nil, errors.New("engine applicable pricing catalog exceeds snapshot limit")
-	}
-	models := make([]string, 0, len(candidates))
-	for model := range candidates {
-		models = append(models, model)
-	}
-	sort.Strings(models)
-	for _, model := range models {
-		r := resolver.Resolve(ctx, PricingInput{Model: model, GroupID: key.GroupID, Group: key.Group})
-		if r == nil {
-			continue
-		}
-		p := codexEngineFrozenPrice{Resolved: *r, Channel: r.channelPricing, LongContext: r.longContextPricingEnabled}
-		// The ordinary no-group path has no group long-context entitlement. The
-		// resolver's nil-group default must not override the account's preference.
-		if key.Group == nil {
-			p.LongContext = false
-		}
-		freezeTokenCard := func(card *ModelPricing) *ModelPricing {
-			if card == nil {
-				return nil
-			}
-			card = s.billingService.applyModelSpecificPricingPolicyEx(model, card, r.Source == PricingSourceLiteLLM, at)
-			frozen := *card
-			if r.Source == PricingSourceLiteLLM && isDeepSeekModel(model) {
-				multiplier := deepseekPeakMultiplierAt(at)
-				frozen.InputPricePerToken *= multiplier
-				frozen.OutputPricePerToken *= multiplier
-				frozen.CacheReadPricePerToken *= multiplier
-			}
-			if frozen.FlexMultiplier == nil {
-				v := .5
-				frozen.FlexMultiplier = &v
-			}
-			if frozen.UltrafastMultiplier == 0 {
-				frozen.UltrafastMultiplier = 2
-			}
-			if frozen.FastMultiplier == nil && !usePriorityServiceTierPricing("priority", &frozen) {
-				v := 2.0
-				frozen.FastMultiplier = &v
-			}
-			return &frozen
-		}
-		p.Resolved.BasePricing = freezeTokenCard(r.BasePricing)
-		for _, interval := range r.Intervals {
-			if interval.MinTokens == int(^uint(0)>>1) {
-				return nil, errors.New("engine price interval exceeds token range")
-			}
-			p.TokenIntervals = append(p.TokenIntervals, codexEngineFrozenTokenInterval{MinTokens: interval.MinTokens, MaxTokens: interval.MaxTokens, Price: freezeTokenCard(resolver.GetIntervalPricing(r, interval.MinTokens+1))})
-		}
-		timeMultiplier := resolvedChannelTimeMultiplier(r, at)
-		p.TimeMultiplier = &timeMultiplier
-		p.ImageTokenPricing = r.Mode == BillingModeToken && (r.Source == PricingSourceGroup || r.Source == PricingSourceChannel) && !imageCountBillingApplies(key, result.ImageEndpoint)
-		if strings.Contains(strings.ToLower(model), "image") || (result.ImageEndpoint && model == f.UpstreamModel) {
-			p.ImageCosts = make(map[string]float64)
-			for _, size := range []string{"1K", "2K", "4K"} {
-				v := imagePricer.calculateOpenAIImageCost(ctx, model, key, &OpenAIForwardResult{ImageCount: 1, ImageSize: size, ImageEndpoint: true, ReasoningEffort: result.ReasoningEffort}, 1)
-				p.ImageCosts[size] = v.TotalCost
-			}
-		}
-		if statsChannel != nil {
-			p.StatsUseCustomer = statsChannel.ApplyPricingToAccountStats
-			for _, rule := range statsChannel.AccountStatsPricingRules {
-				if matchAccountStatsRule(&rule, a.ID, *key.GroupID) {
-					if found := findPricingForModel(rule.Pricing, statsPlatform, strings.ToLower(model)); found != nil {
-						p.StatsCustom = found
-						break
-					}
-				}
-			}
-			p.StatsCatalog, _ = s.billingService.GetModelPricing(model)
-		}
-		f.Prices[model] = p
-	}
-	// Preserve the existing configured-model candidate order, but resolve its
-	// first usable card now. Recovery never falls back to a newly added price.
-	for _, candidate := range usageBillingModelCandidates(billingModel, result.BillingModel, in.ChannelMappedModel, in.OriginalModel, result.UpstreamModel, result.Model) {
-		if card, ok := f.Prices[candidate]; ok && (card.Resolved.BasePricing != nil || len(card.TokenIntervals) > 0 || card.Resolved.Mode != BillingModeToken && card.Resolved.Mode != "" || len(card.ImageCosts) > 0) {
-			f.BillingModel = candidate
-			break
-		}
-	}
-	raw, err := json.Marshal(f)
-	if err != nil {
-		return nil, err
-	}
-	if len(raw) > codexEnginePricingSnapshotLimit {
-		return nil, errors.New("engine applicable pricing snapshot exceeds storage limit")
-	}
-	return raw, nil
+	return marshalCodexEnginePricingSnapshot(&f)
 }
 
 func codexEngineBillingUserAgent(value string) string {
@@ -367,17 +240,17 @@ func codexEngineBillingUserAgent(value string) string {
 }
 
 func decodeCodexEnginePricingSnapshot(raw json.RawMessage) (*codexEnginePricingSnapshot, error) {
-	if len(raw) > codexEnginePricingSnapshotLimit {
-		return nil, errors.New("engine pricing snapshot exceeds storage limit")
-	}
-	var f codexEnginePricingSnapshot
-	if err := json.Unmarshal(raw, &f); err != nil {
-		return nil, fmt.Errorf("decode engine pricing snapshot: %w", err)
+	f, err := unmarshalCodexEnginePricingSnapshot(raw)
+	if err != nil {
+		return nil, err
 	}
 	// Version 1 jobs keep their legacy settlement semantics; their missing
 	// admission evidence cannot be reconstructed from today's grants.
-	if (f.Version != 1 && f.Version != codexEnginePricingSnapshotVersion) || len(f.Prices) > codexEnginePricingModelLimit || f.PricingAt.IsZero() {
+	if (f.Version != 1 && f.Version != 2 && f.Version != codexEnginePricingSnapshotVersion) || len(f.Prices) > codexEnginePricingModelLimit || f.PricingAt.IsZero() {
 		return nil, errors.New("unsupported engine pricing snapshot")
+	}
+	if f.Version == codexEnginePricingSnapshotVersion && len(f.Prices) != 0 {
+		return nil, errors.New("current engine pricing snapshot must not freeze model prices")
 	}
 	if err := f.validateTotalQuotaSpendSnapshot(); err != nil {
 		return nil, err
@@ -387,7 +260,7 @@ func decodeCodexEnginePricingSnapshot(raw json.RawMessage) (*codexEnginePricingS
 			return nil, errors.New("invalid engine pricing multiplier")
 		}
 	}
-	return &f, nil
+	return f, nil
 }
 
 func codexEngineValidateTokenEvidence(event *CodexEngineBillingUsageEvent) error {
@@ -407,8 +280,8 @@ func codexEngineValidateTokenEvidence(event *CodexEngineBillingUsageEvent) error
 	return nil
 }
 
-// BuildCodexEngineBillingEvent reads only immutable snapshot data. Unknown cards
-// leave the event pending instead of silently recording free or current-price usage.
+// New jobs resolve only the event's model at settlement time. Legacy jobs retain
+// their frozen price cards; missing live dependencies leave new events pending.
 func (s *OpenAIGatewayService) BuildCodexEngineBillingEvent(ctx context.Context, job *CodexEngineBillingJob, event *CodexEngineBillingUsageEvent) (*UsageBillingCommand, *UsageLog, error) {
 	if job == nil || event == nil {
 		return nil, nil, errors.New("engine billing event is nil")
@@ -433,6 +306,54 @@ func (s *OpenAIGatewayService) BuildCodexEngineBillingEvent(ctx context.Context,
 	rate := f.TokenRate
 	p, known := f.Prices[priceModel]
 	bs := &BillingService{}
+	var group *Group
+	var resolver *ModelPricingResolver
+	if f.Version >= 4 {
+		if s == nil || s.billingService == nil {
+			return nil, nil, errors.New("engine settlement pricing service unavailable")
+		}
+		bs = s.billingService
+		if f.GroupID != nil {
+			if *f.GroupID <= 0 || s.channelService == nil || s.channelService.groupRepo == nil {
+				return nil, nil, errors.New("engine original billing group unavailable")
+			}
+			group, err = s.channelService.groupRepo.GetByIDLite(ctx, *f.GroupID)
+			if err != nil {
+				return nil, nil, fmt.Errorf("load engine original billing group: %w", err)
+			}
+			if group == nil || group.ID != *f.GroupID {
+				return nil, nil, errors.New("engine original billing group unavailable")
+			}
+			// Resolver lookups deliberately tolerate unavailable channels elsewhere.
+			// Recovered settlement must wait instead of silently losing an override.
+			if _, err = s.channelService.GetChannelForGroup(ctx, *f.GroupID); err != nil {
+				return nil, nil, fmt.Errorf("load engine settlement channel: %w", err)
+			}
+		}
+		resolver = s.resolver
+		if resolver == nil {
+			resolver = NewModelPricingResolver(s.channelService, bs)
+		}
+		if event.Kind != "search" {
+			r := resolver.Resolve(ctx, PricingInput{Model: priceModel, GroupID: f.GroupID, Group: group})
+			if r == nil {
+				return nil, nil, ErrModelPricingUnavailable
+			}
+			if r.Mode == BillingModePerRequest || r.Mode == BillingModeImage || r.Mode == BillingModeVideo {
+				configured := r.channelPricing != nil && r.channelPricing.PerRequestPrice != nil
+				for _, interval := range r.RequestTiers {
+					configured = configured || interval.PerRequestPrice != nil
+				}
+				if !configured {
+					return nil, nil, fmt.Errorf("engine configured request price missing: %w", ErrModelPricingUnavailable)
+				}
+			}
+			r.longContextPricingEnabled = f.GroupLongContextPricing
+			p = codexEngineFrozenPrice{Resolved: *r, Channel: r.channelPricing, LongContext: r.longContextPricingEnabled}
+			p.ImageTokenPricing = r.Mode == BillingModeToken && (r.Source == PricingSourceGroup || r.Source == PricingSourceChannel) && !(f.ImageEndpoint && f.ImageCountBilling)
+			known = true
+		}
+	}
 	imageSize := ""
 	switch event.Kind {
 	case "search":
@@ -446,9 +367,20 @@ func (s *OpenAIGatewayService) BuildCodexEngineBillingEvent(ctx context.Context,
 		if units == 0 {
 			return nil, nil, errors.New("missing engine search units")
 		}
-		// Operations and native calls are distinct meter dimensions, both using
-		// the frozen alpha/search price. Never manufacture calls from operations.
+		// Operations and native calls are distinct meter dimensions. Never
+		// manufacture calls from operations. Legacy jobs use their saved price;
+		// current jobs resolve the original group's price below.
 		cost = &CostBreakdown{TotalCost: float64(units) * f.SearchPrice, ActualCost: float64(units) * f.SearchPrice * f.BaseRate, BillingMode: string(BillingModePerRequest)}
+		if f.Version >= 4 {
+			var searchPrice *float64
+			if group != nil {
+				searchPrice = group.WebSearchPricePerCall
+			}
+			if searchPrice != nil && (math.IsNaN(*searchPrice) || math.IsInf(*searchPrice, 0) || *searchPrice < 0) {
+				return nil, nil, errors.New("invalid engine current search price")
+			}
+			cost = bs.CalculateWebSearchCost(units, searchPrice, f.BaseRate)
+		}
 		rate = f.BaseRate
 	case "image":
 		if !known {
@@ -462,6 +394,17 @@ func (s *OpenAIGatewayService) BuildCodexEngineBillingEvent(ctx context.Context,
 				return nil, nil, errors.New("missing engine actual image count")
 			}
 			size, validSize := ClassifyImageBillingTier(imageSize)
+			if f.Version >= 4 {
+				if !validSize {
+					return nil, nil, errors.New("engine actual image size unavailable")
+				}
+				cost, err = s.calculateCodexEngineCurrentImageCost(ctx, f, group, resolver, &p.Resolved, priceModel, size, event.ImageCount, effort)
+				if err != nil {
+					return nil, nil, err
+				}
+				rate = f.ImageRate
+				break
+			}
 			unit, ok := p.ImageCosts[size]
 			if !validSize || !ok {
 				return nil, nil, fmt.Errorf("engine actual image size price missing: %w", ErrModelPricingUnavailable)
@@ -492,6 +435,13 @@ func (s *OpenAIGatewayService) BuildCodexEngineBillingEvent(ctx context.Context,
 		r.longContextPricingEnabled = p.LongContext
 		input := CostInput{Ctx: ctx, Model: priceModel, Tokens: tokens, RequestCount: 1, RateMultiplier: f.TokenRate, PricingAt: f.PricingAt, ServiceTier: tier, ReasoningEffort: effort, Resolver: &ModelPricingResolver{}, Resolved: &r, LongContextBillingEnabled: &f.LongContext}
 		calculate := func(input CostInput) (*CostBreakdown, error) {
+			if f.Version >= 4 {
+				input.Resolver, input.GroupID, input.Group = resolver, f.GroupID, group
+				if err := validateCodexEngineCurrentRequestPrice(&r, input); err != nil {
+					return nil, err
+				}
+				return bs.CalculateCostUnified(input)
+			}
 			if r.Mode != BillingModeToken && r.Mode != "" {
 				return bs.CalculateCostUnified(input)
 			}
@@ -559,6 +509,9 @@ func (s *OpenAIGatewayService) BuildCodexEngineBillingEvent(ctx context.Context,
 		log.ImageInputSize = optionalTrimmedStringPtr(event.ImageRequested.Size)
 	}
 	statsPrice := f.Prices[model]
+	if f.Version >= 4 && event.Kind != "search" && f.GroupID != nil {
+		log.AccountStatsCost = resolveAccountStatsCost(ctx, s.channelService, bs, job.AccountID, *f.GroupID, model, tokens, max(1, event.ImageCount), cost.TotalCost, tier, f.PricingAt, f.LongContext, effort)
+	}
 	if statsPrice.StatsCustom != nil && event.Kind != "search" {
 		log.AccountStatsCost = calculateStatsCost(statsPrice.StatsCustom, tokens, max(1, event.ImageCount))
 		if log.AccountStatsCost != nil {
@@ -602,6 +555,58 @@ func (s *OpenAIGatewayService) BuildCodexEngineBillingEvent(ctx context.Context,
 	}
 	cmd.Normalize()
 	return cmd, log, nil
+}
+
+// Match the normal image pricing precedence while using the original request's
+// group and multiplier. A configured zero is valid; absent model prices are not.
+func (s *OpenAIGatewayService) calculateCodexEngineCurrentImageCost(ctx context.Context, f *codexEnginePricingSnapshot, group *Group, resolver *ModelPricingResolver, resolved *ResolvedPricing, model, size string, count int, effort string) (*CostBreakdown, error) {
+	configured := resolved.Mode == BillingModePerRequest || resolved.Mode == BillingModeImage
+	calculateConfigured := func() (*CostBreakdown, error) {
+		input := CostInput{Ctx: ctx, Model: model, GroupID: f.GroupID, Group: group, RequestCount: count, SizeTier: size, RateMultiplier: f.ImageRate, PricingAt: f.PricingAt, ReasoningEffort: effort, Resolver: resolver, Resolved: resolved}
+		if err := validateCodexEngineCurrentRequestPrice(resolved, input); err != nil {
+			return nil, err
+		}
+		return s.billingService.CalculateCostUnified(input)
+	}
+	if configured && resolved.Source == PricingSourceGroup {
+		return calculateConfigured()
+	}
+	key := &APIKey{GroupID: f.GroupID, Group: group}
+	if apiKeyHasConfiguredImagePrice(key, size) {
+		return s.billingService.CalculateImageCost(model, size, count, imagePriceConfigFromAPIKey(key), f.ImageRate), nil
+	}
+	if configured && resolved.Source == PricingSourceChannel {
+		return calculateConfigured()
+	}
+	known := resolved.BasePricing != nil
+	if catalog := s.billingService.pricingService; catalog != nil {
+		if price := catalog.GetModelPricing(model); price != nil && price.OutputCostPerImage > 0 {
+			known = true
+		}
+	}
+	if !known {
+		return nil, fmt.Errorf("engine image price missing for %q: %w", model, ErrModelPricingUnavailable)
+	}
+	return s.billingService.CalculateImageCost(model, size, count, nil, f.ImageRate), nil
+}
+
+func validateCodexEngineCurrentRequestPrice(resolved *ResolvedPricing, input CostInput) error {
+	if resolved.Mode == BillingModeToken || resolved.Mode == "" {
+		return nil
+	}
+	if resolved.channelPricing != nil && resolved.channelPricing.PerRequestPrice != nil {
+		return nil
+	}
+	for _, tier := range resolved.RequestTiers {
+		if input.SizeTier != "" && tier.TierLabel == input.SizeTier && tier.PerRequestPrice != nil {
+			return nil
+		}
+	}
+	contextTokens := input.Tokens.InputTokens + input.Tokens.CacheCreationTokens + input.Tokens.CacheReadTokens
+	if tier := FindMatchingInterval(resolved.RequestTiers, contextTokens); tier != nil && tier.PerRequestPrice != nil {
+		return nil
+	}
+	return fmt.Errorf("engine request price does not cover confirmed usage: %w", ErrModelPricingUnavailable)
 }
 
 func (s *OpenAIGatewayService) SettleCodexEngineBillingEvent(ctx context.Context, store CodexEngineBillingStore, job *CodexEngineBillingJob, event *CodexEngineBillingUsageEvent) error {

@@ -28,7 +28,7 @@ func NewCodexEngineBillingStore(db *sql.DB) service.CodexEngineBillingStore {
 
 const codexEngineBillingJobColumns = `id, client_request_id, account_id, user_id, api_key_id,
 	identity_digest, instance_id, snapshot, receipt_id, state, cursor, revision, consumed_sequence, next_attempt_at,
-	claim_token, lease_until, attempt_count, linked_job_id, terminal_seal, last_error, created_at, updated_at, source_seal, settlement_cursor`
+	claim_token, lease_until, attempt_count, linked_job_id, terminal_seal, last_error, created_at, updated_at, source_seal, settlement_cursor, delivery_outcome`
 
 type engineBillingRowScanner interface{ Scan(...any) error }
 
@@ -38,7 +38,7 @@ func scanCodexEngineBillingJob(row engineBillingRowScanner) (*service.CodexEngin
 	err := row.Scan(&j.ID, &j.ClientRequestID, &j.AccountID, &j.UserID, &j.APIKeyID,
 		&j.IdentityDigest, &j.InstanceID, &snapshot, &j.ReceiptID, &j.State, &j.Cursor, &j.Revision, &j.ConsumedSequence, &j.NextAttemptAt,
 		&j.ClaimToken, &j.LeaseUntil, &j.AttemptCount, &j.LinkedJobID, &seal,
-		&j.LastError, &j.CreatedAt, &j.UpdatedAt, &sourceSeal, &j.SettlementCursor)
+		&j.LastError, &j.CreatedAt, &j.UpdatedAt, &sourceSeal, &j.SettlementCursor, &j.DeliveryOutcome)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, service.ErrCodexEngineBillingNotFound
 	}
@@ -68,15 +68,15 @@ func (r *codexEngineBillingStore) CreatePending(ctx context.Context, in *service
 		next = time.Now()
 	}
 	j, err := scanCodexEngineBillingJob(r.db.QueryRowContext(ctx, `
-		INSERT INTO codex_engine_billing_jobs (client_request_id, account_id, user_id, api_key_id, identity_digest, instance_id, snapshot, next_attempt_at)
-		VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8)
+		INSERT INTO codex_engine_billing_jobs (client_request_id, account_id, user_id, api_key_id, identity_digest, instance_id, snapshot, next_attempt_at, delivery_outcome)
+		VALUES ($1,$2,$3,$4,$5,$6,$7::jsonb,$8,'pending')
 		ON CONFLICT (client_request_id) DO NOTHING RETURNING `+codexEngineBillingJobColumns,
 		in.ClientRequestID, in.AccountID, in.UserID, in.APIKeyID, in.IdentityDigest, in.InstanceID, string(in.Snapshot), next))
 	if !errors.Is(err, service.ErrCodexEngineBillingNotFound) {
 		return j, err
 	}
-	// The first dispatch owns the immutable snapshot. Never refresh its prices,
-	// deadline or billing identity on a replay of the client request ID.
+	// The first dispatch owns the original request identity and billing policy.
+	// Never replace them on a replay of the client request ID.
 	j, err = scanCodexEngineBillingJob(r.db.QueryRowContext(ctx, `SELECT `+codexEngineBillingJobColumns+` FROM codex_engine_billing_jobs WHERE client_request_id=$1`, in.ClientRequestID))
 	if err != nil {
 		return nil, err
@@ -85,6 +85,43 @@ func (r *codexEngineBillingStore) CreatePending(ctx context.Context, in *service
 		return nil, service.ErrCodexEngineBillingConflict
 	}
 	return j, nil
+}
+
+func (r *codexEngineBillingStore) FinalizeDelivery(ctx context.Context, id int64, outcome string) error {
+	if err := r.ready(); err != nil {
+		return err
+	}
+	if id <= 0 || (outcome != service.CodexEngineBillingDelivered && outcome != service.CodexEngineBillingNoCustomerCharge) {
+		return service.ErrCodexEngineBillingConflict
+	}
+	tx, err := r.db.BeginTx(ctx, nil)
+	if err != nil {
+		return err
+	}
+	defer tx.Rollback()
+	result, err := tx.ExecContext(ctx, `UPDATE codex_engine_billing_jobs SET delivery_outcome=$2, updated_at=NOW(),
+		next_attempt_at=CASE WHEN $2='delivered' THEN NOW() ELSE next_attempt_at END,
+		claim_token=CASE WHEN $2='no_customer_charge' THEN '' ELSE claim_token END,
+		lease_until=CASE WHEN $2='no_customer_charge' THEN NULL ELSE lease_until END
+		WHERE id=$1 AND (delivery_outcome='pending' OR delivery_outcome=$2)`, id, outcome)
+	if err != nil {
+		return err
+	}
+	n, err := result.RowsAffected()
+	if err != nil {
+		return err
+	}
+	if n != 1 {
+		return service.ErrCodexEngineBillingConflict
+	}
+	if outcome == service.CodexEngineBillingNoCustomerCharge {
+		// Incomplete delivery is terminal. Discard already staged facts together
+		// with the outcome so a stale worker can never turn them into a usage log.
+		if _, err := tx.ExecContext(ctx, `DELETE FROM codex_engine_billing_received_events WHERE job_id=$1`, id); err != nil {
+			return err
+		}
+	}
+	return tx.Commit()
 }
 
 func (r *codexEngineBillingStore) Get(ctx context.Context, id int64) (*service.CodexEngineBillingJob, error) {
@@ -188,6 +225,7 @@ func (r *codexEngineBillingStore) ClaimDue(ctx context.Context, limit int, lease
 		SELECT id FROM codex_engine_billing_jobs
 		WHERE (state='pending' OR (state='blocked' AND EXISTS (
 			SELECT 1 FROM codex_engine_billing_received_events e WHERE e.job_id=codex_engine_billing_jobs.id AND e.settled_at IS NULL)))
+		AND delivery_outcome='delivered'
 		AND next_attempt_at <= NOW() AND (lease_until IS NULL OR lease_until <= NOW())
 		ORDER BY next_attempt_at, id LIMIT $1 FOR UPDATE SKIP LOCKED
 	) UPDATE codex_engine_billing_jobs SET claim_token=$2, lease_until=NOW()+($3 * INTERVAL '1 millisecond'),
@@ -282,6 +320,14 @@ func (r *codexEngineBillingStore) ApplyEvent(ctx context.Context, e *service.Cod
 	}
 	if err != nil {
 		return nil, err
+	}
+	if j.DeliveryOutcome == service.CodexEngineBillingNoCustomerCharge {
+		// Defensive for stale callers: incomplete responses have neither customer
+		// debit nor usage/account-cost records, regardless of receipt contents.
+		return nil, service.ErrCodexEngineBillingClaimLost
+	}
+	if j.DeliveryOutcome != service.CodexEngineBillingDelivered {
+		return nil, service.ErrCodexEngineBillingDeliveryPending
 	}
 	if j.ReceiptID == "" || j.InstanceID == "" {
 		return nil, service.ErrCodexEngineBillingConflict
