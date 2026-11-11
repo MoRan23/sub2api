@@ -137,20 +137,24 @@ func prioritize(legacy *LegacyDecision, prompt *PromptDecision) Decision {
 		}
 		if code == ErrorCodeKeywordBlocked {
 			message = "提示词包含禁止内容，请调整输入后重试"
-			if result := prompt.Result; result != nil && result.ScannerBackend == "local-keyword" && result.PolicyID == "keyword-substring" && result.matchedKeyword != "" && result.matchedContent != "" {
-				message += fmt.Sprintf("（命中关键词：%q）", result.matchedContent)
+			if result := prompt.Result; result != nil && result.ScannerBackend == "local-keyword" && result.PolicyID == "keyword-substring" {
+				if result.keywordKind == "jailbreak" {
+					message = "禁止破甲，请立即停止使用破甲词，否则将封号" + enforcementCountMessage(prompt.Enforcement)
+				} else if result.keywordKind == "other" && result.matchedKeyword != "" && result.matchedContent != "" {
+					message += fmt.Sprintf("（命中关键词：%q）", TrimRunes(result.matchedContent, 160))
+				}
 			}
 		}
 		if code == ErrorCodeCBRNBlocked {
 			message = "请求同时命中危险主题与操作意图，请调整输入后重试"
 			if result := prompt.Result; result != nil && result.ScannerBackend == "local-cbrn" && result.PolicyID == "cbrn-topic-intent" && result.cbrnMatch != nil {
-				message += fmt.Sprintf("（主题命中：%q；操作意图命中：%q）", TrimRunes(result.cbrnMatch.Topic.Content, 160), TrimRunes(result.cbrnMatch.Intent.Content, 160))
+				message = "请求命中规则组\"核、生物、化学、放射性危害\"，请停止相关违规请求" + enforcementCountMessage(prompt.Enforcement)
 			}
 		}
 		if code == ErrorCodeCombinationBlocked {
-			message = "请求同时命中组合规则的主题与操作意图，请调整输入后重试"
+			message = "请求命中组合拦截规则，请停止相关违规请求" + enforcementCountMessage(prompt.Enforcement)
 			if result := prompt.Result; result != nil && result.ScannerBackend == "local-combination" && result.PolicyID == "combination-topic-intent" && result.combinationMatch != nil {
-				message += fmt.Sprintf("（规则组：%q；主题命中：%q；操作意图命中：%q）", TrimRunes(result.combinationMatch.PolicyName, 80), TrimRunes(result.combinationMatch.Topic.Content, 160), TrimRunes(result.combinationMatch.Intent.Content, 160))
+				message = fmt.Sprintf("请求命中规则组%q，请停止相关违规请求", TrimRunes(result.combinationMatch.PolicyName, 80)) + enforcementCountMessage(prompt.Enforcement)
 			}
 		}
 		return Decision{Kind: DecisionBlock, HTTPStatus: http.StatusForbidden, ErrorCode: code,
@@ -166,6 +170,20 @@ func prioritize(legacy *LegacyDecision, prompt *PromptDecision) Decision {
 	default:
 		return allowDecision(legacy, prompt)
 	}
+}
+
+func enforcementCountMessage(outcome *EnforcementOutcome) string {
+	if outcome == nil || !outcome.Recorded {
+		return "；记录次数暂不可用"
+	}
+	if !outcome.Counted {
+		return "；本次已记录，未计入当前统计周期"
+	}
+	message := fmt.Sprintf("；最近 %d 小时已记录 %d 次", outcome.WindowHours, outcome.ViolationCount)
+	if outcome.AutoBanned && outcome.UserStatus == "disabled" {
+		message += "，账号已自动停用"
+	}
+	return message
 }
 
 func allowDecision(legacy *LegacyDecision, prompt *PromptDecision) Decision {

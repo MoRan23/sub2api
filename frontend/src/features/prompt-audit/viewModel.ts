@@ -32,6 +32,13 @@ export function configToDraft(config: PromptAuditConfig): PromptAuditDraft {
   return {
     ...cloneData(config),
     blocked_keywords: [...(config.blocked_keywords ?? [])],
+    jailbreak_keywords: [...(config.jailbreak_keywords === undefined ? config.blocked_keywords ?? [] : config.jailbreak_keywords ?? [])],
+    other_keywords: [...(config.other_keywords ?? [])],
+    warning_email_enabled: config.warning_email_enabled ?? true,
+    warning_email_window_minutes: config.warning_email_window_minutes ?? 5,
+    auto_ban_enabled: config.auto_ban_enabled ?? true,
+    violation_window_hours: config.violation_window_hours ?? 24,
+    ban_threshold: config.ban_threshold ?? 10,
     combination_policies: cloneData(config.combination_policies ?? (
       config.cbrn_blocking_enabled || config.cbrn_topic_rules?.length || config.cbrn_intent_rules?.length
         ? [{ id: 'cbrn', name: 'CBRN', enabled: config.cbrn_blocking_enabled ?? false, topic_rules: config.cbrn_topic_rules ?? [], intent_rules: config.cbrn_intent_rules ?? [] }]
@@ -81,7 +88,13 @@ export function buildUpdateRequest(draft: PromptAuditDraft): PromptAuditUpdateRe
       intent_rules: normalizeKeywordRules(policy.intent_rules ?? []),
       migrate_keywords: normalizeKeywordRules(policy.migrate_keywords ?? []),
     })),
-    blocked_keywords: normalizeKeywordRules(draft.blocked_keywords),
+    jailbreak_keywords: normalizeKeywordRules(draft.jailbreak_keywords),
+    other_keywords: normalizeKeywordRules(draft.other_keywords),
+    warning_email_enabled: draft.warning_email_enabled,
+    warning_email_window_minutes: Number(draft.warning_email_window_minutes),
+    auto_ban_enabled: draft.auto_ban_enabled,
+    violation_window_hours: Number(draft.violation_window_hours),
+    ban_threshold: Number(draft.ban_threshold),
     keyword_all_groups: draft.keyword_all_groups,
     keyword_group_ids: draft.keyword_all_groups ? [] : [...draft.keyword_group_ids].sort((a, b) => a - b),
     keyword_whitelist_keys: (draft.keyword_whitelist_keys ?? []).map(({ user_id, api_key_id }) => ({ user_id, api_key_id })),
@@ -110,6 +123,13 @@ export function buildUpdateRequest(draft: PromptAuditDraft): PromptAuditUpdateRe
 export function draftFingerprint(draft: PromptAuditDraft | null): string {
   if (!draft) return ''
   return JSON.stringify(buildUpdateRequest(draft))
+}
+
+export function enforcementPolicyError(draft: PromptAuditDraft): string {
+  if (!Number.isInteger(draft.warning_email_window_minutes) || draft.warning_email_window_minutes < 1 || draft.warning_email_window_minutes > 60) return 'prompt_audit_invalid_warning_email_window'
+  if (!Number.isInteger(draft.violation_window_hours) || draft.violation_window_hours < 1 || draft.violation_window_hours > 720) return 'prompt_audit_invalid_violation_window'
+  if (!Number.isInteger(draft.ban_threshold) || draft.ban_threshold < 1 || draft.ban_threshold > 10000) return 'prompt_audit_invalid_ban_threshold'
+  return ''
 }
 
 export function emptyEventFilters(): PromptEventFilters {

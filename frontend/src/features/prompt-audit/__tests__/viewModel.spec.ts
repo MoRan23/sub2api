@@ -8,6 +8,7 @@ import {
   eventFilterPayload,
   hasExplicitDeleteRange,
   SCANNER_CATALOG,
+  enforcementPolicyError,
 } from '../viewModel'
 
 const config = (): PromptAuditConfig => ({
@@ -139,10 +140,10 @@ describe('Prompt Audit view model', () => {
       ...config(), keyword_blocking_enabled: true, keyword_blocking_active: true,
       blocked_keywords: ['  Alpha ', '', 'Beta'], keyword_all_groups: false, keyword_group_ids: [9, 3],
     })
-    expect(draft.blocked_keywords).toEqual(['  Alpha ', '', 'Beta'])
+    expect(draft.jailbreak_keywords).toEqual(['  Alpha ', '', 'Beta'])
     expect(buildUpdateRequest(draft)).toMatchObject({
       keyword_blocking_enabled: true,
-      blocked_keywords: ['Alpha', 'Beta'],
+      jailbreak_keywords: ['Alpha', 'Beta'],
       keyword_all_groups: false,
       keyword_group_ids: [3, 9],
     })
@@ -159,7 +160,37 @@ describe('Prompt Audit view model', () => {
   it('saves regex case and 2000-character rules without folding literal namespaces', () => {
     const longRule = 'regex:' + 'a'.repeat(1994)
     const draft = configToDraft({ ...config(), blocked_keywords: [' Alpha ', 'alpha', 'regex:Alpha', 'regex:alpha', 'REGEX:Alpha', 'regex:Alpha', longRule] })
-    expect(buildUpdateRequest(draft).blocked_keywords).toEqual(['Alpha', 'regex:Alpha', 'regex:alpha', 'REGEX:Alpha', longRule])
+    expect(buildUpdateRequest(draft).jailbreak_keywords).toEqual(['Alpha', 'regex:Alpha', 'regex:alpha', 'REGEX:Alpha', longRule])
+  })
+
+  it('migrates legacy keywords to jailbreak and initializes enforcement defaults', () => {
+    const draft = configToDraft({ ...config(), blocked_keywords: ['old-rule'] })
+    expect(draft).toMatchObject({ jailbreak_keywords: ['old-rule'], other_keywords: [], warning_email_enabled: true,
+      warning_email_window_minutes: 5, auto_ban_enabled: true, violation_window_hours: 24, ban_threshold: 10 })
+    expect(buildUpdateRequest(draft)).not.toHaveProperty('blocked_keywords')
+  })
+
+  it.each([
+    ['warning_email_window_minutes', 0, 'prompt_audit_invalid_warning_email_window'],
+    ['warning_email_window_minutes', 61, 'prompt_audit_invalid_warning_email_window'],
+    ['violation_window_hours', 721, 'prompt_audit_invalid_violation_window'],
+    ['ban_threshold', 1.5, 'prompt_audit_invalid_ban_threshold'],
+    ['ban_threshold', Number.NaN, 'prompt_audit_invalid_ban_threshold'],
+  ] as const)('rejects invalid enforcement setting %s=%s', (field, value, expected) => {
+    const draft = configToDraft(config())
+    draft[field] = value
+    expect(enforcementPolicyError(draft)).toBe(expected)
+  })
+
+  it.each([[], null])('does not restore retired legacy keywords over an explicit new list %s', (keywords) => {
+    const draft = configToDraft({ ...config(), blocked_keywords: ['retired'], jailbreak_keywords: keywords,
+      other_keywords: [' Other ', 'other'], warning_email_enabled: false, auto_ban_enabled: false,
+      warning_email_window_minutes: 12, violation_window_hours: 48, ban_threshold: 20 })
+    expect(buildUpdateRequest(draft)).toMatchObject({ jailbreak_keywords: [], other_keywords: ['Other'],
+      warning_email_enabled: false, auto_ban_enabled: false, warning_email_window_minutes: 12, violation_window_hours: 48, ban_threshold: 20 })
+    const fingerprint = draftFingerprint(draft)
+    draft.other_keywords = []
+    expect(draftFingerprint(draft)).not.toBe(fingerprint)
   })
 
   it('requires a valid explicit range and sends canonical ISO timestamps for filter deletion', () => {

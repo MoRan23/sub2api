@@ -204,8 +204,9 @@ func resolveUpdatedCombinationPolicies(current storageConfig, req UpdateConfigRe
 	return policies
 }
 
-// Migration is declarative and happens only when saving an enabled policy.
-// Reapplying it prevents older clients from restoring retired literal rules.
+// Migration is declarative and applies when loading or saving enabled policies.
+// Both keyword categories retire exact literals so an earlier independent rule
+// cannot shadow the combination policy. Reapplying also covers legacy clients.
 func migrateCombinationKeywords(cfg *storageConfig) {
 	retired := make(map[string]struct{})
 	folder := cases.Fold()
@@ -219,18 +220,23 @@ func migrateCombinationKeywords(cfg *storageConfig) {
 	if len(retired) == 0 {
 		return
 	}
-	remaining := make([]string, 0, len(cfg.BlockedKeywords))
 	removed := false
-	for _, word := range cfg.BlockedKeywords {
-		if _, exists := retired[folder.String(strings.TrimSpace(word))]; exists {
-			removed = true
-		} else {
-			remaining = append(remaining, word)
+	removeRetired := func(words []string) []string {
+		remaining := make([]string, 0, len(words))
+		for _, word := range words {
+			if _, exists := retired[folder.String(strings.TrimSpace(word))]; exists {
+				removed = true
+			} else {
+				remaining = append(remaining, word)
+			}
 		}
+		return remaining
 	}
+	cfg.JailbreakKeywords = removeRetired(cfg.JailbreakKeywords)
+	cfg.OtherKeywords = removeRetired(cfg.OtherKeywords)
 	if removed {
-		cfg.BlockedKeywords = remaining
-		if len(remaining) == 0 {
+		cfg.BlockedKeywords = append([]string(nil), cfg.JailbreakKeywords...)
+		if len(cfg.JailbreakKeywords) == 0 && len(cfg.OtherKeywords) == 0 {
 			cfg.KeywordBlockingEnabled = false
 		}
 	}

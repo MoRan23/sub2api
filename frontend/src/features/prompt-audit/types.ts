@@ -65,7 +65,14 @@ export interface PromptAuditConfig {
   combination_policies?: PromptCombinationPolicy[]
   combination_templates?: PromptCombinationPolicy[]
   combination_blocking_active?: boolean
-  blocked_keywords: string[]
+  blocked_keywords?: string[]
+  jailbreak_keywords?: string[] | null
+  other_keywords?: string[] | null
+  warning_email_enabled?: boolean
+  warning_email_window_minutes?: number
+  auto_ban_enabled?: boolean
+  violation_window_hours?: number
+  ban_threshold?: number
   keyword_all_groups: boolean
   keyword_group_ids: number[]
   keyword_whitelist_keys: PromptKeywordWhitelistKey[]
@@ -85,6 +92,13 @@ export interface PromptAuditConfig {
 }
 
 export interface PromptAuditDraft extends Omit<PromptAuditConfig, 'endpoints'> {
+  jailbreak_keywords: string[]
+  other_keywords: string[]
+  warning_email_enabled: boolean
+  warning_email_window_minutes: number
+  auto_ban_enabled: boolean
+  violation_window_hours: number
+  ban_threshold: number
   combination_policies: PromptCombinationPolicy[]
   combination_templates: PromptCombinationPolicy[]
   endpoints: PromptAuditEndpointDraft[]
@@ -97,7 +111,13 @@ export interface PromptAuditUpdateRequest {
   blocking_latest_turn_only: boolean
   keyword_blocking_enabled: boolean
   combination_policies: PromptCombinationPolicy[]
-  blocked_keywords: string[]
+  jailbreak_keywords: string[]
+  other_keywords: string[]
+  warning_email_enabled: boolean
+  warning_email_window_minutes: number
+  auto_ban_enabled: boolean
+  violation_window_hours: number
+  ban_threshold: number
   keyword_all_groups: boolean
   keyword_group_ids: number[]
   keyword_whitelist_keys: PromptKeywordWhitelistKey[]
@@ -250,6 +270,21 @@ export interface PromptCombinationMatch extends PromptCBRNMatch {
   policy_name: string
 }
 
+export interface PromptEnforcementOutcome {
+  recorded: boolean
+  counted: boolean
+  kind: string
+  violation_count: number
+  window_hours: number
+  ban_threshold: number
+  auto_banned: boolean
+  epoch: number
+  email_status: string
+  user_status: string
+  can_unban: boolean
+  reason?: string
+}
+
 export interface PromptAuditEvent {
   id: number
   job_id: number
@@ -262,6 +297,8 @@ export interface PromptAuditEvent {
   scanner_scores: Record<string, number>
   scanner_evidence: Record<string, string>
   matched_keyword?: string
+  keyword_kind?: 'jailbreak' | 'other' | string
+  enforcement?: PromptEnforcementOutcome | null
   cbrn_match?: PromptCBRNMatch
   combination_match?: PromptCombinationMatch
   scanner_backend: string

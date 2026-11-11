@@ -22,6 +22,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/userallowedgroup"
 	"github.com/Wei-Shaw/sub2api/ent/usersubscription"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/promptenforcement"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
 	"github.com/shopspring/decimal"
@@ -350,6 +351,14 @@ func (r *userRepository) Update(ctx context.Context, userIn *service.User, field
 	updated, err := updateOp.Save(txCtx)
 	if err != nil {
 		return translatePersistenceError(err, service.ErrUserNotFound, service.ErrEmailExists)
+	}
+	if fields.Status {
+		// The UPDATE above holds the user row lock. Follow the same user ->
+		// enforcement-state lock order as automatic penalties, including an
+		// explicit repeated disabled value that revokes automatic ban ownership.
+		if err := promptenforcement.ApplyExplicitUserStatus(txCtx, txAwareSQLExecutor(txCtx, r.sql, r.client), updated.ID, updated.Status, time.Now().UTC()); err != nil {
+			return fmt.Errorf("update prompt audit status ownership: %w", err)
+		}
 	}
 
 	if fields.AllowedGroups {

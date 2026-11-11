@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"slices"
 	"strconv"
 	"strings"
 	"sync"
@@ -346,7 +347,15 @@ func (m *ConfigManager) Save(ctx context.Context, req UpdateConfigRequest, actor
 }
 
 func (m *ConfigManager) buildNextStorage(current storageConfig, req UpdateConfigRequest, actorID int64) (storageConfig, error) {
-	if err := validateUpdateConfigRequest(req); err != nil {
+	normalizeLocalRuleConfig(&current)
+	validationRequest := req
+	if req.JailbreakKeywords == nil && req.BlockedKeywords == nil {
+		validationRequest.JailbreakKeywords = &current.JailbreakKeywords
+	}
+	if req.OtherKeywords == nil {
+		validationRequest.OtherKeywords = &current.OtherKeywords
+	}
+	if err := validateUpdateConfigRequest(validationRequest); err != nil {
 		return storageConfig{}, err
 	}
 	keywordAllGroups := current.KeywordAllGroups
@@ -359,6 +368,38 @@ func (m *ConfigManager) buildNextStorage(current storageConfig, req UpdateConfig
 		keywordAllGroups = *req.KeywordAllGroups
 		keywordGroupIDs = append([]int64(nil), req.KeywordGroupIDs...)
 	}
+	jailbreakKeywords := append([]string{}, current.JailbreakKeywords...)
+	if req.JailbreakKeywords != nil {
+		jailbreakKeywords = append([]string{}, (*req.JailbreakKeywords)...)
+	} else if req.BlockedKeywords != nil {
+		// Legacy clients still submit blocked_keywords; treat it as the
+		// jailbreak list without overwriting newer categories when omitted.
+		jailbreakKeywords = append([]string{}, req.BlockedKeywords...)
+	}
+	otherKeywords := append([]string{}, current.OtherKeywords...)
+	if req.OtherKeywords != nil {
+		otherKeywords = append([]string{}, (*req.OtherKeywords)...)
+	}
+	warningEmailEnabled := current.WarningEmailEnabled
+	if req.WarningEmailEnabled != nil {
+		warningEmailEnabled = *req.WarningEmailEnabled
+	}
+	warningEmailWindowMinutes := current.WarningEmailWindowMinutes
+	if req.WarningEmailWindowMinutes != nil {
+		warningEmailWindowMinutes = *req.WarningEmailWindowMinutes
+	}
+	autoBanEnabled := current.AutoBanEnabled
+	if req.AutoBanEnabled != nil {
+		autoBanEnabled = *req.AutoBanEnabled
+	}
+	violationWindowHours := current.ViolationWindowHours
+	if req.ViolationWindowHours != nil {
+		violationWindowHours = *req.ViolationWindowHours
+	}
+	banThreshold := current.BanThreshold
+	if req.BanThreshold != nil {
+		banThreshold = *req.BanThreshold
+	}
 	combinationPolicies := resolveUpdatedCombinationPolicies(current, req)
 	currentByID := make(map[string]StorageEndpoint, len(current.Endpoints))
 	for _, endpoint := range current.Endpoints {
@@ -366,13 +407,16 @@ func (m *ConfigManager) buildNextStorage(current storageConfig, req UpdateConfig
 	}
 	next := storageConfig{
 		Enabled: req.Enabled, BlockingEnabled: req.BlockingEnabled, BlockingLatestTurnOnly: req.BlockingLatestTurnOnly, StorePassEvents: req.StorePassEvents,
-		KeywordBlockingEnabled: req.KeywordBlockingEnabled, BlockedKeywords: append([]string(nil), req.BlockedKeywords...),
+		KeywordBlockingEnabled: req.KeywordBlockingEnabled, BlockedKeywords: append([]string(nil), jailbreakKeywords...),
+		JailbreakKeywords: jailbreakKeywords, OtherKeywords: otherKeywords,
 		KeywordAllGroups: keywordAllGroups, KeywordGroupIDs: keywordGroupIDs,
 		KeywordWhitelistKeys: keywordWhitelistKeys,
 		CombinationPolicies:  combinationPolicies,
 		Strategy:             strings.TrimSpace(req.Strategy), WorkerCount: req.WorkerCount,
 		QueueCapacity: req.QueueCapacity, Scanners: append([]string(nil), req.Scanners...),
 		AllGroups: req.AllGroups, GroupIDs: append([]int64(nil), req.GroupIDs...),
+		WarningEmailEnabled: warningEmailEnabled, WarningEmailWindowMinutes: warningEmailWindowMinutes,
+		AutoBanEnabled: autoBanEnabled, ViolationWindowHours: violationWindowHours, BanThreshold: banThreshold,
 		ConfigVersion: current.ConfigVersion, UpdatedBy: actorID,
 		Endpoints: make([]StorageEndpoint, 0, len(req.Endpoints)),
 	}
@@ -557,6 +601,8 @@ func cloneStorageConfig(cfg storageConfig) storageConfig {
 	cfg.GroupIDs = append([]int64(nil), cfg.GroupIDs...)
 	cfg.KeywordGroupIDs = append([]int64(nil), cfg.KeywordGroupIDs...)
 	cfg.BlockedKeywords = append([]string(nil), cfg.BlockedKeywords...)
+	cfg.JailbreakKeywords = slices.Clone(cfg.JailbreakKeywords)
+	cfg.OtherKeywords = slices.Clone(cfg.OtherKeywords)
 	cfg.Endpoints = append([]StorageEndpoint(nil), cfg.Endpoints...)
 	return cfg
 }
@@ -569,7 +615,16 @@ func cloneActiveConfig(cfg ActiveConfig) ActiveConfig {
 	cfg.Scanners = append([]string(nil), cfg.Scanners...)
 	cfg.GroupIDs = append([]int64(nil), cfg.GroupIDs...)
 	cfg.KeywordGroupIDs = append([]int64(nil), cfg.KeywordGroupIDs...)
-	cfg.BlockedKeywords = append([]string(nil), cfg.BlockedKeywords...)
+	if cfg.JailbreakKeywords != nil {
+		// The legacy field is a projection of the classified list. Keep one owned
+		// copy per snapshot; never revive stale legacy entries after an explicit clear.
+		cfg.JailbreakKeywords = slices.Clone(cfg.JailbreakKeywords)
+		cfg.BlockedKeywords = cfg.JailbreakKeywords
+	} else {
+		// Preserve legacy-only ActiveConfig values constructed by older callers.
+		cfg.BlockedKeywords = slices.Clone(cfg.BlockedKeywords)
+	}
+	cfg.OtherKeywords = slices.Clone(cfg.OtherKeywords)
 	cfg.Endpoints = append([]ActiveEndpoint(nil), cfg.Endpoints...)
 	return cfg
 }

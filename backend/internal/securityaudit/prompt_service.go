@@ -15,15 +15,18 @@ import (
 )
 
 type PromptService struct {
-	config    ConfigStore
-	repo      *PostgreSQLRepository
-	payload   *RedisPayloadStore
-	enqueuer  *Enqueuer
-	runner    *Runner
-	evaluator *GuardEvaluator
-	scanner   *OpenAICompatibleScanner
-	metrics   *AtomicMetrics
-	clock     Clock
+	config               ConfigStore
+	repo                 *PostgreSQLRepository
+	payload              *RedisPayloadStore
+	enqueuer             *Enqueuer
+	runner               *Runner
+	evaluator            *GuardEvaluator
+	scanner              *OpenAICompatibleScanner
+	metrics              *AtomicMetrics
+	clock                Clock
+	enforcement          EnforcementRepository
+	authCacheInvalidator interface{ InvalidateAuthCacheByUserID(context.Context, int64) }
+	notifications        *PromptNotificationWorker
 
 	lifecycleMu  sync.Mutex
 	cancel       context.CancelFunc
@@ -32,6 +35,24 @@ type PromptService struct {
 	enqueueSlots chan struct{}
 	probeMu      sync.RWMutex
 	probes       map[string]ProbeResult
+}
+
+// EnforcementRepository is intentionally narrow: the prompt path supplies a
+// fully local decision and the repository atomically records its event,
+// violation ledger and any user state transition.
+type EnforcementRepository interface {
+	RecordEnforcedBlocking(context.Context, EnforcementInput) (*EnforcementOutcome, error)
+}
+
+// SetEnforcementDependencies wires the optional enforcement path after the
+// service graph is built. A nil repository keeps legacy event recording
+// semantics, which also lets older deployments upgrade without a new store.
+func (s *PromptService) SetEnforcementDependencies(repo EnforcementRepository, invalidator interface{ InvalidateAuthCacheByUserID(context.Context, int64) }) {
+	if s == nil {
+		return
+	}
+	s.enforcement = repo
+	s.authCacheInvalidator = invalidator
 }
 
 func NewPromptService(
@@ -66,6 +87,9 @@ func (s *PromptService) Start(ctx context.Context) error {
 	s.lifecycleMu.Unlock()
 	configErr := s.config.Start(background)
 	workerErr := s.runner.Start(background)
+	if s.notifications != nil {
+		s.notifications.Start(background)
+	}
 	return errors.Join(configErr, workerErr)
 }
 
@@ -83,6 +107,9 @@ func (s *PromptService) Shutdown(ctx context.Context) error {
 	var workerErr error
 	if s.runner != nil {
 		workerErr = s.runner.Shutdown(ctx)
+	}
+	if s.notifications != nil {
+		workerErr = errors.Join(workerErr, s.notifications.Shutdown(ctx))
 	}
 	done := make(chan struct{})
 	go func() { s.enqueueWG.Wait(); close(done) }()
@@ -145,13 +172,26 @@ func (s *PromptService) CheckKeyword(ctx context.Context, req Request) (*PromptD
 		return nil, &GuardError{Code: ErrorCodeInvalidResponse, Cause: err}
 	}
 	var keyword, content string
+	keywordKind := ""
 	var matched bool
 	if cfg.KeywordBlockingActive() {
 		scanText, _ := req.prepared.scanText(req)
-		keyword, content, matched = cfg.MatchBlockedKeyword(scanText)
+		keyword, content, matched = cfg.MatchJailbreakKeyword(scanText)
+		if matched {
+			keywordKind = "jailbreak"
+		}
 	}
 	if !matched {
-		return s.checkCombinations(ctx, req, cfg, started)
+		combination, err := s.checkCombinations(ctx, req, cfg, started)
+		if err != nil || combination.Kind != DecisionAllow {
+			return combination, err
+		}
+		scanText, _ := req.prepared.scanText(req)
+		keyword, content, matched = cfg.MatchOtherKeyword(scanText)
+		if !matched {
+			return &PromptDecision{Kind: DecisionAllow, AllowNextStage: true}, nil
+		}
+		keywordKind = "other"
 	}
 	snapshot, _ := req.prepared.snapshot(req, false)
 
@@ -164,14 +204,21 @@ func (s *PromptService) CheckKeyword(ctx context.Context, req Request) (*PromptD
 		ScannerScores: map[string]float64{"keyword": 1}, ScannerEvidence: map[string]string{"keyword": "sha256:" + keywordHash},
 		ScannerBackend: "local-keyword", ScannerVersion: "1", PolicyID: "keyword-substring", PolicyVersion: 1,
 		ChunkTotal: 1, LatencyMS: int(latency.Milliseconds()),
-		matchedKeyword: keyword, matchedContent: content,
+		matchedKeyword: keyword, matchedContent: content, keywordKind: keywordKind,
 	}
 	if s.metrics != nil {
 		s.metrics.Observe(DecisionBlock, latency)
 		s.metrics.IncKeywordBlocked()
 	}
-	if s.repo != nil {
-		if _, recordErr := s.repo.RecordBlocking(ctx, snapshot, cfg.ConfigVersion, result, cfg.StorePassEvents); recordErr != nil {
+	var outcome *EnforcementOutcome
+	if s.repo != nil || s.enforcement != nil {
+		var recordErr error
+		if keywordKind == "jailbreak" && s.enforcement != nil {
+			outcome, recordErr = s.recordEnforced(ctx, req, snapshot, cfg, result, "jailbreak", "", started)
+		} else if s.repo != nil {
+			_, recordErr = s.repo.RecordBlocking(ctx, snapshot, cfg.ConfigVersion, result, cfg.StorePassEvents)
+		}
+		if recordErr != nil {
 			if s.metrics != nil {
 				s.metrics.IncRecordFailed()
 			}
@@ -187,7 +234,7 @@ func (s *PromptService) CheckKeyword(ctx context.Context, req Request) (*PromptD
 		"upstream_dispatched": false, "billing_preconsumed": false,
 	}))
 	return &PromptDecision{
-		Kind: DecisionBlock, ErrorCode: ErrorCodeKeywordBlocked, Result: result, AllowNextStage: false,
+		Kind: DecisionBlock, ErrorCode: ErrorCodeKeywordBlocked, Result: result, AllowNextStage: false, Enforcement: outcome,
 	}, nil
 }
 
@@ -226,8 +273,15 @@ func (s *PromptService) checkCombinations(ctx context.Context, req Request, cfg 
 		s.metrics.Observe(DecisionBlock, latency)
 		s.metrics.IncCombinationBlocked()
 	}
-	if s.repo != nil {
-		if _, recordErr := s.repo.RecordBlocking(ctx, snapshot, cfg.ConfigVersion, result, cfg.StorePassEvents); recordErr != nil {
+	var outcome *EnforcementOutcome
+	if s.repo != nil || s.enforcement != nil {
+		var recordErr error
+		if s.enforcement != nil {
+			outcome, recordErr = s.recordEnforced(ctx, req, snapshot, cfg, result, "combination", match.PolicyName, started)
+		} else if s.repo != nil {
+			_, recordErr = s.repo.RecordBlocking(ctx, snapshot, cfg.ConfigVersion, result, cfg.StorePassEvents)
+		}
+		if recordErr != nil {
 			if s.metrics != nil {
 				s.metrics.IncRecordFailed()
 			}
@@ -242,7 +296,32 @@ func (s *PromptService) checkCombinations(ctx context.Context, req Request, cfg 
 		"error_code": ErrorCodeCombinationBlocked, "combination_hash": ruleHash,
 		"upstream_dispatched": false, "billing_preconsumed": false,
 	}))
-	return &PromptDecision{Kind: DecisionBlock, ErrorCode: ErrorCodeCombinationBlocked, Result: result}, nil
+	return &PromptDecision{Kind: DecisionBlock, ErrorCode: ErrorCodeCombinationBlocked, Result: result, Enforcement: outcome}, nil
+}
+
+func (s *PromptService) recordEnforced(ctx context.Context, req Request, snapshot PromptSnapshot, cfg ActiveConfig, result *NormalizedResult, kind, groupName string, started time.Time) (*EnforcementOutcome, error) {
+	policy := EnforcementPolicy{
+		AutoBanEnabled:       cfg.AutoBanEnabled,
+		ViolationWindowHours: cfg.ViolationWindowHours,
+		BanThreshold:         cfg.BanThreshold,
+		EmailOnHit:           cfg.WarningEmailEnabled,
+		EmailMergeMinutes:    cfg.WarningEmailWindowMinutes,
+	}
+	if !req.EnforcementStartedAt.IsZero() {
+		started = req.EnforcementStartedAt
+	}
+	outcome, err := s.enforcement.RecordEnforcedBlocking(ctx, EnforcementInput{
+		Snapshot: snapshot, ConfigVersion: cfg.ConfigVersion, Result: result,
+		RequestKey: req.EnforcementID, StartedAt: started, Kind: kind,
+		RuleGroupName: groupName, Policy: policy,
+	})
+	if err != nil {
+		return nil, err
+	}
+	if err == nil && outcome != nil && outcome.UserChanged && s.authCacheInvalidator != nil && snapshot.UserID > 0 {
+		s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, snapshot.UserID)
+	}
+	return outcome, err
 }
 
 func (s *PromptService) Enqueue(_ context.Context, req Request) error {
@@ -539,10 +618,63 @@ func (s *PromptService) probeSnapshot() map[string]ProbeResult {
 }
 
 func (s *PromptService) ListEvents(ctx context.Context, filter EventFilter, page, pageSize int) (*EventPage, error) {
-	return s.repo.ListEvents(ctx, filter, page, pageSize)
+	result, err := s.repo.ListEvents(ctx, filter, page, pageSize)
+	if err != nil || result == nil {
+		return result, err
+	}
+	if err := s.attachEventEnforcement(ctx, result.Items); err != nil {
+		return nil, err
+	}
+	return result, nil
 }
 func (s *PromptService) GetEvent(ctx context.Context, id int64) (*Event, error) {
-	return s.repo.GetEvent(ctx, id)
+	event, err := s.repo.GetEvent(ctx, id)
+	if err != nil || event == nil {
+		return event, err
+	}
+	if err := s.attachEventEnforcement(ctx, []*Event{event}); err != nil {
+		return nil, err
+	}
+	return event, nil
+}
+
+func (s *PromptService) attachEventEnforcement(ctx context.Context, events []*Event) error {
+	reader, ok := s.enforcement.(interface {
+		GetEventEnforcement(context.Context, []int64) (map[int64]*EnforcementOutcome, error)
+	})
+	if !ok || len(events) == 0 {
+		return nil
+	}
+	ids := make([]int64, 0, len(events))
+	for _, event := range events {
+		if event != nil {
+			ids = append(ids, event.ID)
+		}
+	}
+	outcomes, err := reader.GetEventEnforcement(ctx, ids)
+	if err != nil {
+		return err
+	}
+	for _, event := range events {
+		if event != nil {
+			event.Enforcement = outcomes[event.ID]
+		}
+	}
+	return nil
+}
+
+func (s *PromptService) UnbanUser(ctx context.Context, userID int64) (*EnforcementOutcome, error) {
+	store, ok := s.enforcement.(interface {
+		UnbanPromptUser(context.Context, int64) (*EnforcementOutcome, error)
+	})
+	if !ok {
+		return nil, errors.New("prompt enforcement unavailable")
+	}
+	outcome, err := store.UnbanPromptUser(ctx, userID)
+	if err == nil && outcome != nil && outcome.UserChanged && s.authCacheInvalidator != nil {
+		s.authCacheInvalidator.InvalidateAuthCacheByUserID(ctx, userID)
+	}
+	return outcome, err
 }
 
 func (s *PromptService) DeleteEvent(ctx context.Context, id int64) (*DeleteResult, error) {

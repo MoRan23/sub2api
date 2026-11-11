@@ -1939,12 +1939,14 @@ func newOpenAIWSHandlerTestServer(t *testing.T, h *OpenAIGatewayHandler, subject
 }
 
 type openAIResponsesWSUsageLogCase struct {
-	simpleModeRejectAtRead int64
-	compositeResolver      *service.CompositeRouteResolver
-	accountPlatform        string
-	closeReason            string
-	closeStatus            coderws.StatusCode
-	firstPayload           string
+	codexEngine             bool
+	assertTurnSlotsReleased bool
+	simpleModeRejectAtRead  int64
+	compositeResolver       *service.CompositeRouteResolver
+	accountPlatform         string
+	closeReason             string
+	closeStatus             coderws.StatusCode
+	firstPayload            string
 	// midPayload 在首个 turn 完成后发送（如 session.update），上游桩会为它
 	// 回一个 response.completed，客户端按普通事件读取。
 	midPayload                string
@@ -2688,10 +2690,14 @@ func runOpenAIResponsesWebSocketUsageLimitCase(t *testing.T, mode string, follow
 
 	apiKey := &service.APIKey{
 		ID:      1802,
+		UserID:  1702,
+		Key:     "sk-ws-replay-test",
+		Status:  service.StatusActive,
 		GroupID: &groupID,
 		User:    &service.User{ID: 1702, Status: service.StatusActive},
 		Group:   &service.Group{ID: groupID, Platform: service.PlatformOpenAI, Status: service.StatusActive},
 	}
+	h.apiKeyService = service.NewAPIKeyService(&wsTurnAuthorizationStaticRepo{key: apiKey}, nil, nil, nil, nil, nil, cfg)
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
 		c.Set(string(middleware.ContextKeyAPIKey), apiKey)
@@ -2998,13 +3004,24 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	upstreamErrCh := make(chan error, 1)
 	var channelSvc *service.ChannelService
 	upstreamServer := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		if tc.accountPlatform == service.PlatformGrok {
+		if tc.codexEngine && r.Method == http.MethodGet && strings.HasSuffix(r.URL.Path, "/v1/engine/capacity") {
+			w.Header().Set("Content-Type", "application/json")
+			_, _ = io.WriteString(w, `{"object":"codex_engine.capacity","instance_id":"cei_1234567890abcdef1234567890abcdef","capabilities":{"usage_receipts":true,"billing_contract":"confirmed-events"}}`)
+			return
+		}
+		if tc.accountPlatform == service.PlatformGrok || tc.codexEngine {
 			payload, err := io.ReadAll(r.Body)
 			if err != nil {
 				upstreamErrCh <- err
 				return
 			}
 			upstreamPayloadCh <- payload
+			if len(upstreamPayloadCh) == 1 && tc.afterFirstUpstreamRequest != nil {
+				if callbackErr := tc.afterFirstUpstreamRequest(channelSvc); callbackErr != nil {
+					upstreamErrCh <- callbackErr
+					return
+				}
+			}
 			w.Header().Set("Content-Type", "text/event-stream")
 			_, _ = fmt.Fprintf(w, "data: {\"type\":\"response.completed\",\"response\":{\"id\":\"resp_grok_test\",\"model\":%q,\"usage\":{\"input_tokens\":2,\"output_tokens\":1}}}\n\n", gjson.GetBytes(payload, "model").String())
 			return
@@ -3083,6 +3100,9 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	if strings.TrimSpace(tc.ingressMode) != "" {
 		account.Extra["openai_apikey_responses_websockets_v2_mode"] = tc.ingressMode
 	}
+	if tc.codexEngine {
+		account.Extra[service.OpenAIAPIKeyModeExtraKey] = "codex_engine"
+	}
 
 	cfg := &config.Config{}
 	cfg.RunMode = config.RunModeSimple
@@ -3121,7 +3141,23 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	}
 	billingCacheSvc := service.NewBillingCacheService(nil, nil, nil, keyRepo, nil, nil, cfg, nil)
 	t.Cleanup(billingCacheSvc.Stop)
-	gatewaySvc := service.NewOpenAIGatewayService(
+	cache := &concurrencyCacheMock{
+		acquireUserSlotFn: func(ctx context.Context, userID int64, maxConcurrency int, requestID string) (bool, error) {
+			return true, nil
+		},
+		acquireAccountSlotFn: func(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
+			return true, nil
+		},
+	}
+	concurrencySvc := service.NewConcurrencyService(cache)
+	var engineBilling *service.CodexEngineBillingService
+	var engineStore *wsTurnAuthorizationEngineStore
+	if tc.codexEngine {
+		engineStore = &wsTurnAuthorizationEngineStore{}
+		engineBilling = service.NewCodexEngineBillingService(engineStore, accountRepo, &compositeWSHTTPUpstream{}, cfg)
+		t.Cleanup(engineBilling.Stop)
+	}
+	gatewaySvc := service.ProvideOpenAIGatewayService(
 		accountRepo,
 		usageRepo,
 		nil,
@@ -3131,7 +3167,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		nil,
 		cfg,
 		nil,
-		nil,
+		concurrencySvc,
 		service.NewBillingService(cfg, nil),
 		nil,
 		billingCacheSvc,
@@ -3144,15 +3180,14 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		nil,
 		nil,
 		nil, // userPlatformQuotaRepo
+		nil, nil, nil, nil, engineBilling, engineStore, nil, nil,
 	)
-
-	cache := &concurrencyCacheMock{
-		acquireUserSlotFn: func(ctx context.Context, userID int64, maxConcurrency int, requestID string) (bool, error) {
-			return true, nil
-		},
-		acquireAccountSlotFn: func(ctx context.Context, accountID int64, maxConcurrency int, requestID string) (bool, error) {
-			return true, nil
-		},
+	if tc.assertTurnSlotsReleased {
+		t.Cleanup(func() {
+			require.Eventually(t, func() bool {
+				return atomic.LoadInt32(&cache.releaseUserCalled) >= 1 && atomic.LoadInt32(&cache.releaseAccountCalled) >= 1
+			}, time.Second, time.Millisecond, "closed inference connection must release its turn slots")
+		})
 	}
 	h := &OpenAIGatewayHandler{
 		cfg:                 cfg,
@@ -3165,6 +3200,9 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 
 	apiKey := &service.APIKey{
 		ID:      1801,
+		UserID:  1701,
+		Key:     "sk-ws-usage-test",
+		Status:  service.StatusActive,
 		GroupID: &groupID,
 		User:    &service.User{ID: 1701, Status: service.StatusActive},
 	}
@@ -3179,6 +3217,9 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	}
 	if tc.group != nil {
 		apiKey.Group = tc.group
+	}
+	if tc.apiKeyService == nil {
+		h.apiKeyService = service.NewAPIKeyService(&wsTurnAuthorizationStaticRepo{key: apiKey}, nil, nil, nil, nil, nil, cfg)
 	}
 	router := gin.New()
 	router.Use(func(c *gin.Context) {
@@ -3248,7 +3289,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		_, event, readErr := clientConn.Read(readCtx)
 		cancelRead()
 		require.NoError(t, readErr)
-		require.Equal(t, "response.completed", gjson.GetBytes(event, "type").String())
+		require.Equal(t, "response.completed", gjson.GetBytes(event, "type").String(), "unexpected websocket frame: %s", event)
 		clientEvents = append(clientEvents, append([]byte(nil), event...))
 	}
 	readCompleted()
@@ -3279,6 +3320,13 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 			_, _, readErr := clientConn.Read(readCtx)
 			cancelRead()
 			require.Error(t, readErr, "second turn should have been rejected with a close")
+			if tc.codexEngine {
+				// The Engine HTTP bridge retires its downstream socket in its own
+				// cleanup before the handler can emit a graceful close frame.
+				require.ErrorIs(t, readErr, io.EOF)
+				require.Len(t, upstreamPayloadCh, turnCount-1, "rejected Engine turn must not reach upstream")
+				return openAIResponsesWSUsageLogResult{}
+			}
 			var closeErr coderws.CloseError
 			require.ErrorAs(t, readErr, &closeErr)
 			status := tc.closeStatus
@@ -3304,7 +3352,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 	_ = clientConn.Close(coderws.StatusNormalClosure, "done")
 
 	usageLogs := make([]*service.UsageLog, 0, turnCount)
-	for len(usageLogs) < turnCount {
+	for len(usageLogs) < turnCount && !tc.codexEngine {
 		select {
 		case usageLog := <-usageRepo.created:
 			require.NotNil(t, usageLog)
@@ -3324,7 +3372,7 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		}
 	}
 
-	if tc.accountPlatform == service.PlatformGrok {
+	if tc.accountPlatform == service.PlatformGrok || tc.codexEngine {
 		upstreamErrCh <- nil
 	}
 	select {
@@ -3334,8 +3382,12 @@ func runOpenAIResponsesWebSocketUsageLogCase(t *testing.T, tc openAIResponsesWSU
 		t.Fatal("等待上游 WebSocket 结束超时")
 	}
 
+	var firstUsage *service.UsageLog
+	if len(usageLogs) > 0 {
+		firstUsage = usageLogs[0]
+	}
 	return openAIResponsesWSUsageLogResult{
-		log:                  usageLogs[0],
+		log:                  firstUsage,
 		logs:                 usageLogs,
 		upstreamFirstPayload: upstreamPayloads[0],
 		upstreamPayloads:     upstreamPayloads,

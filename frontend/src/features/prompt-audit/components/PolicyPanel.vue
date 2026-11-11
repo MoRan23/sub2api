@@ -31,15 +31,26 @@
           <legend class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.promptAudit.policy.keywordTitle') }}</legend>
           <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.policy.keywordDescription') }}</p>
           <p class="mt-2 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.policy.keywordRegexHint') }}</p>
-          <div class="mt-3">
+          <p class="mt-2 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.policy.keywordPriority') }}</p>
+          <div class="mt-3 space-y-5">
             <KeywordEditor
-              v-model="keywordModel"
-              :label="t('admin.promptAudit.policy.keywords')"
+              v-model="jailbreakModel"
+              :label="t('admin.promptAudit.policy.jailbreakKeywords')"
               :placeholder="t('admin.promptAudit.policy.keywordsPlaceholder')"
-              :count-label="t('admin.promptAudit.policy.keywordCount', { count: effectiveKeywordCount })"
+              :count-label="t('admin.promptAudit.policy.keywordCount', { count: normalizeKeywordRules(draft.jailbreak_keywords).length })"
               :limit-label="t('admin.promptAudit.policy.keywordLimit')"
-              :error="keywordError"
+              :error="keywordError(draft.jailbreak_keywords)"
             />
+            <p class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.policy.jailbreakHint') }}</p>
+            <KeywordEditor
+              v-model="otherModel"
+              :label="t('admin.promptAudit.policy.otherKeywords')"
+              :placeholder="t('admin.promptAudit.policy.keywordsPlaceholder')"
+              :count-label="t('admin.promptAudit.policy.keywordCount', { count: normalizeKeywordRules(draft.other_keywords).length })"
+              :limit-label="t('admin.promptAudit.policy.keywordLimit')"
+              :error="keywordError(draft.other_keywords)"
+            />
+            <p class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.policy.otherHint') }}</p>
           </div>
         </fieldset>
 
@@ -67,6 +78,30 @@
       </div>
 
       <div class="space-y-4 rounded-xl border border-gray-200 p-4 dark:border-dark-700/60 dark:bg-dark-900/20 sm:p-5">
+        <fieldset class="space-y-4 border-b border-gray-100 pb-5 dark:border-dark-800">
+          <legend class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.promptAudit.enforcement.title') }}</legend>
+          <p class="text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.enforcement.description') }}</p>
+          <label class="flex items-center gap-2 text-sm">
+            <input type="checkbox" :checked="draft.warning_email_enabled" @change="patch({ warning_email_enabled: ($event.target as HTMLInputElement).checked })" />
+            {{ t('admin.promptAudit.enforcement.warningEmailEnabled') }}
+          </label>
+          <label class="block text-sm">
+            <span>{{ t('admin.promptAudit.enforcement.warningEmailWindowMinutes') }}</span>
+            <input :value="draft.warning_email_window_minutes" :disabled="!draft.warning_email_enabled" type="number" min="1" max="60" step="1" class="input mt-1.5 w-full" @input="patch({ warning_email_window_minutes: Number(($event.target as HTMLInputElement).value) })" />
+          </label>
+          <label class="flex items-center gap-2 text-sm">
+            <input type="checkbox" :checked="draft.auto_ban_enabled" @change="patch({ auto_ban_enabled: ($event.target as HTMLInputElement).checked })" />
+            {{ t('admin.promptAudit.enforcement.autoBanEnabled') }}
+          </label>
+          <label class="block text-sm">
+            <span>{{ t('admin.promptAudit.enforcement.violationWindowHours') }}</span>
+            <input :value="draft.violation_window_hours" type="number" min="1" max="720" step="1" class="input mt-1.5 w-full" @input="patch({ violation_window_hours: Number(($event.target as HTMLInputElement).value) })" />
+          </label>
+          <label class="block text-sm">
+            <span>{{ t('admin.promptAudit.enforcement.banThreshold') }}</span>
+            <input :value="draft.ban_threshold" :disabled="!draft.auto_ban_enabled" type="number" min="1" max="10000" step="1" class="input mt-1.5 w-full" @input="patch({ ban_threshold: Number(($event.target as HTMLInputElement).value) })" />
+          </label>
+        </fieldset>
         <label class="block text-sm text-gray-700 dark:text-dark-200">
           <span>{{ t('admin.promptAudit.policy.workerCount') }}</span>
           <input :value="draft.worker_count" type="number" min="1" max="32" class="input mt-1.5 w-full" :aria-label="t('admin.promptAudit.policy.workerCount')" @input="patch({ worker_count: Number(($event.target as HTMLInputElement).value) })" />
@@ -102,17 +137,19 @@ const guardAllGroups = computed({ get: () => props.draft.all_groups, set: (value
 const guardGroupIds = computed({ get: () => props.draft.group_ids, set: (value) => patch({ group_ids: value }) })
 const keywordAllGroups = computed({ get: () => props.draft.keyword_all_groups, set: (value) => patch({ keyword_all_groups: value }) })
 const keywordGroupIds = computed({ get: () => props.draft.keyword_group_ids, set: (value) => patch({ keyword_group_ids: value }) })
-const keywordModel = computed<string[]>({
-  get: () => props.draft.blocked_keywords,
-  set: (value) => patch({ blocked_keywords: value }),
+const jailbreakModel = computed<string[]>({
+  get: () => props.draft.jailbreak_keywords,
+  set: (value) => patch({ jailbreak_keywords: value }),
 })
-const effectiveKeywords = computed(() => normalizeKeywordRules(props.draft.blocked_keywords))
-const effectiveKeywordCount = computed(() => effectiveKeywords.value.length)
+const otherModel = computed<string[]>({
+  get: () => props.draft.other_keywords,
+  set: (value) => patch({ other_keywords: value }),
+})
 const combinationPolicies = computed({ get: () => props.draft.combination_policies ?? [], set: (value: PromptAuditDraft['combination_policies']) => patch({ combination_policies: value }) })
-const keywordError = computed(() => {
-  const errorCode = keywordRuleLengthError(effectiveKeywords.value)
+function keywordError(values: string[]) {
+  const errorCode = keywordRuleLengthError(normalizeKeywordRules(values))
   return errorCode ? t(`admin.promptAudit.errors.${errorCode}`) : ''
-})
+}
 
 function patch(value: Partial<PromptAuditDraft>) {
   emit('update:draft', { ...cloneData(props.draft), ...value })

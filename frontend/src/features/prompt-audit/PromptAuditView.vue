@@ -75,6 +75,8 @@
               :selected-ids="selectedEventIds"
               :loading="loading.events"
               :error="loadErrors.events"
+              :unbanning-user-id="unbanningUserId"
+              @unban="unbanUser"
               @filters-change="handleFiltersChanged"
               @search="applyEventFilters"
               @selection="selectedEventIds = $event"
@@ -140,7 +142,7 @@
       @confirm="confirmFilterDelete"
       @criteria-change="clearDeletePreview"
     />
-    <EventDetailDialog :show="showEventDetail" :event="activeEvent" :loading="loading.detail" @close="closeEventDetail" />
+    <EventDetailDialog :show="showEventDetail" :event="activeEvent" :loading="loading.detail" :unbanning-user-id="unbanningUserId" @unban="unbanUser" @close="closeEventDetail" />
   </AppLayout>
 </template>
 
@@ -170,7 +172,7 @@ import type {
   PromptLoadErrors,
   PromptProbeResult,
 } from './types'
-import { buildUpdateRequest, cloneData, configToDraft, draftFingerprint, emptyEventFilters } from './viewModel'
+import { buildUpdateRequest, cloneData, configToDraft, draftFingerprint, emptyEventFilters, enforcementPolicyError } from './viewModel'
 
 const { t, locale } = useI18n()
 const appStore = useAppStore()
@@ -190,6 +192,9 @@ const appliedFilters = ref<PromptEventFilters>(emptyEventFilters())
 const selectedEventIds = ref<number[]>([])
 const activeEvent = ref<PromptAuditEvent | null>(null)
 const showEventDetail = ref(false)
+const unbanningUserId = ref<number | null>(null)
+let eventsRequestVersion = 0
+let detailRequestVersion = 0
 const probeResults = reactive<Record<string, PromptProbeResult>>({})
 const probingIds = ref<string[]>([])
 const showFilterDelete = ref(false)
@@ -274,16 +279,19 @@ async function loadGroups() {
   finally { loading.groups = false }
 }
 async function loadEvents() {
+  const requestVersion = ++eventsRequestVersion
   loading.events = true
   loadErrors.events = ''
   try {
     const result = await promptAuditAPI.listEvents(appliedFilters.value, events.page, events.page_size)
+    if (requestVersion !== eventsRequestVersion) return
     Object.assign(events, result)
     selectedEventIds.value = []
   } catch (error) {
+    if (requestVersion !== eventsRequestVersion) return
     loadErrors.events = errorMessage(error, 'admin.promptAudit.errors.loadEvents')
   } finally {
-    loading.events = false
+    if (requestVersion === eventsRequestVersion) loading.events = false
   }
 }
 async function loadInitial() {
@@ -317,6 +325,8 @@ function resetDraft() {
 }
 async function saveConfig() {
   if (!draft.value || !dirty.value) return
+  const policyError = enforcementPolicyError(draft.value)
+  if (policyError) { appStore.showError(t(`admin.promptAudit.errors.${policyError}`)); return }
   loading.saving = true
   try {
     const saved = await promptAuditAPI.updateConfig(buildUpdateRequest(draft.value))
@@ -360,14 +370,52 @@ function applyEventFilters(value: PromptEventFilters) {
 function changePage(value: number) { events.page = value; void loadEvents() }
 function changePageSize(value: number) { events.page_size = value; events.page = 1; void loadEvents() }
 async function openEvent(id: number) {
+  const requestVersion = ++detailRequestVersion
   showEventDetail.value = true
   loading.detail = true
   activeEvent.value = null
-  try { activeEvent.value = await promptAuditAPI.getEvent(id) }
-  catch (error) { appStore.showError(errorMessage(error, 'admin.promptAudit.errors.loadDetail')); showEventDetail.value = false }
-  finally { loading.detail = false }
+  try {
+    const event = await promptAuditAPI.getEvent(id)
+    if (requestVersion === detailRequestVersion) activeEvent.value = event
+  } catch (error) {
+    if (requestVersion === detailRequestVersion) {
+      appStore.showError(errorMessage(error, 'admin.promptAudit.errors.loadDetail'))
+      showEventDetail.value = false
+    }
+  } finally { if (requestVersion === detailRequestVersion) loading.detail = false }
 }
-function closeEventDetail() { showEventDetail.value = false; activeEvent.value = null }
+function closeEventDetail() { ++detailRequestVersion; showEventDetail.value = false; activeEvent.value = null; loading.detail = false }
+
+async function unbanUser(userId: number) {
+  if (unbanningUserId.value !== null || userId <= 0) return
+  const current = [activeEvent.value, ...events.items].find((event) => event?.snapshot.user_id === userId && event.enforcement?.can_unban && event.enforcement.user_status === 'disabled')
+  if (!current) return
+  unbanningUserId.value = userId
+  try {
+    const outcome = await promptAuditAPI.unbanUser(userId)
+    const refreshPendingList = loading.events
+    ++eventsRequestVersion
+    ++detailRequestVersion
+    loading.events = false
+    loading.detail = false
+    // Counts, epoch and auto_banned describe the historical event. Only current
+    // account state is updated from the unban result.
+    const update = (event: PromptAuditEvent) => {
+      if (event.snapshot.user_id !== userId || !event.enforcement) return event
+      return { ...event, enforcement: { ...event.enforcement, user_status: outcome.user_status, can_unban: outcome.can_unban } }
+    }
+    events.items = events.items.map(update)
+    if (activeEvent.value) activeEvent.value = update(activeEvent.value)
+    appStore.showSuccess(t('admin.promptAudit.messages.unbanned'))
+    if (refreshPendingList) void loadEvents()
+    if (showEventDetail.value && activeEvent.value === null) closeEventDetail()
+  } catch (error) {
+    appStore.showError(errorMessage(error, 'admin.promptAudit.errors.unban'))
+    // Another admin may have changed the ban while this view was open.
+    void loadEvents()
+    if (showEventDetail.value && activeEvent.value) void openEvent(activeEvent.value.id)
+  } finally { unbanningUserId.value = null }
+}
 function requestSingleDelete(id: number) { deleteRequest.mode = 'single'; deleteRequest.ids = [id] }
 function requestBatchDelete() { if (selectedEventIds.value.length) { deleteRequest.mode = 'batch'; deleteRequest.ids = [...selectedEventIds.value] } }
 function clearDeleteRequest() { deleteRequest.mode = ''; deleteRequest.ids = [] }

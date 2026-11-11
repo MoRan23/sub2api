@@ -2323,14 +2323,17 @@ type openAIWSTurnAPIKeyLookup interface {
 // 重取快照，只采用其中的分组，作为该 turn 利润门准入与用量计费共同的分组；用户、
 // Key 限额、订阅仍沿用建连快照。只在同一把 Key、同一分组且平台与订阅类型未变时
 // 采用：Key 换组或分组改平台/订阅类型不是调价，该连接按建连分组调度，继续按建连
-// 快照计费；重取失败同样保留建连快照，不断连。
+// 快照计费。实际推理先在 BeforeRequest 复核 Key/用户有效性，失败时停止续轮；
+// 通过后复用该次查询结果，仅将符合条件的分组用于本轮计费。
 //
 // 首轮沿用刚经认证中间件取得的建连快照；没有经过 BeforeTurn 的 turn 回退建连
 // 快照。只保留当前与上一个 turn：下一 turn 的 BeforeTurn 先于上一 turn 的
 // AfterTurn 执行时，上一 turn 仍取到自己的快照。
 type openAIWSTurnBillingAPIKeys struct {
-	mu   sync.Mutex
-	keys map[int]*service.APIKey
+	mu           sync.Mutex
+	keys         map[int]*service.APIKey
+	admittedTurn int
+	admittedKey  *service.APIKey
 }
 
 // begin 在 BeforeTurn 重装利润门前调用：后续 turn 重取计费分组并按 turn 记下，
@@ -2341,6 +2344,8 @@ func (k *openAIWSTurnBillingAPIKeys) begin(ctx context.Context, apiKeyService *s
 		// A replacement upstream attempt restarts its local turn numbering at
 		// one. Keep the failed logical turn's pricing snapshot when it is replayed.
 		turnKey = k.forTurn(turn, conn)
+	} else if latest := k.takeAdmittedKey(turn); latest != nil {
+		turnKey = projectOpenAIWSTurnBillingAPIKey(conn, latest)
 	} else if apiKeyService != nil {
 		turnKey = refreshOpenAIWSTurnBillingAPIKey(ctx, apiKeyService, conn)
 	}
@@ -2394,7 +2399,14 @@ func refreshOpenAIWSTurnBillingAPIKey(ctx context.Context, lookup openAIWSTurnAP
 		return conn
 	}
 	latest, err := lookup.GetByKey(ctx, conn.Key)
-	if err != nil || latest == nil || latest.ID != conn.ID || latest.GroupID == nil || *latest.GroupID != *conn.GroupID {
+	if err != nil {
+		return conn
+	}
+	return projectOpenAIWSTurnBillingAPIKey(conn, latest)
+}
+
+func projectOpenAIWSTurnBillingAPIKey(conn, latest *service.APIKey) *service.APIKey {
+	if conn == nil || conn.GroupID == nil || conn.Group == nil || latest == nil || latest.ID != conn.ID || latest.GroupID == nil || *latest.GroupID != *conn.GroupID {
 		return conn
 	}
 	group := latest.Group
@@ -3199,6 +3211,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				}
 				if turn == 1 {
 					return nil
+				}
+				if err := turnBillingAPIKeys.authorizeNextTurn(ctx, h.apiKeyService, turn, apiKey); err != nil {
+					return err
 				}
 				if !gjson.ValidBytes(payload) {
 					return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", errors.New("invalid json"))

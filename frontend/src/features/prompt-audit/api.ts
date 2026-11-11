@@ -16,6 +16,7 @@ import type {
   PromptKeywordKeyOption,
   PromptKeywordWhitelistKey,
   PromptKeywordWhitelistIdentity,
+  PromptEnforcementOutcome,
 } from './types'
 import { eventFilterPayload, eventQueryParams } from './viewModel'
 
@@ -91,6 +92,11 @@ export async function getEvent(id: number): Promise<PromptAuditEvent> {
   return data
 }
 
+export async function unbanUser(userId: number): Promise<PromptEnforcementOutcome> {
+  const { data } = await apiClient.post<PromptEnforcementOutcome>(`${basePath}/users/${userId}/unban`)
+  return data
+}
+
 export async function deleteEvent(id: number): Promise<PromptDeleteResult> {
   const { data } = await apiClient.delete<PromptDeleteResult>(`${basePath}/events/${id}`)
   return data
@@ -137,6 +143,7 @@ export const promptAuditAPI = {
   getRuntime,
   listEvents,
   getEvent,
+  unbanUser,
   deleteEvent,
   batchDeleteEvents,
   previewDelete,

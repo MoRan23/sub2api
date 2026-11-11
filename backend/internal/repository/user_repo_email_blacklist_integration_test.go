@@ -147,7 +147,8 @@ VALUES ($1, $2, 'racing client', $3, 1, $4, 'user', TRUE, $5, $6)`,
 		var waiting int
 		err := integrationDB.QueryRowContext(ctx, `
 SELECT COUNT(*) FROM pg_stat_activity
-WHERE datname = current_database() AND wait_event_type = 'Lock' AND query LIKE '%UPDATE users SET status%'`).Scan(&waiting)
+WHERE datname = current_database() AND wait_event_type = 'Lock'
+  AND query LIKE '%SELECT id FROM users%' AND query LIKE '%ORDER BY id FOR UPDATE%'`).Scan(&waiting)
 		return err == nil && waiting > 0
 	}, 10*time.Second, 10*time.Millisecond, "batch disable should wait for the user row lock")
 	require.NoError(t, lockTx.Commit())

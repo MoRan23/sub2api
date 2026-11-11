@@ -116,7 +116,7 @@ func TestCoordinatorKeywordBlockShortCircuitsLegacyQueueAndGuard(t *testing.T) {
 func TestCoordinatorKeywordBlockReturnsActualMatch(t *testing.T) {
 	active, err := ActiveFromStorage(storageConfig{
 		KeywordBlockingEnabled: true,
-		BlockedKeywords:        []string{".gov.", "Other Rule", "unmatched-private-rule"},
+		OtherKeywords:          []string{".gov.", "Other Rule", "unmatched-private-rule"},
 		KeywordAllGroups:       true,
 	}, true, prefixEncryptor{})
 	require.NoError(t, err)
@@ -164,7 +164,7 @@ func TestCoordinatorKeywordMessageRequiresLocalMatch(t *testing.T) {
 
 func TestCoordinatorKeywordMessageQuotesMatchedContent(t *testing.T) {
 	decision := prioritize(nil, &PromptDecision{Kind: DecisionBlock, ErrorCode: ErrorCodeKeywordBlocked, Result: &NormalizedResult{
-		ScannerBackend: "local-keyword", PolicyID: "keyword-substring", matchedKeyword: "regex:(?s).*", matchedContent: "中文\"规则\\\n\t",
+		ScannerBackend: "local-keyword", PolicyID: "keyword-substring", keywordKind: "other", matchedKeyword: "regex:(?s).*", matchedContent: "中文\"规则\\\n\t",
 	}})
 	require.Equal(t, `提示词包含禁止内容，请调整输入后重试（命中关键词："中文\"规则\\\n\t"）`, decision.ClientMessage)
 	require.NotContains(t, decision.ClientMessage, "\n")
@@ -174,7 +174,7 @@ func TestCoordinatorKeywordMessageQuotesMatchedContent(t *testing.T) {
 func TestCoordinatorRegexBlockReturnsMatchedContentAcrossProtocols(t *testing.T) {
 	const rule = `regex:(?i)blocked-[0-9]+|never-match-private-branch`
 	active, err := ActiveFromStorage(storageConfig{
-		KeywordBlockingEnabled: true, KeywordAllGroups: true, BlockedKeywords: []string{rule},
+		KeywordBlockingEnabled: true, KeywordAllGroups: true, OtherKeywords: []string{rule},
 	}, true, prefixEncryptor{})
 	require.NoError(t, err)
 	for _, tc := range []struct {
@@ -205,7 +205,7 @@ func TestCoordinatorRegexBlockReturnsMatchedContentAcrossProtocols(t *testing.T)
 
 func TestCoordinatorRegexEmptyMatchKeepsGenericBlockMessage(t *testing.T) {
 	active, err := ActiveFromStorage(storageConfig{
-		KeywordBlockingEnabled: true, KeywordAllGroups: true, BlockedKeywords: []string{`regex:^`},
+		KeywordBlockingEnabled: true, KeywordAllGroups: true, OtherKeywords: []string{`regex:^`},
 	}, true, prefixEncryptor{})
 	require.NoError(t, err)
 	prompt := &PromptService{config: &fakeConfigStore{active: true, cfg: active}}

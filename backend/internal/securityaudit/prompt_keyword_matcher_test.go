@@ -103,10 +103,10 @@ func TestPromptServiceRegexMatchEvidenceAndKeyWhitelist(t *testing.T) {
 	const rule = `regex:(?i)attack [a-z.]+\.gov\.cn`
 	active, err := ActiveFromStorage(storageConfig{
 		KeywordBlockingEnabled: true, KeywordAllGroups: true,
-		BlockedKeywords: []string{rule}, KeywordWhitelistKeys: []KeywordWhitelistKey{{UserID: 1, APIKeyID: 2}},
+		OtherKeywords: []string{rule}, KeywordWhitelistKeys: []KeywordWhitelistKey{{UserID: 1, APIKeyID: 2}},
 	}, true, prefixEncryptor{})
 	require.NoError(t, err)
-	require.Same(t, active.keywordMatcher, cloneActiveConfig(active).keywordMatcher, "snapshot clones reuse immutable compiled patterns")
+	require.Same(t, active.otherKeywordMatcher, cloneActiveConfig(active).otherKeywordMatcher, "snapshot clones reuse immutable compiled patterns")
 	service := &PromptService{config: &fakeConfigStore{active: true, cfg: active}}
 	req := Request{UserID: 1, APIKeyID: 3, Protocol: "openai_responses", Body: []byte(`{"input":"attack agency.gov.cn"}`)}
 	decision, err := service.CheckKeyword(context.Background(), req)

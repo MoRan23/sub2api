@@ -8,6 +8,7 @@ import (
 	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/promptenforcement"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/lib/pq"
 )
@@ -69,7 +70,8 @@ func (r *userRepository) ListActiveUsersByEmailAliasProbeKeys(ctx context.Contex
 //
 // 与 userRepository.Update 停用单个用户的口径一致：停用与吊销 MCP 授权在同一事务内分两条语句
 // 执行，恢复账号后旧授权不会复活。吊销语句在停用语句拿到用户行锁之后才取快照，能看到持有该行锁
-// 并发新建、随后提交的授权。
+// 并发新建、随后提交的授权。所有显式目标（包括已停用账号）按 ID 有序加锁，再撤销提示词处罚归属；
+// 返回值仍只包含本次真正改变状态的账号。
 func (r *userRepository) BatchDisableUsers(ctx context.Context, userIDs []int64) ([]int64, error) {
 	if len(userIDs) == 0 {
 		return []int64{}, nil
@@ -77,38 +79,74 @@ func (r *userRepository) BatchDisableUsers(ctx context.Context, userIDs []int64)
 	if r.client == nil {
 		return nil, fmt.Errorf("ent client is not configured")
 	}
-	tx, err := r.client.Tx(ctx)
-	if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
-		return nil, err
-	}
 	txCtx := ctx
-	if err == nil {
-		defer func() { _ = tx.Rollback() }()
-		txCtx = dbent.NewTxContext(ctx, tx)
+	var ownedTx *dbent.Tx
+	if dbent.TxFromContext(ctx) == nil {
+		tx, err := r.client.Tx(ctx)
+		if err != nil && !errors.Is(err, dbent.ErrTxStarted) {
+			return nil, err
+		}
+		if err == nil {
+			ownedTx = tx
+			defer func() { _ = ownedTx.Rollback() }()
+			txCtx = dbent.NewTxContext(ctx, tx)
+		}
 	}
 	exec := txAwareSQLExecutor(txCtx, r.sql, r.client)
 	if exec == nil {
 		return nil, fmt.Errorf("sql executor is not configured")
 	}
 
-	disabled, err := batchDisableUserRows(txCtx, exec, userIDs)
+	targets, err := lockUsersForBatchDisable(txCtx, exec, userIDs)
 	if err != nil {
 		return nil, err
 	}
+	disabled, err := batchDisableUserRows(txCtx, exec, targets)
+	if err != nil {
+		return nil, err
+	}
+	now := time.Now().UTC()
 	if len(disabled) > 0 {
 		if _, err := exec.ExecContext(txCtx,
 			`UPDATE mcp_oauth_grants SET revoked_at = $2 WHERE user_id = ANY($1) AND revoked_at IS NULL`,
-			pq.Array(disabled), time.Now().UTC(),
+			pq.Array(disabled), now,
 		); err != nil {
 			return nil, fmt.Errorf("revoke mcp grants of disabled users: %w", err)
 		}
 	}
-	if tx != nil {
-		if err := tx.Commit(); err != nil {
+	for _, userID := range targets {
+		if err := promptenforcement.ApplyExplicitUserStatus(txCtx, exec, userID, service.StatusDisabled, now); err != nil {
+			return nil, fmt.Errorf("revoke prompt audit ownership of disabled user %d: %w", userID, err)
+		}
+	}
+	if ownedTx != nil {
+		if err := ownedTx.Commit(); err != nil {
 			return nil, err
 		}
 	}
 	return disabled, nil
+}
+
+func lockUsersForBatchDisable(ctx context.Context, exec sqlQueryExecutor, userIDs []int64) ([]int64, error) {
+	rows, err := exec.QueryContext(ctx, `SELECT id FROM users
+		WHERE id = ANY($1) AND deleted_at IS NULL AND role <> $2
+		ORDER BY id FOR UPDATE`, pq.Array(userIDs), service.RoleAdmin)
+	if err != nil {
+		return nil, fmt.Errorf("lock users for batch disable: %w", err)
+	}
+	defer func() { _ = rows.Close() }()
+	targets := make([]int64, 0, len(userIDs))
+	for rows.Next() {
+		var id int64
+		if err := rows.Scan(&id); err != nil {
+			return nil, fmt.Errorf("scan batch disable target: %w", err)
+		}
+		targets = append(targets, id)
+	}
+	if err := rows.Err(); err != nil {
+		return nil, fmt.Errorf("iterate batch disable targets: %w", err)
+	}
+	return targets, nil
 }
 
 func batchDisableUserRows(ctx context.Context, exec sqlQueryExecutor, userIDs []int64) ([]int64, error) {

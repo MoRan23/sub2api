@@ -68,30 +68,37 @@ type StorageEndpoint struct {
 }
 
 type storageConfig struct {
-	Enabled                bool                  `json:"enabled"`
-	BlockingEnabled        bool                  `json:"blocking_enabled"`
-	BlockingLatestTurnOnly bool                  `json:"blocking_latest_turn_only"`
-	KeywordBlockingEnabled bool                  `json:"keyword_blocking_enabled"`
-	BlockedKeywords        []string              `json:"blocked_keywords"`
-	KeywordAllGroups       bool                  `json:"keyword_all_groups"`
-	KeywordGroupIDs        []int64               `json:"keyword_group_ids"`
-	KeywordWhitelistKeys   []KeywordWhitelistKey `json:"keyword_whitelist_keys"`
-	CBRNBlockingEnabled    bool                  `json:"cbrn_blocking_enabled"`
-	CBRNTopicRules         []string              `json:"cbrn_topic_rules"`
-	CBRNIntentRules        []string              `json:"cbrn_intent_rules"`
-	CombinationPolicies    []CombinationPolicy   `json:"combination_policies"`
-	StorePassEvents        bool                  `json:"store_pass_events"`
-	Strategy               string                `json:"strategy"`
-	WorkerCount            int                   `json:"worker_count"`
-	QueueCapacity          int                   `json:"queue_capacity"`
-	Scanners               []string              `json:"scanners"`
-	AllGroups              bool                  `json:"all_groups"`
-	GroupIDs               []int64               `json:"group_ids"`
-	Endpoints              []StorageEndpoint     `json:"endpoints"`
-	ConfigVersion          int64                 `json:"config_version"`
-	UpdatedAt              time.Time             `json:"updated_at"`
-	UpdatedBy              int64                 `json:"updated_by"`
-	ChangeSummary          string                `json:"change_summary"`
+	Enabled                   bool                  `json:"enabled"`
+	BlockingEnabled           bool                  `json:"blocking_enabled"`
+	BlockingLatestTurnOnly    bool                  `json:"blocking_latest_turn_only"`
+	KeywordBlockingEnabled    bool                  `json:"keyword_blocking_enabled"`
+	BlockedKeywords           []string              `json:"blocked_keywords"`
+	JailbreakKeywords         []string              `json:"jailbreak_keywords"`
+	OtherKeywords             []string              `json:"other_keywords"`
+	KeywordAllGroups          bool                  `json:"keyword_all_groups"`
+	KeywordGroupIDs           []int64               `json:"keyword_group_ids"`
+	KeywordWhitelistKeys      []KeywordWhitelistKey `json:"keyword_whitelist_keys"`
+	CBRNBlockingEnabled       bool                  `json:"cbrn_blocking_enabled"`
+	CBRNTopicRules            []string              `json:"cbrn_topic_rules"`
+	CBRNIntentRules           []string              `json:"cbrn_intent_rules"`
+	CombinationPolicies       []CombinationPolicy   `json:"combination_policies"`
+	StorePassEvents           bool                  `json:"store_pass_events"`
+	Strategy                  string                `json:"strategy"`
+	WorkerCount               int                   `json:"worker_count"`
+	QueueCapacity             int                   `json:"queue_capacity"`
+	Scanners                  []string              `json:"scanners"`
+	AllGroups                 bool                  `json:"all_groups"`
+	GroupIDs                  []int64               `json:"group_ids"`
+	Endpoints                 []StorageEndpoint     `json:"endpoints"`
+	ConfigVersion             int64                 `json:"config_version"`
+	UpdatedAt                 time.Time             `json:"updated_at"`
+	UpdatedBy                 int64                 `json:"updated_by"`
+	ChangeSummary             string                `json:"change_summary"`
+	WarningEmailEnabled       bool                  `json:"warning_email_enabled"`
+	WarningEmailWindowMinutes int                   `json:"warning_email_window_minutes"`
+	AutoBanEnabled            bool                  `json:"auto_ban_enabled"`
+	ViolationWindowHours      int                   `json:"violation_window_hours"`
+	BanThreshold              int                   `json:"ban_threshold"`
 }
 
 type ActiveEndpoint struct {
@@ -112,32 +119,41 @@ type ActiveEndpoint struct {
 }
 
 type ActiveConfig struct {
-	RiskControlEnabled     bool
-	Enabled                bool
-	BlockingEnabled        bool
-	BlockingLatestTurnOnly bool
-	KeywordBlockingEnabled bool
-	BlockedKeywords        []string
-	KeywordAllGroups       bool
-	KeywordGroupIDs        []int64
-	KeywordWhitelistKeys   []KeywordWhitelistKey
-	CBRNBlockingEnabled    bool
-	CBRNTopicRules         []string
-	CBRNIntentRules        []string
-	CombinationPolicies    []ActiveCombinationPolicy
-	StorePassEvents        bool
-	Strategy               string
-	WorkerCount            int
-	QueueCapacity          int
-	Scanners               []string
-	AllGroups              bool
-	GroupIDs               []int64
-	Endpoints              []ActiveEndpoint
-	ConfigVersion          int64
-	UpdatedAt              time.Time
-	UpdatedBy              int64
-	ChangeSummary          string
-	keywordMatcher         *promptKeywordMatcher
+	RiskControlEnabled        bool
+	Enabled                   bool
+	BlockingEnabled           bool
+	BlockingLatestTurnOnly    bool
+	KeywordBlockingEnabled    bool
+	BlockedKeywords           []string
+	JailbreakKeywords         []string
+	OtherKeywords             []string
+	KeywordAllGroups          bool
+	KeywordGroupIDs           []int64
+	KeywordWhitelistKeys      []KeywordWhitelistKey
+	CBRNBlockingEnabled       bool
+	CBRNTopicRules            []string
+	CBRNIntentRules           []string
+	CombinationPolicies       []ActiveCombinationPolicy
+	StorePassEvents           bool
+	Strategy                  string
+	WorkerCount               int
+	QueueCapacity             int
+	Scanners                  []string
+	AllGroups                 bool
+	GroupIDs                  []int64
+	Endpoints                 []ActiveEndpoint
+	ConfigVersion             int64
+	UpdatedAt                 time.Time
+	UpdatedBy                 int64
+	ChangeSummary             string
+	keywordMatcher            *promptKeywordMatcher
+	jailbreakMatcher          *promptKeywordMatcher
+	otherKeywordMatcher       *promptKeywordMatcher
+	WarningEmailEnabled       bool
+	WarningEmailWindowMinutes int
+	AutoBanEnabled            bool
+	ViolationWindowHours      int
+	BanThreshold              int
 }
 
 type PublicEndpoint struct {
@@ -160,6 +176,8 @@ type PublicConfig struct {
 	KeywordBlockingEnabled    bool                  `json:"keyword_blocking_enabled"`
 	KeywordBlockingActive     bool                  `json:"keyword_blocking_active"`
 	BlockedKeywords           []string              `json:"blocked_keywords"`
+	JailbreakKeywords         []string              `json:"jailbreak_keywords"`
+	OtherKeywords             []string              `json:"other_keywords"`
 	KeywordAllGroups          bool                  `json:"keyword_all_groups"`
 	KeywordGroupIDs           []int64               `json:"keyword_group_ids"`
 	KeywordWhitelistKeys      []KeywordWhitelistKey `json:"keyword_whitelist_keys"`
@@ -183,6 +201,11 @@ type PublicConfig struct {
 	UpdatedAt                 time.Time             `json:"updated_at"`
 	UpdatedBy                 int64                 `json:"updated_by"`
 	ChangeSummary             string                `json:"change_summary"`
+	WarningEmailEnabled       bool                  `json:"warning_email_enabled"`
+	WarningEmailWindowMinutes int                   `json:"warning_email_window_minutes"`
+	AutoBanEnabled            bool                  `json:"auto_ban_enabled"`
+	ViolationWindowHours      int                   `json:"violation_window_hours"`
+	BanThreshold              int                   `json:"ban_threshold"`
 }
 
 type UpdateEndpoint struct {
@@ -199,50 +222,64 @@ type UpdateEndpoint struct {
 }
 
 type UpdateConfigRequest struct {
-	ExpectedConfigVersion  int64                  `json:"expected_config_version" binding:"required"`
-	Enabled                bool                   `json:"enabled"`
-	BlockingEnabled        bool                   `json:"blocking_enabled"`
-	BlockingLatestTurnOnly bool                   `json:"blocking_latest_turn_only"`
-	KeywordBlockingEnabled bool                   `json:"keyword_blocking_enabled"`
-	BlockedKeywords        []string               `json:"blocked_keywords"`
-	KeywordAllGroups       *bool                  `json:"keyword_all_groups"`
-	KeywordGroupIDs        []int64                `json:"keyword_group_ids"`
-	KeywordWhitelistKeys   *[]KeywordWhitelistKey `json:"keyword_whitelist_keys"`
-	CBRNBlockingEnabled    *bool                  `json:"cbrn_blocking_enabled"`
-	CBRNTopicRules         *[]string              `json:"cbrn_topic_rules"`
-	CBRNIntentRules        *[]string              `json:"cbrn_intent_rules"`
-	CombinationPolicies    *[]CombinationPolicy   `json:"combination_policies"`
-	StorePassEvents        bool                   `json:"store_pass_events"`
-	Strategy               string                 `json:"strategy"`
-	WorkerCount            int                    `json:"worker_count"`
-	QueueCapacity          int                    `json:"queue_capacity"`
-	Scanners               []string               `json:"scanners"`
-	AllGroups              bool                   `json:"all_groups"`
-	GroupIDs               []int64                `json:"group_ids"`
-	Endpoints              []UpdateEndpoint       `json:"endpoints"`
+	ExpectedConfigVersion     int64                  `json:"expected_config_version" binding:"required"`
+	Enabled                   bool                   `json:"enabled"`
+	BlockingEnabled           bool                   `json:"blocking_enabled"`
+	BlockingLatestTurnOnly    bool                   `json:"blocking_latest_turn_only"`
+	KeywordBlockingEnabled    bool                   `json:"keyword_blocking_enabled"`
+	BlockedKeywords           []string               `json:"blocked_keywords"`
+	JailbreakKeywords         *[]string              `json:"jailbreak_keywords"`
+	OtherKeywords             *[]string              `json:"other_keywords"`
+	KeywordAllGroups          *bool                  `json:"keyword_all_groups"`
+	KeywordGroupIDs           []int64                `json:"keyword_group_ids"`
+	KeywordWhitelistKeys      *[]KeywordWhitelistKey `json:"keyword_whitelist_keys"`
+	CBRNBlockingEnabled       *bool                  `json:"cbrn_blocking_enabled"`
+	CBRNTopicRules            *[]string              `json:"cbrn_topic_rules"`
+	CBRNIntentRules           *[]string              `json:"cbrn_intent_rules"`
+	CombinationPolicies       *[]CombinationPolicy   `json:"combination_policies"`
+	StorePassEvents           bool                   `json:"store_pass_events"`
+	Strategy                  string                 `json:"strategy"`
+	WorkerCount               int                    `json:"worker_count"`
+	QueueCapacity             int                    `json:"queue_capacity"`
+	Scanners                  []string               `json:"scanners"`
+	AllGroups                 bool                   `json:"all_groups"`
+	GroupIDs                  []int64                `json:"group_ids"`
+	Endpoints                 []UpdateEndpoint       `json:"endpoints"`
+	WarningEmailEnabled       *bool                  `json:"warning_email_enabled"`
+	WarningEmailWindowMinutes *int                   `json:"warning_email_window_minutes"`
+	AutoBanEnabled            *bool                  `json:"auto_ban_enabled"`
+	ViolationWindowHours      *int                   `json:"violation_window_hours"`
+	BanThreshold              *int                   `json:"ban_threshold"`
 }
 
 func DefaultStorageConfig() storageConfig {
 	return storageConfig{
-		Enabled:                false,
-		BlockingEnabled:        false,
-		BlockingLatestTurnOnly: false,
-		KeywordBlockingEnabled: false,
-		BlockedKeywords:        []string{},
-		KeywordAllGroups:       true,
-		KeywordGroupIDs:        []int64{},
-		KeywordWhitelistKeys:   []KeywordWhitelistKey{},
-		CBRNTopicRules:         defaultCBRNTopicRules(),
-		CBRNIntentRules:        defaultCBRNIntentRules(),
-		StorePassEvents:        false,
-		Strategy:               "priority",
-		WorkerCount:            DefaultWorkerCount,
-		QueueCapacity:          DefaultQueueCapacity,
-		Scanners:               append([]string(nil), AllScannerIDs...),
-		AllGroups:              true,
-		GroupIDs:               []int64{},
-		Endpoints:              []StorageEndpoint{},
-		ConfigVersion:          1,
+		Enabled:                   false,
+		BlockingEnabled:           false,
+		BlockingLatestTurnOnly:    false,
+		KeywordBlockingEnabled:    false,
+		BlockedKeywords:           []string{},
+		JailbreakKeywords:         nil,
+		OtherKeywords:             []string{},
+		KeywordAllGroups:          true,
+		KeywordGroupIDs:           []int64{},
+		KeywordWhitelistKeys:      []KeywordWhitelistKey{},
+		CBRNTopicRules:            defaultCBRNTopicRules(),
+		CBRNIntentRules:           defaultCBRNIntentRules(),
+		StorePassEvents:           false,
+		Strategy:                  "priority",
+		WorkerCount:               DefaultWorkerCount,
+		QueueCapacity:             DefaultQueueCapacity,
+		Scanners:                  append([]string(nil), AllScannerIDs...),
+		AllGroups:                 true,
+		GroupIDs:                  []int64{},
+		Endpoints:                 []StorageEndpoint{},
+		WarningEmailEnabled:       true,
+		WarningEmailWindowMinutes: 5,
+		AutoBanEnabled:            true,
+		ViolationWindowHours:      24,
+		BanThreshold:              10,
+		ConfigVersion:             1,
 	}
 }
 
@@ -261,11 +298,34 @@ func ParseStorageConfig(raw string) (storageConfig, error) {
 	}
 	_, hasKeywordAllGroups := fields["keyword_all_groups"]
 	_, hasKeywordGroupIDs := fields["keyword_group_ids"]
+	_, hasJailbreakKeywords := fields["jailbreak_keywords"]
+	_, hasOtherKeywords := fields["other_keywords"]
+	if !hasJailbreakKeywords {
+		cfg.JailbreakKeywords = append([]string(nil), cfg.BlockedKeywords...)
+	}
+	if !hasOtherKeywords {
+		cfg.OtherKeywords = []string{}
+	}
 	if !hasKeywordAllGroups && !hasKeywordGroupIDs {
 		cfg.KeywordAllGroups = cfg.AllGroups
 		cfg.KeywordGroupIDs = append([]int64(nil), cfg.GroupIDs...)
 	}
+	// Defaults apply to missing legacy fields only. Explicit zero values in a
+	// stored document must retain the same rejection as an admin update.
+	if _, ok := fields["warning_email_window_minutes"]; ok && (cfg.WarningEmailWindowMinutes < 1 || cfg.WarningEmailWindowMinutes > 60) {
+		return storageConfig{}, infraerrors.BadRequest("prompt_audit_invalid_warning_email_window", "警告邮件窗口必须在 1 到 60 分钟之间")
+	}
+	if _, ok := fields["violation_window_hours"]; ok && (cfg.ViolationWindowHours < 1 || cfg.ViolationWindowHours > 720) {
+		return storageConfig{}, infraerrors.BadRequest("prompt_audit_invalid_violation_window", "违规计数窗口必须在 1 到 720 小时之间")
+	}
+	if _, ok := fields["ban_threshold"]; ok && (cfg.BanThreshold < 1 || cfg.BanThreshold > 10000) {
+		return storageConfig{}, infraerrors.BadRequest("prompt_audit_invalid_ban_threshold", "自动封号阈值必须在 1 到 10000 之间")
+	}
 	normalizeStorageConfig(&cfg)
+	if err := validateCombinationPolicies(cfg.CombinationPolicies); err != nil {
+		return storageConfig{}, err
+	}
+	migrateCombinationKeywords(&cfg)
 	if err := validateStorageConfig(cfg); err != nil {
 		return storageConfig{}, err
 	}
@@ -295,7 +355,7 @@ func normalizeStorageConfig(cfg *storageConfig) {
 	cfg.GroupIDs = canonicalInt64s(cfg.GroupIDs)
 	cfg.KeywordGroupIDs = canonicalInt64s(cfg.KeywordGroupIDs)
 	cfg.KeywordWhitelistKeys = canonicalKeywordWhitelistKeys(cfg.KeywordWhitelistKeys)
-	cfg.BlockedKeywords = canonicalBlockedKeywords(cfg.BlockedKeywords)
+	normalizeLocalRuleConfig(cfg)
 	cfg.CBRNTopicRules = canonicalBlockedKeywords(cfg.CBRNTopicRules)
 	cfg.CBRNIntentRules = canonicalBlockedKeywords(cfg.CBRNIntentRules)
 	normalizeCombinationPolicies(cfg)
@@ -323,18 +383,49 @@ func normalizeStorageConfig(cfg *storageConfig) {
 	}
 }
 
+func normalizeLocalRuleConfig(cfg *storageConfig) {
+	// blocked_keywords is the legacy client/storage projection. Old rows are
+	// promoted to jailbreak_keywords, while new rows keep the projection in
+	// sync so older clients can continue to read and submit it.
+	if cfg.JailbreakKeywords == nil {
+		cfg.JailbreakKeywords = append([]string(nil), cfg.BlockedKeywords...)
+	}
+	cfg.JailbreakKeywords = canonicalBlockedKeywords(cfg.JailbreakKeywords)
+	cfg.OtherKeywords = canonicalBlockedKeywords(cfg.OtherKeywords)
+	cfg.BlockedKeywords = append([]string(nil), cfg.JailbreakKeywords...)
+	if cfg.WarningEmailWindowMinutes == 0 {
+		cfg.WarningEmailWindowMinutes = 5
+	}
+	if cfg.ViolationWindowHours == 0 {
+		cfg.ViolationWindowHours = 24
+	}
+	if cfg.BanThreshold == 0 {
+		cfg.BanThreshold = 10
+	}
+}
+
 func validateStorageConfig(cfg storageConfig) error {
+	normalizeLocalRuleConfig(&cfg)
 	if err := validateKeywordWhitelistKeys(cfg.KeywordWhitelistKeys); err != nil {
 		return err
 	}
 	if cfg.BlockingEnabled && !cfg.Enabled {
 		return infraerrors.BadRequest(ErrorCodeRequiresEnabled, "开启同步阻止前必须先启用提示词审计")
 	}
-	if err := validateBlockedKeywords(cfg.BlockedKeywords); err != nil {
+	if err := validateClassifiedKeywords(cfg.JailbreakKeywords, cfg.OtherKeywords); err != nil {
 		return err
 	}
-	if cfg.KeywordBlockingEnabled && len(cfg.BlockedKeywords) == 0 {
+	if cfg.KeywordBlockingEnabled && len(cfg.JailbreakKeywords) == 0 && len(cfg.OtherKeywords) == 0 {
 		return infraerrors.BadRequest("prompt_audit_keywords_required", "开启关键字拦截前至少需要配置一个关键字")
+	}
+	if cfg.WarningEmailWindowMinutes < 1 || cfg.WarningEmailWindowMinutes > 60 {
+		return infraerrors.BadRequest("prompt_audit_invalid_warning_email_window", "警告邮件窗口必须在 1 到 60 分钟之间")
+	}
+	if cfg.ViolationWindowHours < 1 || cfg.ViolationWindowHours > 720 {
+		return infraerrors.BadRequest("prompt_audit_invalid_violation_window", "违规计数窗口必须在 1 到 720 小时之间")
+	}
+	if cfg.BanThreshold < 1 || cfg.BanThreshold > 10000 {
+		return infraerrors.BadRequest("prompt_audit_invalid_ban_threshold", "自动封号阈值必须在 1 到 10000 之间")
 	}
 	if err := validateCombinationPolicies(cfg.effectiveCombinationPolicies()); err != nil {
 		return err
@@ -409,12 +500,29 @@ func validateUpdateConfigRequest(req UpdateConfigRequest) error {
 			return err
 		}
 	}
-	keywords := canonicalBlockedKeywords(req.BlockedKeywords)
-	if err := validateBlockedKeywords(keywords); err != nil {
+	legacyKeywords := canonicalBlockedKeywords(req.BlockedKeywords)
+	jailbreakKeywords := legacyKeywords
+	if req.JailbreakKeywords != nil {
+		jailbreakKeywords = canonicalBlockedKeywords(*req.JailbreakKeywords)
+	}
+	otherKeywords := []string(nil)
+	if req.OtherKeywords != nil {
+		otherKeywords = canonicalBlockedKeywords(*req.OtherKeywords)
+	}
+	if err := validateClassifiedKeywords(jailbreakKeywords, otherKeywords); err != nil {
 		return err
 	}
-	if req.KeywordBlockingEnabled && len(keywords) == 0 {
+	if req.KeywordBlockingEnabled && len(jailbreakKeywords) == 0 && len(otherKeywords) == 0 {
 		return infraerrors.BadRequest("prompt_audit_keywords_required", "开启关键字拦截前至少需要配置一个关键字")
+	}
+	if req.WarningEmailWindowMinutes != nil && (*req.WarningEmailWindowMinutes < 1 || *req.WarningEmailWindowMinutes > 60) {
+		return infraerrors.BadRequest("prompt_audit_invalid_warning_email_window", "警告邮件窗口必须在 1 到 60 分钟之间")
+	}
+	if req.ViolationWindowHours != nil && (*req.ViolationWindowHours < 1 || *req.ViolationWindowHours > 720) {
+		return infraerrors.BadRequest("prompt_audit_invalid_violation_window", "违规计数窗口必须在 1 到 720 小时之间")
+	}
+	if req.BanThreshold != nil && (*req.BanThreshold < 1 || *req.BanThreshold > 10000) {
+		return infraerrors.BadRequest("prompt_audit_invalid_ban_threshold", "自动封号阈值必须在 1 到 10000 之间")
 	}
 	if strings.TrimSpace(req.Strategy) != "priority" {
 		return infraerrors.BadRequest("prompt_audit_invalid_strategy", "提示词审计策略仅支持 priority")
@@ -475,14 +583,32 @@ func (cfg ActiveConfig) EffectiveMode() Mode {
 }
 
 func (cfg ActiveConfig) KeywordBlockingActive() bool {
-	return cfg.RiskControlEnabled && cfg.KeywordBlockingEnabled && len(cfg.BlockedKeywords) > 0 && cfg.keywordMatcher != nil
+	return cfg.RiskControlEnabled && cfg.KeywordBlockingEnabled &&
+		((len(cfg.JailbreakKeywords) > 0 && cfg.jailbreakMatcher != nil) ||
+			(len(cfg.BlockedKeywords) > 0 && cfg.keywordMatcher != nil) ||
+			(len(cfg.OtherKeywords) > 0 && cfg.otherKeywordMatcher != nil))
+}
+
+func (cfg ActiveConfig) MatchJailbreakKeyword(text string) (rule, content string, matched bool) {
+	matcher := cfg.jailbreakMatcher
+	if matcher == nil {
+		matcher = cfg.keywordMatcher
+	}
+	if !cfg.RiskControlEnabled || !cfg.KeywordBlockingEnabled || matcher == nil {
+		return "", "", false
+	}
+	return matcher.Match(text)
+}
+
+func (cfg ActiveConfig) MatchOtherKeyword(text string) (rule, content string, matched bool) {
+	if !cfg.RiskControlEnabled || !cfg.KeywordBlockingEnabled || cfg.otherKeywordMatcher == nil {
+		return "", "", false
+	}
+	return cfg.otherKeywordMatcher.Match(text)
 }
 
 func (cfg ActiveConfig) MatchBlockedKeyword(text string) (rule, content string, matched bool) {
-	if !cfg.KeywordBlockingActive() {
-		return "", "", false
-	}
-	return cfg.keywordMatcher.Match(text)
+	return cfg.MatchJailbreakKeyword(text)
 }
 
 func (cfg ActiveConfig) CBRNBlockingActive() bool {
@@ -555,6 +681,7 @@ func (cfg ActiveConfig) InvalidTokenEndpointIDs() []string {
 }
 
 func PublicFromStorage(cfg storageConfig, riskControlEnabled bool, invalidTokenEndpointIDs []string) PublicConfig {
+	normalizeLocalRuleConfig(&cfg)
 	normalizeCombinationPolicies(&cfg)
 	invalid := make(map[string]struct{}, len(invalidTokenEndpointIDs))
 	for _, id := range invalidTokenEndpointIDs {
@@ -583,8 +710,10 @@ func PublicFromStorage(cfg storageConfig, riskControlEnabled bool, invalidTokenE
 	return PublicConfig{
 		Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled, BlockingLatestTurnOnly: cfg.BlockingLatestTurnOnly,
 		KeywordBlockingEnabled: cfg.KeywordBlockingEnabled,
-		KeywordBlockingActive:  riskControlEnabled && cfg.KeywordBlockingEnabled && len(cfg.BlockedKeywords) > 0,
-		BlockedKeywords:        append([]string(nil), cfg.BlockedKeywords...),
+		KeywordBlockingActive:  riskControlEnabled && cfg.KeywordBlockingEnabled && (len(cfg.JailbreakKeywords) > 0 || len(cfg.OtherKeywords) > 0),
+		BlockedKeywords:        append([]string(nil), cfg.JailbreakKeywords...),
+		JailbreakKeywords:      append([]string{}, cfg.JailbreakKeywords...),
+		OtherKeywords:          append([]string{}, cfg.OtherKeywords...),
 		KeywordAllGroups:       cfg.KeywordAllGroups, KeywordGroupIDs: keywordGroupIDs, StorePassEvents: cfg.StorePassEvents,
 		KeywordWhitelistKeys: append([]KeywordWhitelistKey{}, cfg.KeywordWhitelistKeys...),
 		CBRNBlockingEnabled:  cfg.CBRNBlockingEnabled,
@@ -595,13 +724,23 @@ func PublicFromStorage(cfg storageConfig, riskControlEnabled bool, invalidTokenE
 		EffectiveMode:             active.EffectiveMode(), Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
 		QueueCapacity: cfg.QueueCapacity, Scanners: scanners, AllGroups: cfg.AllGroups,
 		GroupIDs: groupIDs, Endpoints: endpoints, ConfigVersion: cfg.ConfigVersion,
+		WarningEmailEnabled: cfg.WarningEmailEnabled, WarningEmailWindowMinutes: cfg.WarningEmailWindowMinutes,
+		AutoBanEnabled: cfg.AutoBanEnabled, ViolationWindowHours: cfg.ViolationWindowHours, BanThreshold: cfg.BanThreshold,
 		UpdatedAt: cfg.UpdatedAt, UpdatedBy: cfg.UpdatedBy, ChangeSummary: cfg.ChangeSummary,
 	}
 }
 
 func ActiveFromStorage(cfg storageConfig, riskControlEnabled bool, encryptor SecretEncryptor) (ActiveConfig, error) {
+	normalizeLocalRuleConfig(&cfg)
 	normalizeCombinationPolicies(&cfg)
-	matcher, err := newPromptKeywordMatcher(cfg.BlockedKeywords)
+	if err := validateClassifiedKeywords(cfg.JailbreakKeywords, cfg.OtherKeywords); err != nil {
+		return ActiveConfig{}, err
+	}
+	jailbreakMatcher, err := newPromptKeywordMatcher(cfg.JailbreakKeywords)
+	if err != nil {
+		return ActiveConfig{}, err
+	}
+	otherMatcher, err := newPromptKeywordMatcher(cfg.OtherKeywords)
 	if err != nil {
 		return ActiveConfig{}, err
 	}
@@ -620,7 +759,9 @@ func ActiveFromStorage(cfg storageConfig, riskControlEnabled bool, encryptor Sec
 		RiskControlEnabled: riskControlEnabled, Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled,
 		BlockingLatestTurnOnly: cfg.BlockingLatestTurnOnly,
 		KeywordBlockingEnabled: cfg.KeywordBlockingEnabled,
-		BlockedKeywords:        append([]string(nil), cfg.BlockedKeywords...),
+		BlockedKeywords:        append([]string(nil), cfg.JailbreakKeywords...),
+		JailbreakKeywords:      append([]string(nil), cfg.JailbreakKeywords...),
+		OtherKeywords:          append([]string(nil), cfg.OtherKeywords...),
 		KeywordAllGroups:       cfg.KeywordAllGroups,
 		KeywordGroupIDs:        append([]int64(nil), cfg.KeywordGroupIDs...),
 		KeywordWhitelistKeys:   append([]KeywordWhitelistKey{}, cfg.KeywordWhitelistKeys...),
@@ -630,9 +771,11 @@ func ActiveFromStorage(cfg storageConfig, riskControlEnabled bool, encryptor Sec
 		StorePassEvents:     cfg.StorePassEvents, Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
 		QueueCapacity: cfg.QueueCapacity, Scanners: append([]string(nil), cfg.Scanners...), AllGroups: cfg.AllGroups,
 		GroupIDs: append([]int64(nil), cfg.GroupIDs...), ConfigVersion: cfg.ConfigVersion,
+		WarningEmailEnabled: cfg.WarningEmailEnabled, WarningEmailWindowMinutes: cfg.WarningEmailWindowMinutes,
+		AutoBanEnabled: cfg.AutoBanEnabled, ViolationWindowHours: cfg.ViolationWindowHours, BanThreshold: cfg.BanThreshold,
 		UpdatedAt: cfg.UpdatedAt, UpdatedBy: cfg.UpdatedBy, ChangeSummary: cfg.ChangeSummary,
 		Endpoints:      make([]ActiveEndpoint, 0, len(cfg.Endpoints)),
-		keywordMatcher: matcher,
+		keywordMatcher: jailbreakMatcher, jailbreakMatcher: jailbreakMatcher, otherKeywordMatcher: otherMatcher,
 	}
 	for _, ep := range cfg.Endpoints {
 		token := ""
@@ -670,6 +813,15 @@ func changeSummary(cfg storageConfig) string {
 		KeywordBlockingEnabled   bool   `json:"keyword_blocking_enabled"`
 		KeywordCount             int    `json:"keyword_count"`
 		KeywordHash              string `json:"keyword_hash"`
+		JailbreakKeywordCount    int    `json:"jailbreak_keyword_count"`
+		JailbreakKeywordHash     string `json:"jailbreak_keyword_hash"`
+		OtherKeywordCount        int    `json:"other_keyword_count"`
+		OtherKeywordHash         string `json:"other_keyword_hash"`
+		WarningEmailEnabled      bool   `json:"warning_email_enabled"`
+		WarningEmailWindow       int    `json:"warning_email_window_minutes"`
+		AutoBanEnabled           bool   `json:"auto_ban_enabled"`
+		ViolationWindow          int    `json:"violation_window_hours"`
+		BanThreshold             int    `json:"ban_threshold"`
 		KeywordAllGroups         bool   `json:"keyword_all_groups"`
 		KeywordGroupCount        int    `json:"keyword_group_count"`
 		KeywordGroupHash         string `json:"keyword_group_hash"`
@@ -689,14 +841,18 @@ func changeSummary(cfg storageConfig) string {
 		GroupHash                string `json:"group_hash"`
 	}{
 		Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled, BlockingLatestTurnOnly: cfg.BlockingLatestTurnOnly,
-		KeywordBlockingEnabled: cfg.KeywordBlockingEnabled, KeywordCount: len(cfg.BlockedKeywords),
+		KeywordBlockingEnabled: cfg.KeywordBlockingEnabled, KeywordCount: len(cfg.JailbreakKeywords) + len(cfg.OtherKeywords),
+		JailbreakKeywordCount: len(cfg.JailbreakKeywords), JailbreakKeywordHash: blockedKeywordsHash(cfg.JailbreakKeywords),
+		OtherKeywordCount: len(cfg.OtherKeywords), OtherKeywordHash: blockedKeywordsHash(cfg.OtherKeywords),
+		WarningEmailEnabled: cfg.WarningEmailEnabled, WarningEmailWindow: cfg.WarningEmailWindowMinutes,
+		AutoBanEnabled: cfg.AutoBanEnabled, ViolationWindow: cfg.ViolationWindowHours, BanThreshold: cfg.BanThreshold,
 		KeywordAllGroups: cfg.KeywordAllGroups, KeywordGroupCount: len(cfg.KeywordGroupIDs), KeywordWhitelistKeyCount: len(cfg.KeywordWhitelistKeys),
 		CBRNBlockingEnabled: cfg.CBRNBlockingEnabled, CBRNTopicRuleCount: len(cfg.CBRNTopicRules), CBRNIntentRuleCount: len(cfg.CBRNIntentRules),
 		CBRNTopicRuleHash: blockedKeywordsHash(cfg.CBRNTopicRules), CBRNIntentRuleHash: blockedKeywordsHash(cfg.CBRNIntentRules),
 		CombinationPolicyCount: len(cfg.CombinationPolicies), CombinationPolicyHash: combinationPoliciesHash(cfg.CombinationPolicies),
 		StorePassEvents: cfg.StorePassEvents, EndpointCount: len(cfg.Endpoints), ScannerCount: len(cfg.Scanners), AllGroups: cfg.AllGroups, GroupCount: len(cfg.GroupIDs),
 	}
-	summary.KeywordHash = blockedKeywordsHash(cfg.BlockedKeywords)
+	summary.KeywordHash = blockedKeywordsHash(cfg.JailbreakKeywords)
 	summary.KeywordGroupHash = groupIDsHash(cfg.KeywordGroupIDs)
 	summary.GroupHash = groupIDsHash(cfg.GroupIDs)
 	raw, _ := json.Marshal(summary)
@@ -786,4 +942,14 @@ func validateBlockedKeywords(values []string) error {
 		}
 	}
 	return nil
+}
+
+func validateClassifiedKeywords(jailbreak, other []string) error {
+	if len(jailbreak)+len(other) > MaxBlockedKeywords {
+		return infraerrors.BadRequest("prompt_audit_too_many_keywords", "提示词审计关键字总数量超出允许范围")
+	}
+	if err := validateBlockedKeywords(jailbreak); err != nil {
+		return err
+	}
+	return validateBlockedKeywords(other)
 }

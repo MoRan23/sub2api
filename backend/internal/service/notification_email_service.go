@@ -31,6 +31,8 @@ const (
 	NotificationEmailEventContentModerationViolation  = "content_moderation.violation_notice"
 	NotificationEmailEventContentModerationDisabled   = "content_moderation.account_disabled"
 	NotificationEmailEventCyberPolicyNotice           = "content_moderation.cyber_policy_notice"
+	NotificationEmailEventPromptAuditWarning          = "prompt_audit.warning"
+	NotificationEmailEventPromptAuditBanned           = "prompt_audit.banned"
 	NotificationEmailEventOpsAlert                    = "ops.alert"
 	NotificationEmailEventOpsScheduledReport          = "ops.scheduled_report"
 
@@ -517,6 +519,7 @@ func (s *NotificationEmailService) sampleVariables(ctx context.Context, event, l
 	for key, value := range notificationEmailSampleVariables(locale) {
 		variables[key] = value
 	}
+	addNotificationEmailPromptAuditSampleVariables(variables, event, locale)
 	variables["site_name"] = s.siteName(ctx)
 	if variables["unsubscribe_url"] == "" && info.Optional {
 		variables["unsubscribe_url"] = "https://example.com/unsubscribe"
@@ -528,6 +531,14 @@ func (s *NotificationEmailService) runtimeVariables(ctx context.Context, event, 
 	variables := s.sampleVariables(ctx, event, locale)
 	for key, value := range input.Variables {
 		variables[key] = value
+	}
+	if isNotificationEmailPromptAuditEvent(event) {
+		// Preview examples are not evidence for a live security notification.
+		for _, key := range notificationEmailPromptAuditPlaceholders {
+			if _, exists := input.Variables[key]; !exists {
+				variables[key] = ""
+			}
+		}
 	}
 	if event == NotificationEmailEventOpsScheduledReport {
 		// Scheduled reports may be sent by integrations that only provide report_html.
@@ -1021,6 +1032,8 @@ func addNotificationEmailOpsSummarySampleVariables(variables map[string]string) 
 }
 
 var notificationEmailEventOrder = []string{
+	NotificationEmailEventPromptAuditWarning,
+	NotificationEmailEventPromptAuditBanned,
 	NotificationEmailEventAuthVerifyCode,
 	NotificationEmailEventAuthPasswordReset,
 	NotificationEmailEventNotificationEmailVerifyCode,
@@ -1037,6 +1050,16 @@ var notificationEmailEventOrder = []string{
 }
 
 var notificationEmailEventDefinitions = map[string]NotificationEmailEventInfo{
+	NotificationEmailEventPromptAuditWarning: {
+		Event: NotificationEmailEventPromptAuditWarning, Label: "Prompt audit warning", Category: "risk_control", Optional: false,
+		Description:  "Aggregated warning for jailbreak and topic-intent blocking, without rule text or request contents.",
+		Placeholders: append(append([]string{}, notificationEmailCommonPlaceholders...), notificationEmailPromptAuditPlaceholders...),
+	},
+	NotificationEmailEventPromptAuditBanned: {
+		Event: NotificationEmailEventPromptAuditBanned, Label: "Prompt audit account disabled", Category: "risk_control", Optional: false,
+		Description:  "Security notice after prompt audit automatically disables a user, without rule text or request contents.",
+		Placeholders: append(append([]string{}, notificationEmailCommonPlaceholders...), notificationEmailPromptAuditPlaceholders...),
+	},
 	NotificationEmailEventAuthVerifyCode: {
 		Event:        NotificationEmailEventAuthVerifyCode,
 		Label:        "Email verification code",
@@ -1155,6 +1178,8 @@ var notificationEmailEventDefinitions = map[string]NotificationEmailEventInfo{
 }
 
 var notificationEmailOfficialTemplates = map[string]map[string]notificationEmailOfficialTemplate{
+	NotificationEmailEventPromptAuditWarning: notificationEmailPromptAuditTemplates(false),
+	NotificationEmailEventPromptAuditBanned:  notificationEmailPromptAuditTemplates(true),
 	NotificationEmailEventAuthVerifyCode: {
 		notificationEmailDefaultLocale: {
 			Subject: "[{{site_name}}] Email verification code",

@@ -25,6 +25,7 @@ type PromptAdminService interface {
 	DeleteEventsByIDs(context.Context, []int64) (*DeleteResult, error)
 	PreviewDelete(context.Context, EventFilter, int64) (*DeletePreview, error)
 	DeleteByFilter(context.Context, DeleteByFilterRequest, int64) (*DeleteResult, error)
+	UnbanUser(context.Context, int64) (*EnforcementOutcome, error)
 }
 
 type PromptAdminHandler struct{ service PromptAdminService }
@@ -126,6 +127,29 @@ func (h *PromptAdminHandler) GetEvent(c *gin.Context) {
 		return
 	}
 	response.Success(c, event)
+}
+
+func (h *PromptAdminHandler) UnbanUser(c *gin.Context) {
+	userID, err := strconv.ParseInt(c.Param("user_id"), 10, 64)
+	if err != nil || userID <= 0 {
+		response.ErrorFrom(c, infraerrors.BadRequest("prompt_audit_invalid_user_id", "用户 ID 无效"))
+		return
+	}
+	outcome, err := h.service.UnbanUser(c.Request.Context(), userID)
+	if err != nil {
+		setPromptAdminAudit(c, "failed", "prompt_audit_unban_failed", map[string]any{"user_id": userID})
+		switch {
+		case errors.Is(err, ErrEnforcementUnbanOwnership):
+			response.ErrorFrom(c, infraerrors.Conflict("prompt_audit_unban_ownership", "该用户未被本提示词审计停用，请在用户管理中处理"))
+		case errors.Is(err, ErrEnforcementUserNotFound):
+			response.ErrorFrom(c, infraerrors.NotFound("prompt_audit_user_not_found", "用户不存在"))
+		default:
+			response.ErrorFrom(c, err)
+		}
+		return
+	}
+	setPromptAdminAudit(c, "success", "", map[string]any{"user_id": userID, "epoch": outcome.Epoch})
+	response.Success(c, outcome)
 }
 
 func (h *PromptAdminHandler) DeleteEvent(c *gin.Context) {
@@ -231,18 +255,28 @@ func configAuditFields(request UpdateConfigRequest, saved *PublicConfig) map[str
 	version := request.ExpectedConfigVersion
 	keywordAllGroups := request.KeywordAllGroups != nil && *request.KeywordAllGroups
 	keywordGroupIDs := request.KeywordGroupIDs
+	jailbreakKeywords := request.BlockedKeywords
+	var otherKeywords []string
+	if request.JailbreakKeywords != nil {
+		jailbreakKeywords = *request.JailbreakKeywords
+	}
+	if request.OtherKeywords != nil {
+		otherKeywords = *request.OtherKeywords
+	}
 	if saved != nil {
 		version = saved.ConfigVersion
 		keywordAllGroups = saved.KeywordAllGroups
 		keywordGroupIDs = saved.KeywordGroupIDs
+		jailbreakKeywords, otherKeywords = saved.JailbreakKeywords, saved.OtherKeywords
 	}
 	return map[string]any{
 		"enabled": request.Enabled, "blocking_enabled": request.BlockingEnabled,
 		"blocking_latest_turn_only": request.BlockingLatestTurnOnly,
 		"keyword_blocking_enabled":  request.KeywordBlockingEnabled,
 		"config_version":            version, "endpoint_count": len(request.Endpoints),
-		"scanner_count": len(request.Scanners), "keyword_count": len(canonicalBlockedKeywords(request.BlockedKeywords)),
-		"keyword_hash": blockedKeywordsHash(request.BlockedKeywords), "all_groups": request.AllGroups,
+		"scanner_count": len(request.Scanners), "keyword_count": len(canonicalBlockedKeywords(jailbreakKeywords)) + len(canonicalBlockedKeywords(otherKeywords)),
+		"keyword_hash": blockedKeywordsHash(jailbreakKeywords), "all_groups": request.AllGroups,
+		"jailbreak_keyword_count": len(jailbreakKeywords), "other_keyword_count": len(otherKeywords), "other_keyword_hash": blockedKeywordsHash(otherKeywords),
 		"group_count": len(request.GroupIDs), "keyword_all_groups": keywordAllGroups,
 		"keyword_group_count": len(keywordGroupIDs), "keyword_group_hash": groupIDsHash(keywordGroupIDs),
 	}

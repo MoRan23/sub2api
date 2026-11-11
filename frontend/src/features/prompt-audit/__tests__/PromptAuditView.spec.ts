@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
 import { flushPromises, mount } from '@vue/test-utils'
-import type { PromptAuditConfig, PromptAuditRuntime } from '../types'
+import type { PromptAuditConfig, PromptAuditRuntime, PromptAuditEvent } from '../types'
 import { SCANNER_CATALOG } from '../viewModel'
 import PromptAuditView from '../PromptAuditView.vue'
 
@@ -9,6 +9,7 @@ const mocks = vi.hoisted(() => ({
   getConfig: vi.fn(), updateConfig: vi.fn(), probeEndpoint: vi.fn(), getRuntime: vi.fn(), listEvents: vi.fn(),
   getEvent: vi.fn(), deleteEvent: vi.fn(), batchDeleteEvents: vi.fn(), previewDelete: vi.fn(), deleteEventsByFilter: vi.fn(), listGroups: vi.fn(),
   showSuccess: vi.fn(), showError: vi.fn(),
+  unbanUser: vi.fn(),
 }))
 
 vi.mock('../api', () => ({ default: mocks }))
@@ -19,7 +20,7 @@ vi.mock('vue-i18n', async () => {
 })
 
 const baseConfig = (): PromptAuditConfig => ({
-  enabled: true, blocking_enabled: false, blocking_latest_turn_only: false, keyword_blocking_enabled: false, keyword_blocking_active: false, blocked_keywords: [], keyword_all_groups: true, keyword_group_ids: [], keyword_whitelist_keys: [], store_pass_events: false, effective_mode: 'async_audit', strategy: 'priority',
+  enabled: true, blocking_enabled: false, blocking_latest_turn_only: false, keyword_blocking_enabled: false, keyword_blocking_active: false, jailbreak_keywords: [], keyword_all_groups: true, keyword_group_ids: [], keyword_whitelist_keys: [], store_pass_events: false, effective_mode: 'async_audit', strategy: 'priority',
   worker_count: 4, queue_capacity: 100, scanners: SCANNER_CATALOG.map((item) => item.id), all_groups: true, group_ids: [],
   endpoints: [{ id: 'guard-1', name: 'Guard One', protocol: 'openai_compatible', base_url: 'http://127.0.0.1:8000', model: 'guard-model', timeout_ms: 3000, input_limit: 4000, enabled: true, has_token: true, token_status: 'configured' }],
   config_version: 7, updated_at: '2026-07-16T00:00:00Z', updated_by: 1, change_summary: '{}',
@@ -38,13 +39,13 @@ const EndpointStub = defineComponent({
   props: ['endpoints', 'probeResults', 'probingIds'], emits: ['update:endpoints', 'probe'],
   template: '<div data-test="endpoint"><button data-test="inject-secret" @click="$emit(\'update:endpoints\', endpoints.map((e) => ({ ...e, token: \'PROMPT_AUDIT_CANARY_SECRET_DO_NOT_PERSIST\' })))">secret</button><button data-test="probe" @click="$emit(\'probe\', endpoints[0])">probe</button></div>',
 })
-const PolicyStub = defineComponent({ props: ['draft', 'groups'], emits: ['update:draft'], template: '<div data-test="policy"><button data-test="add-keyword" @click="$emit(\'update:draft\', { ...draft, blocked_keywords: [\'seed\'] })">keyword</button></div>' })
+const PolicyStub = defineComponent({ props: ['draft', 'groups'], emits: ['update:draft'], template: '<div data-test="policy"><button data-test="add-keyword" @click="$emit(\'update:draft\', { ...draft, jailbreak_keywords: [\'seed\'] })">keyword</button></div>' })
 const EventsStub = defineComponent({
-  props: ['events', 'filters', 'selectedIds', 'loading', 'error', 'total', 'page', 'pageSize'],
-  emits: ['filters-change', 'search', 'selection', 'page', 'page-size', 'view', 'delete', 'batch-delete', 'preview-delete'],
+  props: ['events', 'filters', 'selectedIds', 'loading', 'error', 'total', 'page', 'pageSize', 'unbanningUserId'],
+  emits: ['filters-change', 'search', 'selection', 'page', 'page-size', 'view', 'delete', 'batch-delete', 'preview-delete', 'unban'],
   template: '<div data-test="events"><button data-test="preview" @click="$emit(\'preview-delete\')">preview</button><button data-test="change-filter" @click="$emit(\'filters-change\', { ...filters, keyword: \'changed\' })">change</button><button data-test="delete-one" @click="$emit(\'delete\', 5)">delete</button><button data-test="select-batch" @click="$emit(\'selection\', [5, 6])">select</button><button data-test="delete-batch" @click="$emit(\'batch-delete\')">batch</button></div>',
 })
-const DetailStub = defineComponent({ props: ['show', 'event', 'loading'], emits: ['close'], template: '<div data-test="detail" />' })
+const DetailStub = defineComponent({ props: ['show', 'event', 'loading', 'unbanningUserId'], emits: ['close', 'unban'], template: '<div data-test="detail" />' })
 const ConfirmStub = defineComponent({ props: ['show', 'title', 'message'], emits: ['confirm', 'cancel'], template: '<div v-if="show" data-test="confirm"><button data-test="confirm-action" @click="$emit(\'confirm\')">confirm</button></div>' })
 const FilterDeleteStub = defineComponent({
   props: ['show', 'initialFilters', 'preview', 'previewing', 'deleting'],
@@ -71,6 +72,55 @@ describe('PromptAuditView', () => {
     mocks.deleteEventsByFilter.mockResolvedValue({ deleted_events: 2, deleted_jobs: 2 })
     mocks.deleteEvent.mockResolvedValue({ deleted_events: 1, deleted_jobs: 1 })
     mocks.batchDeleteEvents.mockResolvedValue({ deleted_events: 2, deleted_jobs: 2 })
+  })
+
+  it('unbans the current user once, updates all rows and detail, and ignores an older list response', async () => {
+    const event = { id: 1, snapshot: { user_id: 8 }, enforcement: { recorded: true, counted: true, kind: 'jailbreak',
+      violation_count: 10, window_hours: 24, ban_threshold: 10, auto_banned: true, epoch: 3,
+      email_status: 'queued', user_status: 'disabled', can_unban: true } } as PromptAuditEvent
+    const page = { items: [event, { ...event, id: 2 }], total: 2, page: 1, page_size: 20, pages: 1 }
+    mocks.listEvents.mockResolvedValue(page)
+    mocks.getEvent.mockResolvedValue(event)
+    let finishUnban!: (value: unknown) => void
+    let finishList!: (value: unknown) => void
+    mocks.unbanUser.mockImplementation(() => new Promise(resolve => { finishUnban = resolve }))
+    const wrapper = mountView()
+    await flushPromises()
+    const events = wrapper.getComponent(EventsStub)
+    events.vm.$emit('view', 1)
+    await flushPromises()
+    mocks.listEvents.mockImplementationOnce(() => new Promise(resolve => { finishList = resolve }))
+    events.vm.$emit('page', 1)
+    const detail = wrapper.getComponent(DetailStub)
+    detail.vm.$emit('unban', 8)
+    events.vm.$emit('unban', 8)
+    await flushPromises()
+    expect(mocks.unbanUser).toHaveBeenCalledTimes(1)
+    expect(events.props('unbanningUserId')).toBe(8)
+    mocks.listEvents.mockResolvedValue({ ...page, items: page.items.map(row => ({ ...row, enforcement: { ...row.enforcement, user_status: 'active', can_unban: false } })) })
+    finishUnban({ user_status: 'active', can_unban: false, epoch: 4 })
+    await flushPromises()
+    expect(detail.props('event').enforcement).toMatchObject({ user_status: 'active', can_unban: false, epoch: 3, auto_banned: true, violation_count: 10 })
+    finishList(page)
+    await flushPromises()
+    expect(events.props('events').every((row: PromptAuditEvent) => row.enforcement?.user_status === 'active')).toBe(true)
+    expect(events.props('loading')).toBe(false)
+    expect(events.props('unbanningUserId')).toBeNull()
+    wrapper.unmount()
+  })
+
+  it('refreshes current state when unban fails and does not claim success', async () => {
+    const event = { id: 1, snapshot: { user_id: 8 }, enforcement: { user_status: 'disabled', can_unban: true } } as PromptAuditEvent
+    mocks.listEvents.mockResolvedValue({ items: [event], total: 1, page: 1, page_size: 20, pages: 1 })
+    mocks.unbanUser.mockRejectedValue(new Error('ownership changed'))
+    const wrapper = mountView()
+    await flushPromises()
+    wrapper.getComponent(EventsStub).vm.$emit('unban', 8)
+    await flushPromises()
+    expect(mocks.showError).toHaveBeenCalledWith('ownership changed')
+    expect(mocks.showSuccess).not.toHaveBeenCalled()
+    expect(mocks.listEvents).toHaveBeenCalledTimes(2)
+    wrapper.unmount()
   })
 
   it('starts config, runtime, groups, and events loads independently', async () => {
@@ -141,9 +191,9 @@ describe('PromptAuditView', () => {
   ])('enables a migrating combination and uses the saved server keyword list on later saves ($keywordEnabled)', async ({ remaining, keywordEnabled }) => {
     const combination = { id: 'government', name: 'Government targets', enabled: false, topic_rules: ['regex:(?i)\\.gov'], intent_rules: ['attack'], migrate_keywords: ['.gov', '.gov.'] }
     const enabledCombination = { ...combination, enabled: true }
-    const original = { ...baseConfig(), enabled: false, keyword_blocking_enabled: true, blocked_keywords: ['.gov', '.gov.', ...remaining], combination_policies: [combination] }
+    const original = { ...baseConfig(), enabled: false, keyword_blocking_enabled: true, jailbreak_keywords: ['.gov', '.gov.', ...remaining], combination_policies: [combination] }
     mocks.getConfig.mockResolvedValue(original)
-    mocks.updateConfig.mockResolvedValue({ ...original, config_version: 8, combination_policies: [enabledCombination], blocked_keywords: remaining, keyword_blocking_enabled: keywordEnabled })
+    mocks.updateConfig.mockResolvedValue({ ...original, config_version: 8, combination_policies: [enabledCombination], jailbreak_keywords: remaining, keyword_blocking_enabled: keywordEnabled })
     const wrapper = mountView()
     await flushPromises()
     await wrapper.get('[data-test="tab-config"]').trigger('click')
@@ -154,11 +204,11 @@ describe('PromptAuditView', () => {
     await wrapper.get('[data-test="save-config"]').trigger('click')
     await flushPromises()
     expect(mocks.updateConfig).toHaveBeenNthCalledWith(1, expect.objectContaining({ combination_policies: [enabledCombination] }))
-    expect(policy.props('draft')).toMatchObject({ combination_policies: [enabledCombination], blocked_keywords: remaining, keyword_blocking_enabled: keywordEnabled })
+    expect(policy.props('draft')).toMatchObject({ combination_policies: [enabledCombination], jailbreak_keywords: remaining, keyword_blocking_enabled: keywordEnabled })
     await wrapper.get('[data-test="store-pass-toggle"]').trigger('click')
     await wrapper.get('[data-test="save-config"]').trigger('click')
     await flushPromises()
-    expect(mocks.updateConfig).toHaveBeenNthCalledWith(2, expect.objectContaining({ expected_config_version: 8, blocked_keywords: remaining, keyword_blocking_enabled: keywordEnabled }))
+    expect(mocks.updateConfig).toHaveBeenNthCalledWith(2, expect.objectContaining({ expected_config_version: 8, jailbreak_keywords: remaining, keyword_blocking_enabled: keywordEnabled }))
   })
 
   it('clears plaintext token state after a successful save', async () => {
@@ -235,7 +285,7 @@ describe('PromptAuditView', () => {
     expect(wrapper.get('[data-test="keyword-blocking-toggle"]').attributes('aria-checked')).toBe('true')
     await wrapper.get('[data-test="save-config"]').trigger('click')
     await flushPromises()
-    expect(mocks.updateConfig).toHaveBeenCalledWith(expect.objectContaining({ keyword_blocking_enabled: true, blocked_keywords: ['seed'] }))
+    expect(mocks.updateConfig).toHaveBeenCalledWith(expect.objectContaining({ keyword_blocking_enabled: true, jailbreak_keywords: ['seed'] }))
   })
 
   it('loads, saves, and clears exact keyword allowlist identities without widening to a user', async () => {

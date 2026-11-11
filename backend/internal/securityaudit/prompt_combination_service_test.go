@@ -107,8 +107,8 @@ func TestPromptCombinationCoordinatorLocalEvidence(t *testing.T) {
 	require.Equal(t, http.StatusForbidden, decision.HTTPStatus)
 	require.Equal(t, ErrorCodeCombinationBlocked, decision.ErrorCode)
 	require.Zero(t, legacy.calls.Load())
-	require.Contains(t, decision.ClientMessage, "example.gov.cn")
-	require.Contains(t, decision.ClientMessage, "渗透")
+	require.NotContains(t, decision.ClientMessage, "example.gov.cn")
+	require.NotContains(t, decision.ClientMessage, "渗透")
 	require.Contains(t, decision.ClientMessage, "自定义政府目标策略")
 	require.NotContains(t, decision.ClientMessage, "regex:")
 
@@ -120,8 +120,9 @@ func TestPromptCombinationCoordinatorLocalEvidence(t *testing.T) {
 		},
 	}}
 	decision = prioritize(nil, &PromptDecision{Kind: DecisionBlock, ErrorCode: ErrorCodeCombinationBlocked, Result: result})
-	require.Contains(t, decision.ClientMessage, `example\"\n`)
-	require.Contains(t, decision.ClientMessage, `attack\t\\`)
+	require.NotContains(t, decision.ClientMessage, "example")
+	require.NotContains(t, decision.ClientMessage, "attack")
+	require.Contains(t, decision.ClientMessage, "用户自定义")
 	require.NotContains(t, decision.ClientMessage, "private-domain")
 	require.Less(t, len([]rune(decision.ClientMessage)), 450)
 	result.ScannerBackend = "external-guard"

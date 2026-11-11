@@ -94,8 +94,9 @@ func TestPromptCBRNCoordinatorStopsBeforeOtherEngines(t *testing.T) {
 	require.Equal(t, ErrorCodeCombinationBlocked, decision.ErrorCode)
 	require.Equal(t, http.StatusForbidden, decision.HTTPStatus)
 	require.Equal(t, int64(0), legacy.calls.Load())
-	require.Contains(t, decision.ClientMessage, "subject-x")
-	require.Contains(t, decision.ClientMessage, "prepare-x")
+	require.NotContains(t, decision.ClientMessage, "subject-x")
+	require.NotContains(t, decision.ClientMessage, "prepare-x")
+	require.Contains(t, decision.ClientMessage, "核、生物、化学、放射性危害")
 	require.NotContains(t, decision.ClientMessage, "regex:")
 }
 
@@ -105,8 +106,8 @@ func TestPromptCBRNClientEvidenceIsLocalAndBounded(t *testing.T) {
 		Intent: CBRNMatchEvidence{Rule: "regex:private-intent", Content: "prepare\t\\"},
 	}}
 	decision := prioritize(nil, &PromptDecision{Kind: DecisionBlock, ErrorCode: ErrorCodeCBRNBlocked, Result: result})
-	require.Contains(t, decision.ClientMessage, `subject\"\n`)
-	require.Contains(t, decision.ClientMessage, `prepare\t\\`)
+	require.NotContains(t, decision.ClientMessage, "subject")
+	require.NotContains(t, decision.ClientMessage, "prepare")
 	require.Less(t, len([]rune(decision.ClientMessage)), 450)
 	require.NotContains(t, decision.ClientMessage, "private-rule")
 	result.ScannerBackend = "external-guard"

@@ -4,17 +4,46 @@ import (
 	"crypto/sha256"
 	"net/http"
 	"strings"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/securityaudit"
 	middleware2 "github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/gin-gonic/gin"
+	"github.com/google/uuid"
 	"go.uber.org/zap"
 )
 
 const securityAuditCompletedContextKey = "sub2api.security_audit.completed"
 const securityAuditWSTurnContextKey = "sub2api.security_audit.ws_turn"
 const securityAuditWSDedupeContextKey = "sub2api.security_audit.ws_dedupe"
+const securityAuditEnforcementContextKey = "sub2api.security_audit.enforcement"
+
+type securityAuditEnforcementIdentity struct {
+	turn      int
+	id        string
+	startedAt time.Time
+}
+
+// Keep a single identity per logical request, including retries and repeated
+// audit callbacks. WS connections replace it when the inference turn changes.
+func securityAuditEnforcementRequest(c *gin.Context, stage string) securityAuditEnforcementIdentity {
+	turn := 0
+	if isSecurityAuditWebSocketStage(stage) {
+		turn = 1
+		if current, ok := securityAuditWSTurn(c); ok && current > 0 {
+			turn = current
+		}
+	}
+	if value, exists := c.Get(securityAuditEnforcementContextKey); exists {
+		if identity, ok := value.(securityAuditEnforcementIdentity); ok && identity.turn == turn {
+			return identity
+		}
+	}
+	identity := securityAuditEnforcementIdentity{turn: turn, id: uuid.NewString(), startedAt: time.Now().UTC()}
+	c.Set(securityAuditEnforcementContextKey, identity)
+	return identity
+}
 
 type securityAuditWSDedupeEntry struct {
 	stage    string
@@ -174,6 +203,8 @@ func buildSecurityAuditRequest(c *gin.Context, apiKey *service.APIKey, subject m
 	if request.Stage == "" {
 		request.Stage = "http"
 	}
+	identity := securityAuditEnforcementRequest(c, request.Stage)
+	request.EnforcementID, request.EnforcementStartedAt = identity.id, identity.startedAt
 	return request
 }
 

@@ -16,6 +16,7 @@ const (
 	// Reserved storage-only evidence key. It is exposed through matched_keyword
 	// exclusively on administrator event detail reads.
 	matchedKeywordEvidenceKey = "_matched_keyword"
+	keywordKindEvidenceKey    = "_keyword_kind"
 	// Structured local CBRN evidence is decoded only for administrator details.
 	cbrnMatchEvidenceKey        = "_cbrn_match"
 	combinationMatchEvidenceKey = "_combination_match"
@@ -47,29 +48,31 @@ type Job struct {
 }
 
 type Event struct {
-	ID               int64              `json:"id"`
-	JobID            int64              `json:"job_id"`
-	Snapshot         PromptSnapshot     `json:"snapshot"`
-	Decision         EventDecision      `json:"decision"`
-	RiskLevel        RiskLevel          `json:"risk_level"`
-	Action           Action             `json:"action"`
-	Categories       []string           `json:"categories"`
-	MatchedScanners  []string           `json:"matched_scanners"`
-	ScannerScores    map[string]float64 `json:"scanner_scores"`
-	ScannerEvidence  map[string]string  `json:"scanner_evidence"`
-	MatchedKeyword   string             `json:"matched_keyword,omitempty"`
-	CBRNMatch        *CBRNMatch         `json:"cbrn_match,omitempty"`
-	CombinationMatch *CombinationMatch  `json:"combination_match,omitempty"`
-	ScannerBackend   string             `json:"scanner_backend"`
-	ScannerVersion   string             `json:"scanner_version"`
-	GuardEndpointID  string             `json:"guard_endpoint_id"`
-	PolicyID         string             `json:"policy_id"`
-	PolicyVersion    int                `json:"policy_version"`
-	ConfigVersion    int64              `json:"config_version"`
-	ChunkTotal       int                `json:"chunk_total"`
-	LatencyMS        int                `json:"latency_ms"`
-	IssueSummaries   []IssueSummary     `json:"issue_summaries"`
-	CreatedAt        time.Time          `json:"created_at"`
+	ID               int64               `json:"id"`
+	JobID            int64               `json:"job_id"`
+	Snapshot         PromptSnapshot      `json:"snapshot"`
+	Decision         EventDecision       `json:"decision"`
+	RiskLevel        RiskLevel           `json:"risk_level"`
+	Action           Action              `json:"action"`
+	Categories       []string            `json:"categories"`
+	MatchedScanners  []string            `json:"matched_scanners"`
+	ScannerScores    map[string]float64  `json:"scanner_scores"`
+	ScannerEvidence  map[string]string   `json:"scanner_evidence"`
+	MatchedKeyword   string              `json:"matched_keyword,omitempty"`
+	KeywordKind      string              `json:"keyword_kind,omitempty"`
+	Enforcement      *EnforcementOutcome `json:"enforcement,omitempty"`
+	CBRNMatch        *CBRNMatch          `json:"cbrn_match,omitempty"`
+	CombinationMatch *CombinationMatch   `json:"combination_match,omitempty"`
+	ScannerBackend   string              `json:"scanner_backend"`
+	ScannerVersion   string              `json:"scanner_version"`
+	GuardEndpointID  string              `json:"guard_endpoint_id"`
+	PolicyID         string              `json:"policy_id"`
+	PolicyVersion    int                 `json:"policy_version"`
+	ConfigVersion    int64               `json:"config_version"`
+	ChunkTotal       int                 `json:"chunk_total"`
+	LatencyMS        int                 `json:"latency_ms"`
+	IssueSummaries   []IssueSummary      `json:"issue_summaries"`
+	CreatedAt        time.Time           `json:"created_at"`
 }
 
 type JobRepository interface {
@@ -374,7 +377,7 @@ func promptEventEvidence(result *NormalizedResult) map[string]string {
 	localCombination := result.ScannerBackend == "local-combination" && result.PolicyID == "combination-topic-intent" && result.combinationMatch != nil
 	evidence := make(map[string]string, len(result.ScannerEvidence))
 	for key, value := range result.ScannerEvidence {
-		if key == matchedKeywordEvidenceKey || key == cbrnMatchEvidenceKey || key == combinationMatchEvidenceKey {
+		if key == matchedKeywordEvidenceKey || key == keywordKindEvidenceKey || key == cbrnMatchEvidenceKey || key == combinationMatchEvidenceKey {
 			continue
 		}
 		if (localKeyword && key == "keyword") || (localCBRN && (key == "cbrn_topic" || key == "cbrn_intent")) ||
@@ -390,6 +393,9 @@ func promptEventEvidence(result *NormalizedResult) map[string]string {
 		// Preserve the exact configured keyword, including rules beyond the
 		// preview's 160-rune limit and rules resembling redacted sensitive data.
 		evidence[matchedKeywordEvidenceKey] = result.matchedKeyword
+		if result.keywordKind == "jailbreak" || result.keywordKind == "other" {
+			evidence[keywordKindEvidenceKey] = result.keywordKind
+		}
 	}
 	if localCBRN {
 		// The unexported match is produced locally. Never accept reserved evidence

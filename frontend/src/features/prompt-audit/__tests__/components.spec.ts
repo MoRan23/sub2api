@@ -70,6 +70,8 @@ describe('Prompt Audit components', () => {
     const draft: PromptAuditDraft = {
       enabled: true, blocking_enabled: false, blocking_latest_turn_only: false, keyword_blocking_enabled: false, keyword_blocking_active: false, blocked_keywords: [], store_pass_events: false, effective_mode: 'async_audit', strategy: 'priority',
       keyword_all_groups: false, keyword_group_ids: [2, 100], keyword_whitelist_keys: [],
+      jailbreak_keywords: [], other_keywords: [], warning_email_enabled: true, warning_email_window_minutes: 5,
+      auto_ban_enabled: true, violation_window_hours: 24, ban_threshold: 10,
       combination_policies: [], combination_templates: [],
       worker_count: 4, queue_capacity: 100, scanners: SCANNER_CATALOG.map((item) => item.id), all_groups: false, group_ids: [1, 99],
       endpoints: [endpoint()], config_version: 1, updated_at: '', updated_by: 0, change_summary: '',
@@ -89,6 +91,21 @@ describe('Prompt Audit components', () => {
     const emitted = wrapper.emitted('update:draft')?.at(-1)?.[0] as PromptAuditDraft
     expect(emitted.worker_count).toBe(6)
 
+    const keywordEditors = wrapper.findAllComponents(KeywordEditor)
+    expect(keywordEditors).toHaveLength(2)
+    await keywordEditors[0].get('textarea').setValue(' Jailbreak Rule \nregex:(?i)KeepCase')
+    expect(wrapper.emitted('update:draft')?.at(-1)?.[0]).toMatchObject({ jailbreak_keywords: ['Jailbreak Rule', 'regex:(?i)KeepCase'], other_keywords: [] })
+    await keywordEditors[1].get('textarea').setValue(' Other Rule \nother rule')
+    expect(wrapper.emitted('update:draft')?.at(-1)?.[0]).toMatchObject({ jailbreak_keywords: [], other_keywords: ['Other Rule'] })
+    const enforcementInputs = wrapper.findAll<HTMLInputElement>('fieldset input[type="number"]')
+    expect(enforcementInputs.map(input => input.element.value)).toEqual(['5', '24', '10'])
+    expect(enforcementInputs.map(input => input.attributes('max'))).toEqual(['60', '720', '10000'])
+    await enforcementInputs[0].setValue('12')
+    expect(wrapper.emitted('update:draft')?.at(-1)?.[0]).toMatchObject({ warning_email_window_minutes: 12 })
+    await wrapper.setProps({ draft: { ...draft, warning_email_enabled: false, auto_ban_enabled: false } })
+    expect(enforcementInputs[0].attributes('disabled')).toBeDefined()
+    expect(enforcementInputs[2].attributes('disabled')).toBeDefined()
+
     const selectedKeywordGroup = keywordScope.findAll<HTMLInputElement>('input[type="checkbox"]').find((input) => input.element.checked)
     expect(selectedKeywordGroup).toBeTruthy()
     await selectedKeywordGroup!.setValue(false)
@@ -99,13 +116,15 @@ describe('Prompt Audit components', () => {
     const missingRemoved = wrapper.emitted('update:draft')?.at(-1)?.[0] as PromptAuditDraft
     expect(missingRemoved.keyword_group_ids).toEqual([2])
 
-    await wrapper.setProps({ draft: { ...draft, blocked_keywords: ['regex:' + 'a'.repeat(1994)] } })
+    await wrapper.setProps({ draft: { ...draft, jailbreak_keywords: ['regex:' + 'a'.repeat(1994)] } })
     expect(wrapper.getComponent(KeywordEditor).props('error')).toBe('')
     expect(wrapper.text()).toContain('admin.promptAudit.policy.keywordRegexHint')
-    await wrapper.setProps({ draft: { ...draft, blocked_keywords: ['regex:' + 'a'.repeat(1995)] } })
+    await wrapper.setProps({ draft: { ...draft, jailbreak_keywords: ['regex:' + 'a'.repeat(1995)] } })
     expect(wrapper.getComponent(KeywordEditor).props('error')).toContain('prompt_audit_keyword_regex_too_long')
-    await wrapper.setProps({ draft: { ...draft, blocked_keywords: ['a'.repeat(201)] } })
+    await wrapper.setProps({ draft: { ...draft, jailbreak_keywords: ['a'.repeat(201)] } })
     expect(wrapper.getComponent(KeywordEditor).props('error')).toContain('prompt_audit_keyword_too_long')
+    await wrapper.setProps({ draft: { ...draft, other_keywords: ['regex:' + 'a'.repeat(1995)] } })
+    expect(wrapper.findAllComponents(KeywordEditor)[1].props('error')).toContain('prompt_audit_keyword_regex_too_long')
 
     await wrapper.setProps({ draft: { ...draft, enabled: false, combination_policies: [{ id: 'custom-rule', name: 'Custom', enabled: true, topic_rules: ['topic'], intent_rules: ['intent'] }] } })
     expect(wrapper.get('[data-test="local-rule-scope"]').text()).toContain('admin.promptAudit.keywordWhitelist.title')

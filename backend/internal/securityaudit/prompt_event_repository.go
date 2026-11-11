@@ -355,12 +355,16 @@ func scanEvent(row rowScanner, withFullPrompt ...bool) (*Event, error) {
 	_ = json.Unmarshal(evidence, &event.ScannerEvidence)
 	var matchedKeyword string
 	if event.ScannerBackend == "local-keyword" && event.PolicyID == "keyword-substring" {
+		if kind := event.ScannerEvidence[keywordKindEvidenceKey]; kind == "jailbreak" || kind == "other" {
+			event.KeywordKind = kind
+		}
 		matchedKeyword = event.ScannerEvidence[matchedKeywordEvidenceKey]
 		if len(withFullPrompt) > 0 && withFullPrompt[0] {
 			event.MatchedKeyword = matchedKeyword
 		}
 	}
 	delete(event.ScannerEvidence, matchedKeywordEvidenceKey)
+	delete(event.ScannerEvidence, keywordKindEvidenceKey)
 	if len(withFullPrompt) > 0 && withFullPrompt[0] && event.ScannerBackend == "local-cbrn" && event.PolicyID == "cbrn-topic-intent" {
 		event.CBRNMatch = decodeCBRNMatchEvidence(event.ScannerEvidence[cbrnMatchEvidenceKey])
 	}
@@ -372,7 +376,7 @@ func scanEvent(row rowScanner, withFullPrompt ...bool) (*Event, error) {
 	result := NormalizedResult{Decision: event.Decision, RiskLevel: event.RiskLevel, Action: event.Action,
 		Categories: event.Categories, MatchedScanners: event.MatchedScanners, ScannerScores: event.ScannerScores,
 		ScannerEvidence: event.ScannerEvidence, ScannerBackend: event.ScannerBackend,
-		PolicyID: event.PolicyID, matchedKeyword: matchedKeyword, cbrnMatch: event.CBRNMatch, combinationMatch: event.CombinationMatch}
+		PolicyID: event.PolicyID, matchedKeyword: matchedKeyword, keywordKind: event.KeywordKind, cbrnMatch: event.CBRNMatch, combinationMatch: event.CombinationMatch}
 	event.IssueSummaries = BuildIssueSummaries(result)
 	return event, nil
 }

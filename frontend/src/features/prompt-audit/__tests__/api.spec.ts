@@ -30,6 +30,13 @@ describe('Prompt Audit API', () => {
     expect(client.get).toHaveBeenCalledWith('/admin/prompt-audit/runtime')
   })
 
+  it('unbans only through the prompt-audit user action and returns current state', async () => {
+    const outcome = { user_status: 'active', can_unban: false, epoch: 2, reason: 'cycle_reset' }
+    client.post.mockResolvedValue({ data: outcome })
+    expect(await promptAuditAPI.unbanUser(8)).toEqual(outcome)
+    expect(client.post).toHaveBeenCalledWith('/admin/prompt-audit/users/8/unban')
+  })
+
   it('looks up saved identity pairs using only IDs and retains no secret fields', async () => {
     const pair = { user_id: 8, api_key_id: 17, key: 'not-in-request' }
     client.post.mockResolvedValue({ data: { items: [{ user_id: 8, api_key_id: 17, user_email: 'owner@example.test', username: 'owner', key_name: 'main', available: true, key: 'not-in-response' }] } })

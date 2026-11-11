@@ -51,6 +51,12 @@ func BuildIssueSummaries(result NormalizedResult) []IssueSummary {
 			continue
 		}
 		if category == "keyword" {
+			title := "关键字拦截"
+			if result.keywordKind == "jailbreak" {
+				title = "破甲关键词拦截"
+			} else if result.keywordKind == "other" {
+				title = "其他关键词拦截"
+			}
 			evidence := RedactPreview(result.ScannerEvidence[category], 160)
 			if result.ScannerBackend == "local-keyword" && result.PolicyID == "keyword-substring" && result.matchedKeyword != "" {
 				evidence = result.ScannerEvidence[category]
@@ -61,7 +67,7 @@ func BuildIssueSummaries(result NormalizedResult) []IssueSummary {
 				evidenceHash = hex.EncodeToString(digest[:])
 			}
 			summaries = append(summaries, IssueSummary{
-				Category: category, ScannerID: category, Title: "关键字拦截",
+				Category: category, ScannerID: category, Title: title,
 				Description: "提示词命中管理员配置的关键字规则", Severity: string(RiskCritical),
 				SeverityLabel: riskLabelZH(RiskCritical), Action: string(ActionBlock),
 				ActionLabel: actionLabelZH(ActionBlock), Code: "prompt_audit_keyword",

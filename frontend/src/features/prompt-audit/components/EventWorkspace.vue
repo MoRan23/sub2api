@@ -66,13 +66,14 @@
             <th class="px-3 py-3 font-medium">{{ t('admin.promptAudit.events.group') }}</th>
             <th class="px-3 py-3 font-medium">{{ t('admin.promptAudit.events.route') }}</th>
             <th class="px-3 py-3 font-medium">{{ t('admin.promptAudit.events.result') }}</th>
+            <th class="px-3 py-3 font-medium">{{ t('admin.promptAudit.enforcement.eventTitle') }}</th>
             <th class="px-3 py-3 font-medium">{{ t('admin.promptAudit.events.preview') }}</th>
             <th class="px-3 py-3 text-right font-medium">{{ t('admin.promptAudit.common.actions') }}</th>
           </tr>
         </thead>
         <tbody class="divide-y divide-gray-100 bg-white dark:divide-dark-700 dark:bg-transparent">
-          <tr v-if="loading"><td colspan="8" class="px-4 py-12 text-center text-gray-500" aria-busy="true">{{ t('common.loading') }}</td></tr>
-          <tr v-else-if="events.length === 0"><td colspan="8" class="px-4 py-12 text-center text-gray-500">{{ t('admin.promptAudit.events.empty') }}</td></tr>
+          <tr v-if="loading"><td colspan="9" class="px-4 py-12 text-center text-gray-500" aria-busy="true">{{ t('common.loading') }}</td></tr>
+          <tr v-else-if="events.length === 0"><td colspan="9" class="px-4 py-12 text-center text-gray-500">{{ t('admin.promptAudit.events.empty') }}</td></tr>
           <tr v-for="event in events" v-else :key="event.id" :data-test="`event-${event.id}`" class="align-top hover:bg-gray-50/70 dark:hover:bg-dark-800/70">
             <td class="px-3 py-3"><input type="checkbox" :checked="selectedIds.includes(event.id)" :aria-label="t('admin.promptAudit.events.selectEvent', { id: event.id })" @change="toggleOne(event.id)" /></td>
             <td class="whitespace-nowrap px-3 py-3 text-xs text-gray-600 dark:text-dark-300">{{ formatDate(event.created_at) }}</td>
@@ -90,6 +91,7 @@
               <span class="rounded-full px-2 py-0.5 text-xs font-medium" :class="decisionClass(event.decision)">{{ formatDecisionRisk(event.decision, event.risk_level) }}</span>
               <p class="mt-2 max-w-48 truncate text-xs text-gray-500" :title="formatCategories(event.categories)">{{ formatCategories(event.categories) }}</p>
             </td>
+            <td class="min-w-52 px-3 py-3"><EnforcementStatus compact :event="event" :unbanning="unbanningUserId === event.snapshot.user_id" :disabled="unbanningUserId != null" @unban="$emit('unban', $event)" /></td>
             <td class="max-w-xs px-3 py-3"><p class="line-clamp-2 break-words text-gray-600 dark:text-dark-300">{{ event.snapshot.redacted_preview || '—' }}</p></td>
             <td class="whitespace-nowrap px-3 py-3 text-right">
               <button type="button" class="btn btn-ghost btn-sm" @click="$emit('view', event.id)">{{ t('common.view') }}</button>
@@ -107,12 +109,14 @@
 import { computed, defineComponent, h, reactive, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Pagination from '@/components/common/Pagination.vue'
+import EnforcementStatus from './EnforcementStatus.vue'
 import type { PromptAuditEvent, PromptEventFilters } from '../types'
 import { cloneData, emptyEventFilters, SCANNER_CATALOG } from '../viewModel'
 
 const props = defineProps<{
   events: PromptAuditEvent[]; total: number; page: number; pageSize: number
   filters: PromptEventFilters; selectedIds: number[]; loading: boolean; error: string
+  unbanningUserId?: number | null
 }>()
 const emit = defineEmits<{
   (event: 'filters-change', value: PromptEventFilters): void
@@ -121,6 +125,7 @@ const emit = defineEmits<{
   (event: 'page', value: number): void
   (event: 'page-size', value: number): void
   (event: 'view', id: number): void
+  (event: 'unban', userId: number): void
   (event: 'delete', id: number): void
   (event: 'batch-delete'): void
   (event: 'preview-delete'): void

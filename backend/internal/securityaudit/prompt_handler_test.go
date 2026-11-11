@@ -30,10 +30,18 @@ type fakePromptAdminService struct {
 	deleteIDs    func(context.Context, []int64) (*DeleteResult, error)
 	preview      func(context.Context, EventFilter, int64) (*DeletePreview, error)
 	deleteFilter func(context.Context, DeleteByFilterRequest, int64) (*DeleteResult, error)
+	unban        func(context.Context, int64) (*EnforcementOutcome, error)
 }
 
 func (s *fakePromptAdminService) GetConfig() (PublicConfig, error) {
 	return s.config, nil
+}
+
+func (s *fakePromptAdminService) UnbanUser(ctx context.Context, userID int64) (*EnforcementOutcome, error) {
+	if s.unban == nil {
+		return nil, ErrEnforcementUnbanOwnership
+	}
+	return s.unban(ctx, userID)
 }
 func (s *fakePromptAdminService) ResolveKeywordWhitelistIdentities(ctx context.Context, keys []KeywordWhitelistKey) ([]KeywordWhitelistIdentity, error) {
 	if s.identities == nil {
@@ -108,6 +116,7 @@ func promptAdminRouter(service PromptAdminService) *gin.Engine {
 	group.GET("/runtime", handler.GetRuntime)
 	group.GET("/events", handler.ListEvents)
 	group.GET("/events/:id", handler.GetEvent)
+	group.POST("/users/:user_id/unban", handler.UnbanUser)
 	group.DELETE("/events/:id", handler.DeleteEvent)
 	group.POST("/events/batch-delete", handler.BatchDelete)
 	group.POST("/events/delete-preview", handler.DeletePreview)

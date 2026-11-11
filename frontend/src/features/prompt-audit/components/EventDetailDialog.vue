@@ -28,6 +28,7 @@
               <dd class="whitespace-pre-wrap break-words" data-test="summary-matched-keyword">{{ event.matched_keyword || t('admin.promptAudit.keyword.notRecorded') }}</dd>
             </template>
           </dl>
+          <EnforcementStatus class="lg:col-span-2 rounded-lg bg-gray-50 p-4 dark:bg-dark-900" :event="event" :unbanning="unbanningUserId === event.snapshot.user_id" :disabled="unbanningUserId != null" @unban="$emit('unban', $event)" />
           <CBRNMatchDetails v-if="event.matched_scanners.includes('cbrn')" :match="event.cbrn_match" class="lg:col-span-2 rounded-lg bg-gray-50 p-4 dark:bg-dark-900" />
           <section v-if="event.matched_scanners.includes('combination')" class="lg:col-span-2 rounded-lg bg-gray-50 p-4 dark:bg-dark-900">
             <h4 class="mb-3 text-sm font-semibold" data-test="combination-policy-name">{{ event.combination_match?.policy_name || t('admin.promptAudit.keyword.notRecorded') }}</h4>
@@ -92,11 +93,12 @@ import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import CBRNMatchDetails from './CBRNMatchDetails.vue'
+import EnforcementStatus from './EnforcementStatus.vue'
 import type { PromptAuditEvent, PromptIssueSummary } from '../types'
 import { SCANNER_CATALOG } from '../viewModel'
 
-const props = defineProps<{ show: boolean; event: PromptAuditEvent | null; loading: boolean }>()
-defineEmits<{ (event: 'close'): void }>()
+const props = defineProps<{ show: boolean; event: PromptAuditEvent | null; loading: boolean; unbanningUserId?: number | null }>()
+defineEmits<{ (event: 'close'): void; (event: 'unban', userId: number): void }>()
 const { t } = useI18n()
 const tabs = ['summary', 'risks', 'technical'] as const
 const activeTab = ref<(typeof tabs)[number]>('summary')
@@ -148,6 +150,8 @@ function formatGuardReturn(event: PromptAuditEvent): string {
     scanner_scores: event.scanner_scores,
     scanner_evidence: evidence,
     matched_keyword: event.matched_keyword,
+    keyword_kind: event.keyword_kind,
+    enforcement: event.enforcement,
     cbrn_match: event.cbrn_match,
     combination_match: event.combination_match,
     scanner_backend: event.scanner_backend,
