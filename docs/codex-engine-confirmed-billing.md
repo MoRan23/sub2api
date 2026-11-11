@@ -14,6 +14,18 @@
 
 事件保留原模型、实际服务档位及来源声明的适用计量维度。总输入包含缓存／图片子集，拆分时不叠加子集。搜索操作与搜索调用使用各自确认单位，不重复计算同一数量。GIF 帧数不当作图片张数。价格、必要数量或实际档位未知时保留未结算，不能套用其他模型或估计用量。
 
+### 缓存写入 TTL 明细
+
+合同名称仍为 `confirmed-events`。每个事件的 `usage` 可额外包含 `cache_write_30m_input_tokens`、`cache_write_12h_input_tokens`，单位均为 token，且在 `applicable_usage` 中声明。两桶必须同时是非负整数，总和等于 `cache_write_input_tokens`；明确的零保留，缺省不补零。已声明适用但尚未取得完整用量的事件继续等待，不能提前按聚合结算。
+
+没有可靠完整明细的源事件继续只发布聚合字段，Sub2API 使用现有聚合价格。可靠明细按既有 30 分钟与 12 小时价格分别计费，aggregate 不再额外相加；12 小时未配置专门价格时沿用已有聚合价回退，明确的零价格保持有效。当前价与兼容旧快照价均采用相同桶语义。
+
+原始 OpenAI 明细路径沿用 `input_tokens_details.cache_write_tokens_details.{ttl_30m_tokens,ttl_12h_tokens}`。Engine 仅从匹配本次原生用量的真实字段提取，不能根据模型、缓存设置或价格猜测。当前部署是否产生这些字段取决于上游实际输出；本次以模拟上游验证契约，不为历史事件补造明细。
+
+事件第一次发布后字段不可变，同一 ID 改写 TTL 会被指纹校验拒绝。汇总只对实际出现的键求和：同组混合明细事件和聚合事件时，两桶汇总可以小于聚合总量。事件、摘要和 JSONB 恢复均区分缺省与显式零。新增计量键不修改完整交付、断连免计费及事务幂等条件，无需新增数据库列。
+
+`confirmed-events` now accepts optional, complete 30-minute / 12-hour cache-write buckets. Both nonnegative integer fields must be explicitly applicable and sum to the event's aggregate. Missing evidence keeps aggregate-only pricing; explicit zero remains distinct from absence. Summary groups can combine detailed and aggregate-only events, so their known buckets may sum to less than the aggregate. Published events remain immutable. Delivery gates, disconnected-request no-charge handling and ledger idempotency are unchanged. No database migration is required. Deploy the compatible Sub2API consumer before an Engine producer starts emitting these optional keys; older consumers reject unknown usage dimensions.
+
 账号停调不影响原账单恢复；地址／密钥／接入模式改变后停止新查询，已用原身份取得并验证的事件仍可结算。租约控制多实例领取，重启后恢复待结算任务。事件账本独立于短期运维记录保留。
 
 价格快照 v2 同时保存总额度订阅的准入批次 ID、有序消费列表、超额承接批次和准入时间。后台恢复时使用这些冻结数据：即使原额度在执行中到期，也结算到原批次，不消费请求准入后追加的额度。新总额度请求缺少有效准入快照时在派发前报错。旧 v1 任务仍可读取并按原规则结算；其未保存的批次信息不能从当前额度推算，补丁不会伪造历史快照。新快照仍不保存正文或凭据，无需数据库列迁移。

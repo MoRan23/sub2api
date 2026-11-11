@@ -215,15 +215,24 @@ func validateCodexEngineBillingJSON(data []byte) error {
 	return nil
 }
 
+func validCodexEngineBillingUsageKey(key string) bool {
+	switch key {
+	case "input_tokens", "output_tokens", "cached_input_tokens", "cache_write_input_tokens",
+		"cache_write_30m_input_tokens", "cache_write_12h_input_tokens", "image_input_tokens",
+		"cached_image_input_tokens", "image_output_tokens", "search_calls", "search_operations", "images":
+		return true
+	}
+	return false
+}
+
 func parseCodexEngineBillingUsage(raw json.RawMessage) (map[string]int64, error) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil || fields == nil {
 		return nil, ErrCodexEngineBillingProtocol
 	}
-	allowed := map[string]bool{"input_tokens": true, "output_tokens": true, "cached_input_tokens": true, "cache_write_input_tokens": true, "image_input_tokens": true, "cached_image_input_tokens": true, "image_output_tokens": true, "search_calls": true, "search_operations": true, "images": true}
 	values := make(map[string]int64, len(fields))
 	for k, v := range fields {
-		if !allowed[k] {
+		if !validCodexEngineBillingUsageKey(k) {
 			return nil, ErrCodexEngineBillingProtocol
 		}
 		n, err := strconv.ParseInt(string(v), 10, 64)
@@ -240,6 +249,24 @@ func parseCodexEngineBillingUsage(raw json.RawMessage) (map[string]int64, error)
 		}
 	}
 	return values, nil
+}
+
+// TTL buckets are optional upstream facts. Individual events report an exhaustive
+// pair; summaries may also include aggregate-only events, so their known TTL
+// subset can be smaller than the aggregate. Never fill absent buckets with zero.
+func validateCodexEngineBillingCacheWriteTTL(values map[string]int64, summary bool) error {
+	short, hasShort := values["cache_write_30m_input_tokens"]
+	long, hasLong := values["cache_write_12h_input_tokens"]
+	if !hasShort && !hasLong {
+		return nil
+	}
+	total, hasTotal := values["cache_write_input_tokens"]
+	// Subtraction avoids overflowing when two individually valid int64 counters
+	// have a sum above the largest supported aggregate.
+	if !hasShort || !hasLong || !hasTotal || short < 0 || long < 0 || short > total || long > total-short || !summary && long != total-short {
+		return ErrCodexEngineBillingProtocol
+	}
+	return nil
 }
 
 func validCodexEngineBillingTuple(kind, purpose, model string) bool {
@@ -287,17 +314,16 @@ func parseCodexEngineBillingEvent(raw json.RawMessage) (CodexEngineBillingUsageE
 	if err != nil {
 		return CodexEngineBillingUsageEvent{}, ErrCodexEngineBillingProtocol
 	}
-	if len(w.ApplicableUsage) == 0 || len(w.ApplicableUsage) > 10 {
+	if err := validateCodexEngineBillingCacheWriteTTL(values, false); err != nil {
+		return CodexEngineBillingUsageEvent{}, err
+	}
+	if len(w.ApplicableUsage) == 0 || len(w.ApplicableUsage) > 12 {
 		return CodexEngineBillingUsageEvent{}, ErrCodexEngineBillingProtocol
 	}
 	applicable := make(map[string]bool, len(w.ApplicableUsage))
 	for _, key := range w.ApplicableUsage {
-		if applicable[key] {
+		if applicable[key] || !validCodexEngineBillingUsageKey(key) {
 			return CodexEngineBillingUsageEvent{}, ErrCodexEngineBillingProtocol
-		}
-		probe, _ := json.Marshal(map[string]int{key: 0})
-		if _, err := parseCodexEngineBillingUsage(probe); err != nil {
-			return CodexEngineBillingUsageEvent{}, err
 		}
 		applicable[key] = true
 		if _, ok := values[key]; !ok && *w.UsageComplete {
@@ -309,6 +335,9 @@ func parseCodexEngineBillingEvent(raw json.RawMessage) (CodexEngineBillingUsageE
 			return CodexEngineBillingUsageEvent{}, ErrCodexEngineBillingProtocol
 		}
 	}
+	if applicable["cache_write_30m_input_tokens"] != applicable["cache_write_12h_input_tokens"] || applicable["cache_write_30m_input_tokens"] && !applicable["cache_write_input_tokens"] {
+		return CodexEngineBillingUsageEvent{}, ErrCodexEngineBillingProtocol
+	}
 	e := CodexEngineBillingUsageEvent{EventID: w.EventID, Sequence: *w.Sequence, Kind: w.Kind, Purpose: w.Purpose, Model: w.Model, UsageComplete: *w.UsageComplete, UsageValues: values, UsagePresent: map[string]bool{}, ImageCount: int(values["images"]), SearchCalls: int(values["search_calls"]), SearchOperations: int(values["search_operations"])}
 	e.ApplicableUsage = applicable
 	e.OccurredAt = occurredAt
@@ -318,7 +347,7 @@ func parseCodexEngineBillingEvent(raw json.RawMessage) (CodexEngineBillingUsageE
 	for key := range values {
 		e.UsagePresent[key] = true
 	}
-	e.Usage = OpenAIUsage{InputTokens: int(values["input_tokens"]), OutputTokens: int(values["output_tokens"]), CacheReadInputTokens: int(values["cached_input_tokens"]), CacheCreationInputTokens: int(values["cache_write_input_tokens"]), ImageInputTokens: int(values["image_input_tokens"]), ImageCacheReadTokens: int(values["cached_image_input_tokens"]), ImageOutputTokens: int(values["image_output_tokens"])}
+	e.Usage = OpenAIUsage{InputTokens: int(values["input_tokens"]), OutputTokens: int(values["output_tokens"]), CacheReadInputTokens: int(values["cached_input_tokens"]), CacheCreationInputTokens: int(values["cache_write_input_tokens"]), CacheCreation30mInputTokens: int(values["cache_write_30m_input_tokens"]), CacheCreation12hInputTokens: int(values["cache_write_12h_input_tokens"]), ImageInputTokens: int(values["image_input_tokens"]), ImageCacheReadTokens: int(values["cached_image_input_tokens"]), ImageOutputTokens: int(values["image_output_tokens"])}
 	if w.Image != nil {
 		if e.Kind != "image" {
 			return e, ErrCodexEngineBillingProtocol
@@ -438,6 +467,9 @@ func ParseCodexEngineBillingPage(data []byte) (*CodexEngineBillingPage, error) {
 		}
 		values, err := parseCodexEngineBillingUsage(group.Usage)
 		if err != nil {
+			return nil, err
+		}
+		if err := validateCodexEngineBillingCacheWriteTTL(values, true); err != nil {
 			return nil, err
 		}
 		g := CodexEngineBillingSummaryGroup{Kind: group.Kind, Purpose: group.Purpose, Model: group.Model, ServiceTier: group.ServiceTier, Usage: values}

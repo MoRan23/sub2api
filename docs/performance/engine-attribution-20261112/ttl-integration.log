@@ -1,0 +1,42 @@
+2026/11/11 18:05:17 Timezone initialized: UTC (UTC offset: +00:00)
+2026/11/11 18:05:17 github.com/testcontainers/testcontainers-go - Connected to docker: 
+  Server Version: 29.4.0
+  API Version: 1.51
+  Operating System: Ubuntu 24.04.3 LTS
+  Total Memory: 32099 MB
+  Testcontainers for Go Version: v0.40.0
+  Resolved Docker Host: unix:///var/run/docker.sock
+  Resolved Docker Socket Path: /var/run/docker.sock
+  Test SessionID: 61eecf6462829a9c2d782f5e18c4d27bec23df3d3c3e53998a784840cc0e4a5b
+  Test ProcessID: aef0ebb9-69b5-4c20-82a7-cd9bd2decea0
+2026/11/11 18:05:17 🐳 Creating container for image postgres:18.1-alpine3.23
+2026/11/11 18:05:18 🐳 Creating container for image testcontainers/ryuk:0.13.0
+2026/11/11 18:05:18 ✅ Container created: f216c8e93b87
+2026/11/11 18:05:18 🐳 Starting container: f216c8e93b87
+2026/11/11 18:05:18 ✅ Container started: f216c8e93b87
+2026/11/11 18:05:18 ⏳ Waiting for container id f216c8e93b87 image: testcontainers/ryuk:0.13.0. Waiting for: port 8080/tcp to be listening
+2026/11/11 18:05:18 Shell not found in container
+2026/11/11 18:05:18 🔔 Container is ready: f216c8e93b87
+2026/11/11 18:05:18 ✅ Container created: 7c7c4d28485f
+2026/11/11 18:05:18 🐳 Starting container: 7c7c4d28485f
+2026/11/11 18:05:19 ✅ Container started: 7c7c4d28485f
+2026/11/11 18:05:19 ⏳ Waiting for container id 7c7c4d28485f image: postgres:18.1-alpine3.23. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2), port 5432/tcp to be listening]
+2026/11/11 18:05:20 🔔 Container is ready: 7c7c4d28485f
+2026/11/11 18:05:20 🐳 Creating container for image redis:8.4-alpine
+2026/11/11 18:05:20 ✅ Container created: 7b92eb39f97a
+2026/11/11 18:05:20 🐳 Starting container: 7b92eb39f97a
+2026/11/11 18:05:21 ✅ Container started: 7b92eb39f97a
+2026/11/11 18:05:21 ⏳ Waiting for container id 7b92eb39f97a image: redis:8.4-alpine. Waiting for: all of: [port 6379/tcp to be listening, log message "* Ready to accept connections"]
+2026/11/11 18:05:21 🔔 Container is ready: 7b92eb39f97a
+=== RUN   TestCodexEngineBillingTTLRecoveryAndIdempotencyIntegration
+--- PASS: TestCodexEngineBillingTTLRecoveryAndIdempotencyIntegration (0.05s)
+=== RUN   TestCodexEngineBillingTTLMixedSummaryIntegration
+--- PASS: TestCodexEngineBillingTTLMixedSummaryIntegration (0.07s)
+=== RUN   TestCodexEngineBillingTTLDeliveryGateIntegration
+=== RUN   TestCodexEngineBillingTTLDeliveryGateIntegration/delivered
+=== RUN   TestCodexEngineBillingTTLDeliveryGateIntegration/no_customer_charge
+--- PASS: TestCodexEngineBillingTTLDeliveryGateIntegration (0.08s)
+    --- PASS: TestCodexEngineBillingTTLDeliveryGateIntegration/delivered (0.04s)
+    --- PASS: TestCodexEngineBillingTTLDeliveryGateIntegration/no_customer_charge (0.03s)
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/repository	5.933s

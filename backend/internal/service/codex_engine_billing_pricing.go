@@ -272,7 +272,7 @@ func codexEngineValidateTokenEvidence(event *CodexEngineBillingUsageEvent) error
 			return fmt.Errorf("engine token evidence missing %s", name)
 		}
 	}
-	for _, name := range []string{"cache_write_input_tokens", "image_input_tokens", "cached_image_input_tokens", "image_output_tokens"} {
+	for _, name := range []string{"cache_write_input_tokens", "cache_write_30m_input_tokens", "cache_write_12h_input_tokens", "image_input_tokens", "cached_image_input_tokens", "image_output_tokens"} {
 		if event.ApplicableUsage[name] && !event.UsagePresent[name] {
 			return fmt.Errorf("engine token evidence missing %s", name)
 		}
@@ -301,7 +301,14 @@ func (s *OpenAIGatewayService) BuildCodexEngineBillingEvent(ctx context.Context,
 	if u.InputTokens < 0 || u.OutputTokens < 0 || u.CacheReadInputTokens < 0 || u.CacheCreationInputTokens < 0 || u.CacheReadInputTokens > u.InputTokens || u.CacheCreationInputTokens > u.InputTokens-u.CacheReadInputTokens || u.ImageInputTokens < 0 || u.ImageCacheReadTokens < 0 || u.ImageOutputTokens < 0 || u.ImageInputTokens > u.InputTokens || u.ImageCacheReadTokens > u.CacheReadInputTokens || u.ImageCacheReadTokens > u.ImageInputTokens || u.ImageOutputTokens > u.OutputTokens || u.ImageInputTokens-u.ImageCacheReadTokens > u.InputTokens-u.CacheReadInputTokens-u.CacheCreationInputTokens {
 		return nil, nil, errors.New("invalid engine usage token buckets")
 	}
-	tokens := UsageTokens{InputTokens: u.InputTokens - u.CacheReadInputTokens - u.CacheCreationInputTokens, OutputTokens: u.OutputTokens, CacheReadTokens: u.CacheReadInputTokens, CacheCreationTokens: u.CacheCreationInputTokens, ImageInputTokens: max(u.ImageInputTokens-u.ImageCacheReadTokens, 0), ImageCacheReadTokens: u.ImageCacheReadTokens, ImageOutputTokens: u.ImageOutputTokens}
+	if u.CacheCreation30mInputTokens != 0 || u.CacheCreation12hInputTokens != 0 || event.UsagePresent["cache_write_30m_input_tokens"] || event.UsagePresent["cache_write_12h_input_tokens"] {
+		if !event.UsagePresent["cache_write_input_tokens"] || !event.UsagePresent["cache_write_30m_input_tokens"] || !event.UsagePresent["cache_write_12h_input_tokens"] ||
+			!event.ApplicableUsage["cache_write_input_tokens"] || !event.ApplicableUsage["cache_write_30m_input_tokens"] || !event.ApplicableUsage["cache_write_12h_input_tokens"] ||
+			u.CacheCreation30mInputTokens < 0 || u.CacheCreation12hInputTokens < 0 || u.CacheCreation30mInputTokens > u.CacheCreationInputTokens || u.CacheCreation12hInputTokens != u.CacheCreationInputTokens-u.CacheCreation30mInputTokens {
+			return nil, nil, errors.New("invalid engine cache write TTL evidence")
+		}
+	}
+	tokens := UsageTokens{InputTokens: u.InputTokens - u.CacheReadInputTokens - u.CacheCreationInputTokens, OutputTokens: u.OutputTokens, CacheReadTokens: u.CacheReadInputTokens, CacheCreationTokens: u.CacheCreationInputTokens, CacheCreation30mTokens: u.CacheCreation30mInputTokens, CacheCreation12hTokens: u.CacheCreation12hInputTokens, ImageInputTokens: max(u.ImageInputTokens-u.ImageCacheReadTokens, 0), ImageCacheReadTokens: u.ImageCacheReadTokens, ImageOutputTokens: u.ImageOutputTokens}
 	var cost *CostBreakdown
 	rate := f.TokenRate
 	p, known := f.Prices[priceModel]
@@ -491,6 +498,7 @@ func (s *OpenAIGatewayService) BuildCodexEngineBillingEvent(ctx context.Context,
 	}
 	log := &UsageLog{UserID: job.UserID, APIKeyID: job.APIKeyID, AccountID: job.AccountID, Model: model, RequestedModel: f.RequestedModel, UpstreamModel: optionalTrimmedStringPtr(model), UpstreamResponseModel: optionalTrimmedStringPtr(model), ServiceTier: optionalTrimmedStringPtr(tier), ReasoningEffort: optionalTrimmedStringPtr(effort), GroupID: f.GroupID, SubscriptionID: f.SubscriptionID, ChannelID: optionalInt64Ptr(f.ChannelID), ModelMappingChain: optionalTrimmedStringPtr(f.ModelMappingChain), InboundEndpoint: optionalTrimmedStringPtr(f.InboundEndpoint), UpstreamEndpoint: optionalTrimmedStringPtr(f.UpstreamEndpoint), InputTokens: tokens.InputTokens, OutputTokens: tokens.OutputTokens, CacheReadTokens: tokens.CacheReadTokens, CacheCreationTokens: tokens.CacheCreationTokens, ImageInputTokens: u.ImageInputTokens, ImageOutputTokens: u.ImageOutputTokens, ImageCount: event.ImageCount, ImageSize: optionalTrimmedStringPtr(imageSize), InputCost: cost.InputCost, OutputCost: cost.OutputCost, CacheReadCost: cost.CacheReadCost, CacheCreationCost: cost.CacheCreationCost, ImageInputCost: cost.ImageInputCost, ImageOutputCost: cost.ImageOutputCost, TotalCost: cost.TotalCost, ActualCost: cost.ActualCost, RateMultiplier: rate, AccountRateMultiplier: &f.AccountRate, BillingType: billingType, BillingMode: optionalTrimmedStringPtr(cost.BillingMode), Stream: f.Stream, NativeCompactionV2: f.NativeCompactionV2 || event.Purpose == "compact", LongContextBillingApplied: cost.LongContextBillingApplied, CreatedAt: f.PricingAt}
 	log.OpenAIWSMode, log.RequestType = f.OpenAIWSMode, f.RequestType
+	log.CacheCreation30mTokens, log.CacheCreation12hTokens = tokens.CacheCreation30mTokens, tokens.CacheCreation12hTokens
 	if !event.OccurredAt.IsZero() {
 		log.CreatedAt = event.OccurredAt
 	}
