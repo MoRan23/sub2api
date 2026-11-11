@@ -31,6 +31,7 @@ const (
 	EventGuardBlocked         = "prompt_guard.blocked"
 	EventKeywordBlocked       = "prompt_audit.keyword_blocked"
 	EventCBRNBlocked          = "prompt_audit.cbrn_blocked"
+	EventCombinationBlocked   = "prompt_audit.combination_blocked"
 	EventGuardFailed          = "prompt_guard.failed"
 	EventResultRecordFailed   = "prompt_guard.result_record_failed"
 	EventEventDeleted         = "prompt_audit.event_deleted"
@@ -40,8 +41,9 @@ const (
 )
 
 var knownLogEvents = map[string]struct{}{
-	EventCBRNBlocked:   {},
-	EventConfigUpdated: {}, EventConfigLoaded: {}, EventConfigReloadDegraded: {}, EventConfigTokenInvalid: {},
+	EventCBRNBlocked:        {},
+	EventCombinationBlocked: {},
+	EventConfigUpdated:      {}, EventConfigLoaded: {}, EventConfigReloadDegraded: {}, EventConfigTokenInvalid: {},
 	EventProbeStarted: {}, EventProbeFinished: {}, EventProbeFailed: {},
 	EventJobEnqueued: {}, EventEnqueueSkipped: {}, EventEnqueueDropped: {},
 	EventAuditStarted: {}, EventProcessingReclaimed: {}, EventProcessed: {}, EventProcessFailed: {}, EventFindingRecorded: {},
@@ -59,8 +61,9 @@ var allowedLogFields = map[string]struct{}{
 	"queue_length": {}, "queue_capacity": {}, "stage": {}, "upstream_dispatched": {},
 	"billing_preconsumed": {}, "worker_id": {}, "reclaimed_total": {}, "attempts": {},
 	"max_attempts": {}, "claim_version": {}, "http_status": {}, "retryable": {},
-	"keyword_hash": {},
-	"cbrn_hash":    {},
+	"keyword_hash":     {},
+	"cbrn_hash":        {},
+	"combination_hash": {},
 }
 
 func LogInfo(event string, fields map[string]any) {
@@ -161,6 +164,8 @@ func stableErrorMessage(code string) string {
 		return "Prompt Audit keyword policy blocked the request"
 	case ErrorCodeCBRNBlocked:
 		return "Prompt Audit CBRN combination policy blocked the request"
+	case ErrorCodeCombinationBlocked:
+		return "Prompt Audit combination topic and intent policy blocked the request"
 	case ErrorCodeUnavailable, "payload_store_unavailable", "payload_missing":
 		return "Prompt Audit dependency is unavailable"
 	case ErrorCodeInvalidResponse:

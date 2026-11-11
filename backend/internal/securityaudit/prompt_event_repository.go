@@ -365,10 +365,14 @@ func scanEvent(row rowScanner, withFullPrompt ...bool) (*Event, error) {
 		event.CBRNMatch = decodeCBRNMatchEvidence(event.ScannerEvidence[cbrnMatchEvidenceKey])
 	}
 	delete(event.ScannerEvidence, cbrnMatchEvidenceKey)
+	if len(withFullPrompt) > 0 && withFullPrompt[0] && event.ScannerBackend == "local-combination" && event.PolicyID == "combination-topic-intent" {
+		event.CombinationMatch = decodeCombinationMatchEvidence(event.ScannerEvidence[combinationMatchEvidenceKey])
+	}
+	delete(event.ScannerEvidence, combinationMatchEvidenceKey)
 	result := NormalizedResult{Decision: event.Decision, RiskLevel: event.RiskLevel, Action: event.Action,
 		Categories: event.Categories, MatchedScanners: event.MatchedScanners, ScannerScores: event.ScannerScores,
 		ScannerEvidence: event.ScannerEvidence, ScannerBackend: event.ScannerBackend,
-		PolicyID: event.PolicyID, matchedKeyword: matchedKeyword, cbrnMatch: event.CBRNMatch}
+		PolicyID: event.PolicyID, matchedKeyword: matchedKeyword, cbrnMatch: event.CBRNMatch, combinationMatch: event.CombinationMatch}
 	event.IssueSummaries = BuildIssueSummaries(result)
 	return event, nil
 }
@@ -380,18 +384,33 @@ func decodeCBRNMatchEvidence(raw string) *CBRNMatch {
 		return nil
 	}
 	var match CBRNMatch
-	if json.Unmarshal([]byte(raw), &match) != nil {
+	if json.Unmarshal([]byte(raw), &match) != nil || !validPairedMatchEvidence(match) {
 		return nil
 	}
+	return &match
+}
+
+func validPairedMatchEvidence(match CBRNMatch) bool {
 	for _, evidence := range []CBRNMatchEvidence{match.Topic, match.Intent} {
 		if strings.TrimSpace(evidence.Rule) == "" || evidence.Content == "" ||
 			utf8.RuneCountInString(evidence.Rule) > MaxBlockedRegexRunes || utf8.RuneCountInString(evidence.Content) > MaxBlockedRegexRunes+1 ||
 			(evidence.Source != "latest_user" && evidence.Source != "history") ||
 			evidence.SegmentIndex < 0 || evidence.Start < 0 || evidence.End <= evidence.Start {
-			return nil
+			return false
 		}
 	}
-	if match.Intent.Source != "latest_user" {
+	return match.Intent.Source == "latest_user"
+}
+
+func decodeCombinationMatchEvidence(raw string) *CombinationMatch {
+	// Validate the shared match schema first; corrupt history never supplies
+	// inferred policy names or evidence from today's configuration.
+	if raw == "" || len(raw) > MaxBlockedRegexRunes*4*6+2048 {
+		return nil
+	}
+	var match CombinationMatch
+	if json.Unmarshal([]byte(raw), &match) != nil || !validPairedMatchEvidence(match.CBRNMatch) ||
+		!validCombinationPolicyID(match.PolicyID) || !validCombinationPolicyName(match.PolicyName) {
 		return nil
 	}
 	return &match

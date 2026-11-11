@@ -288,3 +288,66 @@ func TestPromptAuditCBRNConfigPersistenceAndLegacyUpdate(t *testing.T) {
 	require.Equal(t, public.ConfigVersion, stored.ConfigVersion)
 	require.Equal(t, topics, stored.CBRNTopicRules)
 }
+
+func TestPromptAuditCombinationConfigPersistenceAndMigration(t *testing.T) {
+	db := openPromptAuditIntegrationDB(t)
+	ctx := context.Background()
+	repo := postgresPromptAuditSettingRepository{db: db}
+	require.NoError(t, repo.Set(ctx, SettingKeyRiskControl, "true"))
+	manager := NewConfigManager(db, repo, nil, promptAuditTestEncryptor(t), testTotpKeyConfig())
+	require.NoError(t, manager.Reload(ctx))
+	request := cbrnConfigUpdateRequest()
+	policies := []CombinationPolicy{testCombinationPolicy("custom-domain")}
+	policies[0].MigrateKeywords = []string{".gov", ".gov."}
+	request.CombinationPolicies = &policies
+	request.KeywordBlockingEnabled, request.BlockedKeywords = true, []string{" .GOV ", ".gov."}
+	public, err := manager.Save(ctx, request, 101)
+	require.NoError(t, err)
+	require.True(t, public.CombinationBlockingActive)
+	require.False(t, public.KeywordBlockingEnabled)
+	require.Empty(t, public.BlockedKeywords)
+	require.False(t, public.CBRNBlockingEnabled)
+
+	request = cbrnConfigUpdateRequest()
+	request.ExpectedConfigVersion = public.ConfigVersion
+	request.KeywordBlockingEnabled, request.BlockedKeywords = true, []string{".gov", "retained"}
+	public, err = manager.Save(ctx, request, 101)
+	require.NoError(t, err)
+	require.Equal(t, policies, public.CombinationPolicies, "omitted generic fields preserve custom policies")
+	require.Equal(t, []string{"retained"}, public.BlockedKeywords)
+	second := NewConfigManager(db, repo, nil, promptAuditTestEncryptor(t), testTotpKeyConfig())
+	require.NoError(t, second.Reload(ctx))
+	active, ok := second.Active()
+	require.True(t, ok)
+	match, err := active.MatchCombination(Request{Protocol: "responses", Body: []byte(`{"input":"target attack"}`)})
+	require.NoError(t, err)
+	require.Equal(t, "custom-domain", match.PolicyID)
+
+	invalid := cloneCombinationPolicies(policies)
+	invalid[0].TopicRules = []string{"regex:a*"}
+	request.ExpectedConfigVersion, request.CombinationPolicies = public.ConfigVersion, &invalid
+	_, err = manager.Save(ctx, request, 101)
+	require.Error(t, err)
+	raw, err := repo.GetValue(ctx, SettingKeyPromptAuditConfig)
+	require.NoError(t, err)
+	stored, err := ParseStorageConfig(raw)
+	require.NoError(t, err)
+	require.Equal(t, public.ConfigVersion, stored.ConfigVersion)
+	require.Equal(t, policies, stored.CombinationPolicies)
+	require.Equal(t, []string{"retained"}, stored.BlockedKeywords)
+
+	deleted := []CombinationPolicy{}
+	request.CombinationPolicies, request.BlockedKeywords = &deleted, stored.BlockedKeywords
+	public, err = manager.Save(ctx, request, 101)
+	require.NoError(t, err)
+	request = cbrnConfigUpdateRequest()
+	request.ExpectedConfigVersion = public.ConfigVersion
+	staleEnabled := true
+	request.CBRNBlockingEnabled = &staleEnabled
+	public, err = manager.Save(ctx, request, 101)
+	require.NoError(t, err)
+	require.Empty(t, public.CombinationPolicies, "old-client enabled=true save cannot resurrect deleted policies")
+	require.NoError(t, second.Reload(ctx))
+	active, _ = second.Active()
+	require.False(t, active.CombinationBlockingActive())
+}

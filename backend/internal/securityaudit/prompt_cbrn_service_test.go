@@ -29,17 +29,17 @@ func TestPromptCBRNServiceScopeAndPriority(t *testing.T) {
 		body      string
 		wantCode  string
 	}{
-		{name: "independent of keyword and Guard switches", wantCode: ErrorCodeCBRNBlocked},
+		{name: "independent of keyword and Guard switches", wantCode: ErrorCodeCombinationBlocked},
 		{name: "risk control disabled", configure: func(c *ActiveConfig) { c.RiskControlEnabled = false }},
-		{name: "combination disabled", configure: func(c *ActiveConfig) { c.CBRNBlockingEnabled = false }},
+		{name: "combination disabled", configure: func(c *ActiveConfig) { c.CombinationPolicies[0].Enabled = false }},
 		{name: "different group", configure: func(c *ActiveConfig) { c.KeywordAllGroups = false; c.KeywordGroupIDs = []int64{8} }},
-		{name: "selected group", configure: func(c *ActiveConfig) { c.KeywordAllGroups = false; c.KeywordGroupIDs = []int64{7} }, wantCode: ErrorCodeCBRNBlocked},
+		{name: "selected group", configure: func(c *ActiveConfig) { c.KeywordAllGroups = false; c.KeywordGroupIDs = []int64{7} }, wantCode: ErrorCodeCombinationBlocked},
 		{name: "exact Key bypass", configure: func(c *ActiveConfig) { c.KeywordWhitelistKeys = []KeywordWhitelistKey{{UserID: 1, APIKeyID: 2}} }},
-		{name: "same user another Key", configure: func(c *ActiveConfig) { c.KeywordWhitelistKeys = []KeywordWhitelistKey{{UserID: 1, APIKeyID: 3}} }, wantCode: ErrorCodeCBRNBlocked},
-		{name: "same Key ID wrong user", configure: func(c *ActiveConfig) { c.KeywordWhitelistKeys = []KeywordWhitelistKey{{UserID: 3, APIKeyID: 2}} }, wantCode: ErrorCodeCBRNBlocked},
+		{name: "same user another Key", configure: func(c *ActiveConfig) { c.KeywordWhitelistKeys = []KeywordWhitelistKey{{UserID: 1, APIKeyID: 3}} }, wantCode: ErrorCodeCombinationBlocked},
+		{name: "same Key ID wrong user", configure: func(c *ActiveConfig) { c.KeywordWhitelistKeys = []KeywordWhitelistKey{{UserID: 3, APIKeyID: 2}} }, wantCode: ErrorCodeCombinationBlocked},
 		{name: "topic only", body: `{"input":"subject-x history"}`},
 		{name: "intent only", body: `{"input":"prepare-x"}`},
-		{name: "topic from carried history", body: `{"input":[{"role":"user","content":"subject-x"},{"role":"assistant","content":"history"},{"role":"user","content":"prepare-x"}]}`, wantCode: ErrorCodeCBRNBlocked},
+		{name: "topic from carried history", body: `{"input":[{"role":"user","content":"subject-x"},{"role":"assistant","content":"history"},{"role":"user","content":"prepare-x"}]}`, wantCode: ErrorCodeCombinationBlocked},
 		{name: "historical intent excluded", body: `{"input":[{"role":"user","content":"subject-x prepare-x"},{"role":"assistant","content":"history"},{"role":"user","content":"hello"}]}`},
 		{name: "no implicit history lookup", body: `{"previous_response_id":"resp_subject-x","input":"prepare-x"}`},
 		{name: "original keywords win", configure: func(c *ActiveConfig) {
@@ -73,8 +73,8 @@ func TestPromptCBRNServiceScopeAndPriority(t *testing.T) {
 				require.Equal(t, DecisionBlock, decision.Kind)
 				require.False(t, decision.AllowNextStage)
 			}
-			if tc.wantCode == ErrorCodeCBRNBlocked {
-				require.Equal(t, int64(1), metrics.Snapshot().CBRNBlocked)
+			if tc.wantCode == ErrorCodeCombinationBlocked {
+				require.Equal(t, int64(1), metrics.Snapshot().CombinationBlocked)
 				require.Zero(t, metrics.Snapshot().KeywordBlocked)
 				raw, err := json.Marshal(decision.Result)
 				require.NoError(t, err)
@@ -91,7 +91,7 @@ func TestPromptCBRNCoordinatorStopsBeforeOtherEngines(t *testing.T) {
 	decision := NewCoordinator(legacy, service).Check(context.Background(), Request{
 		Protocol: "openai_responses", Body: []byte(`{"input":"subject-x prepare-x"}`),
 	})
-	require.Equal(t, ErrorCodeCBRNBlocked, decision.ErrorCode)
+	require.Equal(t, ErrorCodeCombinationBlocked, decision.ErrorCode)
 	require.Equal(t, http.StatusForbidden, decision.HTTPStatus)
 	require.Equal(t, int64(0), legacy.calls.Load())
 	require.Contains(t, decision.ClientMessage, "subject-x")
@@ -121,7 +121,7 @@ func TestPromptCBRNServiceConcurrentSnapshot(t *testing.T) {
 		wg.Go(func() {
 			for range 10 {
 				decision, err := service.CheckKeyword(context.Background(), Request{Protocol: "openai_responses", Body: []byte(`{"input":"subject-x prepare-x"}`)})
-				if err != nil || decision.ErrorCode != ErrorCodeCBRNBlocked {
+				if err != nil || decision.ErrorCode != ErrorCodeCombinationBlocked {
 					t.Errorf("unexpected decision: %+v, %v", decision, err)
 					return
 				}
@@ -129,5 +129,5 @@ func TestPromptCBRNServiceConcurrentSnapshot(t *testing.T) {
 		})
 	}
 	wg.Wait()
-	require.Equal(t, int64(240), service.metrics.Snapshot().CBRNBlocked)
+	require.Equal(t, int64(240), service.metrics.Snapshot().CombinationBlocked)
 }

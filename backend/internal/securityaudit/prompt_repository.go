@@ -17,7 +17,8 @@ const (
 	// exclusively on administrator event detail reads.
 	matchedKeywordEvidenceKey = "_matched_keyword"
 	// Structured local CBRN evidence is decoded only for administrator details.
-	cbrnMatchEvidenceKey = "_cbrn_match"
+	cbrnMatchEvidenceKey        = "_cbrn_match"
+	combinationMatchEvidenceKey = "_combination_match"
 )
 
 var (
@@ -46,28 +47,29 @@ type Job struct {
 }
 
 type Event struct {
-	ID              int64              `json:"id"`
-	JobID           int64              `json:"job_id"`
-	Snapshot        PromptSnapshot     `json:"snapshot"`
-	Decision        EventDecision      `json:"decision"`
-	RiskLevel       RiskLevel          `json:"risk_level"`
-	Action          Action             `json:"action"`
-	Categories      []string           `json:"categories"`
-	MatchedScanners []string           `json:"matched_scanners"`
-	ScannerScores   map[string]float64 `json:"scanner_scores"`
-	ScannerEvidence map[string]string  `json:"scanner_evidence"`
-	MatchedKeyword  string             `json:"matched_keyword,omitempty"`
-	CBRNMatch       *CBRNMatch         `json:"cbrn_match,omitempty"`
-	ScannerBackend  string             `json:"scanner_backend"`
-	ScannerVersion  string             `json:"scanner_version"`
-	GuardEndpointID string             `json:"guard_endpoint_id"`
-	PolicyID        string             `json:"policy_id"`
-	PolicyVersion   int                `json:"policy_version"`
-	ConfigVersion   int64              `json:"config_version"`
-	ChunkTotal      int                `json:"chunk_total"`
-	LatencyMS       int                `json:"latency_ms"`
-	IssueSummaries  []IssueSummary     `json:"issue_summaries"`
-	CreatedAt       time.Time          `json:"created_at"`
+	ID               int64              `json:"id"`
+	JobID            int64              `json:"job_id"`
+	Snapshot         PromptSnapshot     `json:"snapshot"`
+	Decision         EventDecision      `json:"decision"`
+	RiskLevel        RiskLevel          `json:"risk_level"`
+	Action           Action             `json:"action"`
+	Categories       []string           `json:"categories"`
+	MatchedScanners  []string           `json:"matched_scanners"`
+	ScannerScores    map[string]float64 `json:"scanner_scores"`
+	ScannerEvidence  map[string]string  `json:"scanner_evidence"`
+	MatchedKeyword   string             `json:"matched_keyword,omitempty"`
+	CBRNMatch        *CBRNMatch         `json:"cbrn_match,omitempty"`
+	CombinationMatch *CombinationMatch  `json:"combination_match,omitempty"`
+	ScannerBackend   string             `json:"scanner_backend"`
+	ScannerVersion   string             `json:"scanner_version"`
+	GuardEndpointID  string             `json:"guard_endpoint_id"`
+	PolicyID         string             `json:"policy_id"`
+	PolicyVersion    int                `json:"policy_version"`
+	ConfigVersion    int64              `json:"config_version"`
+	ChunkTotal       int                `json:"chunk_total"`
+	LatencyMS        int                `json:"latency_ms"`
+	IssueSummaries   []IssueSummary     `json:"issue_summaries"`
+	CreatedAt        time.Time          `json:"created_at"`
 }
 
 type JobRepository interface {
@@ -369,12 +371,14 @@ func insertEvent(ctx context.Context, queryer sqlQueryer, jobID int64, snapshot 
 func promptEventEvidence(result *NormalizedResult) map[string]string {
 	localKeyword := result.ScannerBackend == "local-keyword" && result.PolicyID == "keyword-substring" && result.matchedKeyword != ""
 	localCBRN := result.ScannerBackend == "local-cbrn" && result.PolicyID == "cbrn-topic-intent" && result.cbrnMatch != nil
+	localCombination := result.ScannerBackend == "local-combination" && result.PolicyID == "combination-topic-intent" && result.combinationMatch != nil
 	evidence := make(map[string]string, len(result.ScannerEvidence))
 	for key, value := range result.ScannerEvidence {
-		if key == matchedKeywordEvidenceKey || key == cbrnMatchEvidenceKey {
+		if key == matchedKeywordEvidenceKey || key == cbrnMatchEvidenceKey || key == combinationMatchEvidenceKey {
 			continue
 		}
-		if (localKeyword && key == "keyword") || (localCBRN && (key == "cbrn_topic" || key == "cbrn_intent")) {
+		if (localKeyword && key == "keyword") || (localCBRN && (key == "cbrn_topic" || key == "cbrn_intent")) ||
+			(localCombination && (key == "combination_topic" || key == "combination_intent")) {
 			// The locally generated digest is not prompt text. Redacting digit
 			// sequences as phone numbers would corrupt its identity.
 			evidence[key] = value
@@ -392,6 +396,11 @@ func promptEventEvidence(result *NormalizedResult) map[string]string {
 		// from a Guard response, even when its map contains a valid JSON object.
 		if raw, err := json.Marshal(result.cbrnMatch); err == nil {
 			evidence[cbrnMatchEvidenceKey] = string(raw)
+		}
+	}
+	if localCombination {
+		if raw, err := json.Marshal(result.combinationMatch); err == nil {
+			evidence[combinationMatchEvidenceKey] = string(raw)
 		}
 	}
 	return evidence

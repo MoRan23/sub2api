@@ -117,7 +117,7 @@ func (s *PromptService) CheckKeyword(ctx context.Context, req Request) (*PromptD
 		return nil, &GuardError{Code: ErrorCodeUnavailable}
 	}
 	cfg, ok := s.config.Active()
-	if !ok || (!cfg.KeywordBlockingActive() && !cfg.CBRNBlockingActive()) || !cfg.KeywordIncludesGroup(req.GroupID) {
+	if !ok || (!cfg.KeywordBlockingActive() && !cfg.CombinationBlockingActive()) || !cfg.KeywordIncludesGroup(req.GroupID) {
 		return &PromptDecision{Kind: DecisionAllow, AllowNextStage: true}, nil
 	}
 	if cfg.KeywordWhitelistsKey(req.UserID, req.APIKeyID) {
@@ -141,7 +141,7 @@ func (s *PromptService) CheckKeyword(ctx context.Context, req Request) (*PromptD
 	}
 	keyword, content, matched := cfg.MatchBlockedKeyword(snapshot.ScanText)
 	if !matched {
-		return s.checkCBRN(ctx, req, cfg, snapshot, started)
+		return s.checkCombinations(ctx, req, cfg, snapshot, started)
 	}
 
 	digest := sha256.Sum256([]byte(promptKeywordEvidenceText(keyword)))
@@ -180,8 +180,8 @@ func (s *PromptService) CheckKeyword(ctx context.Context, req Request) (*PromptD
 	}, nil
 }
 
-func (s *PromptService) checkCBRN(ctx context.Context, req Request, cfg ActiveConfig, snapshot PromptSnapshot, started time.Time) (*PromptDecision, error) {
-	match, err := cfg.MatchCBRN(req)
+func (s *PromptService) checkCombinations(ctx context.Context, req Request, cfg ActiveConfig, snapshot PromptSnapshot, started time.Time) (*PromptDecision, error) {
+	match, err := cfg.MatchCombination(req)
 	clock := s.clock
 	if clock == nil {
 		clock = realClock{}
@@ -203,16 +203,16 @@ func (s *PromptService) checkCBRN(ctx context.Context, req Request, cfg ActiveCo
 	intentDigest := sha256.Sum256([]byte(promptKeywordEvidenceText(match.Intent.Rule)))
 	result := &NormalizedResult{
 		Decision: EventCritical, RiskLevel: RiskCritical, Action: ActionBlock, Safety: "Unsafe",
-		Categories: []string{"cbrn"}, MatchedScanners: []string{"cbrn"},
-		ScannerScores: map[string]float64{"cbrn": 1}, ScannerEvidence: map[string]string{
-			"cbrn_topic": "sha256:" + hex.EncodeToString(topicDigest[:]), "cbrn_intent": "sha256:" + hex.EncodeToString(intentDigest[:]),
+		Categories: []string{"combination"}, MatchedScanners: []string{"combination"},
+		ScannerScores: map[string]float64{"combination": 1}, ScannerEvidence: map[string]string{
+			"combination_topic": "sha256:" + hex.EncodeToString(topicDigest[:]), "combination_intent": "sha256:" + hex.EncodeToString(intentDigest[:]),
 		},
-		ScannerBackend: "local-cbrn", ScannerVersion: "1", PolicyID: "cbrn-topic-intent", PolicyVersion: 1,
-		ChunkTotal: 1, LatencyMS: int(latency.Milliseconds()), cbrnMatch: match,
+		ScannerBackend: "local-combination", ScannerVersion: "1", PolicyID: "combination-topic-intent", PolicyVersion: 1,
+		ChunkTotal: 1, LatencyMS: int(latency.Milliseconds()), combinationMatch: match,
 	}
 	if s.metrics != nil {
 		s.metrics.Observe(DecisionBlock, latency)
-		s.metrics.IncCBRNBlocked()
+		s.metrics.IncCombinationBlocked()
 	}
 	if s.repo != nil {
 		if _, recordErr := s.repo.RecordBlocking(ctx, snapshot, cfg.ConfigVersion, result, cfg.StorePassEvents); recordErr != nil {
@@ -224,13 +224,13 @@ func (s *PromptService) checkCBRN(ctx context.Context, req Request, cfg ActiveCo
 			}))
 		}
 	}
-	LogWarn(EventCBRNBlocked, mergeLogFields(snapshotLogFields(snapshot), map[string]any{
+	LogWarn(EventCombinationBlocked, mergeLogFields(snapshotLogFields(snapshot), map[string]any{
 		"config_version": cfg.ConfigVersion, "decision": DecisionBlock, "risk_level": RiskCritical,
 		"action": ActionBlock, "latency_ms": latency.Milliseconds(), "status": "blocked",
-		"error_code": ErrorCodeCBRNBlocked, "cbrn_hash": ruleHash,
+		"error_code": ErrorCodeCombinationBlocked, "combination_hash": ruleHash,
 		"upstream_dispatched": false, "billing_preconsumed": false,
 	}))
-	return &PromptDecision{Kind: DecisionBlock, ErrorCode: ErrorCodeCBRNBlocked, Result: result}, nil
+	return &PromptDecision{Kind: DecisionBlock, ErrorCode: ErrorCodeCombinationBlocked, Result: result}, nil
 }
 
 func (s *PromptService) Enqueue(_ context.Context, req Request) error {
@@ -315,6 +315,7 @@ func (s *PromptService) Runtime(ctx context.Context) RuntimeSnapshot {
 	if hasConfig {
 		runtime.KeywordBlockingActive = cfg.KeywordBlockingActive()
 		runtime.CBRNBlockingActive = cfg.CBRNBlockingActive()
+		runtime.CombinationBlockingActive = cfg.CombinationBlockingActive()
 	}
 	if s.repo != nil {
 		stats, err := s.repo.QueueStats(ctx)
@@ -343,7 +344,7 @@ func (s *PromptService) Runtime(ctx context.Context) RuntimeSnapshot {
 	if workerCode != "" {
 		runtime.LastErrorCode, runtime.LastErrorMessage = workerCode, workerMessage
 	}
-	if mode != ModeOff || runtime.KeywordBlockingActive || runtime.CBRNBlockingActive {
+	if mode != ModeOff || runtime.KeywordBlockingActive || runtime.CombinationBlockingActive {
 		runtime.ProcessStatus = "running"
 		if loadError != "" || runtime.DatabaseStatus != "ok" || runtime.RedisStatus != "ok" || activeVersion != expected {
 			runtime.ProcessStatus = "degraded"

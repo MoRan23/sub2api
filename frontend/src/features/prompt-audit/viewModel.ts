@@ -32,9 +32,12 @@ export function configToDraft(config: PromptAuditConfig): PromptAuditDraft {
   return {
     ...cloneData(config),
     blocked_keywords: [...(config.blocked_keywords ?? [])],
-    cbrn_blocking_enabled: config.cbrn_blocking_enabled ?? false,
-    cbrn_topic_rules: [...(config.cbrn_topic_rules ?? [])],
-    cbrn_intent_rules: [...(config.cbrn_intent_rules ?? [])],
+    combination_policies: cloneData(config.combination_policies ?? (
+      config.cbrn_blocking_enabled || config.cbrn_topic_rules?.length || config.cbrn_intent_rules?.length
+        ? [{ id: 'cbrn', name: 'CBRN', enabled: config.cbrn_blocking_enabled ?? false, topic_rules: config.cbrn_topic_rules ?? [], intent_rules: config.cbrn_intent_rules ?? [] }]
+        : []
+    )),
+    combination_templates: cloneData(config.combination_templates ?? []),
     keyword_all_groups: config.keyword_all_groups ?? config.all_groups ?? true,
     keyword_group_ids: [...(config.keyword_group_ids ?? config.group_ids ?? [])],
     keyword_whitelist_keys: (config.keyword_whitelist_keys ?? []).map(({ user_id, api_key_id }) => ({ user_id, api_key_id })),
@@ -72,9 +75,12 @@ export function buildUpdateRequest(draft: PromptAuditDraft): PromptAuditUpdateRe
     blocking_enabled: draft.enabled && draft.blocking_enabled,
     blocking_latest_turn_only: draft.blocking_latest_turn_only,
     keyword_blocking_enabled: draft.keyword_blocking_enabled,
-    cbrn_blocking_enabled: draft.cbrn_blocking_enabled,
-    cbrn_topic_rules: normalizeKeywordRules(draft.cbrn_topic_rules),
-    cbrn_intent_rules: normalizeKeywordRules(draft.cbrn_intent_rules),
+    combination_policies: draft.combination_policies.map((policy) => ({
+      id: policy.id.trim(), name: policy.name.trim(), enabled: policy.enabled,
+      topic_rules: normalizeKeywordRules(policy.topic_rules ?? []),
+      intent_rules: normalizeKeywordRules(policy.intent_rules ?? []),
+      migrate_keywords: normalizeKeywordRules(policy.migrate_keywords ?? []),
+    })),
     blocked_keywords: normalizeKeywordRules(draft.blocked_keywords),
     keyword_all_groups: draft.keyword_all_groups,
     keyword_group_ids: draft.keyword_all_groups ? [] : [...draft.keyword_group_ids].sort((a, b) => a - b),

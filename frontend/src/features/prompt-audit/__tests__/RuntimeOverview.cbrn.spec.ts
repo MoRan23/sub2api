@@ -13,17 +13,19 @@ const runtime = (): PromptAuditRuntime => ({
   guard_metrics: { total: 1, allowed: 1, flagged: 0, blocked: 0, keyword_blocked: 0, unavailable: 0, invalid: 0, timeouts: 0, failovers: 0, bulkhead_full: 0, record_failed: 0 },
 })
 
-describe('CBRN runtime observation', () => {
-  it('shows independent effective CBRN status and counter, with missing fields marked unrecorded', async () => {
+describe('Combination runtime observation', () => {
+  it('shows the generic effective status and counter and leaves absent legacy metrics unavailable', async () => {
     const wrapper = mount(RuntimeOverview, { props: { runtime: runtime(), loading: false, error: '' } })
-    const status = () => wrapper.findAll('dl > div').find((entry) => entry.text().includes('admin.promptAudit.runtime.cbrnBlocking'))!
+    const status = () => wrapper.findAll('dl > div').find((entry) => entry.text().includes('admin.promptAudit.runtime.combinationBlocking'))!
+    const metric = () => wrapper.findAll('p').find((entry) => entry.text() === 'admin.promptAudit.metrics.combinationBlocked')!.element.parentElement!.textContent
     expect(status().text()).toContain('admin.promptAudit.keyword.notRecorded')
-    const metric = () => wrapper.findAll('p').find((entry) => entry.text() === 'admin.promptAudit.metrics.cbrnBlocked')!.element.parentElement!.textContent
     expect(metric()).toContain('—')
-    await wrapper.setProps({ runtime: { ...runtime(), cbrn_blocking_active: true, guard_metrics: { ...runtime().guard_metrics, cbrn_blocked: 12 } } })
+    await wrapper.setProps({ runtime: { ...runtime(), cbrn_blocking_active: true, combination_blocking_active: true, guard_metrics: { ...runtime().guard_metrics, combination_blocked: 17 } } })
     expect(status().text()).toContain('admin.promptAudit.status.running')
-    expect(metric()).toContain('12')
-    await wrapper.setProps({ runtime: { ...runtime(), cbrn_blocking_active: false } })
+    expect(metric()).toContain('17')
+    await wrapper.setProps({ runtime: { ...runtime(), combination_blocking_active: false } })
     expect(status().text()).toContain('admin.promptAudit.status.disabled')
+    await wrapper.setProps({ runtime: { ...runtime(), cbrn_blocking_active: true } })
+    expect(status().text()).toContain('admin.promptAudit.keyword.notRecorded')
   })
 })

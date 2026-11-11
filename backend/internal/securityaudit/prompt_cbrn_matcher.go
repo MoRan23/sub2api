@@ -1,8 +1,6 @@
 package securityaudit
 
 import (
-	"encoding/json"
-	"errors"
 	"regexp"
 	"regexp/syntax"
 	"strings"
@@ -45,21 +43,25 @@ func validateCBRNRules(topics, intents []string) error {
 }
 
 func newPromptCBRNMatcher(topics, intents []string) (*promptCBRNMatcher, error) {
+	return newPromptCombinedMatcher(topics, intents, "prompt_audit_too_many_cbrn_rules", "prompt_audit_cbrn_empty_match")
+}
+
+func newPromptCombinedMatcher(topics, intents []string, countCode, emptyCode string) (*promptCBRNMatcher, error) {
 	if len(topics)+len(intents) > MaxBlockedKeywords {
-		return nil, infraerrors.BadRequest("prompt_audit_too_many_cbrn_rules", "主题和操作意图规则合计不能超过 10000 条")
+		return nil, infraerrors.BadRequest(countCode, "主题和操作意图规则合计不能超过 10000 条")
 	}
 	m := &promptCBRNMatcher{}
 	var err error
-	if m.topics, err = compileCBRNRules(topics); err != nil {
+	if m.topics, err = compileCombinedRules(topics, emptyCode); err != nil {
 		return nil, err
 	}
-	if m.intents, err = compileCBRNRules(intents); err != nil {
+	if m.intents, err = compileCombinedRules(intents, emptyCode); err != nil {
 		return nil, err
 	}
 	return m, nil
 }
 
-func compileCBRNRules(rules []string) ([]promptCBRNRule, error) {
+func compileCombinedRules(rules []string, emptyCode string) ([]promptCBRNRule, error) {
 	if err := validateBlockedKeywords(rules); err != nil {
 		return nil, err
 	}
@@ -84,7 +86,7 @@ func compileCBRNRules(rules []string) ([]promptCBRNRule, error) {
 			return nil, parseErr
 		}
 		if cbrnCanMatchEmpty(parsed) {
-			return nil, infraerrors.BadRequest("prompt_audit_cbrn_empty_match", "组合规则不能匹配空字符串")
+			return nil, infraerrors.BadRequest(emptyCode, "组合规则不能匹配空字符串")
 		}
 		compiled = append(compiled, promptCBRNRule{rule: rule, re: re})
 	}
@@ -129,112 +131,35 @@ type cbrnTextSegment struct {
 }
 
 func (m *promptCBRNMatcher) Match(req Request) (*CBRNMatch, error) {
-	if m == nil || len(m.topics) == 0 || len(m.intents) == 0 {
+	if !m.hasRules() {
 		return nil, nil
 	}
-	var document any
-	if err := json.Unmarshal(req.Body, &document); err != nil {
-		return nil, errors.New("prompt audit request JSON is invalid")
+	prepared, err := preparePromptCombination(req)
+	if err != nil {
+		return nil, err
 	}
-	root, _ := document.(map[string]any)
-	protocol := strings.ToLower(strings.TrimSpace(req.Protocol))
-	if protocol == "gemini" || protocol == "gemini_generate_content" {
-		return m.matchCBRNGemini(root), nil
-	}
-	latest := latestCBRNUserTexts(req.Protocol, root)
-	if len(latest) == 0 {
-		return nil, nil
-	}
-	extracted := extractProtocolSegments(req.Protocol, document)
-	return m.matchCBRNSegments(extracted, latest, 0, nil), nil
+	return m.matchPrepared(prepared), nil
 }
 
-func (m *promptCBRNMatcher) matchCBRNSegments(extracted []promptSegment, latest []string, offset int, originalIndexes []int) *CBRNMatch {
-	latestIndexes := cbrnLatestSegmentIndexes(extracted, latest)
-	if len(latestIndexes) == 0 {
+func (m *promptCBRNMatcher) hasRules() bool {
+	return m != nil && len(m.topics) > 0 && len(m.intents) > 0
+}
+
+func (m *promptCBRNMatcher) matchPrepared(prepared *preparedPromptCombination) *CBRNMatch {
+	if !m.hasRules() || prepared == nil {
 		return nil
 	}
-	segments := make([]cbrnTextSegment, 0, len(extracted))
-	for index, segment := range extracted {
-		originalIndex := offset + index
-		if originalIndexes != nil {
-			originalIndex = originalIndexes[index]
+	for _, segments := range prepared.batches {
+		// Only normalize history after a policy matches current operational intent.
+		intent := matchCBRNList(m.intents, segments, true)
+		if intent == nil {
+			continue
 		}
-		segments = append(segments, cbrnTextSegment{original: segment.text, index: originalIndex, latest: latestIndexes[index]})
-	}
-	// Most requests have no current operational intent. Do not normalize their
-	// history or scan the topic list unless the current input passes this gate.
-	intent := matchCBRNList(m.intents, segments, true)
-	if intent == nil {
-		return nil
-	}
-	topic := matchCBRNList(m.topics, segments, false)
-	if topic == nil {
-		return nil
-	}
-	return &CBRNMatch{Topic: *topic, Intent: *intent}
-}
-
-// Gemini batch/predict members are independent requests, not conversation
-// turns. A member must supply both conditions within its own prompt/history.
-// Offsets follow extractGeminiRoot's flat order for the administrator evidence.
-func (m *promptCBRNMatcher) matchCBRNGemini(root map[string]any) *CBRNMatch {
-	if root == nil {
-		return nil
-	}
-	match, offset := m.matchCBRNGeminiUnit(root, 0)
-	if match != nil {
-		return match
-	}
-	if requests, ok := root["requests"].([]any); ok {
-		for _, value := range requests {
-			if request, ok := value.(map[string]any); ok {
-				var consumed int
-				match, consumed = m.matchCBRNGeminiUnit(request, offset)
-				if match != nil {
-					return match
-				}
-				offset += consumed
-			}
+		if topic := matchCBRNList(m.topics, segments, false); topic != nil {
+			return &CBRNMatch{Topic: *topic, Intent: *intent}
 		}
 	}
 	return nil
-}
-
-func (m *promptCBRNMatcher) matchCBRNGeminiUnit(root map[string]any, offset int) (*CBRNMatch, int) {
-	headers := extractGeminiSystemInstruction(root["systemInstruction"])
-	headers = append(headers, extractGeminiSystemInstruction(root["system_instruction"])...)
-	conversation := append([]promptSegment(nil), headers...)
-	conversation = append(conversation, extractGemini(root["contents"])...)
-	conversation = append(conversation, extractGemini(root["content"])...)
-	latest, _ := cbrnGeminiRootUserTexts(map[string]any{"contents": root["contents"], "content": root["content"]})
-	if match := m.matchCBRNSegments(conversation, latest, offset, nil); match != nil {
-		return match, 0
-	}
-	consumed := len(conversation)
-	if instances, ok := root["instances"].([]any); ok {
-		for _, instance := range instances {
-			prompt := extractGeminiInstances([]any{instance})
-			if len(prompt) == 0 {
-				continue
-			}
-			// Shared system instructions apply to each instance; sibling prompts
-			// and conversation turns do not become its carried history.
-			segments := append(append([]promptSegment(nil), headers...), prompt...)
-			indexes := make([]int, len(segments))
-			for index := range headers {
-				indexes[index] = offset + index
-			}
-			for index := range prompt {
-				indexes[len(headers)+index] = offset + consumed + index
-			}
-			if match := m.matchCBRNSegments(segments, promptSegmentTexts(prompt), 0, indexes); match != nil {
-				return match, 0
-			}
-			consumed += len(prompt)
-		}
-	}
-	return nil, consumed
 }
 
 func matchCBRNList(rules []promptCBRNRule, segments []cbrnTextSegment, latestOnly bool) *CBRNMatchEvidence {

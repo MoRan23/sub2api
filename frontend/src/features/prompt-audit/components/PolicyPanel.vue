@@ -43,36 +43,11 @@
           </div>
         </fieldset>
 
-        <fieldset class="mt-5 border-t border-gray-100 pt-5 dark:border-dark-800" data-test="cbrn-policy">
-          <legend class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.promptAudit.cbrn.title') }}</legend>
-          <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.cbrn.description') }}</p>
-          <p class="mt-2 text-xs text-amber-700 dark:text-amber-300">{{ t('admin.promptAudit.cbrn.warning') }}</p>
-          <p class="mt-2 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.policy.keywordRegexHint') }}</p>
-          <div class="mt-3 space-y-4">
-            <KeywordEditor
-              v-model="cbrnTopicModel"
-              data-test="cbrn-topic-editor"
-              :label="t('admin.promptAudit.cbrn.topicRules')"
-              limit-label=""
-              :count-label="t('admin.promptAudit.policy.keywordCount', { count: effectiveCBRNTopics.length })"
-              :error="cbrnTopicError"
-            />
-            <KeywordEditor
-              v-model="cbrnIntentModel"
-              data-test="cbrn-intent-editor"
-              :label="t('admin.promptAudit.cbrn.intentRules')"
-              limit-label=""
-              :count-label="t('admin.promptAudit.policy.keywordCount', { count: effectiveCBRNIntents.length })"
-              :error="cbrnIntentError"
-            />
-          </div>
-          <p class="mt-2 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.cbrn.limit') }}</p>
-          <p v-if="cbrnCombinedError" class="mt-2 text-xs text-red-600 dark:text-red-300" role="alert">{{ cbrnCombinedError }}</p>
-        </fieldset>
+        <CombinationPolicyList v-model="combinationPolicies" :templates="draft.combination_templates" />
 
         <fieldset class="mt-5 border-t border-gray-100 pt-5 dark:border-dark-800" data-test="local-rule-scope">
-          <legend class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.promptAudit.cbrn.sharedScope') }}</legend>
-          <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.cbrn.sharedScopeHint') }}</p>
+          <legend class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.promptAudit.combination.sharedScope') }}</legend>
+          <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.combination.sharedScopeHint') }}</p>
           <GroupScopeSelector
             v-model:all-groups="keywordAllGroups"
             v-model:group-ids="keywordGroupIds"
@@ -118,6 +93,7 @@ import { keywordRuleLengthError, normalizeKeywordRules } from '../keywordRules'
 import GroupScopeSelector from './GroupScopeSelector.vue'
 import KeywordEditor from './KeywordEditor.vue'
 import KeywordKeyWhitelist from './KeywordKeyWhitelist.vue'
+import CombinationPolicyList from './CombinationPolicyList.vue'
 
 const props = defineProps<{ draft: PromptAuditDraft; groups: PromptAuditGroup[] }>()
 const emit = defineEmits<{ (event: 'update:draft', value: PromptAuditDraft): void }>()
@@ -132,18 +108,7 @@ const keywordModel = computed<string[]>({
 })
 const effectiveKeywords = computed(() => normalizeKeywordRules(props.draft.blocked_keywords))
 const effectiveKeywordCount = computed(() => effectiveKeywords.value.length)
-const cbrnTopicModel = computed({ get: () => props.draft.cbrn_topic_rules ?? [], set: (value: string[]) => patch({ cbrn_topic_rules: value }) })
-const cbrnIntentModel = computed({ get: () => props.draft.cbrn_intent_rules ?? [], set: (value: string[]) => patch({ cbrn_intent_rules: value }) })
-const effectiveCBRNTopics = computed(() => normalizeKeywordRules(cbrnTopicModel.value))
-const effectiveCBRNIntents = computed(() => normalizeKeywordRules(cbrnIntentModel.value))
-const cbrnTopicError = computed(() => cbrnRuleError(effectiveCBRNTopics.value))
-const cbrnIntentError = computed(() => cbrnRuleError(effectiveCBRNIntents.value))
-const cbrnCombinedError = computed(() => effectiveCBRNTopics.value.length + effectiveCBRNIntents.value.length > 10000 ? t('admin.promptAudit.errors.prompt_audit_too_many_cbrn_rules') : '')
-function cbrnRuleError(rules: string[]): string {
-  if (props.draft.cbrn_blocking_enabled && rules.length === 0) return t('admin.promptAudit.errors.prompt_audit_cbrn_rules_required')
-  const errorCode = keywordRuleLengthError(rules)
-  return errorCode ? t(`admin.promptAudit.errors.${errorCode}`) : ''
-}
+const combinationPolicies = computed({ get: () => props.draft.combination_policies ?? [], set: (value: PromptAuditDraft['combination_policies']) => patch({ combination_policies: value }) })
 const keywordError = computed(() => {
   const errorCode = keywordRuleLengthError(effectiveKeywords.value)
   return errorCode ? t(`admin.promptAudit.errors.${errorCode}`) : ''

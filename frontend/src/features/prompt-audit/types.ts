@@ -43,6 +43,15 @@ export interface PromptKeywordKeyOption {
   name: string
 }
 
+export interface PromptCombinationPolicy {
+  id: string
+  name: string
+  enabled: boolean
+  topic_rules: string[]
+  intent_rules: string[]
+  migrate_keywords?: string[]
+}
+
 export interface PromptAuditConfig {
   enabled: boolean
   blocking_enabled: boolean
@@ -53,6 +62,9 @@ export interface PromptAuditConfig {
   cbrn_blocking_active?: boolean
   cbrn_topic_rules?: string[]
   cbrn_intent_rules?: string[]
+  combination_policies?: PromptCombinationPolicy[]
+  combination_templates?: PromptCombinationPolicy[]
+  combination_blocking_active?: boolean
   blocked_keywords: string[]
   keyword_all_groups: boolean
   keyword_group_ids: number[]
@@ -73,9 +85,8 @@ export interface PromptAuditConfig {
 }
 
 export interface PromptAuditDraft extends Omit<PromptAuditConfig, 'endpoints'> {
-  cbrn_blocking_enabled: boolean
-  cbrn_topic_rules: string[]
-  cbrn_intent_rules: string[]
+  combination_policies: PromptCombinationPolicy[]
+  combination_templates: PromptCombinationPolicy[]
   endpoints: PromptAuditEndpointDraft[]
 }
 
@@ -85,9 +96,7 @@ export interface PromptAuditUpdateRequest {
   blocking_enabled: boolean
   blocking_latest_turn_only: boolean
   keyword_blocking_enabled: boolean
-  cbrn_blocking_enabled: boolean
-  cbrn_topic_rules: string[]
-  cbrn_intent_rules: string[]
+  combination_policies: PromptCombinationPolicy[]
   blocked_keywords: string[]
   keyword_all_groups: boolean
   keyword_group_ids: number[]
@@ -142,6 +151,7 @@ export interface PromptGuardMetrics {
   blocked: number
   keyword_blocked: number
   cbrn_blocked?: number
+  combination_blocked?: number
   unavailable: number
   invalid: number
   timeouts: number
@@ -160,6 +170,7 @@ export interface PromptAuditRuntime {
   effective_mode: PromptAuditMode
   keyword_blocking_active: boolean
   cbrn_blocking_active?: boolean
+  combination_blocking_active?: boolean
   expected_config_version: number
   active_config_version: number
   config_loaded_at?: string
@@ -234,6 +245,11 @@ export interface PromptCBRNMatch {
   intent: PromptCBRNMatchEvidence
 }
 
+export interface PromptCombinationMatch extends PromptCBRNMatch {
+  policy_id: string
+  policy_name: string
+}
+
 export interface PromptAuditEvent {
   id: number
   job_id: number
@@ -247,6 +263,7 @@ export interface PromptAuditEvent {
   scanner_evidence: Record<string, string>
   matched_keyword?: string
   cbrn_match?: PromptCBRNMatch
+  combination_match?: PromptCombinationMatch
   scanner_backend: string
   scanner_version: string
   guard_endpoint_id: string

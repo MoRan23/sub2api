@@ -15,6 +15,7 @@ const (
 	ErrorCodeBlocked               = "prompt_guard_blocked"
 	ErrorCodeKeywordBlocked        = "prompt_keyword_blocked"
 	ErrorCodeCBRNBlocked           = "prompt_cbrn_blocked"
+	ErrorCodeCombinationBlocked    = "prompt_combination_blocked"
 	ErrorCodeUnavailable           = "prompt_guard_unavailable"
 	ErrorCodeInvalidResponse       = "prompt_guard_invalid_response"
 	ErrorCodeConfigConflict        = "prompt_audit_config_conflict"
@@ -150,6 +151,8 @@ type NormalizedResult struct {
 	// cbrnMatch is generated only by the local combination matcher. External
 	// Guard responses cannot supply private rules or client-visible evidence.
 	cbrnMatch *CBRNMatch
+	// combinationMatch has the same local-only provenance as legacy cbrnMatch.
+	combinationMatch *CombinationMatch
 }
 
 type PromptDecision struct {
@@ -209,24 +212,25 @@ type ProbeResult struct {
 }
 
 type GuardMetricsSnapshot struct {
-	Total          int64 `json:"total"`
-	Allowed        int64 `json:"allowed"`
-	Flagged        int64 `json:"flagged"`
-	Blocked        int64 `json:"blocked"`
-	KeywordBlocked int64 `json:"keyword_blocked"`
-	CBRNBlocked    int64 `json:"cbrn_blocked"`
-	Unavailable    int64 `json:"unavailable"`
-	Invalid        int64 `json:"invalid"`
-	Timeouts       int64 `json:"timeouts"`
-	Failovers      int64 `json:"failovers"`
-	BulkheadFull   int64 `json:"bulkhead_full"`
-	RecordFailed   int64 `json:"record_failed"`
-	LatencyCount   int64 `json:"latency_count"`
-	LatencyAvgMS   int64 `json:"latency_avg_ms"`
-	LatencyP50MS   int64 `json:"latency_p50_ms"`
-	LatencyP95MS   int64 `json:"latency_p95_ms"`
-	LatencyP99MS   int64 `json:"latency_p99_ms"`
-	LatencyMaxMS   int64 `json:"latency_max_ms"`
+	Total              int64 `json:"total"`
+	Allowed            int64 `json:"allowed"`
+	Flagged            int64 `json:"flagged"`
+	Blocked            int64 `json:"blocked"`
+	KeywordBlocked     int64 `json:"keyword_blocked"`
+	CBRNBlocked        int64 `json:"cbrn_blocked"`
+	CombinationBlocked int64 `json:"combination_blocked"`
+	Unavailable        int64 `json:"unavailable"`
+	Invalid            int64 `json:"invalid"`
+	Timeouts           int64 `json:"timeouts"`
+	Failovers          int64 `json:"failovers"`
+	BulkheadFull       int64 `json:"bulkhead_full"`
+	RecordFailed       int64 `json:"record_failed"`
+	LatencyCount       int64 `json:"latency_count"`
+	LatencyAvgMS       int64 `json:"latency_avg_ms"`
+	LatencyP50MS       int64 `json:"latency_p50_ms"`
+	LatencyP95MS       int64 `json:"latency_p95_ms"`
+	LatencyP99MS       int64 `json:"latency_p99_ms"`
+	LatencyMaxMS       int64 `json:"latency_max_ms"`
 }
 
 type AuditMetricsSnapshot struct {
@@ -245,30 +249,31 @@ type QueueStats struct {
 }
 
 type RuntimeSnapshot struct {
-	ProcessStatus         string                 `json:"process_status"`
-	EffectiveMode         Mode                   `json:"effective_mode"`
-	ExpectedConfigVersion int64                  `json:"expected_config_version"`
-	ActiveConfigVersion   int64                  `json:"active_config_version"`
-	ConfigLoadedAt        *time.Time             `json:"config_loaded_at,omitempty"`
-	ConfigLoadError       string                 `json:"config_load_error,omitempty"`
-	WorkerTotal           int                    `json:"worker_total"`
-	WorkerActive          int64                  `json:"worker_active"`
-	WorkerHeartbeatAt     *time.Time             `json:"worker_heartbeat_at,omitempty"`
-	QueueCapacity         int                    `json:"queue_capacity"`
-	Queue                 QueueStats             `json:"queue"`
-	ProcessedTotal        int64                  `json:"processed_total"`
-	FailedTotal           int64                  `json:"failed_total"`
-	EnqueuedTotal         int64                  `json:"enqueued_total"`
-	DroppedTotal          int64                  `json:"dropped_total"`
-	LastProcessedAt       *time.Time             `json:"last_processed_at,omitempty"`
-	LastErrorCode         string                 `json:"last_error_code,omitempty"`
-	LastErrorMessage      string                 `json:"last_error_message,omitempty"`
-	DatabaseStatus        string                 `json:"database_status"`
-	RedisStatus           string                 `json:"redis_status"`
-	Endpoints             map[string]ProbeResult `json:"endpoints"`
-	GuardMetrics          GuardMetricsSnapshot   `json:"guard_metrics"`
-	KeywordBlockingActive bool                   `json:"keyword_blocking_active"`
-	CBRNBlockingActive    bool                   `json:"cbrn_blocking_active"`
+	ProcessStatus             string                 `json:"process_status"`
+	EffectiveMode             Mode                   `json:"effective_mode"`
+	ExpectedConfigVersion     int64                  `json:"expected_config_version"`
+	ActiveConfigVersion       int64                  `json:"active_config_version"`
+	ConfigLoadedAt            *time.Time             `json:"config_loaded_at,omitempty"`
+	ConfigLoadError           string                 `json:"config_load_error,omitempty"`
+	WorkerTotal               int                    `json:"worker_total"`
+	WorkerActive              int64                  `json:"worker_active"`
+	WorkerHeartbeatAt         *time.Time             `json:"worker_heartbeat_at,omitempty"`
+	QueueCapacity             int                    `json:"queue_capacity"`
+	Queue                     QueueStats             `json:"queue"`
+	ProcessedTotal            int64                  `json:"processed_total"`
+	FailedTotal               int64                  `json:"failed_total"`
+	EnqueuedTotal             int64                  `json:"enqueued_total"`
+	DroppedTotal              int64                  `json:"dropped_total"`
+	LastProcessedAt           *time.Time             `json:"last_processed_at,omitempty"`
+	LastErrorCode             string                 `json:"last_error_code,omitempty"`
+	LastErrorMessage          string                 `json:"last_error_message,omitempty"`
+	DatabaseStatus            string                 `json:"database_status"`
+	RedisStatus               string                 `json:"redis_status"`
+	Endpoints                 map[string]ProbeResult `json:"endpoints"`
+	GuardMetrics              GuardMetricsSnapshot   `json:"guard_metrics"`
+	KeywordBlockingActive     bool                   `json:"keyword_blocking_active"`
+	CBRNBlockingActive        bool                   `json:"cbrn_blocking_active"`
+	CombinationBlockingActive bool                   `json:"combination_blocking_active"`
 }
 
 type Clock interface {

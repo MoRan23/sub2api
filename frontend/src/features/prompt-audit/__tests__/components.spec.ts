@@ -70,7 +70,7 @@ describe('Prompt Audit components', () => {
     const draft: PromptAuditDraft = {
       enabled: true, blocking_enabled: false, blocking_latest_turn_only: false, keyword_blocking_enabled: false, keyword_blocking_active: false, blocked_keywords: [], store_pass_events: false, effective_mode: 'async_audit', strategy: 'priority',
       keyword_all_groups: false, keyword_group_ids: [2, 100], keyword_whitelist_keys: [],
-      cbrn_blocking_enabled: false, cbrn_topic_rules: [], cbrn_intent_rules: [],
+      combination_policies: [], combination_templates: [],
       worker_count: 4, queue_capacity: 100, scanners: SCANNER_CATALOG.map((item) => item.id), all_groups: false, group_ids: [1, 99],
       endpoints: [endpoint()], config_version: 1, updated_at: '', updated_by: 0, change_summary: '',
     }
@@ -107,21 +107,11 @@ describe('Prompt Audit components', () => {
     await wrapper.setProps({ draft: { ...draft, blocked_keywords: ['a'.repeat(201)] } })
     expect(wrapper.getComponent(KeywordEditor).props('error')).toContain('prompt_audit_keyword_too_long')
 
-    await wrapper.setProps({ draft: { ...draft, enabled: false, cbrn_blocking_enabled: true, cbrn_topic_rules: ['topic'], cbrn_intent_rules: ['intent'] } })
+    await wrapper.setProps({ draft: { ...draft, enabled: false, combination_policies: [{ id: 'custom-rule', name: 'Custom', enabled: true, topic_rules: ['topic'], intent_rules: ['intent'] }] } })
     expect(wrapper.get('[data-test="local-rule-scope"]').text()).toContain('admin.promptAudit.keywordWhitelist.title')
     expect(wrapper.get('[data-test="keyword-group-scope"]').find('input[disabled]').exists()).toBe(false)
-    const topicEditor = wrapper.get('[data-test="cbrn-topic-editor"] textarea')
-    await topicEditor.setValue('topic\n')
-    expect((topicEditor.element as HTMLTextAreaElement).value).toBe('topic\n')
-    await topicEditor.setValue('topic\nregex:(?i)new topic')
-    expect(wrapper.emitted('update:draft')?.at(-1)?.[0]).toMatchObject({ cbrn_topic_rules: ['topic', 'regex:(?i)new topic'], keyword_blocking_enabled: false, cbrn_blocking_enabled: true })
-    await wrapper.get('[data-test="cbrn-intent-editor"] textarea').setValue('new intent')
-    expect(wrapper.emitted('update:draft')?.at(-1)?.[0]).toMatchObject({ cbrn_intent_rules: ['new intent'] })
-    await wrapper.setProps({ draft: { ...draft, cbrn_blocking_enabled: true } })
-    expect(wrapper.get('[data-test="cbrn-topic-editor"] [role="alert"]').text()).toContain('prompt_audit_cbrn_rules_required')
-    expect(wrapper.get('[data-test="cbrn-intent-editor"] [role="alert"]').text()).toContain('prompt_audit_cbrn_rules_required')
-    await wrapper.setProps({ draft: { ...draft, cbrn_topic_rules: Array.from({ length: 5001 }, (_, i) => `topic-${i}`), cbrn_intent_rules: Array.from({ length: 5000 }, (_, i) => `intent-${i}`) } })
-    expect(wrapper.get('[data-test="cbrn-policy"]').text()).toContain('prompt_audit_too_many_cbrn_rules')
+    await wrapper.get('[data-test="combination-topic-editor"] textarea').setValue('topic\nregex:(?i)new topic')
+    expect(wrapper.emitted('update:draft')?.at(-1)?.[0]).toMatchObject({ keyword_blocking_enabled: false, enabled: false, combination_policies: [{ id: 'custom-rule', enabled: true, topic_rules: ['topic', 'regex:(?i)new topic'] }] })
   })
 
   it('normalizes keyword editor lines and exposes validation errors', async () => {

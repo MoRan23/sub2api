@@ -144,6 +144,12 @@ func prioritize(legacy *LegacyDecision, prompt *PromptDecision) Decision {
 				message += fmt.Sprintf("（主题命中：%q；操作意图命中：%q）", TrimRunes(result.cbrnMatch.Topic.Content, 160), TrimRunes(result.cbrnMatch.Intent.Content, 160))
 			}
 		}
+		if code == ErrorCodeCombinationBlocked {
+			message = "请求同时命中组合规则的主题与操作意图，请调整输入后重试"
+			if result := prompt.Result; result != nil && result.ScannerBackend == "local-combination" && result.PolicyID == "combination-topic-intent" && result.combinationMatch != nil {
+				message += fmt.Sprintf("（规则组：%q；主题命中：%q；操作意图命中：%q）", TrimRunes(result.combinationMatch.PolicyName, 80), TrimRunes(result.combinationMatch.Topic.Content, 160), TrimRunes(result.combinationMatch.Intent.Content, 160))
+			}
+		}
 		return Decision{Kind: DecisionBlock, HTTPStatus: http.StatusForbidden, ErrorCode: code,
 			ClientMessage: message, Legacy: legacy, Prompt: prompt}
 	case DecisionInvalid:

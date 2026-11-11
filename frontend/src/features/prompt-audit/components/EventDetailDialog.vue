@@ -29,6 +29,10 @@
             </template>
           </dl>
           <CBRNMatchDetails v-if="event.matched_scanners.includes('cbrn')" :match="event.cbrn_match" class="lg:col-span-2 rounded-lg bg-gray-50 p-4 dark:bg-dark-900" />
+          <section v-if="event.matched_scanners.includes('combination')" class="lg:col-span-2 rounded-lg bg-gray-50 p-4 dark:bg-dark-900">
+            <h4 class="mb-3 text-sm font-semibold" data-test="combination-policy-name">{{ event.combination_match?.policy_name || t('admin.promptAudit.keyword.notRecorded') }}</h4>
+            <CBRNMatchDetails policy="combination" :match="event.combination_match" />
+          </section>
         </div>
 
         <div v-show="activeTab === 'risks'" class="space-y-5" role="tabpanel">
@@ -60,6 +64,7 @@
                 <div class="sm:col-span-2"><dt class="inline text-gray-400">{{ t('admin.promptAudit.events.evidence') }} · </dt><dd class="inline break-words">{{ issue.evidence ? translateEvidence(issue.evidence) : '—' }}</dd></div>
               </dl>
               <CBRNMatchDetails v-if="issue.scanner_id === 'cbrn'" :match="event.cbrn_match" class="mt-3" />
+              <CBRNMatchDetails v-if="issue.scanner_id === 'combination'" policy="combination" :match="event.combination_match" class="mt-3" />
             </article>
             <p v-if="event.issue_summaries.length === 0" class="py-6 text-center text-sm text-gray-500">{{ t('admin.promptAudit.events.noRisks') }}</p>
           </div>
@@ -113,6 +118,7 @@ function formatDecisionAction(decision: string, action: string): string {
 function translateCategory(category: string): string {
   if (category === 'keyword') return t('admin.promptAudit.keyword.category')
   if (category === 'cbrn') return t('admin.promptAudit.cbrn.category')
+  if (category === 'combination') return t('admin.promptAudit.combination.category')
   return SCANNER_CATALOG.some((scanner) => scanner.id === category)
     ? t(`admin.promptAudit.scanners.${category}`)
     : category
@@ -143,6 +149,7 @@ function formatGuardReturn(event: PromptAuditEvent): string {
     scanner_evidence: evidence,
     matched_keyword: event.matched_keyword,
     cbrn_match: event.cbrn_match,
+    combination_match: event.combination_match,
     scanner_backend: event.scanner_backend,
     scanner_version: event.scanner_version,
     guard_endpoint_id: event.guard_endpoint_id,
@@ -151,11 +158,13 @@ function formatGuardReturn(event: PromptAuditEvent): string {
   }, null, 2)
 }
 function issueTitle(issue: PromptIssueSummary): string {
+  if ((issue.category || issue.scanner_id) === 'combination') return props.event?.combination_match?.policy_name || issue.title || t('admin.promptAudit.combination.category')
   return translateCategory(issue.category || issue.scanner_id) || issue.title
 }
 function issueDescription(issue: PromptIssueSummary): string {
   if ((issue.category || issue.scanner_id) === 'keyword') return t('admin.promptAudit.keyword.description')
   if ((issue.category || issue.scanner_id) === 'cbrn') return t('admin.promptAudit.cbrn.issueDescription')
+  if ((issue.category || issue.scanner_id) === 'combination') return t('admin.promptAudit.combination.issueDescription')
   const category = issue.category || issue.scanner_id
   const key = `admin.promptAudit.scannerDescriptions.${category}`
   const label = t(key)

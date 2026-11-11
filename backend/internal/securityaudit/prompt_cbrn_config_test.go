@@ -148,7 +148,7 @@ func TestCBRNConfigReloadAndSnapshotIsolation(t *testing.T) {
 	require.True(t, ok)
 	require.True(t, active.CBRNBlockingActive())
 	clone := cloneActiveConfig(active)
-	require.Same(t, active.cbrnMatcher, clone.cbrnMatcher)
+	require.Same(t, active.CombinationPolicies[0].matcher, clone.CombinationPolicies[0].matcher)
 	clone.CBRNTopicRules[0], clone.CBRNIntentRules[0] = "changed", "changed"
 	require.Equal(t, "topic", active.CBRNTopicRules[0])
 	require.Equal(t, "intent", active.CBRNIntentRules[0])
@@ -163,7 +163,7 @@ func TestCBRNConfigReloadAndSnapshotIsolation(t *testing.T) {
 	retained, ok := manager.Active()
 	require.True(t, ok)
 	require.Equal(t, int64(2), retained.ConfigVersion)
-	require.Same(t, active.cbrnMatcher, retained.cbrnMatcher)
+	require.Same(t, active.CombinationPolicies[0].matcher, retained.CombinationPolicies[0].matcher)
 
 	storage.ConfigVersion, storage.CBRNBlockingEnabled = 4, false
 	storage.CBRNTopicRules = []string{"other"}

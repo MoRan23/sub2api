@@ -14,6 +14,25 @@ func BuildIssueSummaries(result NormalizedResult) []IssueSummary {
 	}
 	summaries := make([]IssueSummary, 0, len(resultCategories)+len(result.UnknownCategories))
 	for _, category := range resultCategories {
+		if category == "combination" && result.ScannerBackend == "local-combination" && result.PolicyID == "combination-topic-intent" {
+			evidence := ""
+			title := "主题与操作意图组合拦截"
+			if match := result.combinationMatch; match != nil {
+				title = match.PolicyName + "组合拦截"
+				evidence = fmt.Sprintf("主题：%q（%s）；操作意图：%q（%s）",
+					RedactPreview(match.Topic.Content, 160), cbrnEvidenceLocation(match.Topic),
+					RedactPreview(match.Intent.Content, 160), cbrnEvidenceLocation(match.Intent))
+			}
+			digest := sha256.Sum256([]byte(evidence))
+			summaries = append(summaries, IssueSummary{
+				Category: category, ScannerID: category, Title: title,
+				Description: "请求携带的主题与最新用户输入中的操作意图同时命中管理员配置规则",
+				Severity:    string(RiskCritical), SeverityLabel: riskLabelZH(RiskCritical),
+				Action: string(ActionBlock), ActionLabel: actionLabelZH(ActionBlock), Code: "prompt_audit_combination",
+				Score: 1, Evidence: evidence, EvidenceHash: hex.EncodeToString(digest[:]),
+			})
+			continue
+		}
 		if category == "cbrn" && result.ScannerBackend == "local-cbrn" && result.PolicyID == "cbrn-topic-intent" {
 			evidence := ""
 			if match := result.cbrnMatch; match != nil {

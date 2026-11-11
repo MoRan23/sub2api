@@ -40,19 +40,42 @@ const config = (): PromptAuditConfig => ({
 })
 
 describe('Prompt Audit view model', () => {
-  it('defaults legacy CBRN fields to off without inventing presets', () => {
-    expect(configToDraft(config())).toMatchObject({ cbrn_blocking_enabled: false, cbrn_topic_rules: [], cbrn_intent_rules: [] })
-    expect(configToDraft({ ...config(), cbrn_topic_rules: null, cbrn_intent_rules: null } as unknown as PromptAuditConfig)).toMatchObject({ cbrn_topic_rules: [], cbrn_intent_rules: [] })
+  it('starts with no policies and only uses templates returned by the server', () => {
+    expect(configToDraft(config())).toMatchObject({ combination_policies: [], combination_templates: [] })
+    expect(configToDraft({ ...config(), cbrn_topic_rules: null, cbrn_intent_rules: null } as unknown as PromptAuditConfig).combination_policies).toEqual([])
   })
 
-  it('round-trips independent CBRN rules, clones server presets and preserves regex case', () => {
-    const saved = { ...config(), enabled: false, keyword_blocking_enabled: false, cbrn_blocking_enabled: true, cbrn_topic_rules: [' Topic ', 'topic', 'regex:(?i)Topic'], cbrn_intent_rules: ['regex:Build', 'regex:build'] }
+  it('round-trips ordered custom policies and clones templates without saving legacy switches', () => {
+    const template = { id: 'government', name: 'Government', enabled: false, topic_rules: ['regex:(?i)\\.gov'], intent_rules: ['attack'], migrate_keywords: ['.gov', '.gov.'] }
+    const saved = { ...config(), enabled: false, combination_policies: [
+      { id: ' custom-rule ', name: ' Custom policy ', enabled: true, topic_rules: [' Topic ', 'topic', 'regex:(?i)Topic'], intent_rules: ['regex:Build', 'regex:build'], migrate_keywords: [' old ', 'OLD'] },
+      template,
+    ], combination_templates: [template] }
     const draft = configToDraft(saved)
     const before = draftFingerprint(draft)
-    draft.cbrn_topic_rules.push('extra')
-    expect(saved.cbrn_topic_rules).not.toContain('extra')
+    draft.combination_policies[0]!.topic_rules.push('extra')
+    draft.combination_templates[0]!.topic_rules.push('template extra')
+    expect(saved.combination_policies[0]!.topic_rules).not.toContain('extra')
+    expect(template.topic_rules).not.toContain('template extra')
     expect(draftFingerprint(draft)).not.toBe(before)
-    expect(buildUpdateRequest(draft)).toMatchObject({ enabled: false, keyword_blocking_enabled: false, cbrn_blocking_enabled: true, cbrn_topic_rules: ['Topic', 'regex:(?i)Topic', 'extra'], cbrn_intent_rules: ['regex:Build', 'regex:build'] })
+    const payload = buildUpdateRequest(draft)
+    expect(payload).toMatchObject({ enabled: false, keyword_blocking_enabled: false, combination_policies: [
+      { id: 'custom-rule', name: 'Custom policy', enabled: true, topic_rules: ['Topic', 'regex:(?i)Topic', 'extra'], intent_rules: ['regex:Build', 'regex:build'], migrate_keywords: ['old'] },
+      template,
+    ] })
+    expect(payload).not.toHaveProperty('combination_templates')
+    expect(payload).not.toHaveProperty('cbrn_blocking_enabled')
+    expect(payload).not.toHaveProperty('government_blocking_enabled')
+    const edited = draftFingerprint(draft)
+    draft.combination_policies.reverse()
+    expect(draftFingerprint(draft)).not.toBe(edited)
+  })
+
+  it('projects old CBRN settings only when the generic list is absent, preserving an explicit empty list', () => {
+    const legacy = { ...config(), cbrn_blocking_enabled: true, cbrn_topic_rules: ['Topic'], cbrn_intent_rules: ['intent'] }
+    expect(configToDraft(legacy).combination_policies).toEqual([{ id: 'cbrn', name: 'CBRN', enabled: true, topic_rules: ['Topic'], intent_rules: ['intent'] }])
+    expect(configToDraft({ ...legacy, combination_policies: [] }).combination_policies).toEqual([])
+    expect(buildUpdateRequest(configToDraft({ ...legacy, combination_policies: [] })).combination_policies).toEqual([])
   })
 
   it('round-trips exact user/key pairs and explicitly clears the keyword allowlist', () => {

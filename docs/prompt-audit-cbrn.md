@@ -1,5 +1,9 @@
 # CBRN 主题与操作意图拦截 / Topic-and-intent blocking
 
+> **当前版本**：CBRN 已统一为可自行扩展的组合规则组，与政府规则同为可编辑预设。新增、改名、排序和删除均可在页面完成；旧 CBRN 配置和历史兼容。当前用法与接口见 [通用组合规则](prompt-audit-combination.md)。以下保留首版实现及其验证记录，`cbrn_*` 字段用于兼容，新拦截统一使用 `prompt_combination_blocked`。
+>
+> **Current version:** CBRN is now an editable preset of the generic combination-policy feature. See [configurable combination policies](prompt-audit-combination.md) for current UI/API usage. The original release notes and verification below are retained for historical reference.
+
 ## 配置和行为
 
 在管理员「提示词审计」中开启独立的「核、生物、化学、放射性危害」开关。默认关闭；主题列表预置武器主题与重点物质／病原体规则，操作意图列表预置制造、获取、投放及索取步骤等规则。原有关键词列表不变。
@@ -50,7 +54,7 @@ Reproduction commands (run in `backend/`, with test-only database variables for 
 ```bash
 GOEXPERIMENT=greenteagc,jsonv2 go test ./internal/securityaudit -count=1
 GOEXPERIMENT=greenteagc,jsonv2 go test -race ./internal/securityaudit -count=1
-go test ./internal/handler -run CBRN -count=1
+go test ./internal/handler -run Combination -count=1
 go test ./internal/securityaudit -run '^$' -bench BenchmarkCBRNMatcherLargeRequest -benchmem
 go build -o /tmp/sub2api-cbrn ./cmd/server
 ```

@@ -36,6 +36,34 @@ function mountDetail(event: PromptAuditEvent) {
 }
 
 describe('Prompt audit keyword details', () => {
+  it('shows the frozen generic policy name and two pieces of evidence, with legacy fallback', async () => {
+    const event: PromptAuditEvent = {
+      ...keywordEvent(), matched_scanners: ['combination'], categories: ['combination'], scanner_backend: 'local-combination',
+      combination_match: {
+        policy_id: 'custom-rule', policy_name: 'Saved custom policy',
+        topic: { rule: 'regex:(?i)\\.gov', content: 'example.gov', source: 'history', segment_index: 0, start: 2, end: 13 },
+        intent: { rule: 'attack', content: '<script>attack</script>', source: 'latest_user', segment_index: 3, start: 0, end: 23 },
+      },
+      issue_summaries: [{ ...keywordEvent().issue_summaries[0], scanner_id: 'combination', category: 'combination', code: 'prompt_audit_combination' }],
+    }
+    const wrapper = mountDetail(event)
+    const summary = wrapper.get('[data-test="combination-match-details"]')
+    expect(wrapper.get('[data-test="combination-policy-name"]').text()).toBe('Saved custom policy')
+    expect(summary.get('[data-test="combination-topic-content"]').text()).toBe('example.gov')
+    expect(summary.get('[data-test="combination-intent-content"]').text()).toBe('<script>attack</script>')
+    expect(summary.get('[data-test="combination-topic-location"]').text()).toContain('"start":2,"end":13')
+    expect(wrapper.find('script').exists()).toBe(false)
+    expect(wrapper.find('[data-test="cbrn-match-details"]').exists()).toBe(false)
+    expect(wrapper.text()).toContain('admin.promptAudit.combination.category')
+    await wrapper.get('[role="tablist"]').findAll('button')[1].trigger('click')
+    expect(wrapper.get('[data-test="risk-issue"]').text()).toContain('admin.promptAudit.combination.issueDescription')
+    expect(wrapper.get('[data-test="risk-issue"]').text()).toContain('Saved custom policy')
+    expect(wrapper.get('[data-test="risk-guard-return"] pre').text()).toContain('"combination_match"')
+    await wrapper.setProps({ event: { ...event, id: 3, combination_match: undefined } })
+    expect(wrapper.get('[data-test="combination-match-details"]').text()).toContain('admin.promptAudit.keyword.notRecorded')
+    expect(wrapper.find('[data-test="combination-topic-location"]').exists()).toBe(false)
+  })
+
   it('shows both original CBRN matches with source and rune positions and escapes content', async () => {
     const event: PromptAuditEvent = {
       ...keywordEvent(), matched_scanners: ['cbrn'], categories: ['cbrn'], scanner_backend: 'local-cbrn',
