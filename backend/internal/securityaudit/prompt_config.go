@@ -76,6 +76,9 @@ type storageConfig struct {
 	KeywordAllGroups       bool                  `json:"keyword_all_groups"`
 	KeywordGroupIDs        []int64               `json:"keyword_group_ids"`
 	KeywordWhitelistKeys   []KeywordWhitelistKey `json:"keyword_whitelist_keys"`
+	CBRNBlockingEnabled    bool                  `json:"cbrn_blocking_enabled"`
+	CBRNTopicRules         []string              `json:"cbrn_topic_rules"`
+	CBRNIntentRules        []string              `json:"cbrn_intent_rules"`
 	StorePassEvents        bool                  `json:"store_pass_events"`
 	Strategy               string                `json:"strategy"`
 	WorkerCount            int                   `json:"worker_count"`
@@ -117,6 +120,9 @@ type ActiveConfig struct {
 	KeywordAllGroups       bool
 	KeywordGroupIDs        []int64
 	KeywordWhitelistKeys   []KeywordWhitelistKey
+	CBRNBlockingEnabled    bool
+	CBRNTopicRules         []string
+	CBRNIntentRules        []string
 	StorePassEvents        bool
 	Strategy               string
 	WorkerCount            int
@@ -130,6 +136,7 @@ type ActiveConfig struct {
 	UpdatedBy              int64
 	ChangeSummary          string
 	keywordMatcher         *promptKeywordMatcher
+	cbrnMatcher            *promptCBRNMatcher
 }
 
 type PublicEndpoint struct {
@@ -155,6 +162,10 @@ type PublicConfig struct {
 	KeywordAllGroups       bool                  `json:"keyword_all_groups"`
 	KeywordGroupIDs        []int64               `json:"keyword_group_ids"`
 	KeywordWhitelistKeys   []KeywordWhitelistKey `json:"keyword_whitelist_keys"`
+	CBRNBlockingEnabled    bool                  `json:"cbrn_blocking_enabled"`
+	CBRNBlockingActive     bool                  `json:"cbrn_blocking_active"`
+	CBRNTopicRules         []string              `json:"cbrn_topic_rules"`
+	CBRNIntentRules        []string              `json:"cbrn_intent_rules"`
 	StorePassEvents        bool                  `json:"store_pass_events"`
 	EffectiveMode          Mode                  `json:"effective_mode"`
 	Strategy               string                `json:"strategy"`
@@ -193,6 +204,9 @@ type UpdateConfigRequest struct {
 	KeywordAllGroups       *bool                  `json:"keyword_all_groups"`
 	KeywordGroupIDs        []int64                `json:"keyword_group_ids"`
 	KeywordWhitelistKeys   *[]KeywordWhitelistKey `json:"keyword_whitelist_keys"`
+	CBRNBlockingEnabled    *bool                  `json:"cbrn_blocking_enabled"`
+	CBRNTopicRules         *[]string              `json:"cbrn_topic_rules"`
+	CBRNIntentRules        *[]string              `json:"cbrn_intent_rules"`
 	StorePassEvents        bool                   `json:"store_pass_events"`
 	Strategy               string                 `json:"strategy"`
 	WorkerCount            int                    `json:"worker_count"`
@@ -213,6 +227,8 @@ func DefaultStorageConfig() storageConfig {
 		KeywordAllGroups:       true,
 		KeywordGroupIDs:        []int64{},
 		KeywordWhitelistKeys:   []KeywordWhitelistKey{},
+		CBRNTopicRules:         defaultCBRNTopicRules(),
+		CBRNIntentRules:        defaultCBRNIntentRules(),
 		StorePassEvents:        false,
 		Strategy:               "priority",
 		WorkerCount:            DefaultWorkerCount,
@@ -275,6 +291,8 @@ func normalizeStorageConfig(cfg *storageConfig) {
 	cfg.KeywordGroupIDs = canonicalInt64s(cfg.KeywordGroupIDs)
 	cfg.KeywordWhitelistKeys = canonicalKeywordWhitelistKeys(cfg.KeywordWhitelistKeys)
 	cfg.BlockedKeywords = canonicalBlockedKeywords(cfg.BlockedKeywords)
+	cfg.CBRNTopicRules = canonicalBlockedKeywords(cfg.CBRNTopicRules)
+	cfg.CBRNIntentRules = canonicalBlockedKeywords(cfg.CBRNIntentRules)
 	// Preserve an invalid blocking-without-audit combination so validation can
 	// reject it instead of silently changing administrator intent.
 	for i := range cfg.Endpoints {
@@ -312,6 +330,12 @@ func validateStorageConfig(cfg storageConfig) error {
 	if cfg.KeywordBlockingEnabled && len(cfg.BlockedKeywords) == 0 {
 		return infraerrors.BadRequest("prompt_audit_keywords_required", "开启关键字拦截前至少需要配置一个关键字")
 	}
+	if err := validateCBRNRules(cfg.CBRNTopicRules, cfg.CBRNIntentRules); err != nil {
+		return err
+	}
+	if cfg.CBRNBlockingEnabled && (len(cfg.CBRNTopicRules) == 0 || len(cfg.CBRNIntentRules) == 0) {
+		return infraerrors.BadRequest("prompt_audit_cbrn_rules_required", "开启 CBRN 组合拦截前必须配置主题和操作意图规则")
+	}
 	if cfg.Strategy != "priority" {
 		return infraerrors.BadRequest("prompt_audit_invalid_strategy", "提示词审计策略仅支持 priority")
 	}
@@ -324,7 +348,7 @@ func validateStorageConfig(cfg storageConfig) error {
 	if !cfg.AllGroups && len(cfg.GroupIDs) == 0 {
 		return infraerrors.BadRequest("prompt_audit_groups_required", "指定分组模式至少需要选择一个分组")
 	}
-	if cfg.KeywordBlockingEnabled && !cfg.KeywordAllGroups && len(cfg.KeywordGroupIDs) == 0 {
+	if (cfg.KeywordBlockingEnabled || cfg.CBRNBlockingEnabled) && !cfg.KeywordAllGroups && len(cfg.KeywordGroupIDs) == 0 {
 		return infraerrors.BadRequest("prompt_audit_keyword_groups_required", "关键字拦截指定分组模式至少需要选择一个分组")
 	}
 	if len(cfg.Scanners) == 0 {
@@ -363,6 +387,18 @@ func validateStorageConfig(cfg storageConfig) error {
 }
 
 func validateUpdateConfigRequest(req UpdateConfigRequest) error {
+	// Validate supplied lists now; validate their final merged combination under
+	// the config lock, where omitted fields can be resolved against stored values.
+	var cbrnTopics, cbrnIntents []string
+	if req.CBRNTopicRules != nil {
+		cbrnTopics = canonicalBlockedKeywords(*req.CBRNTopicRules)
+	}
+	if req.CBRNIntentRules != nil {
+		cbrnIntents = canonicalBlockedKeywords(*req.CBRNIntentRules)
+	}
+	if err := validateCBRNRules(cbrnTopics, cbrnIntents); err != nil {
+		return err
+	}
 	if req.KeywordWhitelistKeys != nil {
 		if err := validateKeywordWhitelistKeys(*req.KeywordWhitelistKeys); err != nil {
 			return err
@@ -444,8 +480,19 @@ func (cfg ActiveConfig) MatchBlockedKeyword(text string) (rule, content string, 
 	return cfg.keywordMatcher.Match(text)
 }
 
+func (cfg ActiveConfig) CBRNBlockingActive() bool {
+	return cfg.RiskControlEnabled && cfg.CBRNBlockingEnabled && len(cfg.CBRNTopicRules) > 0 && len(cfg.CBRNIntentRules) > 0 && cfg.cbrnMatcher != nil
+}
+
+func (cfg ActiveConfig) MatchCBRN(req Request) (*CBRNMatch, error) {
+	if !cfg.CBRNBlockingActive() {
+		return nil, nil
+	}
+	return cfg.cbrnMatcher.Match(req)
+}
+
 func (cfg storageConfig) synchronousBlockingEnabled() bool {
-	return (cfg.Enabled && cfg.BlockingEnabled) || cfg.KeywordBlockingEnabled
+	return (cfg.Enabled && cfg.BlockingEnabled) || cfg.KeywordBlockingEnabled || cfg.CBRNBlockingEnabled
 }
 
 func (cfg ActiveConfig) IncludesGroup(groupID *int64) bool {
@@ -521,7 +568,10 @@ func PublicFromStorage(cfg storageConfig, riskControlEnabled bool, invalidTokenE
 		BlockedKeywords:        append([]string(nil), cfg.BlockedKeywords...),
 		KeywordAllGroups:       cfg.KeywordAllGroups, KeywordGroupIDs: keywordGroupIDs, StorePassEvents: cfg.StorePassEvents,
 		KeywordWhitelistKeys: append([]KeywordWhitelistKey{}, cfg.KeywordWhitelistKeys...),
-		EffectiveMode:        active.EffectiveMode(), Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
+		CBRNBlockingEnabled:  cfg.CBRNBlockingEnabled,
+		CBRNBlockingActive:   riskControlEnabled && cfg.CBRNBlockingEnabled && len(cfg.CBRNTopicRules) > 0 && len(cfg.CBRNIntentRules) > 0,
+		CBRNTopicRules:       append([]string{}, cfg.CBRNTopicRules...), CBRNIntentRules: append([]string{}, cfg.CBRNIntentRules...),
+		EffectiveMode: active.EffectiveMode(), Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
 		QueueCapacity: cfg.QueueCapacity, Scanners: scanners, AllGroups: cfg.AllGroups,
 		GroupIDs: groupIDs, Endpoints: endpoints, ConfigVersion: cfg.ConfigVersion,
 		UpdatedAt: cfg.UpdatedAt, UpdatedBy: cfg.UpdatedBy, ChangeSummary: cfg.ChangeSummary,
@@ -533,6 +583,10 @@ func ActiveFromStorage(cfg storageConfig, riskControlEnabled bool, encryptor Sec
 	if err != nil {
 		return ActiveConfig{}, err
 	}
+	cbrnMatcher, err := newPromptCBRNMatcher(cfg.CBRNTopicRules, cfg.CBRNIntentRules)
+	if err != nil {
+		return ActiveConfig{}, err
+	}
 	active := ActiveConfig{
 		RiskControlEnabled: riskControlEnabled, Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled,
 		BlockingLatestTurnOnly: cfg.BlockingLatestTurnOnly,
@@ -541,12 +595,15 @@ func ActiveFromStorage(cfg storageConfig, riskControlEnabled bool, encryptor Sec
 		KeywordAllGroups:       cfg.KeywordAllGroups,
 		KeywordGroupIDs:        append([]int64(nil), cfg.KeywordGroupIDs...),
 		KeywordWhitelistKeys:   append([]KeywordWhitelistKey{}, cfg.KeywordWhitelistKeys...),
-		StorePassEvents:        cfg.StorePassEvents, Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
+		CBRNBlockingEnabled:    cfg.CBRNBlockingEnabled,
+		CBRNTopicRules:         append([]string{}, cfg.CBRNTopicRules...), CBRNIntentRules: append([]string{}, cfg.CBRNIntentRules...),
+		StorePassEvents: cfg.StorePassEvents, Strategy: cfg.Strategy, WorkerCount: cfg.WorkerCount,
 		QueueCapacity: cfg.QueueCapacity, Scanners: append([]string(nil), cfg.Scanners...), AllGroups: cfg.AllGroups,
 		GroupIDs: append([]int64(nil), cfg.GroupIDs...), ConfigVersion: cfg.ConfigVersion,
 		UpdatedAt: cfg.UpdatedAt, UpdatedBy: cfg.UpdatedBy, ChangeSummary: cfg.ChangeSummary,
 		Endpoints:      make([]ActiveEndpoint, 0, len(cfg.Endpoints)),
 		keywordMatcher: matcher,
+		cbrnMatcher:    cbrnMatcher,
 	}
 	for _, ep := range cfg.Endpoints {
 		token := ""
@@ -588,13 +645,25 @@ func changeSummary(cfg storageConfig) string {
 		KeywordGroupCount        int    `json:"keyword_group_count"`
 		KeywordGroupHash         string `json:"keyword_group_hash"`
 		KeywordWhitelistKeyCount int    `json:"keyword_whitelist_key_count"`
+		CBRNBlockingEnabled      bool   `json:"cbrn_blocking_enabled"`
+		CBRNTopicRuleCount       int    `json:"cbrn_topic_rule_count"`
+		CBRNIntentRuleCount      int    `json:"cbrn_intent_rule_count"`
+		CBRNTopicRuleHash        string `json:"cbrn_topic_rule_hash"`
+		CBRNIntentRuleHash       string `json:"cbrn_intent_rule_hash"`
 		StorePassEvents          bool   `json:"store_pass_events"`
 		EndpointCount            int    `json:"endpoint_count"`
 		ScannerCount             int    `json:"scanner_count"`
 		AllGroups                bool   `json:"all_groups"`
 		GroupCount               int    `json:"group_count"`
 		GroupHash                string `json:"group_hash"`
-	}{cfg.Enabled, cfg.BlockingEnabled, cfg.BlockingLatestTurnOnly, cfg.KeywordBlockingEnabled, len(cfg.BlockedKeywords), "", cfg.KeywordAllGroups, len(cfg.KeywordGroupIDs), "", len(cfg.KeywordWhitelistKeys), cfg.StorePassEvents, len(cfg.Endpoints), len(cfg.Scanners), cfg.AllGroups, len(cfg.GroupIDs), ""}
+	}{
+		Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled, BlockingLatestTurnOnly: cfg.BlockingLatestTurnOnly,
+		KeywordBlockingEnabled: cfg.KeywordBlockingEnabled, KeywordCount: len(cfg.BlockedKeywords),
+		KeywordAllGroups: cfg.KeywordAllGroups, KeywordGroupCount: len(cfg.KeywordGroupIDs), KeywordWhitelistKeyCount: len(cfg.KeywordWhitelistKeys),
+		CBRNBlockingEnabled: cfg.CBRNBlockingEnabled, CBRNTopicRuleCount: len(cfg.CBRNTopicRules), CBRNIntentRuleCount: len(cfg.CBRNIntentRules),
+		CBRNTopicRuleHash: blockedKeywordsHash(cfg.CBRNTopicRules), CBRNIntentRuleHash: blockedKeywordsHash(cfg.CBRNIntentRules),
+		StorePassEvents: cfg.StorePassEvents, EndpointCount: len(cfg.Endpoints), ScannerCount: len(cfg.Scanners), AllGroups: cfg.AllGroups, GroupCount: len(cfg.GroupIDs),
+	}
 	summary.KeywordHash = blockedKeywordsHash(cfg.BlockedKeywords)
 	summary.KeywordGroupHash = groupIDsHash(cfg.KeywordGroupIDs)
 	summary.GroupHash = groupIDsHash(cfg.GroupIDs)

@@ -242,3 +242,49 @@ func TestPromptAuditConfigCASSecretRoundTripInvalidationAndTTL(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, int64(5), active.ConfigVersion)
 }
+
+func TestPromptAuditCBRNConfigPersistenceAndLegacyUpdate(t *testing.T) {
+	db := openPromptAuditIntegrationDB(t)
+	ctx := context.Background()
+	repo := postgresPromptAuditSettingRepository{db: db}
+	require.NoError(t, repo.Set(ctx, SettingKeyRiskControl, "true"))
+	manager := NewConfigManager(db, repo, nil, promptAuditTestEncryptor(t), testTotpKeyConfig())
+	require.NoError(t, manager.Reload(ctx))
+	request := cbrnConfigUpdateRequest()
+	enabled := true
+	topics, intents := []string{"topic"}, []string{"intent"}
+	request.CBRNBlockingEnabled, request.CBRNTopicRules, request.CBRNIntentRules = &enabled, &topics, &intents
+	public, err := manager.Save(ctx, request, 101)
+	require.NoError(t, err)
+	require.True(t, public.CBRNBlockingActive)
+	require.Equal(t, int64(2), public.ConfigVersion)
+
+	// An older admin client has no CBRN fields but must preserve the policy.
+	request = cbrnConfigUpdateRequest()
+	request.ExpectedConfigVersion = 2
+	public, err = manager.Save(ctx, request, 101)
+	require.NoError(t, err)
+	require.True(t, public.CBRNBlockingEnabled)
+	require.Equal(t, topics, public.CBRNTopicRules)
+	second := NewConfigManager(db, repo, nil, promptAuditTestEncryptor(t), testTotpKeyConfig())
+	require.NoError(t, second.Reload(ctx))
+	active, ok := second.Active()
+	require.True(t, ok)
+	require.True(t, active.CBRNBlockingActive())
+	match, err := active.MatchCBRN(Request{Protocol: "responses", Body: []byte(`{"input":"topic intent"}`)})
+	require.NoError(t, err)
+	require.NotNil(t, match)
+
+	// Invalid replacements must not commit a config version or lose the old rule.
+	invalid := []string{"regex:a*"}
+	request.ExpectedConfigVersion = public.ConfigVersion
+	request.CBRNTopicRules = &invalid
+	_, err = manager.Save(ctx, request, 101)
+	require.Error(t, err)
+	raw, err := repo.GetValue(ctx, SettingKeyPromptAuditConfig)
+	require.NoError(t, err)
+	stored, err := ParseStorageConfig(raw)
+	require.NoError(t, err)
+	require.Equal(t, public.ConfigVersion, stored.ConfigVersion)
+	require.Equal(t, topics, stored.CBRNTopicRules)
+}

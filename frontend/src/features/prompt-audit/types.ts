@@ -49,6 +49,10 @@ export interface PromptAuditConfig {
   blocking_latest_turn_only: boolean
   keyword_blocking_enabled: boolean
   keyword_blocking_active: boolean
+  cbrn_blocking_enabled?: boolean
+  cbrn_blocking_active?: boolean
+  cbrn_topic_rules?: string[]
+  cbrn_intent_rules?: string[]
   blocked_keywords: string[]
   keyword_all_groups: boolean
   keyword_group_ids: number[]
@@ -69,6 +73,9 @@ export interface PromptAuditConfig {
 }
 
 export interface PromptAuditDraft extends Omit<PromptAuditConfig, 'endpoints'> {
+  cbrn_blocking_enabled: boolean
+  cbrn_topic_rules: string[]
+  cbrn_intent_rules: string[]
   endpoints: PromptAuditEndpointDraft[]
 }
 
@@ -78,6 +85,9 @@ export interface PromptAuditUpdateRequest {
   blocking_enabled: boolean
   blocking_latest_turn_only: boolean
   keyword_blocking_enabled: boolean
+  cbrn_blocking_enabled: boolean
+  cbrn_topic_rules: string[]
+  cbrn_intent_rules: string[]
   blocked_keywords: string[]
   keyword_all_groups: boolean
   keyword_group_ids: number[]
@@ -131,6 +141,7 @@ export interface PromptGuardMetrics {
   flagged: number
   blocked: number
   keyword_blocked: number
+  cbrn_blocked?: number
   unavailable: number
   invalid: number
   timeouts: number
@@ -148,6 +159,7 @@ export interface PromptAuditRuntime {
   process_status: 'disabled' | 'running' | 'degraded' | 'error' | string
   effective_mode: PromptAuditMode
   keyword_blocking_active: boolean
+  cbrn_blocking_active?: boolean
   expected_config_version: number
   active_config_version: number
   config_loaded_at?: string
@@ -208,6 +220,20 @@ export interface PromptIssueSummary {
   end_rune?: number
 }
 
+export interface PromptCBRNMatchEvidence {
+  rule: string
+  content: string
+  source: 'latest_user' | 'history'
+  segment_index: number
+  start: number
+  end: number
+}
+
+export interface PromptCBRNMatch {
+  topic: PromptCBRNMatchEvidence
+  intent: PromptCBRNMatchEvidence
+}
+
 export interface PromptAuditEvent {
   id: number
   job_id: number
@@ -220,6 +246,7 @@ export interface PromptAuditEvent {
   scanner_scores: Record<string, number>
   scanner_evidence: Record<string, string>
   matched_keyword?: string
+  cbrn_match?: PromptCBRNMatch
   scanner_backend: string
   scanner_version: string
   guard_endpoint_id: string

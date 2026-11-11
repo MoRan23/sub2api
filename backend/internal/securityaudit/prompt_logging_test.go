@@ -33,7 +33,18 @@ func TestPromptAuditLogAllowlistAndErrorsDoNotLeakCanarySecrets(t *testing.T) {
 	beforeUnknown := output.Len()
 	LogWarn("prompt_audit.typo_event", map[string]any{"status": "failed"})
 	require.Equal(t, beforeUnknown, output.Len(), "events outside the stable dictionary must not be emitted")
-	require.Len(t, knownLogEvents, 29)
+	require.Len(t, knownLogEvents, 30)
+	require.Contains(t, knownLogEvents, EventCBRNBlocked)
+
+	LogWarn(EventCBRNBlocked, map[string]any{
+		"cbrn_hash":     "sha256:test-rule-hash",
+		"topic_rule":    canary,
+		"intent_rule":   canary,
+		"topic_content": canary,
+		"raw_prompt":    canary,
+	})
+	require.Contains(t, output.String(), "sha256:test-rule-hash")
+	require.NotContains(t, output.String(), canary)
 
 	_, err := NormalizeBaseURL("https://guard.example.test/path?token=" + canary)
 	require.Error(t, err)

@@ -149,6 +149,23 @@ describe('PromptAuditView', () => {
     expect(wrapper.html()).not.toContain('PROMPT_AUDIT_CANARY_SECRET_DO_NOT_PERSIST')
   })
 
+  it('enables CBRN independently while Guard and keywords are off and saves server presets', async () => {
+    mocks.getConfig.mockResolvedValue({ ...baseConfig(), enabled: false, cbrn_blocking_enabled: false, cbrn_topic_rules: ['regex:(?i)topic'], cbrn_intent_rules: ['intent'] })
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('[data-test="tab-config"]').trigger('click')
+    const toggle = wrapper.get('[data-test="cbrn-blocking-toggle"]')
+    expect(toggle.attributes('aria-checked')).toBe('false')
+    expect(toggle.attributes()).not.toHaveProperty('disabled')
+    await toggle.trigger('click')
+    expect(toggle.attributes('aria-checked')).toBe('true')
+    expect(wrapper.get('[data-test="enabled-toggle"]').attributes('aria-checked')).toBe('false')
+    expect(wrapper.get('[data-test="keyword-blocking-toggle"]').attributes('aria-checked')).toBe('false')
+    await wrapper.get('[data-test="save-config"]').trigger('click')
+    await flushPromises()
+    expect(mocks.updateConfig).toHaveBeenCalledWith(expect.objectContaining({ enabled: false, keyword_blocking_enabled: false, cbrn_blocking_enabled: true, cbrn_topic_rules: ['regex:(?i)topic'], cbrn_intent_rules: ['intent'] }))
+  })
+
   it('reports real probe progress/results and invalidates filter confirmation when filters change', async () => {
     const wrapper = mountView()
     await flushPromises()
@@ -178,7 +195,7 @@ describe('PromptAuditView', () => {
     await flushPromises()
     await wrapper.get('[data-test="tab-config"]').trigger('click')
     const switches = wrapper.findAll('[role="switch"]')
-    expect(switches).toHaveLength(5)
+    expect(switches).toHaveLength(6)
     expect(switches.every((item) => Boolean(item.attributes('aria-label')))).toBe(true)
     expect(wrapper.html()).toContain('fixed inset-x-0 bottom-0')
     expect(wrapper.html()).toContain('flex-wrap')

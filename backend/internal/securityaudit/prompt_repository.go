@@ -16,6 +16,8 @@ const (
 	// Reserved storage-only evidence key. It is exposed through matched_keyword
 	// exclusively on administrator event detail reads.
 	matchedKeywordEvidenceKey = "_matched_keyword"
+	// Structured local CBRN evidence is decoded only for administrator details.
+	cbrnMatchEvidenceKey = "_cbrn_match"
 )
 
 var (
@@ -55,6 +57,7 @@ type Event struct {
 	ScannerScores   map[string]float64 `json:"scanner_scores"`
 	ScannerEvidence map[string]string  `json:"scanner_evidence"`
 	MatchedKeyword  string             `json:"matched_keyword,omitempty"`
+	CBRNMatch       *CBRNMatch         `json:"cbrn_match,omitempty"`
 	ScannerBackend  string             `json:"scanner_backend"`
 	ScannerVersion  string             `json:"scanner_version"`
 	GuardEndpointID string             `json:"guard_endpoint_id"`
@@ -342,26 +345,7 @@ func insertEvent(ctx context.Context, queryer sqlQueryer, jobID int64, snapshot 
 	categories, _ := json.Marshal(result.Categories)
 	matched, _ := json.Marshal(result.MatchedScanners)
 	scores, _ := json.Marshal(result.ScannerScores)
-	localKeyword := result.ScannerBackend == "local-keyword" && result.PolicyID == "keyword-substring" && result.matchedKeyword != ""
-	evidence := make(map[string]string, len(result.ScannerEvidence))
-	for key, value := range result.ScannerEvidence {
-		if key == matchedKeywordEvidenceKey {
-			continue
-		}
-		if localKeyword && key == "keyword" {
-			// The locally generated digest is not prompt text. Redacting digit
-			// sequences as phone numbers would corrupt its identity.
-			evidence[key] = value
-		} else {
-			evidence[key] = RedactPreview(value, 160)
-		}
-	}
-	if localKeyword {
-		// Preserve the exact configured keyword, including rules beyond the
-		// preview's 160-rune limit and rules resembling redacted sensitive data.
-		evidence[matchedKeywordEvidenceKey] = result.matchedKeyword
-	}
-	evidenceJSON, _ := json.Marshal(evidence)
+	evidenceJSON, _ := json.Marshal(promptEventEvidence(result))
 	row := queryer.QueryRowContext(ctx, `
 		INSERT INTO prompt_audit_events (
 			job_id,request_id,user_id,username_snapshot,user_email_snapshot,api_key_id,api_key_name_snapshot,
@@ -380,6 +364,37 @@ func insertEvent(ctx context.Context, queryer sqlQueryer, jobID int64, snapshot 
 		result.GuardEndpointID, result.PolicyID, result.PolicyVersion, configVersion, result.ChunkTotal, result.LatencyMS,
 		snapshot.FullPrompt)
 	return scanEvent(row, true)
+}
+
+func promptEventEvidence(result *NormalizedResult) map[string]string {
+	localKeyword := result.ScannerBackend == "local-keyword" && result.PolicyID == "keyword-substring" && result.matchedKeyword != ""
+	localCBRN := result.ScannerBackend == "local-cbrn" && result.PolicyID == "cbrn-topic-intent" && result.cbrnMatch != nil
+	evidence := make(map[string]string, len(result.ScannerEvidence))
+	for key, value := range result.ScannerEvidence {
+		if key == matchedKeywordEvidenceKey || key == cbrnMatchEvidenceKey {
+			continue
+		}
+		if (localKeyword && key == "keyword") || (localCBRN && (key == "cbrn_topic" || key == "cbrn_intent")) {
+			// The locally generated digest is not prompt text. Redacting digit
+			// sequences as phone numbers would corrupt its identity.
+			evidence[key] = value
+		} else {
+			evidence[key] = RedactPreview(value, 160)
+		}
+	}
+	if localKeyword {
+		// Preserve the exact configured keyword, including rules beyond the
+		// preview's 160-rune limit and rules resembling redacted sensitive data.
+		evidence[matchedKeywordEvidenceKey] = result.matchedKeyword
+	}
+	if localCBRN {
+		// The unexported match is produced locally. Never accept reserved evidence
+		// from a Guard response, even when its map contains a valid JSON object.
+		if raw, err := json.Marshal(result.cbrnMatch); err == nil {
+			evidence[cbrnMatchEvidenceKey] = string(raw)
+		}
+	}
+	return evidence
 }
 
 type rowScanner interface{ Scan(...any) error }

@@ -138,6 +138,12 @@ func prioritize(legacy *LegacyDecision, prompt *PromptDecision) Decision {
 				message += fmt.Sprintf("（命中关键词：%q）", result.matchedContent)
 			}
 		}
+		if code == ErrorCodeCBRNBlocked {
+			message = "请求同时命中危险主题与操作意图，请调整输入后重试"
+			if result := prompt.Result; result != nil && result.ScannerBackend == "local-cbrn" && result.PolicyID == "cbrn-topic-intent" && result.cbrnMatch != nil {
+				message += fmt.Sprintf("（主题命中：%q；操作意图命中：%q）", TrimRunes(result.cbrnMatch.Topic.Content, 160), TrimRunes(result.cbrnMatch.Intent.Content, 160))
+			}
+		}
 		return Decision{Kind: DecisionBlock, HTTPStatus: http.StatusForbidden, ErrorCode: code,
 			ClientMessage: message, Legacy: legacy, Prompt: prompt}
 	case DecisionInvalid:

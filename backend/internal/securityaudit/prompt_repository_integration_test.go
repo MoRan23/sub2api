@@ -385,6 +385,80 @@ func TestPromptAuditKeywordEvidenceRejectsGuardReservedKey(t *testing.T) {
 	require.NotContains(t, detail.ScannerEvidence, matchedKeywordEvidenceKey)
 }
 
+func TestPromptAuditCBRNEvidencePersistsOnlyInAdminDetails(t *testing.T) {
+	db := openPromptAuditIntegrationDB(t)
+	repo := NewPostgreSQLRepository(db)
+	ctx := context.Background()
+	result := cbrnEvidenceResult()
+	snapshot := integrationSnapshot("cbrn-evidence")
+	snapshot.FullPrompt = "original full prompt stays unchanged"
+	event, err := repo.RecordBlocking(ctx, snapshot, 9, result, false)
+	require.NoError(t, err)
+	require.Equal(t, result.cbrnMatch, event.CBRNMatch)
+	require.NotContains(t, event.ScannerEvidence, cbrnMatchEvidenceKey)
+
+	var stored string
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT scanner_evidence->>$2::text FROM prompt_audit_events WHERE id=$1`, event.ID, cbrnMatchEvidenceKey).Scan(&stored))
+	require.Equal(t, result.cbrnMatch, decodeCBRNMatchEvidence(stored))
+	page, err := repo.ListEvents(ctx, EventFilter{RequestID: snapshot.RequestID}, 1, 20)
+	require.NoError(t, err)
+	require.Len(t, page.Items, 1)
+	require.Nil(t, page.Items[0].CBRNMatch)
+	require.NotContains(t, page.Items[0].ScannerEvidence, cbrnMatchEvidenceKey)
+	listJSON, err := json.Marshal(page.Items[0])
+	require.NoError(t, err)
+	require.NotContains(t, string(listJSON), result.cbrnMatch.Topic.Rule)
+	require.NotContains(t, string(listJSON), result.cbrnMatch.Topic.Content)
+	require.NotContains(t, string(listJSON), `"cbrn_match"`)
+	require.Empty(t, page.Items[0].IssueSummaries[0].Evidence)
+
+	detail, err := repo.GetEvent(ctx, event.ID)
+	require.NoError(t, err)
+	require.Equal(t, result.cbrnMatch, detail.CBRNMatch)
+	require.Equal(t, snapshot.FullPrompt, detail.Snapshot.FullPrompt)
+	require.Equal(t, result.ScannerEvidence["cbrn_topic"], detail.ScannerEvidence["cbrn_topic"])
+	require.Equal(t, result.ScannerEvidence["cbrn_intent"], detail.ScannerEvidence["cbrn_intent"])
+	require.Contains(t, detail.IssueSummaries[0].Evidence, "携带历史")
+	require.Contains(t, detail.IssueSummaries[0].Evidence, "最新用户输入")
+
+	// Missing old data and malformed stored values are not reconstructed.
+	for _, raw := range []string{"", "{}", "not json"} {
+		_, err = db.ExecContext(ctx, `UPDATE prompt_audit_events SET scanner_evidence=jsonb_set(scanner_evidence, ARRAY[$2::text], to_jsonb($3::text)) WHERE id=$1`, event.ID, cbrnMatchEvidenceKey, raw)
+		require.NoError(t, err)
+		detail, err = repo.GetEvent(ctx, event.ID)
+		require.NoError(t, err)
+		require.Nil(t, detail.CBRNMatch)
+		require.NotContains(t, detail.ScannerEvidence, cbrnMatchEvidenceKey)
+		require.Empty(t, detail.IssueSummaries[0].Evidence)
+	}
+}
+
+func TestPromptAuditCBRNEvidenceRejectsGuardReservedKey(t *testing.T) {
+	db := openPromptAuditIntegrationDB(t)
+	repo := NewPostgreSQLRepository(db)
+	ctx := context.Background()
+	result := cbrnEvidenceResult()
+	result.ScannerBackend = "qwen3guard-openai"
+	raw, err := json.Marshal(result.cbrnMatch)
+	require.NoError(t, err)
+	result.ScannerEvidence[cbrnMatchEvidenceKey] = string(raw)
+	event, err := repo.RecordBlocking(ctx, integrationSnapshot("cbrn-forged"), 1, result, false)
+	require.NoError(t, err)
+	require.Nil(t, event.CBRNMatch)
+	var storedReservedKey bool
+	require.NoError(t, db.QueryRowContext(ctx, `SELECT scanner_evidence ? $2 FROM prompt_audit_events WHERE id=$1`, event.ID, cbrnMatchEvidenceKey).Scan(&storedReservedKey))
+	require.False(t, storedReservedKey)
+
+	// Even an externally sourced historical row with valid JSON is not trusted.
+	_, err = db.ExecContext(ctx, `UPDATE prompt_audit_events SET scanner_evidence=scanner_evidence || jsonb_build_object($2::text,$3::text) WHERE id=$1`, event.ID, cbrnMatchEvidenceKey, string(raw))
+	require.NoError(t, err)
+	detail, err := repo.GetEvent(ctx, event.ID)
+	require.NoError(t, err)
+	require.Nil(t, detail.CBRNMatch)
+	require.NotContains(t, detail.ScannerEvidence, cbrnMatchEvidenceKey)
+	require.Empty(t, detail.IssueSummaries)
+}
+
 func TestPromptAuditRepositoryForeignKeysFiltersAndStableIdentitySnapshots(t *testing.T) {
 	db := openPromptAuditIntegrationDB(t)
 	repo := NewPostgreSQLRepository(db)

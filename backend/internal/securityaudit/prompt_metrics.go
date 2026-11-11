@@ -15,6 +15,7 @@ type AtomicMetrics struct {
 	flagged        atomic.Int64
 	blocked        atomic.Int64
 	keywordBlocked atomic.Int64
+	cbrnBlocked    atomic.Int64
 	unavailable    atomic.Int64
 	invalid        atomic.Int64
 	timeouts       atomic.Int64
@@ -39,7 +40,8 @@ func (m *AtomicMetrics) Snapshot() GuardMetricsSnapshot {
 	snapshot := GuardMetricsSnapshot{
 		Total: m.total.Load(), Allowed: m.allowed.Load(), Flagged: m.flagged.Load(),
 		Blocked: m.blocked.Load(), KeywordBlocked: m.keywordBlocked.Load(), Unavailable: m.unavailable.Load(), Invalid: m.invalid.Load(),
-		Timeouts: m.timeouts.Load(), Failovers: m.failovers.Load(), BulkheadFull: m.bulkheadFull.Load(),
+		CBRNBlocked: m.cbrnBlocked.Load(),
+		Timeouts:    m.timeouts.Load(), Failovers: m.failovers.Load(), BulkheadFull: m.bulkheadFull.Load(),
 		RecordFailed: m.recordFailed.Load(), LatencyCount: m.total.Load(), LatencyMaxMS: m.latencyMax.Load(),
 	}
 	if snapshot.LatencyCount > 0 {
@@ -148,5 +150,11 @@ func (m *AtomicMetrics) IncRecordFailed() {
 func (m *AtomicMetrics) IncKeywordBlocked() {
 	if m != nil {
 		m.keywordBlocked.Add(1)
+	}
+}
+
+func (m *AtomicMetrics) IncCBRNBlocked() {
+	if m != nil {
+		m.cbrnBlocked.Add(1)
 	}
 }

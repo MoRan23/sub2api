@@ -10,6 +10,7 @@ import (
 	"fmt"
 	"strings"
 	"time"
+	"unicode/utf8"
 
 	"github.com/lib/pq"
 )
@@ -360,12 +361,40 @@ func scanEvent(row rowScanner, withFullPrompt ...bool) (*Event, error) {
 		}
 	}
 	delete(event.ScannerEvidence, matchedKeywordEvidenceKey)
+	if len(withFullPrompt) > 0 && withFullPrompt[0] && event.ScannerBackend == "local-cbrn" && event.PolicyID == "cbrn-topic-intent" {
+		event.CBRNMatch = decodeCBRNMatchEvidence(event.ScannerEvidence[cbrnMatchEvidenceKey])
+	}
+	delete(event.ScannerEvidence, cbrnMatchEvidenceKey)
 	result := NormalizedResult{Decision: event.Decision, RiskLevel: event.RiskLevel, Action: event.Action,
 		Categories: event.Categories, MatchedScanners: event.MatchedScanners, ScannerScores: event.ScannerScores,
 		ScannerEvidence: event.ScannerEvidence, ScannerBackend: event.ScannerBackend,
-		PolicyID: event.PolicyID, matchedKeyword: matchedKeyword}
+		PolicyID: event.PolicyID, matchedKeyword: matchedKeyword, cbrnMatch: event.CBRNMatch}
 	event.IssueSummaries = BuildIssueSummaries(result)
 	return event, nil
+}
+
+func decodeCBRNMatchEvidence(raw string) *CBRNMatch {
+	// Each rule and snippet has the configured regex rune bound. Bound corrupt
+	// historical JSON before decoding, including worst-case JSON rune escapes.
+	if raw == "" || len(raw) > MaxBlockedRegexRunes*4*6+2048 {
+		return nil
+	}
+	var match CBRNMatch
+	if json.Unmarshal([]byte(raw), &match) != nil {
+		return nil
+	}
+	for _, evidence := range []CBRNMatchEvidence{match.Topic, match.Intent} {
+		if strings.TrimSpace(evidence.Rule) == "" || evidence.Content == "" ||
+			utf8.RuneCountInString(evidence.Rule) > MaxBlockedRegexRunes || utf8.RuneCountInString(evidence.Content) > MaxBlockedRegexRunes+1 ||
+			(evidence.Source != "latest_user" && evidence.Source != "history") ||
+			evidence.SegmentIndex < 0 || evidence.Start < 0 || evidence.End <= evidence.Start {
+			return nil
+		}
+	}
+	if match.Intent.Source != "latest_user" {
+		return nil
+	}
+	return &match
 }
 
 func scanReturnedJobIDs(rows *sql.Rows) ([]int64, error) {

@@ -216,7 +216,7 @@ func (m *ConfigManager) BlockingActivationDegraded() bool {
 	// A still-active weaker snapshot after a failed synchronous policy activation
 	// must not keep serving allow decisions under the previous snapshot.
 	return active.ConfigVersion < m.expected.Load() ||
-		(!active.KeywordBlockingActive() && active.EffectiveMode() != ModeBlocking)
+		(!active.KeywordBlockingActive() && !active.CBRNBlockingActive() && active.EffectiveMode() != ModeBlocking)
 }
 
 func (m *ConfigManager) EffectiveMode() Mode {
@@ -359,6 +359,18 @@ func (m *ConfigManager) buildNextStorage(current storageConfig, req UpdateConfig
 		keywordAllGroups = *req.KeywordAllGroups
 		keywordGroupIDs = append([]int64(nil), req.KeywordGroupIDs...)
 	}
+	cbrnEnabled := current.CBRNBlockingEnabled
+	cbrnTopics := append([]string{}, current.CBRNTopicRules...)
+	cbrnIntents := append([]string{}, current.CBRNIntentRules...)
+	if req.CBRNBlockingEnabled != nil {
+		cbrnEnabled = *req.CBRNBlockingEnabled
+	}
+	if req.CBRNTopicRules != nil {
+		cbrnTopics = append([]string{}, (*req.CBRNTopicRules)...)
+	}
+	if req.CBRNIntentRules != nil {
+		cbrnIntents = append([]string{}, (*req.CBRNIntentRules)...)
+	}
 	currentByID := make(map[string]StorageEndpoint, len(current.Endpoints))
 	for _, endpoint := range current.Endpoints {
 		currentByID[endpoint.ID] = endpoint
@@ -368,7 +380,8 @@ func (m *ConfigManager) buildNextStorage(current storageConfig, req UpdateConfig
 		KeywordBlockingEnabled: req.KeywordBlockingEnabled, BlockedKeywords: append([]string(nil), req.BlockedKeywords...),
 		KeywordAllGroups: keywordAllGroups, KeywordGroupIDs: keywordGroupIDs,
 		KeywordWhitelistKeys: keywordWhitelistKeys,
-		Strategy:             strings.TrimSpace(req.Strategy), WorkerCount: req.WorkerCount,
+		CBRNBlockingEnabled:  cbrnEnabled, CBRNTopicRules: cbrnTopics, CBRNIntentRules: cbrnIntents,
+		Strategy: strings.TrimSpace(req.Strategy), WorkerCount: req.WorkerCount,
 		QueueCapacity: req.QueueCapacity, Scanners: append([]string(nil), req.Scanners...),
 		AllGroups: req.AllGroups, GroupIDs: append([]int64(nil), req.GroupIDs...),
 		ConfigVersion: current.ConfigVersion, UpdatedBy: actorID,
@@ -452,6 +465,7 @@ func (m *ConfigManager) observeExpectedState(raw string, riskControlEnabled bool
 		Enabled                bool  `json:"enabled"`
 		BlockingEnabled        bool  `json:"blocking_enabled"`
 		KeywordBlockingEnabled bool  `json:"keyword_blocking_enabled"`
+		CBRNBlockingEnabled    bool  `json:"cbrn_blocking_enabled"`
 		ConfigVersion          int64 `json:"config_version"`
 	}
 	if err := json.Unmarshal([]byte(raw), &intent); err != nil {
@@ -461,7 +475,7 @@ func (m *ConfigManager) observeExpectedState(raw string, riskControlEnabled bool
 		intent.ConfigVersion = 1
 	}
 	m.expected.Store(intent.ConfigVersion)
-	m.expectedBlocking.Store(riskControlEnabled && ((intent.Enabled && intent.BlockingEnabled) || intent.KeywordBlockingEnabled))
+	m.expectedBlocking.Store(riskControlEnabled && ((intent.Enabled && intent.BlockingEnabled) || intent.KeywordBlockingEnabled || intent.CBRNBlockingEnabled))
 }
 
 func (m *ConfigManager) refreshLoop(ctx context.Context) {
@@ -535,6 +549,8 @@ func (m *ConfigManager) clearLoadError() bool {
 }
 
 func cloneStorageConfig(cfg storageConfig) storageConfig {
+	cfg.CBRNTopicRules = append([]string{}, cfg.CBRNTopicRules...)
+	cfg.CBRNIntentRules = append([]string{}, cfg.CBRNIntentRules...)
 	cfg.KeywordWhitelistKeys = append([]KeywordWhitelistKey{}, cfg.KeywordWhitelistKeys...)
 	cfg.Scanners = append([]string(nil), cfg.Scanners...)
 	cfg.GroupIDs = append([]int64(nil), cfg.GroupIDs...)
@@ -545,6 +561,8 @@ func cloneStorageConfig(cfg storageConfig) storageConfig {
 }
 
 func cloneActiveConfig(cfg ActiveConfig) ActiveConfig {
+	cfg.CBRNTopicRules = append([]string{}, cfg.CBRNTopicRules...)
+	cfg.CBRNIntentRules = append([]string{}, cfg.CBRNIntentRules...)
 	cfg.KeywordWhitelistKeys = append([]KeywordWhitelistKey{}, cfg.KeywordWhitelistKeys...)
 	cfg.Scanners = append([]string(nil), cfg.Scanners...)
 	cfg.GroupIDs = append([]int64(nil), cfg.GroupIDs...)

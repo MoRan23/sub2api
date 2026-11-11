@@ -28,6 +28,7 @@
               <dd class="whitespace-pre-wrap break-words" data-test="summary-matched-keyword">{{ event.matched_keyword || t('admin.promptAudit.keyword.notRecorded') }}</dd>
             </template>
           </dl>
+          <CBRNMatchDetails v-if="event.matched_scanners.includes('cbrn')" :match="event.cbrn_match" class="lg:col-span-2 rounded-lg bg-gray-50 p-4 dark:bg-dark-900" />
         </div>
 
         <div v-show="activeTab === 'risks'" class="space-y-5" role="tabpanel">
@@ -58,6 +59,7 @@
                 <div v-if="issue.scanner_id === 'keyword'" class="sm:col-span-2"><dt class="inline text-gray-400">{{ t('admin.promptAudit.keyword.matchedKeyword') }} · </dt><dd class="inline whitespace-pre-wrap break-words" data-test="risk-matched-keyword">{{ event.matched_keyword || t('admin.promptAudit.keyword.notRecorded') }}</dd></div>
                 <div class="sm:col-span-2"><dt class="inline text-gray-400">{{ t('admin.promptAudit.events.evidence') }} · </dt><dd class="inline break-words">{{ issue.evidence ? translateEvidence(issue.evidence) : '—' }}</dd></div>
               </dl>
+              <CBRNMatchDetails v-if="issue.scanner_id === 'cbrn'" :match="event.cbrn_match" class="mt-3" />
             </article>
             <p v-if="event.issue_summaries.length === 0" class="py-6 text-center text-sm text-gray-500">{{ t('admin.promptAudit.events.noRisks') }}</p>
           </div>
@@ -84,6 +86,7 @@
 import { ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
+import CBRNMatchDetails from './CBRNMatchDetails.vue'
 import type { PromptAuditEvent, PromptIssueSummary } from '../types'
 import { SCANNER_CATALOG } from '../viewModel'
 
@@ -109,6 +112,7 @@ function formatDecisionAction(decision: string, action: string): string {
 }
 function translateCategory(category: string): string {
   if (category === 'keyword') return t('admin.promptAudit.keyword.category')
+  if (category === 'cbrn') return t('admin.promptAudit.cbrn.category')
   return SCANNER_CATALOG.some((scanner) => scanner.id === category)
     ? t(`admin.promptAudit.scanners.${category}`)
     : category
@@ -138,6 +142,7 @@ function formatGuardReturn(event: PromptAuditEvent): string {
     scanner_scores: event.scanner_scores,
     scanner_evidence: evidence,
     matched_keyword: event.matched_keyword,
+    cbrn_match: event.cbrn_match,
     scanner_backend: event.scanner_backend,
     scanner_version: event.scanner_version,
     guard_endpoint_id: event.guard_endpoint_id,
@@ -150,6 +155,7 @@ function issueTitle(issue: PromptIssueSummary): string {
 }
 function issueDescription(issue: PromptIssueSummary): string {
   if ((issue.category || issue.scanner_id) === 'keyword') return t('admin.promptAudit.keyword.description')
+  if ((issue.category || issue.scanner_id) === 'cbrn') return t('admin.promptAudit.cbrn.issueDescription')
   const category = issue.category || issue.scanner_id
   const key = `admin.promptAudit.scannerDescriptions.${category}`
   const label = t(key)

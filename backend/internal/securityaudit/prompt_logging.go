@@ -30,6 +30,7 @@ const (
 	EventGuardAllowed         = "prompt_guard.allowed"
 	EventGuardBlocked         = "prompt_guard.blocked"
 	EventKeywordBlocked       = "prompt_audit.keyword_blocked"
+	EventCBRNBlocked          = "prompt_audit.cbrn_blocked"
 	EventGuardFailed          = "prompt_guard.failed"
 	EventResultRecordFailed   = "prompt_guard.result_record_failed"
 	EventEventDeleted         = "prompt_audit.event_deleted"
@@ -39,6 +40,7 @@ const (
 )
 
 var knownLogEvents = map[string]struct{}{
+	EventCBRNBlocked:   {},
 	EventConfigUpdated: {}, EventConfigLoaded: {}, EventConfigReloadDegraded: {}, EventConfigTokenInvalid: {},
 	EventProbeStarted: {}, EventProbeFinished: {}, EventProbeFailed: {},
 	EventJobEnqueued: {}, EventEnqueueSkipped: {}, EventEnqueueDropped: {},
@@ -58,6 +60,7 @@ var allowedLogFields = map[string]struct{}{
 	"billing_preconsumed": {}, "worker_id": {}, "reclaimed_total": {}, "attempts": {},
 	"max_attempts": {}, "claim_version": {}, "http_status": {}, "retryable": {},
 	"keyword_hash": {},
+	"cbrn_hash":    {},
 }
 
 func LogInfo(event string, fields map[string]any) {
@@ -156,6 +159,8 @@ func stableErrorMessage(code string) string {
 		return "Prompt Guard blocked the request"
 	case ErrorCodeKeywordBlocked:
 		return "Prompt Audit keyword policy blocked the request"
+	case ErrorCodeCBRNBlocked:
+		return "Prompt Audit CBRN combination policy blocked the request"
 	case ErrorCodeUnavailable, "payload_store_unavailable", "payload_missing":
 		return "Prompt Audit dependency is unavailable"
 	case ErrorCodeInvalidResponse:

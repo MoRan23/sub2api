@@ -3,6 +3,7 @@ package securityaudit
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"strings"
 )
 
@@ -13,6 +14,23 @@ func BuildIssueSummaries(result NormalizedResult) []IssueSummary {
 	}
 	summaries := make([]IssueSummary, 0, len(resultCategories)+len(result.UnknownCategories))
 	for _, category := range resultCategories {
+		if category == "cbrn" && result.ScannerBackend == "local-cbrn" && result.PolicyID == "cbrn-topic-intent" {
+			evidence := ""
+			if match := result.cbrnMatch; match != nil {
+				evidence = fmt.Sprintf("主题：%q（%s）；操作意图：%q（%s）",
+					RedactPreview(match.Topic.Content, 160), cbrnEvidenceLocation(match.Topic),
+					RedactPreview(match.Intent.Content, 160), cbrnEvidenceLocation(match.Intent))
+			}
+			digest := sha256.Sum256([]byte(evidence))
+			summaries = append(summaries, IssueSummary{
+				Category: category, ScannerID: category, Title: "核、生物、化学、放射性危害组合拦截",
+				Description: "请求携带的主题与最新用户输入中的操作意图同时命中管理员配置规则",
+				Severity:    string(RiskCritical), SeverityLabel: riskLabelZH(RiskCritical),
+				Action: string(ActionBlock), ActionLabel: actionLabelZH(ActionBlock), Code: "prompt_audit_cbrn",
+				Score: 1, Evidence: evidence, EvidenceHash: hex.EncodeToString(digest[:]),
+			})
+			continue
+		}
 		if category == "keyword" {
 			evidence := RedactPreview(result.ScannerEvidence[category], 160)
 			if result.ScannerBackend == "local-keyword" && result.PolicyID == "keyword-substring" && result.matchedKeyword != "" {
@@ -62,6 +80,14 @@ func BuildIssueSummaries(result NormalizedResult) []IssueSummary {
 		})
 	}
 	return summaries
+}
+
+func cbrnEvidenceLocation(evidence CBRNMatchEvidence) string {
+	source := "携带历史"
+	if evidence.Source == "latest_user" {
+		source = "最新用户输入"
+	}
+	return fmt.Sprintf("%s，文本段 %d，字符区间 [%d, %d)", source, evidence.SegmentIndex, evidence.Start, evidence.End)
 }
 
 func riskLabelZH(risk RiskLevel) string {

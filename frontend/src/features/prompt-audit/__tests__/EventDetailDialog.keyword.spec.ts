@@ -3,7 +3,7 @@ import { mount } from '@vue/test-utils'
 import EventDetailDialog from '../components/EventDetailDialog.vue'
 import type { PromptAuditEvent } from '../types'
 
-vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string) => key }) }))
+vi.mock('vue-i18n', () => ({ useI18n: () => ({ t: (key: string, values?: Record<string, unknown>) => values ? `${key} ${JSON.stringify(values)}` : key }) }))
 
 function keywordEvent(matchedKeyword?: string): PromptAuditEvent {
   return {
@@ -36,6 +36,38 @@ function mountDetail(event: PromptAuditEvent) {
 }
 
 describe('Prompt audit keyword details', () => {
+  it('shows both original CBRN matches with source and rune positions and escapes content', async () => {
+    const event: PromptAuditEvent = {
+      ...keywordEvent(), matched_scanners: ['cbrn'], categories: ['cbrn'], scanner_backend: 'local-cbrn',
+      cbrn_match: {
+        topic: { rule: 'regex:topic', content: '<img src=x>ＴＯＰＩＣ', source: 'history', segment_index: 0, start: 2, end: 20 },
+        intent: { rule: 'regex:intent', content: 'steps', source: 'latest_user', segment_index: 2, start: 0, end: 5 },
+      },
+      issue_summaries: [{ ...keywordEvent().issue_summaries[0], scanner_id: 'cbrn', category: 'cbrn', code: 'prompt_audit_cbrn' }],
+    }
+    const wrapper = mountDetail(event)
+    const summary = wrapper.get('[data-test="cbrn-match-details"]')
+    expect(summary.get('[data-test="cbrn-topic-content"]').text()).toBe('<img src=x>ＴＯＰＩＣ')
+    expect(summary.get('[data-test="cbrn-intent-content"]').text()).toBe('steps')
+    expect(summary.get('[data-test="cbrn-topic-location"]').text()).toContain('admin.promptAudit.cbrn.sourceHistory')
+    expect(summary.get('[data-test="cbrn-topic-location"]').text()).toContain('"start":2,"end":20')
+    expect(summary.get('[data-test="cbrn-intent-location"]').text()).toContain('admin.promptAudit.cbrn.sourceLatestUser')
+    expect(wrapper.find('img').exists()).toBe(false)
+    expect(wrapper.text()).toContain('admin.promptAudit.cbrn.category')
+    await wrapper.get('[role="tablist"]').findAll('button')[1].trigger('click')
+    expect(wrapper.get('[data-test="risk-issue"]').text()).toContain('admin.promptAudit.cbrn.issueDescription')
+    expect(wrapper.get('[data-test="risk-guard-return"] pre').text()).toContain('"rule": "regex:topic"')
+  })
+
+  it('does not infer missing CBRN evidence or reuse a previous event match', async () => {
+    const wrapper = mountDetail({ ...keywordEvent(), matched_scanners: ['cbrn'], categories: ['cbrn'] })
+    expect(wrapper.get('[data-test="cbrn-match-details"]').text()).toContain('admin.promptAudit.keyword.notRecorded')
+    expect(wrapper.find('[data-test="cbrn-topic-location"]').exists()).toBe(false)
+    await wrapper.setProps({ event: { ...keywordEvent('regular keyword'), id: 3 } })
+    expect(wrapper.find('[data-test="cbrn-match-details"]').exists()).toBe(false)
+    expect(wrapper.get('[data-test="summary-matched-keyword"]').text()).toBe('regular keyword')
+  })
+
   it('shows the recorded triggering keyword as text in the summary, risks and structured result', async () => {
     const keyword = '<img src=x onerror=alert(1)> Admin Rule'
     const wrapper = mountDetail(keywordEvent(keyword))

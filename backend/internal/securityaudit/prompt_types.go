@@ -14,6 +14,7 @@ const (
 
 	ErrorCodeBlocked               = "prompt_guard_blocked"
 	ErrorCodeKeywordBlocked        = "prompt_keyword_blocked"
+	ErrorCodeCBRNBlocked           = "prompt_cbrn_blocked"
 	ErrorCodeUnavailable           = "prompt_guard_unavailable"
 	ErrorCodeInvalidResponse       = "prompt_guard_invalid_response"
 	ErrorCodeConfigConflict        = "prompt_audit_config_conflict"
@@ -146,6 +147,9 @@ type NormalizedResult struct {
 	// matchedContent is the local match text for the client rejection message.
 	// It is transient: Guard responses and persisted records cannot populate it.
 	matchedContent string
+	// cbrnMatch is generated only by the local combination matcher. External
+	// Guard responses cannot supply private rules or client-visible evidence.
+	cbrnMatch *CBRNMatch
 }
 
 type PromptDecision struct {
@@ -210,6 +214,7 @@ type GuardMetricsSnapshot struct {
 	Flagged        int64 `json:"flagged"`
 	Blocked        int64 `json:"blocked"`
 	KeywordBlocked int64 `json:"keyword_blocked"`
+	CBRNBlocked    int64 `json:"cbrn_blocked"`
 	Unavailable    int64 `json:"unavailable"`
 	Invalid        int64 `json:"invalid"`
 	Timeouts       int64 `json:"timeouts"`
@@ -263,6 +268,7 @@ type RuntimeSnapshot struct {
 	Endpoints             map[string]ProbeResult `json:"endpoints"`
 	GuardMetrics          GuardMetricsSnapshot   `json:"guard_metrics"`
 	KeywordBlockingActive bool                   `json:"keyword_blocking_active"`
+	CBRNBlockingActive    bool                   `json:"cbrn_blocking_active"`
 }
 
 type Clock interface {

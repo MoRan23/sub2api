@@ -40,6 +40,21 @@ const config = (): PromptAuditConfig => ({
 })
 
 describe('Prompt Audit view model', () => {
+  it('defaults legacy CBRN fields to off without inventing presets', () => {
+    expect(configToDraft(config())).toMatchObject({ cbrn_blocking_enabled: false, cbrn_topic_rules: [], cbrn_intent_rules: [] })
+    expect(configToDraft({ ...config(), cbrn_topic_rules: null, cbrn_intent_rules: null } as unknown as PromptAuditConfig)).toMatchObject({ cbrn_topic_rules: [], cbrn_intent_rules: [] })
+  })
+
+  it('round-trips independent CBRN rules, clones server presets and preserves regex case', () => {
+    const saved = { ...config(), enabled: false, keyword_blocking_enabled: false, cbrn_blocking_enabled: true, cbrn_topic_rules: [' Topic ', 'topic', 'regex:(?i)Topic'], cbrn_intent_rules: ['regex:Build', 'regex:build'] }
+    const draft = configToDraft(saved)
+    const before = draftFingerprint(draft)
+    draft.cbrn_topic_rules.push('extra')
+    expect(saved.cbrn_topic_rules).not.toContain('extra')
+    expect(draftFingerprint(draft)).not.toBe(before)
+    expect(buildUpdateRequest(draft)).toMatchObject({ enabled: false, keyword_blocking_enabled: false, cbrn_blocking_enabled: true, cbrn_topic_rules: ['Topic', 'regex:(?i)Topic', 'extra'], cbrn_intent_rules: ['regex:Build', 'regex:build'] })
+  })
+
   it('round-trips exact user/key pairs and explicitly clears the keyword allowlist', () => {
     const saved = { ...config(), keyword_whitelist_keys: [{ user_id: 7, api_key_id: 12 }] }
     const draft = configToDraft(saved)
