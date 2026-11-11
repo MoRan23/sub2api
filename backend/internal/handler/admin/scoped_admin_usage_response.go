@@ -36,6 +36,8 @@ func scopedAdminUsageLogResponse(record *service.UsageLog) gin.H {
 		"cache_read_tokens":            usage.CacheReadTokens,
 		"cache_creation_5m_tokens":     usage.CacheCreation5mTokens,
 		"cache_creation_1h_tokens":     usage.CacheCreation1hTokens,
+		"cache_creation_30m_tokens":    usage.CacheCreation30mTokens,
+		"cache_creation_12h_tokens":    usage.CacheCreation12hTokens,
 		"input_cost":                   usage.InputCost,
 		"output_cost":                  usage.OutputCost,
 		"cache_creation_cost":          usage.CacheCreationCost,

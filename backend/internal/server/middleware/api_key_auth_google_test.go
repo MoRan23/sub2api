@@ -883,12 +883,13 @@ func TestApiKeyAuthWithSubscriptionGoogle_SubscriptionLimitExceededReturns429(t 
 	})
 
 	now := time.Now()
+	expiresAt := now.Add(24 * time.Hour)
 	sub := &service.UserSubscription{
 		ID:               601,
 		UserID:           user.ID,
 		GroupID:          group.ID,
 		Status:           service.SubscriptionStatusActive,
-		ExpiresAt:        now.Add(24 * time.Hour),
+		ExpiresAt:        &expiresAt,
 		DailyWindowStart: &now,
 		DailyUsageUSD:    10,
 	}

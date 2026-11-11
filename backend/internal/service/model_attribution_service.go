@@ -501,6 +501,8 @@ func accumulateAttributionExecution(result *AttributionResult, index int, execut
 		total.InputTokens += usage.InputTokens
 		total.OutputTokens += usage.OutputTokens
 		total.CacheCreationInputTokens += usage.CacheCreationInputTokens
+		total.CacheCreation30mInputTokens += usage.CacheCreation30mInputTokens
+		total.CacheCreation12hInputTokens += usage.CacheCreation12hInputTokens
 		total.CacheReadInputTokens += usage.CacheReadInputTokens
 		total.ImageInputTokens += usage.ImageInputTokens
 		total.ImageOutputTokens += usage.ImageOutputTokens

@@ -8,6 +8,9 @@ import (
 	"fmt"
 	"strings"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
+	"github.com/tidwall/gjson"
 )
 
 const (
@@ -1547,15 +1550,19 @@ func ChatUsageToResponsesUsage(usage *ChatUsage) *ResponsesUsage {
 	if usage.PromptTokensDetails != nil && (usage.PromptTokensDetails.CachedTokens > 0 ||
 		usage.PromptTokensDetails.CacheCreationTokens > 0 || usage.PromptTokensDetails.CacheWriteTokens > 0) {
 		out.InputTokensDetails = &ResponsesInputTokensDetails{
-			CachedTokens:        usage.PromptTokensDetails.CachedTokens,
-			CacheCreationTokens: usage.PromptTokensDetails.CacheCreationTokens,
-			CacheWriteTokens:    usage.PromptTokensDetails.CacheWriteTokens,
+			CachedTokens:            usage.PromptTokensDetails.CachedTokens,
+			CacheCreationTokens:     usage.PromptTokensDetails.CacheCreationTokens,
+			CacheWriteTokens:        usage.PromptTokensDetails.CacheWriteTokens,
+			CacheWriteTokensDetails: append(json.RawMessage(nil), usage.PromptTokensDetails.CacheWriteTokensDetails...),
 		}
 		if usage.PromptTokensDetails.CacheWriteTokens > 0 {
 			out.CacheCreationInputTokens = usage.PromptTokensDetails.CacheWriteTokens
 		} else {
 			out.CacheCreationInputTokens = usage.PromptTokensDetails.CacheCreationTokens
 		}
+		out.CacheCreation30mInputTokens, out.CacheCreation12hInputTokens = openai.CacheCreationTTLDetailsTokens(
+			gjson.ParseBytes(usage.PromptTokensDetails.CacheWriteTokensDetails), out.CacheCreationInputTokens,
+		)
 	}
 	return out
 }

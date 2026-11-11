@@ -29,12 +29,12 @@ func usageBillingSnapshotTestGroup() *Group {
 		ModelPricing: []ChannelModelPricing{{
 			ID: 31, ChannelID: 32, Platform: PlatformOpenAI, BillingMode: BillingModeToken,
 			Models: []string{"gpt-4o", "gpt-4o-*"}, InputPrice: p(11), OutputPrice: p(12),
-			CacheWritePrice: p(13), CacheWrite1hPrice: p(14), CacheReadPrice: p(15),
+			CacheWritePrice: p(13), CacheWrite1hPrice: p(14), CacheWrite12hPrice: p(31), CacheReadPrice: p(15),
 			FastMultiplier: p(16), FlexMultiplier: p(17), ImageInputPrice: p(18), ImageOutputPrice: p(19), PerRequestPrice: p(20),
 			ReasoningEffortMultipliers: map[string]float64{"high": 1.7},
 			Intervals: []PricingInterval{{
 				ID: 41, PricingID: 31, MinTokens: 1000, MaxTokens: usageSnapshotTestValue(10000), TierLabel: "large", SortOrder: 2,
-				InputPrice: p(21), OutputPrice: p(22), CacheWritePrice: p(23), CacheWrite1hPrice: p(24), CacheReadPrice: p(25),
+				InputPrice: p(21), OutputPrice: p(22), CacheWritePrice: p(23), CacheWrite1hPrice: p(24), CacheWrite12hPrice: p(32), CacheReadPrice: p(25),
 				InputMultiplier: p(26), OutputMultiplier: p(27), CacheWriteMultiplier: p(28), CacheReadMultiplier: p(29), PerRequestPrice: p(30),
 			}},
 			TimePricing: &ChannelTimePricing{Timezone: "UTC", WeekdaysOnly: true,
@@ -71,12 +71,12 @@ func usageBillingSnapshotTestMutateNested(pricing []ChannelModelPricing, videos 
 	p.Platform, p.BillingMode, p.Models[0] = "changed", BillingModeImage, "changed-model"
 	p.ReasoningEffortMultipliers["high"] = 999
 	p.ReasoningEffortMultipliers["low"] = 999
-	usageBillingSnapshotTestMutatePointers(p.InputPrice, p.OutputPrice, p.CacheWritePrice, p.CacheWrite1hPrice,
+	usageBillingSnapshotTestMutatePointers(p.InputPrice, p.OutputPrice, p.CacheWritePrice, p.CacheWrite1hPrice, p.CacheWrite12hPrice,
 		p.CacheReadPrice, p.FastMultiplier, p.FlexMultiplier, p.ImageInputPrice, p.ImageOutputPrice, p.PerRequestPrice)
 	iv := &p.Intervals[0]
 	*iv.MaxTokens = 999
 	iv.MinTokens, iv.TierLabel = 999, "changed-tier"
-	usageBillingSnapshotTestMutatePointers(iv.InputPrice, iv.OutputPrice, iv.CacheWritePrice, iv.CacheWrite1hPrice,
+	usageBillingSnapshotTestMutatePointers(iv.InputPrice, iv.OutputPrice, iv.CacheWritePrice, iv.CacheWrite1hPrice, iv.CacheWrite12hPrice,
 		iv.CacheReadPrice, iv.InputMultiplier, iv.OutputMultiplier, iv.CacheWriteMultiplier, iv.CacheReadMultiplier, iv.PerRequestPrice)
 	p.TimePricing.Timezone, p.TimePricing.WeekdaysOnly = "Asia/Tokyo", false
 	p.TimePricing.Periods[0] = ChannelTimePricingPeriod{StartTime: "01:00", EndTime: "02:00", Multiplier: 999}

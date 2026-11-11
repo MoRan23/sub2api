@@ -104,10 +104,16 @@ func AnthropicToResponsesWithPathMapping(req *AnthropicRequest) (*ResponsesReque
 // AnthropicToResponsesWithMinOutputTokensAndPathMapping applies the configured
 // output-token floor while retaining text-field provenance.
 func AnthropicToResponsesWithMinOutputTokensAndPathMapping(req *AnthropicRequest, minOutputTokens int) (*ResponsesRequest, map[string]string, error) {
+	return AnthropicToResponsesWithOptionsAndPathMapping(req, AnthropicToResponsesOptions{MinOutputTokens: minOutputTokens})
+}
+
+// AnthropicToResponsesWithOptionsAndPathMapping keeps the same conversion
+// options and text provenance for callers that apply effort policy afterwards.
+func AnthropicToResponsesWithOptionsAndPathMapping(req *AnthropicRequest, options AnthropicToResponsesOptions) (*ResponsesRequest, map[string]string, error) {
 	if req == nil {
 		return nil, nil, fmt.Errorf("anthropic request is nil")
 	}
-	out, err := AnthropicToResponsesWithMinOutputTokens(req, minOutputTokens)
+	out, err := AnthropicToResponsesWithOptions(req, options)
 	if err != nil {
 		return nil, nil, err
 	}

@@ -192,10 +192,14 @@ func normalizeDeferredOpenAIChatInput(out *apicompat.ResponsesRequest, paths map
 }
 
 func anthropicToResponsesWithTimezoneObservation(cfg *config.Config, c *gin.Context, req *apicompat.AnthropicRequest) (*apicompat.ResponsesRequest, error) {
-	if !observeOpenAIRequestTimezoneAdapter(c) && !hasDeferredOpenAIRequestTimezone(c) {
-		return anthropicToResponses(cfg, req)
+	options := apicompat.AnthropicToResponsesOptions{
+		MinOutputTokens:                configuredMinOutputTokens(cfg),
+		DeferReasoningEffortValidation: true,
 	}
-	out, paths, err := apicompat.AnthropicToResponsesWithMinOutputTokensAndPathMapping(req, configuredMinOutputTokens(cfg))
+	if !observeOpenAIRequestTimezoneAdapter(c) && !hasDeferredOpenAIRequestTimezone(c) {
+		return apicompat.AnthropicToResponsesWithOptions(req, options)
+	}
+	out, paths, err := apicompat.AnthropicToResponsesWithOptionsAndPathMapping(req, options)
 	if err == nil {
 		if hasDeferredOpenAIRequestTimezone(c) {
 			freezeDeferredOpenAIRequestTimezoneBaseline(c, out, paths)

@@ -110,6 +110,26 @@ func TestCodexEngineMixedPoolKeepsOriginalCompactWire(t *testing.T) {
 	require.Equal(t, http.StatusOK, rec.Code)
 }
 
+func TestCodexEngineMixedPoolKeepsOriginalPageContextWire(t *testing.T) {
+	// Native OAuth requests need the page-context compatibility conversion. An
+	// Engine failover must still start from the original client representation.
+	body := `{"model":"gpt-6-astra","stream":false,"unknown":9007199254740993123,"input":[{"type":"function_call_output","id":"fco_page","namespace":"agent","name":"codex_apps_open_page","output":"{\"page_id\":null}"},{"role":"user","content":"hello"}]}`
+	upstream := newAstraProCapturedUpstream(astra403(), astra200())
+	h := newOpenAIResponsesFailoverTestHandler(t, upstream, func(accounts []service.Account) {
+		accounts[1].Type = service.AccountTypeAPIKey
+		accounts[1].Credentials = map[string]any{"api_key": "engine", "base_url": "https://engine.example/v1"}
+		accounts[1].Extra = map[string]any{service.OpenAIAPIKeyModeExtraKey: "codex_engine"}
+	})
+	c, rec := newAstraProFailoverContext(t, body)
+	h.Responses(c)
+	_, ids, bodies := upstream.snapshot()
+	require.Equal(t, []int64{1, 2}, ids, "response: %s", rec.Body.String())
+	require.NotContains(t, string(bodies[0]), `"name":"codex_apps_open_page"`)
+	require.Contains(t, string(bodies[0]), `page_id`)
+	require.Equal(t, body, string(bodies[1]))
+	require.Equal(t, http.StatusOK, rec.Code)
+}
+
 func TestCodexEngineHandlerDoesNotReplayOrAppendBusinessError(t *testing.T) {
 	const taskStateUnconfirmed = `{"error":{"code":"task_state_unconfirmed","type":"server_error","message":"The original accepted execution could not be confirmed"}}`
 	for _, tc := range []struct {

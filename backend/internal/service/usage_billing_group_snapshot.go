@@ -86,6 +86,7 @@ func cloneUsageBillingModelPricing(price ChannelModelPricing) ChannelModelPricin
 	}
 	price.InputPrice, price.OutputPrice = cloneUsageBillingScalar(price.InputPrice), cloneUsageBillingScalar(price.OutputPrice)
 	price.CacheWritePrice, price.CacheWrite1hPrice, price.CacheReadPrice = cloneUsageBillingScalar(price.CacheWritePrice), cloneUsageBillingScalar(price.CacheWrite1hPrice), cloneUsageBillingScalar(price.CacheReadPrice)
+	price.CacheWrite12hPrice = cloneUsageBillingScalar(price.CacheWrite12hPrice)
 	price.FastMultiplier, price.FlexMultiplier = cloneUsageBillingScalar(price.FastMultiplier), cloneUsageBillingScalar(price.FlexMultiplier)
 	price.ImageInputPrice, price.ImageOutputPrice, price.PerRequestPrice = cloneUsageBillingScalar(price.ImageInputPrice), cloneUsageBillingScalar(price.ImageOutputPrice), cloneUsageBillingScalar(price.PerRequestPrice)
 	price.ReasoningEffortMultipliers = cloneUsageBillingFloatMap(price.ReasoningEffortMultipliers)
@@ -95,6 +96,7 @@ func cloneUsageBillingModelPricing(price ChannelModelPricing) ChannelModelPricin
 			interval.MaxTokens, interval.TierLabel = cloneUsageBillingScalar(interval.MaxTokens), strings.Clone(interval.TierLabel)
 			interval.InputPrice, interval.OutputPrice = cloneUsageBillingScalar(interval.InputPrice), cloneUsageBillingScalar(interval.OutputPrice)
 			interval.CacheWritePrice, interval.CacheWrite1hPrice, interval.CacheReadPrice = cloneUsageBillingScalar(interval.CacheWritePrice), cloneUsageBillingScalar(interval.CacheWrite1hPrice), cloneUsageBillingScalar(interval.CacheReadPrice)
+			interval.CacheWrite12hPrice = cloneUsageBillingScalar(interval.CacheWrite12hPrice)
 			interval.InputMultiplier, interval.OutputMultiplier = cloneUsageBillingScalar(interval.InputMultiplier), cloneUsageBillingScalar(interval.OutputMultiplier)
 			interval.CacheWriteMultiplier, interval.CacheReadMultiplier, interval.PerRequestPrice = cloneUsageBillingScalar(interval.CacheWriteMultiplier), cloneUsageBillingScalar(interval.CacheReadMultiplier), cloneUsageBillingScalar(interval.PerRequestPrice)
 			intervals[i] = interval

@@ -2487,23 +2487,76 @@ func TestOpenAIResponses_APIKeyPassthroughSSERateLimitUsesConfiguredPoolRetry(t 
 }
 
 func TestOpenAIResponsesWebSocket_FailoverOnUpstreamUsageLimitEvent(t *testing.T) {
+	for _, mode := range []string{service.OpenAIWSIngressModePassthrough, service.OpenAIWSIngressModeCtxPool} {
+		t.Run(mode, func(t *testing.T) {
+			runOpenAIResponsesWebSocketUsageLimitCase(t, mode, nil, false)
+		})
+	}
+}
+
+func TestOpenAIResponsesWebSocket_NativeLaterTurnUsageLimitDoesNotReplayFirstMessage(t *testing.T) {
+	for _, continuation := range []struct {
+		name           string
+		input          string
+		handshakeLimit bool
+	}{
+		{name: "user message", input: `[{"role":"user","content":"continue the task"}]`},
+		{name: "tool result", input: `[{"type":"function_call_output","call_id":"call_inspect","output":"file contents"}]`},
+		{name: "handshake after disconnect", input: `[{"role":"user","content":"continue the task"}]`, handshakeLimit: true},
+	} {
+		t.Run(continuation.name, func(t *testing.T) {
+			runOpenAIResponsesWebSocketUsageLimitCase(t, service.OpenAIWSIngressModeCtxPool, []string{
+				`{"type":"response.create","model":"gpt-5.1","instructions":"Inspect the project before editing it.","tools":[{"type":"function","name":"inspect","parameters":{"type":"object"}}],"input":[{"role":"user","content":"fix the project"}]}`,
+				fmt.Sprintf(`{"type":"response.create","model":"gpt-5.1","store":%t,"previous_response_id":"resp_ws_turn_2","input":%s}`, continuation.handshakeLimit, continuation.input),
+			}, continuation.handshakeLimit)
+		})
+	}
+}
+
+func runOpenAIResponsesWebSocketUsageLimitCase(t *testing.T, mode string, followups []string, handshakeLimit bool) {
+	t.Helper()
 	gin.SetMode(gin.TestMode)
 
-	firstHitCh := make(chan []byte, 1)
+	firstHitCh := make(chan []byte, len(followups)+1)
 	secondHitCh := make(chan []byte, 1)
+	var firstConnections atomic.Int32
+	var secondConnections atomic.Int32
 
 	firstUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		if firstConnections.Add(1) > 1 && handshakeLimit {
+			w.WriteHeader(http.StatusTooManyRequests)
+			return
+		}
 		conn, err := coderws.Accept(w, r, &coderws.AcceptOptions{CompressionMode: coderws.CompressionContextTakeover})
 		if err != nil {
 			return
 		}
 		defer func() { _ = conn.CloseNow() }()
 
-		readCtx, cancelRead := context.WithTimeout(r.Context(), 3*time.Second)
-		_, payload, readErr := conn.Read(readCtx)
-		cancelRead()
-		if readErr == nil {
+		for turn := 0; turn <= len(followups); turn++ {
+			readCtx, cancelRead := context.WithTimeout(r.Context(), 3*time.Second)
+			_, payload, readErr := conn.Read(readCtx)
+			cancelRead()
+			if readErr != nil {
+				return
+			}
 			firstHitCh <- payload
+			if turn < len(followups) {
+				output := `[]`
+				if turn > 0 {
+					output = `[{"type":"function_call","call_id":"call_inspect","name":"inspect","arguments":"{}"}]`
+				}
+				completed := fmt.Sprintf(`{"type":"response.completed","response":{"id":"resp_ws_turn_%d","model":"gpt-5.1","output":%s,"usage":{"input_tokens":1,"output_tokens":1}}}`, turn+1, output)
+				writeCtx, cancelWrite := context.WithTimeout(r.Context(), 3*time.Second)
+				writeErr := conn.Write(writeCtx, coderws.MessageText, []byte(completed))
+				cancelWrite()
+				if writeErr != nil {
+					return
+				}
+				if handshakeLimit && turn == len(followups)-1 {
+					return
+				}
+			}
 		}
 
 		writeCtx, cancelWrite := context.WithTimeout(r.Context(), 3*time.Second)
@@ -2513,6 +2566,7 @@ func TestOpenAIResponsesWebSocket_FailoverOnUpstreamUsageLimitEvent(t *testing.T
 	defer firstUpstream.Close()
 
 	secondUpstream := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		secondConnections.Add(1)
 		conn, err := coderws.Accept(w, r, &coderws.AcceptOptions{CompressionMode: coderws.CompressionContextTakeover})
 		if err != nil {
 			return
@@ -2550,7 +2604,7 @@ func TestOpenAIResponsesWebSocket_FailoverOnUpstreamUsageLimitEvent(t *testing.T
 			},
 			Extra: map[string]any{
 				"openai_apikey_responses_websockets_v2_enabled": true,
-				"openai_apikey_responses_websockets_v2_mode":    service.OpenAIWSIngressModePassthrough,
+				"openai_apikey_responses_websockets_v2_mode":    mode,
 			},
 		},
 		{
@@ -2568,7 +2622,7 @@ func TestOpenAIResponsesWebSocket_FailoverOnUpstreamUsageLimitEvent(t *testing.T
 			},
 			Extra: map[string]any{
 				"openai_apikey_responses_websockets_v2_enabled": true,
-				"openai_apikey_responses_websockets_v2_mode":    service.OpenAIWSIngressModePassthrough,
+				"openai_apikey_responses_websockets_v2_mode":    mode,
 			},
 		},
 	}
@@ -2590,6 +2644,7 @@ func TestOpenAIResponsesWebSocket_FailoverOnUpstreamUsageLimitEvent(t *testing.T
 	accountRepo := &openAIWSFailoverHandlerAccountRepoStub{accounts: accounts}
 	rateLimitSvc := service.NewRateLimitService(accountRepo, nil, cfg, nil, nil)
 	billingCacheSvc := service.NewBillingCacheService(nil, nil, nil, nil, nil, nil, cfg, nil)
+	t.Cleanup(billingCacheSvc.Stop)
 	gatewaySvc := service.NewOpenAIGatewayService(
 		accountRepo,
 		nil,
@@ -2643,7 +2698,11 @@ func TestOpenAIResponsesWebSocket_FailoverOnUpstreamUsageLimitEvent(t *testing.T
 		c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: apiKey.User.ID, Concurrency: 1})
 		c.Next()
 	})
-	router.GET("/openai/v1/responses", h.ResponsesWebSocket)
+	handlerDone := make(chan struct{})
+	router.GET("/openai/v1/responses", func(c *gin.Context) {
+		h.ResponsesWebSocket(c)
+		close(handlerDone)
+	})
 	handlerServer := httptest.NewServer(router)
 	defer handlerServer.Close()
 
@@ -2662,22 +2721,58 @@ func TestOpenAIResponsesWebSocket_FailoverOnUpstreamUsageLimitEvent(t *testing.T
 	cancelWrite()
 	require.NoError(t, err)
 
+	for _, followup := range followups {
+		readCtx, cancelRead := context.WithTimeout(context.Background(), 5*time.Second)
+		_, event, readErr := clientConn.Read(readCtx)
+		cancelRead()
+		require.NoError(t, readErr)
+		require.Equal(t, "response.completed", gjson.GetBytes(event, "type").String())
+
+		writeCtx, cancelWrite := context.WithTimeout(context.Background(), 3*time.Second)
+		writeErr := clientConn.Write(writeCtx, coderws.MessageText, []byte(followup))
+		cancelWrite()
+		require.NoError(t, writeErr)
+	}
+
 	readCtx, cancelRead := context.WithTimeout(context.Background(), 5*time.Second)
 	_, event, err := clientConn.Read(readCtx)
 	cancelRead()
 	require.NoError(t, err)
 	require.Equal(t, "response.completed", gjson.GetBytes(event, "type").String())
 	require.Equal(t, "resp_ws_failover_ok", gjson.GetBytes(event, "response.id").String())
-
+	_ = clientConn.CloseNow()
 	select {
-	case <-firstHitCh:
-	case <-time.After(3 * time.Second):
-		t.Fatal("等待第一个上游收到首帧超时")
+	case <-handlerDone:
+	case <-time.After(5 * time.Second):
+		t.Fatal("timed out waiting for websocket handler")
 	}
+
+	expectedFrames := len(followups) + 1
+	if handshakeLimit {
+		expectedFrames--
+		require.Equal(t, int32(2), firstConnections.Load(), "the same account must reject the replacement handshake")
+	}
+	require.Len(t, firstHitCh, expectedFrames)
+	require.Equal(t, int32(1), secondConnections.Load())
 	select {
-	case <-secondHitCh:
+	case retried := <-secondHitCh:
+		if len(followups) > 0 {
+			// The local replay state has the whole completed chain and the
+			// current unsent turn. It may migrate that turn, never just frame 1.
+			require.False(t, gjson.GetBytes(retried, "previous_response_id").Exists())
+			require.Contains(t, string(retried), "fix the project")
+			current := gjson.Get(followups[len(followups)-1], "input").Array()
+			replayed := gjson.GetBytes(retried, "input").Array()
+			require.Greater(t, len(replayed), len(current))
+			if current[0].Get("type").String() == "function_call_output" {
+				require.True(t, gjson.GetBytes(retried, `input.#(type=="function_call").call_id`).Exists(), "tool continuation must retain its matching call")
+			}
+			for i := range current {
+				require.JSONEq(t, current[i].Raw, replayed[len(replayed)-len(current)+i].Raw)
+			}
+		}
 	case <-time.After(3 * time.Second):
-		t.Fatal("等待第二个上游收到重放首帧超时")
+		t.Fatal("等待第二个上游收到当前轮重放超时")
 	}
 	require.Equal(t, []int64{int64(9902)}, accountRepo.rateLimitedIDs)
 }

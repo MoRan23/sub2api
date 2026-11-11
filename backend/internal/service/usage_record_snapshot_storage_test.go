@@ -63,10 +63,10 @@ func TestUsageRecordSnapshotLargePricingBackingOwnsAllValues(t *testing.T) {
 	g.AudioRealtimePricePerMin, g.AudioTTSPricePerMillionChars, g.AudioSTTPricePerHour = &value, &value, &value
 	price := ChannelModelPricing{
 		Models: []string{"gpt-4o"}, InputPrice: &value, OutputPrice: &value,
-		CacheWritePrice: &value, CacheWrite1hPrice: &value, CacheReadPrice: &value,
+		CacheWritePrice: &value, CacheWrite1hPrice: &value, CacheWrite12hPrice: &value, CacheReadPrice: &value,
 		FastMultiplier: &value, FlexMultiplier: &value, ImageInputPrice: &value, ImageOutputPrice: &value, PerRequestPrice: &value,
 		Intervals: []PricingInterval{{MaxTokens: &maxTokens, TierLabel: "one",
-			InputPrice: &value, OutputPrice: &value, CacheWritePrice: &value, CacheWrite1hPrice: &value, CacheReadPrice: &value,
+			InputPrice: &value, OutputPrice: &value, CacheWritePrice: &value, CacheWrite1hPrice: &value, CacheWrite12hPrice: &value, CacheReadPrice: &value,
 			InputMultiplier: &value, OutputMultiplier: &value, CacheWriteMultiplier: &value, CacheReadMultiplier: &value, PerRequestPrice: &value}},
 		TimePricing: &ChannelTimePricing{Timezone: "UTC", Periods: []ChannelTimePricingPeriod{{StartTime: "00:00", EndTime: "23:59", Multiplier: 1.1}}},
 	}
@@ -100,13 +100,13 @@ func TestUsageRecordSnapshotLargePricingBackingOwnsAllValues(t *testing.T) {
 	require.Equal(t, "upstream-id", *got.upstreamRequestID)
 	require.Equal(t, "tts", got.Result.AudioUsage.Mode)
 	for _, p := range got.APIKey.Group.ModelPricing {
-		for _, pointer := range []*float64{p.InputPrice, p.OutputPrice, p.CacheWritePrice, p.CacheWrite1hPrice, p.CacheReadPrice,
+		for _, pointer := range []*float64{p.InputPrice, p.OutputPrice, p.CacheWritePrice, p.CacheWrite1hPrice, p.CacheWrite12hPrice, p.CacheReadPrice,
 			p.FastMultiplier, p.FlexMultiplier, p.ImageInputPrice, p.ImageOutputPrice, p.PerRequestPrice} {
 			require.Equal(t, 1.25, *pointer)
 		}
 		for _, interval := range p.Intervals {
 			require.Equal(t, 10000, *interval.MaxTokens)
-			for _, pointer := range []*float64{interval.InputPrice, interval.OutputPrice, interval.CacheWritePrice, interval.CacheWrite1hPrice,
+			for _, pointer := range []*float64{interval.InputPrice, interval.OutputPrice, interval.CacheWritePrice, interval.CacheWrite1hPrice, interval.CacheWrite12hPrice,
 				interval.CacheReadPrice, interval.InputMultiplier, interval.OutputMultiplier, interval.CacheWriteMultiplier, interval.CacheReadMultiplier, interval.PerRequestPrice} {
 				require.Equal(t, 1.25, *pointer)
 			}

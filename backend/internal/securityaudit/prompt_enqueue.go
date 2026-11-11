@@ -10,6 +10,7 @@ type Enqueuer struct {
 	repo    JobRepository
 	payload PayloadStore
 	metrics Metrics
+	notify  func()
 }
 
 func NewEnqueuer(config ConfigStore, repo JobRepository, payload PayloadStore, metrics ...Metrics) *Enqueuer {
@@ -85,6 +86,9 @@ func (e *Enqueuer) enqueueWithConfig(ctx context.Context, req Request, cfg Activ
 		}))
 		e.recordDropped()
 		return err
+	}
+	if e.notify != nil {
+		e.notify()
 	}
 	LogInfo(EventJobEnqueued, mergeLogFields(baseFields, map[string]any{
 		"job_id":         job.ID,

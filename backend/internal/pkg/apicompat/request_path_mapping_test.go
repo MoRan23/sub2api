@@ -109,3 +109,30 @@ func TestRequestPathMappingsDoNotMutateRequests(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, before, after)
 }
+
+func TestAnthropicToResponsesPathMappingDefersEffortWithoutLosingProvenance(t *testing.T) {
+	var request AnthropicRequest
+	require.NoError(t, json.Unmarshal([]byte(`{
+		"model":"gpt-6.1-sol","max_tokens":1,"thinking":{"type":"disabled"},
+		"system":[{"type":"text","text":"x-anthropic-billing-header: unused"},{"type":"text","text":"timezone: Asia/Shanghai"}],
+		"messages":[{"role":"user","content":[{"type":"text","text":"timezone: Asia/Shanghai"}]}]
+	}`), &request))
+	before, err := json.Marshal(&request)
+	require.NoError(t, err)
+	_, _, err = AnthropicToResponsesWithPathMapping(&request)
+	require.Error(t, err, "ordinary converter must retain its validation")
+	options := AnthropicToResponsesOptions{MinOutputTokens: 32, DeferReasoningEffortValidation: true}
+	out, paths, err := AnthropicToResponsesWithOptionsAndPathMapping(&request, options)
+	require.NoError(t, err)
+	plain, err := AnthropicToResponsesWithOptions(&request, options)
+	require.NoError(t, err)
+	require.Equal(t, plain, out)
+	require.Equal(t, "none", out.Reasoning.Effort)
+	require.Equal(t, 32, *out.MaxOutputTokens)
+	require.Equal(t, "", paths["system.0.text"])
+	require.Equal(t, "input.0.content.0.text", paths["system.1.text"])
+	require.Equal(t, "input.1.content.0.text", paths["messages.0.content.0.text"])
+	after, err := json.Marshal(&request)
+	require.NoError(t, err)
+	require.Equal(t, before, after)
+}

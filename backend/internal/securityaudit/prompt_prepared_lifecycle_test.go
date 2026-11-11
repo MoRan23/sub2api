@@ -282,6 +282,8 @@ func TestPreparedPromptAsyncEnqueueOwnsTextBeforeReturning(t *testing.T) {
 		config: config, enqueuer: NewEnqueuer(gate, repo, payload),
 		background: context.Background(), enqueueSlots: make(chan struct{}, 1),
 	}
+	notifications := 0
+	service.enqueuer.notify = func() { notifications++ }
 	req := preparePromptRequest(Request{
 		RequestID: "async-owned", Protocol: "responses", GroupID: &group,
 		Body: []byte(`{"input":[{"role":"user","content":[{"type":"input_text","text":"owned 中文😀"},{"type":"input_image","image_url":"data:image/png;base64,` + strings.Repeat("A", 64<<10) + `"}]}]}`),
@@ -310,6 +312,7 @@ func TestPreparedPromptAsyncEnqueueOwnsTextBeforeReturning(t *testing.T) {
 	service.enqueueWG.Wait()
 	require.Equal(t, want.Redacted(), repo.createdSnapshot)
 	require.Equal(t, want.ScanText, payload.values[1])
+	require.Equal(t, 1, notifications)
 	require.Empty(t, service.enqueueSlots)
 }
 
@@ -327,6 +330,7 @@ func TestPreparedPromptAsyncSkipsExcludedInputWithoutParsing(t *testing.T) {
 			config := &fakeConfigStore{active: true, cfg: ActiveConfig{RiskControlEnabled: true, Enabled: true, GroupIDs: tc.groups, Endpoints: tc.endpoints}}
 			repo := &fakeJobRepository{}
 			service := &PromptService{config: config, enqueuer: NewEnqueuer(config, repo, &fakePayloadStore{}), background: context.Background(), enqueueSlots: make(chan struct{}, 1)}
+			service.enqueuer.notify = func() { t.Error("skipped input must not wake workers") }
 			req := preparePromptRequest(Request{Protocol: "responses", GroupID: &group, Body: []byte(`invalid JSON`)})
 			require.NoError(t, service.Enqueue(context.Background(), req))
 			require.Nil(t, req.prepared.err)

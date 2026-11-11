@@ -207,6 +207,7 @@ func (b *usageSnapshotBuilder) modelPricing(p ChannelModelPricing) ChannelModelP
 	p.Models = b.strings(p.Models)
 	p.InputPrice, p.OutputPrice = b.float(p.InputPrice), b.float(p.OutputPrice)
 	p.CacheWritePrice, p.CacheWrite1hPrice, p.CacheReadPrice = b.float(p.CacheWritePrice), b.float(p.CacheWrite1hPrice), b.float(p.CacheReadPrice)
+	p.CacheWrite12hPrice = b.float(p.CacheWrite12hPrice)
 	p.FastMultiplier, p.FlexMultiplier = b.float(p.FastMultiplier), b.float(p.FlexMultiplier)
 	p.ImageInputPrice, p.ImageOutputPrice, p.PerRequestPrice = b.float(p.ImageInputPrice), b.float(p.ImageOutputPrice), b.float(p.PerRequestPrice)
 	p.ReasoningEffortMultipliers = b.floatMap(p.ReasoningEffortMultipliers)
@@ -216,6 +217,7 @@ func (b *usageSnapshotBuilder) modelPricing(p ChannelModelPricing) ChannelModelP
 			v.MaxTokens, v.TierLabel = b.int(v.MaxTokens), b.string(v.TierLabel)
 			v.InputPrice, v.OutputPrice = b.float(v.InputPrice), b.float(v.OutputPrice)
 			v.CacheWritePrice, v.CacheWrite1hPrice, v.CacheReadPrice = b.float(v.CacheWritePrice), b.float(v.CacheWrite1hPrice), b.float(v.CacheReadPrice)
+			v.CacheWrite12hPrice = b.float(v.CacheWrite12hPrice)
 			v.InputMultiplier, v.OutputMultiplier = b.float(v.InputMultiplier), b.float(v.OutputMultiplier)
 			v.CacheWriteMultiplier, v.CacheReadMultiplier, v.PerRequestPrice = b.float(v.CacheWriteMultiplier), b.float(v.CacheReadMultiplier), b.float(v.PerRequestPrice)
 			intervals[i] = v

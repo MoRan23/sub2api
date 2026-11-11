@@ -58,6 +58,8 @@ func retryDiagnostic(ctx context.Context, delay time.Duration, run func(context.
 			usage.ImageOutputTokens += u.ImageOutputTokens
 			usage.ImageCacheReadTokens += u.ImageCacheReadTokens
 			usage.CacheCreationInputTokens += u.CacheCreationInputTokens
+			usage.CacheCreation30mInputTokens += u.CacheCreation30mInputTokens
+			usage.CacheCreation12hInputTokens += u.CacheCreation12hInputTokens
 			usage.CacheReadInputTokens += u.CacheReadInputTokens
 		}
 		if !retryableDiagnosticError(err) {

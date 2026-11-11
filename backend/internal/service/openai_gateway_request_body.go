@@ -2792,9 +2792,19 @@ func supportsOpenAIReasoningEffortMax(model string) bool {
 	}
 }
 
-// validateGPT61CompatRequest runs after model mapping, before conversion can
-// discard unsupported explicit effort selections or disabled thinking.
+// validateGPT61CompatRequest validates the converted request after model
+// mapping and reasoning effort policy application.
 func validateGPT61CompatRequest(body []byte, model string) error {
+	if err := validateGPT61RawEffort(body, model); err != nil {
+		return err
+	}
+	if gjson.GetBytes(body, "thinking.type").String() == "disabled" {
+		return openai.ValidateGPT61ReasoningEffort(model, "none")
+	}
+	return nil
+}
+
+func validateGPT61RawEffort(body []byte, model string) error {
 	if !openai.IsGPT61SolModelSpelling(model) && !openai.IsGPT61TerraModelSpelling(model) {
 		return nil
 	}
@@ -2802,9 +2812,6 @@ func validateGPT61CompatRequest(body []byte, model string) error {
 		if err := openai.ValidateGPT61ReasoningEffort(model, gjson.GetBytes(body, path).String()); err != nil {
 			return err
 		}
-	}
-	if gjson.GetBytes(body, "thinking.type").String() == "disabled" {
-		return openai.ValidateGPT61ReasoningEffort(model, "none")
 	}
 	requestedModel := strings.TrimSuffix(openai.CanonicalizeOpenAIModelAliasSpelling(gjson.GetBytes(body, "model").String()), "-openai-compact")
 	for _, effort := range []string{"none", "minimal"} {
