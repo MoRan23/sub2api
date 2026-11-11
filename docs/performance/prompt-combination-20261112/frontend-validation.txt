@@ -1,0 +1,53 @@
+Frontend validation, cwd frontend, all commands exited 0.
+Distinct test coverage is 78 cases.
+Repeated test runs below must not be added together as unique cases.
+
+1. Initial relevant suites: 7 files, 77 tests passed, 9.35s.
+pnpm exec vitest run \
+  src/features/prompt-audit/__tests__/CombinationPolicyList.spec.ts \
+  src/features/prompt-audit/__tests__/KeywordKeyWhitelist.spec.ts \
+  src/features/prompt-audit/__tests__/viewModel.spec.ts \
+  src/features/prompt-audit/__tests__/api.spec.ts \
+  src/features/prompt-audit/__tests__/components.spec.ts \
+  src/features/prompt-audit/__tests__/PromptAuditView.spec.ts \
+  src/i18n/__tests__/localeKeyCompleteness.spec.ts
+Source log: FastCtx j-p13u8l/output.log.
+
+2. After adding the aggregate 10000-key boundary case: 2 files, 11 tests passed.
+pnpm exec vitest run \
+  src/features/prompt-audit/__tests__/CombinationPolicyList.spec.ts \
+  src/i18n/__tests__/localeKeyCompleteness.spec.ts
+pnpm exec eslint \
+  src/features/prompt-audit/components/CombinationPolicyList.vue \
+  src/features/prompt-audit/__tests__/CombinationPolicyList.spec.ts \
+  src/i18n/locales/en/admin/promptAudit.ts \
+  src/i18n/locales/zh/admin/promptAudit.ts
+Source log: FastCtx j-88n19p/output.log.
+
+3. Changed-file lint and type checking passed.
+pnpm exec vue-tsc --noEmit
+pnpm exec eslint \
+  src/features/prompt-audit/types.ts src/features/prompt-audit/api.ts \
+  src/features/prompt-audit/viewModel.ts \
+  src/features/prompt-audit/components/KeywordKeyWhitelist.vue \
+  src/features/prompt-audit/components/CombinationRuleEditor.vue \
+  src/features/prompt-audit/components/CombinationPolicyList.vue \
+  src/features/prompt-audit/components/PolicyPanel.vue \
+  src/features/prompt-audit/__tests__/CombinationPolicyList.spec.ts \
+  src/features/prompt-audit/__tests__/KeywordKeyWhitelist.spec.ts \
+  src/features/prompt-audit/__tests__/PromptAuditView.spec.ts \
+  src/features/prompt-audit/__tests__/components.spec.ts \
+  src/features/prompt-audit/__tests__/viewModel.spec.ts \
+  src/features/prompt-audit/__tests__/api.spec.ts \
+  src/i18n/locales/en/admin/promptAudit.ts \
+  src/i18n/locales/zh/admin/promptAudit.ts
+Source logs: FastCtx j-n1yx5u/output.log and j-zn7svd/output.log.
+
+4. Final configToDraft clone reduction: viewModel 25 tests passed, ESLint passed.
+pnpm exec vitest run src/features/prompt-audit/__tests__/viewModel.spec.ts
+pnpm exec eslint src/features/prompt-audit/viewModel.ts
+pnpm build
+Production build passed: check:i18n (3 tests), vue-tsc -b, Vite 1207 modules,
+22.08s. Existing Browserslist stale data, DEP0190, mixed dynamic/static imports,
+and >500k chunk warnings; no build error.
+Source log: FastCtx j-6ft0vw/output.log.

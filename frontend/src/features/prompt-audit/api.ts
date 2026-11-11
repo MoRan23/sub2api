@@ -33,7 +33,7 @@ export async function listKeywordWhitelistUsers(search: string, page = 1): Promi
   const { data } = await apiClient.get<PaginatedResponse<PromptKeywordUserOption>>('/admin/users', {
     params: { search, page, page_size: 20 },
   })
-  return { ...data, items: data.items.map(({ id, email }) => ({ id, email })) }
+  return { ...data, items: data.items.map(({ id, email, username }) => ({ id, email, username })) }
 }
 
 export async function listKeywordWhitelistKeys(userId: number, page = 1): Promise<PaginatedResponse<PromptKeywordKeyOption>> {

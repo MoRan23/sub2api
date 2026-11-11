@@ -23,7 +23,7 @@ async function chooseUser(wrapper: ReturnType<typeof mount>, user = '1') {
 
 describe('keyword key allowlist', () => {
   beforeEach(() => {
-    api.users.mockReset().mockResolvedValue(page([{ id: 1, email: 'alice@example.test' }, { id: 2, email: 'bob@example.test' }]))
+    api.users.mockReset().mockResolvedValue(page([{ id: 1, email: 'alice@example.test', username: 'Alice' }, { id: 2, email: 'bob@example.test', username: 'Bob' }]))
     api.keys.mockReset().mockResolvedValue(page([{ id: 11, user_id: 1, name: 'key-one' }, { id: 12, user_id: 1, name: 'key-two' }, { id: 21, user_id: 2, name: 'wrong-owner' }]))
     api.identities.mockReset().mockImplementation(async (keys: PromptKeywordWhitelistKey[]) => keys.map((key) => ({ ...key, user_email: 'alice@example.test', username: 'Alice', key_name: 'key-one', available: true })))
   })
@@ -33,6 +33,7 @@ describe('keyword key allowlist', () => {
     expect(api.users).not.toHaveBeenCalled()
     expect(wrapper.text()).toContain('admin.promptAudit.keywordWhitelist.description')
     await chooseUser(wrapper)
+    expect(wrapper.get('[data-test="user"]').text()).toContain('alice@example.test / Alice')
     expect(api.keys).toHaveBeenCalledWith(1, 1)
     expect(wrapper.get('[data-test="key"]').text()).not.toContain('wrong-owner')
     expect(wrapper.get('[data-test="add-key"]').attributes('disabled')).toBeDefined()
@@ -105,6 +106,7 @@ describe('keyword key allowlist', () => {
     expect(wrapper.get('[data-test="saved-entry"]').text()).toContain('900')
     expect(wrapper.get('[data-test="saved-entry"]').text()).toContain('999')
     expect(wrapper.get('[data-test="saved-entry"]').text()).toContain('admin.promptAudit.keywordWhitelist.missingIdentity')
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
     expect(api.users).not.toHaveBeenCalled()
     expect(api.keys).not.toHaveBeenCalled()
     await wrapper.get('[data-test="remove-key"]').trigger('click')
@@ -144,6 +146,7 @@ describe('keyword key allowlist', () => {
     await flushPromises()
     expect(wrapper.text()).toContain('alice@example.test / Alice · key-one')
     expect(wrapper.find('[data-test="retry-identities"]').exists()).toBe(false)
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
     wrapper.unmount()
   })
 
@@ -168,6 +171,7 @@ describe('keyword key allowlist', () => {
     await flushPromises()
     expect(wrapper.text()).not.toContain('cleared')
     expect(wrapper.find('[data-test="saved-entry"]').exists()).toBe(false)
+    expect(wrapper.emitted('update:modelValue')).toBeUndefined()
     wrapper.unmount()
   })
 })

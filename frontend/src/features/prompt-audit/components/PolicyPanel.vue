@@ -54,8 +54,6 @@
           </div>
         </fieldset>
 
-        <CombinationPolicyList v-model="combinationPolicies" :templates="draft.combination_templates" />
-
         <fieldset class="mt-5 border-t border-gray-100 pt-5 dark:border-dark-800" data-test="local-rule-scope">
           <legend class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.promptAudit.combination.sharedScope') }}</legend>
           <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.combination.sharedScopeHint') }}</p>
@@ -75,6 +73,8 @@
             @update:model-value="patch({ keyword_whitelist_keys: $event })"
           />
         </fieldset>
+
+        <CombinationPolicyList v-model="combinationPolicies" :templates="draft.combination_templates" />
       </div>
 
       <div class="space-y-4 rounded-xl border border-gray-200 p-4 dark:border-dark-700/60 dark:bg-dark-900/20 sm:p-5">

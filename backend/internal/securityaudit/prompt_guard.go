@@ -235,7 +235,9 @@ func callPromptScanner(ctx context.Context, scanner PromptScanner, endpoint Acti
 			err = &GuardError{Code: ErrorCodeUnavailable, Retryable: false}
 		}
 	}()
-	return scanner.Scan(ctx, endpoint, chunk, scanners)
+	// Only the small scanner selection crosses this injected interface; the
+	// rest of the borrowed configuration remains immutable and shared.
+	return scanner.Scan(ctx, endpoint, chunk, append([]string(nil), scanners...))
 }
 
 func (g *GuardEvaluator) nodeSemaphore(id string) chan struct{} {

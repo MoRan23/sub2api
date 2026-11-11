@@ -144,11 +144,16 @@ func (s *PromptService) CheckKeyword(ctx context.Context, req Request) (*PromptD
 	if s.config.BlockingActivationDegraded() {
 		return nil, &GuardError{Code: ErrorCodeUnavailable}
 	}
-	cfg, ok := s.config.Active()
+	cfg, ok := readOnlyActiveConfig(s.config)
 	if !ok || (!cfg.KeywordBlockingActive() && !cfg.CombinationBlockingActive()) || !cfg.KeywordIncludesGroup(req.GroupID) {
 		return &PromptDecision{Kind: DecisionAllow, AllowNextStage: true}, nil
 	}
 	if cfg.KeywordWhitelistsKey(req.UserID, req.APIKeyID) {
+		return &PromptDecision{Kind: DecisionAllow, AllowNextStage: true}, nil
+	}
+	if !cfg.KeywordBlockingActive() && !cfg.combinationAppliesTo(req.UserID, req.APIKeyID) {
+		// A rule-level exemption skips only its own matcher. When none remain,
+		// avoid preparing a large body that is still eligible for the next stage.
 		return &PromptDecision{Kind: DecisionAllow, AllowNextStage: true}, nil
 	}
 
@@ -330,7 +335,7 @@ func (s *PromptService) Enqueue(_ context.Context, req Request) error {
 	}
 	// Do not parse out-of-scope bodies on the handler. Reuse the enqueuer's
 	// existing skip/drop accounting, without waiting for a background slot.
-	cfg, ok := s.config.Active()
+	cfg, ok := readOnlyActiveConfig(s.config)
 	if !ok || cfg.EffectiveMode() != ModeAsync || !cfg.IncludesGroup(req.GroupID) || len(cfg.EnabledEndpoints()) == 0 {
 		return s.enqueuer.enqueueWithConfig(context.Background(), req, cfg, ok)
 	}
@@ -375,7 +380,7 @@ func (s *PromptService) Evaluate(ctx context.Context, req Request) (*PromptDecis
 	if s.config.BlockingActivationDegraded() {
 		return nil, &GuardError{Code: ErrorCodeUnavailable}
 	}
-	cfg, ok := s.config.Active()
+	cfg, ok := readOnlyActiveConfig(s.config)
 	if !ok {
 		if s.config.EffectiveMode() == ModeBlocking {
 			return nil, &GuardError{Code: ErrorCodeUnavailable}
@@ -403,7 +408,7 @@ func (s *PromptService) SaveConfig(ctx context.Context, req UpdateConfigRequest,
 
 func (s *PromptService) Runtime(ctx context.Context) RuntimeSnapshot {
 	expected, activeVersion, loadedAt, loadError := s.config.RuntimeState()
-	cfg, hasConfig := s.config.Active()
+	cfg, hasConfig := readOnlyActiveConfig(s.config)
 	mode := s.EffectiveMode()
 	workerTotal, queueCapacity := 0, 0
 	if hasConfig {
@@ -552,7 +557,7 @@ func (s *PromptService) resolveProbeEndpoint(input UpdateEndpoint) (ActiveEndpoi
 	}
 	token := strings.TrimSpace(input.Token)
 	if token == "" {
-		if cfg, ok := s.config.Active(); ok {
+		if cfg, ok := readOnlyActiveConfig(s.config); ok {
 			for _, endpoint := range cfg.Endpoints {
 				if endpoint.ID != strings.TrimSpace(input.ID) {
 					continue

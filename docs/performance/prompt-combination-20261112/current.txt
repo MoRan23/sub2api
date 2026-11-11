@@ -1,0 +1,105 @@
+# Round 1; GOMAXPROCS=4; benchtime=250ms
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/securityaudit
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkPromptAuditMemory/text/65536/combination-4         	    1423	    209167 ns/op	 313.94 MB/s	  294743 B/op	      85 allocs/op
+BenchmarkPromptAuditMemory/text/1048576/combination-4       	     100	   2867152 ns/op	 365.77 MB/s	 4242358 B/op	      94 allocs/op
+BenchmarkPromptAuditMemory/text/4194304/combination-4       	      26	  11204197 ns/op	 374.36 MB/s	16830523 B/op	      97 allocs/op
+BenchmarkPromptAuditMemory/text/8388608/combination-4       	      12	  23216484 ns/op	 361.33 MB/s	33605650 B/op	     102 allocs/op
+BenchmarkPromptAuditMemory/image/65536/combination-4        	    5558	     48114 ns/op	1365.29 MB/s	   78284 B/op	      71 allocs/op
+BenchmarkPromptAuditMemory/image/1048576/combination-4      	     445	    664662 ns/op	1577.84 MB/s	 1061401 B/op	      71 allocs/op
+BenchmarkPromptAuditMemory/image/4194304/combination-4      	     122	   2438054 ns/op	1720.41 MB/s	 4207353 B/op	      72 allocs/op
+BenchmarkPromptAuditMemory/image/8388608/combination-4      	      48	   5432244 ns/op	1544.25 MB/s	 8401636 B/op	      72 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/securityaudit
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkPromptCombinationFilter/plain/65536-4         	      18	  15830636 ns/op	   4.14 MB/s	   68363 B/op	      53 allocs/op
+BenchmarkPromptCombinationFilter/filesystem/65536-4    	     267	   1097435 ns/op	  62.94 MB/s	  152365 B/op	      56 allocs/op
+BenchmarkPromptCombinationFilter/shortpath/65536-4     	      86	   3407134 ns/op	  19.25 MB/s	  130492 B/op	      64 allocs/op
+BenchmarkPromptCombinationFilter/url/65536-4           	      73	   4129856 ns/op	  15.88 MB/s	   79284 B/op	      55 allocs/op
+BenchmarkPromptCombinationFilter/plain/1048576-4       	       2	 221819534 ns/op	   4.73 MB/s	 1068628 B/op	      73 allocs/op
+BenchmarkPromptCombinationFilter/filesystem/1048576-4  	      18	  15587030 ns/op	  70.88 MB/s	 2260676 B/op	      77 allocs/op
+BenchmarkPromptCombinationFilter/shortpath/1048576-4   	       5	  57613080 ns/op	  18.20 MB/s	 1903377 B/op	     227 allocs/op
+BenchmarkPromptCombinationFilter/url/1048576-4         	       4	  64440268 ns/op	  16.27 MB/s	 1169822 B/op	      82 allocs/op
+BenchmarkPromptCombinationFilter/plain/4194304-4       	       1	 906091747 ns/op	   4.63 MB/s	 4217520 B/op	      80 allocs/op
+BenchmarkPromptCombinationFilter/filesystem/4194304-4  	       4	  66537304 ns/op	  66.41 MB/s	 8991286 B/op	     133 allocs/op
+BenchmarkPromptCombinationFilter/shortpath/4194304-4   	       2	 214690254 ns/op	  19.54 MB/s	 7563420 B/op	     749 allocs/op
+BenchmarkPromptCombinationFilter/url/4194304-4         	       1	 253450073 ns/op	  16.55 MB/s	 4629088 B/op	     152 allocs/op
+BenchmarkPromptCombinationFilter/plain/8388608-4       	       1	1720916341 ns/op	   4.87 MB/s	 8403744 B/op	      81 allocs/op
+BenchmarkPromptCombinationFilter/filesystem/8388608-4  	       2	 125281914 ns/op	  70.54 MB/s	17988516 B/op	     221 allocs/op
+BenchmarkPromptCombinationFilter/shortpath/8388608-4   	       1	 423427207 ns/op	  19.81 MB/s	15148072 B/op	    1448 allocs/op
+BenchmarkPromptCombinationFilter/url/8388608-4         	       1	 509590113 ns/op	  16.46 MB/s	 9207696 B/op	     231 allocs/op
+PASS
+# Round 2; GOMAXPROCS=4; benchtime=250ms
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/securityaudit
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkPromptAuditMemory/text/65536/combination-4         	    1364	    219166 ns/op	 299.62 MB/s	  294578 B/op	      85 allocs/op
+BenchmarkPromptAuditMemory/text/1048576/combination-4       	     100	   3143736 ns/op	 333.59 MB/s	 4238502 B/op	      92 allocs/op
+BenchmarkPromptAuditMemory/text/4194304/combination-4       	      25	  11399213 ns/op	 367.96 MB/s	16838901 B/op	     103 allocs/op
+BenchmarkPromptAuditMemory/text/8388608/combination-4       	      12	  24038564 ns/op	 348.97 MB/s	33605206 B/op	     100 allocs/op
+BenchmarkPromptAuditMemory/image/65536/combination-4        	    5736	     47632 ns/op	1379.13 MB/s	   78281 B/op	      71 allocs/op
+BenchmarkPromptAuditMemory/image/1048576/combination-4      	     446	    654359 ns/op	1602.68 MB/s	 1061431 B/op	      71 allocs/op
+BenchmarkPromptAuditMemory/image/4194304/combination-4      	     122	   2440195 ns/op	1718.90 MB/s	 4207260 B/op	      71 allocs/op
+BenchmarkPromptAuditMemory/image/8388608/combination-4      	      60	   4874480 ns/op	1720.96 MB/s	 8401703 B/op	      72 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/securityaudit
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkPromptCombinationFilter/plain/65536-4         	      21	  13379460 ns/op	   4.90 MB/s	   68264 B/op	      53 allocs/op
+BenchmarkPromptCombinationFilter/filesystem/65536-4    	     304	    992156 ns/op	  69.62 MB/s	  152476 B/op	      56 allocs/op
+BenchmarkPromptCombinationFilter/shortpath/65536-4     	      90	   3502884 ns/op	  18.72 MB/s	  131342 B/op	      64 allocs/op
+BenchmarkPromptCombinationFilter/url/65536-4           	      73	   4048119 ns/op	  16.20 MB/s	   78704 B/op	      55 allocs/op
+BenchmarkPromptCombinationFilter/plain/1048576-4       	       2	 229673412 ns/op	   4.57 MB/s	 1065996 B/op	      67 allocs/op
+BenchmarkPromptCombinationFilter/filesystem/1048576-4  	      18	  15666449 ns/op	  70.52 MB/s	 2256258 B/op	      76 allocs/op
+BenchmarkPromptCombinationFilter/shortpath/1048576-4   	       5	  54571433 ns/op	  19.22 MB/s	 1904414 B/op	     229 allocs/op
+BenchmarkPromptCombinationFilter/url/1048576-4         	       4	  66943006 ns/op	  15.66 MB/s	 1169822 B/op	      82 allocs/op
+BenchmarkPromptCombinationFilter/plain/4194304-4       	       1	 930035758 ns/op	   4.51 MB/s	 4217504 B/op	      80 allocs/op
+BenchmarkPromptCombinationFilter/filesystem/4194304-4  	       4	  62591185 ns/op	  70.60 MB/s	 9000974 B/op	     136 allocs/op
+BenchmarkPromptCombinationFilter/shortpath/4194304-4   	       2	 205341780 ns/op	  20.43 MB/s	 7584868 B/op	     758 allocs/op
+BenchmarkPromptCombinationFilter/url/4194304-4         	       1	 254961137 ns/op	  16.45 MB/s	 4629088 B/op	     152 allocs/op
+BenchmarkPromptCombinationFilter/plain/8388608-4       	       1	1806579929 ns/op	   4.64 MB/s	 8403336 B/op	      80 allocs/op
+BenchmarkPromptCombinationFilter/filesystem/8388608-4  	       2	 125672374 ns/op	  70.33 MB/s	17967004 B/op	     211 allocs/op
+BenchmarkPromptCombinationFilter/shortpath/8388608-4   	       1	 428906084 ns/op	  19.56 MB/s	15111000 B/op	    1443 allocs/op
+BenchmarkPromptCombinationFilter/url/8388608-4         	       1	 513459917 ns/op	  16.34 MB/s	 9207680 B/op	     231 allocs/op
+PASS
+# Round 3; GOMAXPROCS=4; benchtime=250ms
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/securityaudit
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkPromptAuditMemory/text/65536/combination-4         	    1305	    226401 ns/op	 290.04 MB/s	  294872 B/op	      85 allocs/op
+BenchmarkPromptAuditMemory/text/1048576/combination-4       	      91	   2909495 ns/op	 360.44 MB/s	 4241585 B/op	      94 allocs/op
+BenchmarkPromptAuditMemory/text/4194304/combination-4       	      25	  11850737 ns/op	 353.94 MB/s	16837159 B/op	     102 allocs/op
+BenchmarkPromptAuditMemory/text/8388608/combination-4       	      10	  25666727 ns/op	 326.83 MB/s	33603356 B/op	     102 allocs/op
+BenchmarkPromptAuditMemory/image/65536/combination-4        	    5114	     59314 ns/op	1107.50 MB/s	   78288 B/op	      71 allocs/op
+BenchmarkPromptAuditMemory/image/1048576/combination-4      	     384	    773630 ns/op	1355.60 MB/s	 1061491 B/op	      71 allocs/op
+BenchmarkPromptAuditMemory/image/4194304/combination-4      	      96	   3336260 ns/op	1257.23 MB/s	 4207231 B/op	      71 allocs/op
+BenchmarkPromptAuditMemory/image/8388608/combination-4      	      57	   5609201 ns/op	1495.54 MB/s	 8401621 B/op	      72 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/securityaudit
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkPromptCombinationFilter/plain/65536-4         	      21	  14135700 ns/op	   4.64 MB/s	   68264 B/op	      53 allocs/op
+BenchmarkPromptCombinationFilter/filesystem/65536-4    	     282	   1019985 ns/op	  67.72 MB/s	  152418 B/op	      56 allocs/op
+BenchmarkPromptCombinationFilter/shortpath/65536-4     	      94	   3330071 ns/op	  19.69 MB/s	  130756 B/op	      64 allocs/op
+BenchmarkPromptCombinationFilter/url/65536-4           	      75	   4167425 ns/op	  15.73 MB/s	   78108 B/op	      55 allocs/op
+BenchmarkPromptCombinationFilter/plain/1048576-4       	       2	 233451596 ns/op	   4.49 MB/s	 1071284 B/op	      78 allocs/op
+BenchmarkPromptCombinationFilter/filesystem/1048576-4  	      15	  16988953 ns/op	  65.03 MB/s	 2257606 B/op	      76 allocs/op
+BenchmarkPromptCombinationFilter/shortpath/1048576-4   	       5	  53263239 ns/op	  19.69 MB/s	 1903355 B/op	     227 allocs/op
+BenchmarkPromptCombinationFilter/url/1048576-4         	       4	  77297947 ns/op	  13.57 MB/s	 1168506 B/op	      80 allocs/op
+BenchmarkPromptCombinationFilter/plain/4194304-4       	       1	 848733455 ns/op	   4.94 MB/s	 4217016 B/op	      78 allocs/op
+BenchmarkPromptCombinationFilter/filesystem/4194304-4  	       4	  67209242 ns/op	  65.75 MB/s	 9002008 B/op	     138 allocs/op
+BenchmarkPromptCombinationFilter/shortpath/4194304-4   	       2	 227314478 ns/op	  18.45 MB/s	 7566060 B/op	     755 allocs/op
+BenchmarkPromptCombinationFilter/url/4194304-4         	       1	 257632544 ns/op	  16.28 MB/s	 4629088 B/op	     152 allocs/op
+BenchmarkPromptCombinationFilter/plain/8388608-4       	       1	1934145547 ns/op	   4.34 MB/s	 8403128 B/op	      78 allocs/op
+BenchmarkPromptCombinationFilter/filesystem/8388608-4  	       2	 129590156 ns/op	  68.20 MB/s	17985540 B/op	     214 allocs/op
+BenchmarkPromptCombinationFilter/shortpath/8388608-4   	       1	 416445663 ns/op	  20.14 MB/s	15148088 B/op	    1448 allocs/op
+BenchmarkPromptCombinationFilter/url/8388608-4         	       1	 540126752 ns/op	  15.53 MB/s	 9207696 B/op	     231 allocs/op
+PASS

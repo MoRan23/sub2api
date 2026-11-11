@@ -753,7 +753,8 @@ func ActiveFromStorage(cfg storageConfig, riskControlEnabled bool, encryptor Sec
 		if err != nil {
 			return ActiveConfig{}, err
 		}
-		policies = append(policies, ActiveCombinationPolicy{CombinationPolicy: cloneCombinationPolicy(policy), matcher: matcher})
+		policies = append(policies, ActiveCombinationPolicy{CombinationPolicy: cloneCombinationPolicy(policy), matcher: matcher,
+			whitelistKeys: compileCombinationWhitelist(policy.KeywordWhitelistKeys)})
 	}
 	active := ActiveConfig{
 		RiskControlEnabled: riskControlEnabled, Enabled: cfg.Enabled, BlockingEnabled: cfg.BlockingEnabled,

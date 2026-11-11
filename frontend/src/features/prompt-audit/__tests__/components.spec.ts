@@ -7,8 +7,9 @@ import EventWorkspace from '../components/EventWorkspace.vue'
 import EventDetailDialog from '../components/EventDetailDialog.vue'
 import FilterDeleteDialog from '../components/FilterDeleteDialog.vue'
 import KeywordEditor from '../components/KeywordEditor.vue'
+import KeywordKeyWhitelist from '../components/KeywordKeyWhitelist.vue'
 import type { PromptAuditDraft, PromptAuditEndpointDraft, PromptAuditEvent, PromptEventFilters } from '../types'
-import { emptyEventFilters, resolveDeleteRangeFilters, SCANNER_CATALOG } from '../viewModel'
+import { configToDraft, emptyEventFilters, resolveDeleteRangeFilters, SCANNER_CATALOG } from '../viewModel'
 
 vi.mock('vue-i18n', async () => {
   const actual = await vi.importActual<typeof import('vue-i18n')>('vue-i18n')
@@ -140,6 +141,38 @@ describe('Prompt Audit components', () => {
     await wrapper.get('textarea').setValue(' Alpha \n\n Beta ')
     expect(wrapper.emitted('update:modelValue')?.at(-1)?.[0]).toEqual(['Alpha', 'Beta'])
     expect(wrapper.get('[role="alert"]').text()).toBe('keyword error')
+  })
+
+  it('places the global allowlist first and isolates its updates from each combination', async () => {
+    const globalPair = { user_id: 1, api_key_id: 11 }
+    const firstPair = { user_id: 2, api_key_id: 22 }
+    const secondPair = { user_id: 3, api_key_id: 33 }
+    const draft = configToDraft({
+      enabled: false, blocking_enabled: false, blocking_latest_turn_only: false, keyword_blocking_enabled: false, keyword_blocking_active: false,
+      keyword_all_groups: true, keyword_group_ids: [], keyword_whitelist_keys: [globalPair], store_pass_events: false, effective_mode: 'off', strategy: 'priority',
+      worker_count: 4, queue_capacity: 100, scanners: [], all_groups: true, group_ids: [], endpoints: [], config_version: 1, updated_at: '', updated_by: 1, change_summary: '',
+      combination_policies: [
+        { id: 'first', name: 'First', enabled: true, topic_rules: ['topic'], intent_rules: ['intent'], keyword_whitelist_keys: [firstPair] },
+        { id: 'second', name: 'Second', enabled: true, topic_rules: ['topic'], intent_rules: ['intent'], keyword_whitelist_keys: [secondPair] },
+      ],
+    })
+    const wrapper = mount(PolicyPanel, { props: { draft, groups: [] }, global: { stubs: { KeywordKeyWhitelist: true } } })
+    let selectors = wrapper.findAllComponents(KeywordKeyWhitelist)
+    expect(selectors.map((selector) => selector.props('modelValue'))).toEqual([[globalPair], [firstPair], [secondPair]])
+    expect(selectors.map((selector) => selector.props('scope'))).toEqual(['global', 'combination', 'combination'])
+    const accept = async () => {
+      const updated = wrapper.emitted('update:draft')!.at(-1)![0] as PromptAuditDraft
+      await wrapper.setProps({ draft: updated })
+      selectors = wrapper.findAllComponents(KeywordKeyWhitelist)
+      return updated
+    }
+    selectors[1]!.vm.$emit('update:modelValue', [])
+    expect(await accept()).toMatchObject({ keyword_whitelist_keys: [globalPair], combination_policies: [{ keyword_whitelist_keys: [] }, { keyword_whitelist_keys: [secondPair] }] })
+    selectors[0]!.vm.$emit('update:modelValue', [])
+    expect(await accept()).toMatchObject({ keyword_whitelist_keys: [], combination_policies: [{ keyword_whitelist_keys: [] }, { keyword_whitelist_keys: [secondPair] }] })
+    selectors[2]!.vm.$emit('update:modelValue', [firstPair, secondPair])
+    expect(await accept()).toMatchObject({ keyword_whitelist_keys: [], combination_policies: [{ keyword_whitelist_keys: [] }, { keyword_whitelist_keys: [firstPair, secondPair] }] })
+    wrapper.unmount()
   })
 
   it('keeps identity fields separate, supports selection, and opens filter deletion from the toolbar', async () => {

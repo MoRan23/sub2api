@@ -35,6 +35,7 @@ export interface PromptKeywordWhitelistIdentity extends PromptKeywordWhitelistKe
 export interface PromptKeywordUserOption {
   id: number
   email: string
+  username?: string
 }
 
 export interface PromptKeywordKeyOption {
@@ -50,6 +51,7 @@ export interface PromptCombinationPolicy {
   topic_rules: string[]
   intent_rules: string[]
   migrate_keywords?: string[]
+  keyword_whitelist_keys?: PromptKeywordWhitelistKey[] | null
 }
 
 export interface PromptAuditConfig {

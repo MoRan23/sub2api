@@ -125,6 +125,7 @@ func cbrnCanMatchEmpty(expression *syntax.Regexp) bool {
 
 type cbrnTextSegment struct {
 	original, normalized string
+	spans                *combinationTextView
 	index                int
 	latest               bool
 	ready                bool
@@ -177,9 +178,10 @@ func matchCBRNList(rules []promptCBRNRule, segments []cbrnTextSegment, latestOnl
 				}
 				if !segment.ready {
 					segment.normalized = normalizeCBRNText(segment.original)
+					segment.spans = combinationTextSpans(segment.normalized)
 					segment.ready = true
 				}
-				location := rule.re.FindStringIndex(segment.normalized)
+				location := segment.find(rule.re)
 				if location == nil || location[0] == location[1] {
 					continue
 				}
@@ -194,6 +196,21 @@ func matchCBRNList(rules []promptCBRNRule, segments []cbrnTextSegment, latestOnl
 					Start: utf8.RuneCountInString(segment.original[:start]), End: utf8.RuneCountInString(segment.original[:end]),
 				}
 			}
+		}
+	}
+	return nil
+}
+
+func (segment *cbrnTextSegment) find(rule *regexp.Regexp) []int {
+	if segment.spans == nil {
+		return rule.FindStringIndex(segment.normalized)
+	}
+	iterator := segment.spans.iterator()
+	for span, ok := iterator.next(); ok; span, ok = iterator.next() {
+		if location := rule.FindStringIndex(segment.normalized[span.start:span.end]); location != nil {
+			location[0] += span.start
+			location[1] += span.start
+			return location
 		}
 	}
 	return nil

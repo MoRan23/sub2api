@@ -189,7 +189,7 @@ describe('PromptAuditView', () => {
     { remaining: ['keep', 'regex:\\.gov'], keywordEnabled: true },
     { remaining: [], keywordEnabled: false },
   ])('enables a migrating combination and uses the saved server keyword list on later saves ($keywordEnabled)', async ({ remaining, keywordEnabled }) => {
-    const combination = { id: 'government', name: 'Government targets', enabled: false, topic_rules: ['regex:(?i)\\.gov'], intent_rules: ['attack'], migrate_keywords: ['.gov', '.gov.'] }
+    const combination = { id: 'government', name: 'Government targets', enabled: false, topic_rules: ['regex:(?i)\\.gov'], intent_rules: ['attack'], migrate_keywords: ['.gov', '.gov.'], keyword_whitelist_keys: [] }
     const enabledCombination = { ...combination, enabled: true }
     const original = { ...baseConfig(), enabled: false, keyword_blocking_enabled: true, jailbreak_keywords: ['.gov', '.gov.', ...remaining], combination_policies: [combination] }
     mocks.getConfig.mockResolvedValue(original)
@@ -231,7 +231,7 @@ describe('PromptAuditView', () => {
     await flushPromises()
     await wrapper.get('[data-test="tab-config"]').trigger('click')
     const policy = wrapper.getComponent(PolicyStub)
-    const combination = { id: 'internal-project', name: 'Internal project', enabled: true, topic_rules: ['regex:(?i)project'], intent_rules: ['intent'], migrate_keywords: [] }
+    const combination = { id: 'internal-project', name: 'Internal project', enabled: true, topic_rules: ['regex:(?i)project'], intent_rules: ['intent'], migrate_keywords: [], keyword_whitelist_keys: [] }
     policy.vm.$emit('update:draft', { ...policy.props('draft'), combination_policies: [combination] })
     await flushPromises()
     expect(wrapper.get('[data-test="enabled-toggle"]').attributes('aria-checked')).toBe('false')
@@ -308,6 +308,39 @@ describe('PromptAuditView', () => {
     await wrapper.get('[data-test="save-config"]').trigger('click')
     await flushPromises()
     expect(mocks.updateConfig).toHaveBeenLastCalledWith(expect.objectContaining({ keyword_whitelist_keys: [] }))
+    wrapper.unmount()
+  })
+
+  it('saves and clears one combination allowlist while retaining another and the global allowlist', async () => {
+    const saved = { ...baseConfig(), keyword_whitelist_keys: [{ user_id: 7, api_key_id: 12 }], combination_policies: [
+      { id: 'first', name: 'First', enabled: true, topic_rules: ['topic'], intent_rules: ['intent'], keyword_whitelist_keys: [{ user_id: 7, api_key_id: 13 }] },
+      { id: 'second', name: 'Second', enabled: true, topic_rules: ['other'], intent_rules: ['intent'], keyword_whitelist_keys: [{ user_id: 8, api_key_id: 14 }] },
+    ] }
+    mocks.getConfig.mockResolvedValue(saved)
+    mocks.updateConfig.mockImplementation(async (payload) => ({ ...saved, ...payload, config_version: payload.expected_config_version + 1 }))
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('[data-test="tab-config"]').trigger('click')
+    const policy = wrapper.getComponent(PolicyStub)
+    const current = policy.props('draft')
+    policy.vm.$emit('update:draft', { ...current, combination_policies: [{ ...current.combination_policies[0], name: 'Renamed' }, current.combination_policies[1]] })
+    await flushPromises()
+    await wrapper.get('[data-test="save-config"]').trigger('click')
+    await flushPromises()
+    expect(mocks.updateConfig).toHaveBeenLastCalledWith(expect.objectContaining({ keyword_whitelist_keys: saved.keyword_whitelist_keys, combination_policies: [
+      expect.objectContaining({ id: 'first', name: 'Renamed', keyword_whitelist_keys: saved.combination_policies[0]!.keyword_whitelist_keys }),
+      expect.objectContaining({ id: 'second', keyword_whitelist_keys: saved.combination_policies[1]!.keyword_whitelist_keys }),
+    ] }))
+    const updated = policy.props('draft')
+    policy.vm.$emit('update:draft', { ...updated, combination_policies: [{ ...updated.combination_policies[0], keyword_whitelist_keys: [] }, updated.combination_policies[1]] })
+    await flushPromises()
+    await wrapper.get('[data-test="save-config"]').trigger('click')
+    await flushPromises()
+    expect(mocks.updateConfig).toHaveBeenLastCalledWith(expect.objectContaining({ expected_config_version: 8, keyword_whitelist_keys: saved.keyword_whitelist_keys, combination_policies: [
+      expect.objectContaining({ id: 'first', keyword_whitelist_keys: [] }),
+      expect.objectContaining({ id: 'second', keyword_whitelist_keys: saved.combination_policies[1]!.keyword_whitelist_keys }),
+    ] }))
+    expect(policy.props('draft').combination_policies[0].keyword_whitelist_keys).toEqual([])
     wrapper.unmount()
   })
 

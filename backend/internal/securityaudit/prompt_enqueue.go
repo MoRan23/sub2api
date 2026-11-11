@@ -25,7 +25,7 @@ func (e *Enqueuer) Enqueue(ctx context.Context, req Request) error {
 	if e == nil || e.config == nil || e.repo == nil || e.payload == nil {
 		return errors.New("prompt audit enqueuer unavailable")
 	}
-	cfg, ok := e.config.Active()
+	cfg, ok := readOnlyActiveConfig(e.config)
 	return e.enqueueWithConfig(ctx, req, cfg, ok)
 }
 

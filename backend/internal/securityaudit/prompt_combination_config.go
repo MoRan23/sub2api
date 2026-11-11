@@ -4,6 +4,7 @@ import (
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
+	"slices"
 	"strings"
 	"unicode"
 	"unicode/utf8"
@@ -12,20 +13,24 @@ import (
 	"golang.org/x/text/cases"
 )
 
+const MaxCombinationWhitelistKeys = 10000
+
 // CombinationPolicy is an ordered, administrator-defined topic AND latest-user
 // intent policy. Rules within each side are ORed by the shared matcher.
 type CombinationPolicy struct {
-	ID              string   `json:"id"`
-	Name            string   `json:"name"`
-	Enabled         bool     `json:"enabled"`
-	TopicRules      []string `json:"topic_rules"`
-	IntentRules     []string `json:"intent_rules"`
-	MigrateKeywords []string `json:"migrate_keywords,omitempty"`
+	ID                   string                `json:"id"`
+	Name                 string                `json:"name"`
+	Enabled              bool                  `json:"enabled"`
+	TopicRules           []string              `json:"topic_rules"`
+	IntentRules          []string              `json:"intent_rules"`
+	MigrateKeywords      []string              `json:"migrate_keywords,omitempty"`
+	KeywordWhitelistKeys []KeywordWhitelistKey `json:"keyword_whitelist_keys"`
 }
 
 type ActiveCombinationPolicy struct {
 	CombinationPolicy
-	matcher *promptCBRNMatcher
+	matcher       *promptCBRNMatcher
+	whitelistKeys map[KeywordWhitelistKey]struct{}
 }
 
 type CombinationMatch struct {
@@ -56,6 +61,8 @@ func cloneCombinationPolicy(policy CombinationPolicy) CombinationPolicy {
 	policy.TopicRules = append([]string{}, policy.TopicRules...)
 	policy.IntentRules = append([]string{}, policy.IntentRules...)
 	policy.MigrateKeywords = append([]string{}, policy.MigrateKeywords...)
+	// A nil list is an omitted update. Keep it distinct from an explicit clear.
+	policy.KeywordWhitelistKeys = slices.Clone(policy.KeywordWhitelistKeys)
 	return policy
 }
 
@@ -86,6 +93,7 @@ func normalizeCombinationPolicies(cfg *storageConfig) {
 		policy.TopicRules = canonicalBlockedKeywords(policy.TopicRules)
 		policy.IntentRules = canonicalBlockedKeywords(policy.IntentRules)
 		policy.MigrateKeywords = canonicalBlockedKeywords(policy.MigrateKeywords)
+		policy.KeywordWhitelistKeys = canonicalKeywordWhitelistKeys(policy.KeywordWhitelistKeys)
 	}
 	// The old fields are a compatibility projection, never an additional policy.
 	cfg.CBRNBlockingEnabled = false
@@ -127,7 +135,7 @@ func validCombinationPolicyName(name string) bool {
 
 func validateCombinationPolicies(policies []CombinationPolicy) error {
 	seen := make(map[string]struct{}, len(policies))
-	count, migrations := 0, 0
+	count, migrations, whitelistCount := 0, 0, 0
 	for _, policy := range policies {
 		if !validCombinationPolicyID(policy.ID) {
 			return infraerrors.BadRequest("prompt_audit_invalid_combination_policy_id", "组合规则 ID 须为 1–64 位字母、数字、下划线或短横线，并以字母或数字开头")
@@ -138,6 +146,13 @@ func validateCombinationPolicies(policies []CombinationPolicy) error {
 		seen[policy.ID] = struct{}{}
 		if !validCombinationPolicyName(policy.Name) {
 			return infraerrors.BadRequest("prompt_audit_invalid_combination_policy_name", "组合规则名称须为 1–80 个字符，不能包含控制字符")
+		}
+		if err := validateKeywordWhitelistKeys(policy.KeywordWhitelistKeys); err != nil {
+			return err
+		}
+		whitelistCount += len(policy.KeywordWhitelistKeys)
+		if whitelistCount > MaxCombinationWhitelistKeys {
+			return infraerrors.BadRequest("prompt_audit_too_many_combination_whitelist_keys", "所有组合规则的独立白名单合计不能超过 10000 条")
 		}
 		count += len(policy.TopicRules) + len(policy.IntentRules)
 		if count > MaxBlockedKeywords {
@@ -176,6 +191,15 @@ func resolveUpdatedCombinationPolicies(current storageConfig, req UpdateConfigRe
 		policies := cloneCombinationPolicies(*req.CombinationPolicies)
 		if policies == nil {
 			policies = []CombinationPolicy{}
+		}
+		saved := make(map[string][]KeywordWhitelistKey, len(current.CombinationPolicies))
+		for _, policy := range current.effectiveCombinationPolicies() {
+			saved[policy.ID] = policy.KeywordWhitelistKeys
+		}
+		for i := range policies {
+			if policies[i].KeywordWhitelistKeys == nil {
+				policies[i].KeywordWhitelistKeys = slices.Clone(saved[strings.TrimSpace(policies[i].ID)])
+			}
 		}
 		return policies
 	}
@@ -254,13 +278,25 @@ func (cfg ActiveConfig) CombinationBlockingActive() bool {
 	return false
 }
 
+func (cfg ActiveConfig) combinationAppliesTo(userID, apiKeyID int64) bool {
+	if !cfg.RiskControlEnabled {
+		return false
+	}
+	for _, policy := range cfg.CombinationPolicies {
+		if policy.Enabled && policy.matcher.hasRules() && !policy.whitelistsKey(userID, apiKeyID) {
+			return true
+		}
+	}
+	return false
+}
+
 func (cfg ActiveConfig) MatchCombination(req Request) (*CombinationMatch, error) {
 	if !cfg.RiskControlEnabled {
 		return nil, nil
 	}
 	var prepared *preparedPromptCombination
 	for _, policy := range cfg.CombinationPolicies {
-		if !policy.Enabled || !policy.matcher.hasRules() {
+		if !policy.Enabled || !policy.matcher.hasRules() || policy.whitelistsKey(req.UserID, req.APIKeyID) {
 			continue
 		}
 		if prepared == nil {
@@ -283,6 +319,45 @@ func (cfg ActiveConfig) MatchCombination(req Request) (*CombinationMatch, error)
 		}
 	}
 	return nil, nil
+}
+
+func (policy ActiveCombinationPolicy) whitelistsKey(userID, apiKeyID int64) bool {
+	if userID <= 0 || apiKeyID <= 0 {
+		return false
+	}
+	_, allowed := policy.whitelistKeys[KeywordWhitelistKey{UserID: userID, APIKeyID: apiKeyID}]
+	return allowed
+}
+
+func compileCombinationWhitelist(values []KeywordWhitelistKey) map[KeywordWhitelistKey]struct{} {
+	if len(values) == 0 {
+		return nil
+	}
+	keys := make(map[KeywordWhitelistKey]struct{}, len(values))
+	for _, value := range values {
+		keys[value] = struct{}{}
+	}
+	return keys
+}
+
+// Only new exemptions require live ownership validation. Existing unavailable
+// keys remain visible and removable, without blocking unrelated configuration
+// saves by clients that submit their complete configuration.
+func addedCombinationWhitelistKeys(current, next []CombinationPolicy) []KeywordWhitelistKey {
+	previous := make(map[string]map[KeywordWhitelistKey]struct{}, len(current))
+	for _, policy := range current {
+		previous[policy.ID] = compileCombinationWhitelist(policy.KeywordWhitelistKeys)
+	}
+	var added []KeywordWhitelistKey
+	for _, policy := range next {
+		known := previous[policy.ID]
+		for _, pair := range policy.KeywordWhitelistKeys {
+			if _, exists := known[pair]; !exists {
+				added = append(added, pair)
+			}
+		}
+	}
+	return added
 }
 
 func combinationPoliciesHash(policies []CombinationPolicy) string {

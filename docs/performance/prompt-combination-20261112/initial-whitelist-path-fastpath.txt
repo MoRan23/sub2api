@@ -1,0 +1,53 @@
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/securityaudit
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkPromptCombinationPlainPathScan/65536-4         	   24340	     12293 ns/op	5330.19 MB/s	       0 B/op	       0 allocs/op
+BenchmarkPromptCombinationPlainPathScan/65536-4         	   24416	     12304 ns/op	5325.33 MB/s	       0 B/op	       0 allocs/op
+BenchmarkPromptCombinationPlainPathScan/65536-4         	   24484	     12240 ns/op	5353.55 MB/s	       0 B/op	       0 allocs/op
+BenchmarkPromptCombinationPlainPathScan/8388608-4       	     189	   1580130 ns/op	5308.80 MB/s	       0 B/op	       0 allocs/op
+BenchmarkPromptCombinationPlainPathScan/8388608-4       	     188	   1574231 ns/op	5328.70 MB/s	       0 B/op	       0 allocs/op
+BenchmarkPromptCombinationPlainPathScan/8388608-4       	     186	   1618864 ns/op	5181.78 MB/s	       0 B/op	       0 allocs/op
+BenchmarkPromptCombinationWhitelistLookup/keys=1/hit=false-4         	26697716	        10.52 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPromptCombinationWhitelistLookup/keys=1/hit=false-4         	28572592	        10.45 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPromptCombinationWhitelistLookup/keys=1/hit=false-4         	28545324	        10.39 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPromptCombinationWhitelistLookup/keys=1/hit=true-4          	23631016	        12.80 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPromptCombinationWhitelistLookup/keys=1/hit=true-4          	23333900	        12.92 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPromptCombinationWhitelistLookup/keys=1/hit=true-4          	23421781	        12.84 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPromptCombinationWhitelistLookup/keys=100/hit=false-4       	24976885	        12.19 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPromptCombinationWhitelistLookup/keys=100/hit=false-4       	24127618	        12.18 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPromptCombinationWhitelistLookup/keys=100/hit=false-4       	24728004	        12.19 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPromptCombinationWhitelistLookup/keys=100/hit=true-4        	20951514	        14.57 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPromptCombinationWhitelistLookup/keys=100/hit=true-4        	20455216	        14.55 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPromptCombinationWhitelistLookup/keys=100/hit=true-4        	20799631	        14.41 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPromptCombinationWhitelistLookup/keys=1000/hit=false-4      	22634640	        13.41 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPromptCombinationWhitelistLookup/keys=1000/hit=false-4      	22619712	        13.35 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPromptCombinationWhitelistLookup/keys=1000/hit=false-4      	22674130	        13.30 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPromptCombinationWhitelistLookup/keys=1000/hit=true-4       	19924818	        15.04 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPromptCombinationWhitelistLookup/keys=1000/hit=true-4       	19857416	        15.15 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPromptCombinationWhitelistLookup/keys=1000/hit=true-4       	19963315	        15.06 ns/op	       0 B/op	       0 allocs/op
+BenchmarkPromptCombinationWhitelistBypass/global/keys=1/65536-4      	 4955242	        58.56 ns/op	      64 B/op	       1 allocs/op
+BenchmarkPromptCombinationWhitelistBypass/global/keys=1/65536-4      	 5101726	        58.24 ns/op	      64 B/op	       1 allocs/op
+BenchmarkPromptCombinationWhitelistBypass/global/keys=1/65536-4      	 4974483	        59.29 ns/op	      64 B/op	       1 allocs/op
+BenchmarkPromptCombinationWhitelistBypass/global/keys=1000/65536-4   	 1000000	       257.2 ns/op	      64 B/op	       1 allocs/op
+BenchmarkPromptCombinationWhitelistBypass/global/keys=1000/65536-4   	 1000000	       255.3 ns/op	      64 B/op	       1 allocs/op
+BenchmarkPromptCombinationWhitelistBypass/global/keys=1000/65536-4   	 1000000	       259.1 ns/op	      64 B/op	       1 allocs/op
+BenchmarkPromptCombinationWhitelistBypass/policy/keys=1/65536-4      	 1587655	       188.4 ns/op	      64 B/op	       1 allocs/op
+BenchmarkPromptCombinationWhitelistBypass/policy/keys=1/65536-4      	 1575508	       190.3 ns/op	      64 B/op	       1 allocs/op
+BenchmarkPromptCombinationWhitelistBypass/policy/keys=1/65536-4      	 1605306	       187.5 ns/op	      64 B/op	       1 allocs/op
+BenchmarkPromptCombinationWhitelistBypass/policy/keys=1000/65536-4   	 1412824	       212.6 ns/op	      64 B/op	       1 allocs/op
+BenchmarkPromptCombinationWhitelistBypass/policy/keys=1000/65536-4   	 1417666	       213.1 ns/op	      64 B/op	       1 allocs/op
+BenchmarkPromptCombinationWhitelistBypass/policy/keys=1000/65536-4   	 1380031	       216.6 ns/op	      64 B/op	       1 allocs/op
+BenchmarkPromptCombinationWhitelistBypass/global/keys=1/8388608-4    	 5059022	        55.86 ns/op	      64 B/op	       1 allocs/op
+BenchmarkPromptCombinationWhitelistBypass/global/keys=1/8388608-4    	 5123992	        56.64 ns/op	      64 B/op	       1 allocs/op
+BenchmarkPromptCombinationWhitelistBypass/global/keys=1/8388608-4    	 5425273	        55.76 ns/op	      64 B/op	       1 allocs/op
+BenchmarkPromptCombinationWhitelistBypass/global/keys=1000/8388608-4 	 1000000	       258.6 ns/op	      64 B/op	       1 allocs/op
+BenchmarkPromptCombinationWhitelistBypass/global/keys=1000/8388608-4 	 1000000	       261.9 ns/op	      64 B/op	       1 allocs/op
+BenchmarkPromptCombinationWhitelistBypass/global/keys=1000/8388608-4 	 1000000	       256.0 ns/op	      64 B/op	       1 allocs/op
+BenchmarkPromptCombinationWhitelistBypass/policy/keys=1/8388608-4    	 1607211	       185.9 ns/op	      64 B/op	       1 allocs/op
+BenchmarkPromptCombinationWhitelistBypass/policy/keys=1/8388608-4    	 1605096	       186.0 ns/op	      64 B/op	       1 allocs/op
+BenchmarkPromptCombinationWhitelistBypass/policy/keys=1/8388608-4    	 1614384	       185.0 ns/op	      64 B/op	       1 allocs/op
+BenchmarkPromptCombinationWhitelistBypass/policy/keys=1000/8388608-4 	 1417575	       211.0 ns/op	      64 B/op	       1 allocs/op
+BenchmarkPromptCombinationWhitelistBypass/policy/keys=1000/8388608-4 	 1415234	       210.7 ns/op	      64 B/op	       1 allocs/op
+BenchmarkPromptCombinationWhitelistBypass/policy/keys=1000/8388608-4 	 1422422	       210.5 ns/op	      64 B/op	       1 allocs/op
+PASS

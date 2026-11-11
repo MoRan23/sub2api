@@ -1,0 +1,24 @@
+Initial implementation, retained as diagnostic evidence (not the final build)
+Go 1.27.3 linux/amd64; GOEXPERIMENT=greenteagc,jsonv2; GOMAXPROCS=4
+BenchmarkPromptCombinationFilter/url/8388608, benchtime=5x
+509032431 ns/op; 60063163 B/op; 161424 allocs/op
+
+alloc_space profile, five iterations, includes benchmark setup:
+331.95 MB total sampled allocation
+132.12 MB (39.80%) (*combinationPathFilter).appendSpan
+119.02 MB (35.85%) net/url.parse
+ 40.00 MB (12.05%) encoding/json/v2.makeString
+  8.01 MB ( 2.41%) bytes.Clone
+  8.01 MB ( 2.41%) slices.Grow[[]uint8,uint8]
+  8.00 MB ( 2.41%) BenchmarkPromptCombinationFilter.func1
+  8.00 MB ( 2.41%) internal/bytealg.MakeNoZero
+
+The two path-filter hotspots account for 75.66% of this profile's allocation.
+The binary pprof and test binary stay in the local DevCache, outside this repo.
+
+Command (from backend/internal/securityaudit):
+GOMAXPROCS=4 ./securityaudit-current.test -test.run='^$' \
+  -test.bench='^BenchmarkPromptCombinationFilter$/url/8388608$' \
+  -test.benchtime=5x -test.cpu=4 -test.benchmem \
+  -test.memprofile=paths-initial-alloc.pprof
+go tool pprof -top -alloc_space ./securityaudit-current.test paths-initial-alloc.pprof

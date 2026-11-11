@@ -187,6 +187,17 @@ func (m *ConfigManager) logInvalidTokenEndpoints(previous *activeConfigSnapshot,
 }
 
 func (m *ConfigManager) Active() (ActiveConfig, bool) {
+	active, ok := m.activeForMatching()
+	if !ok {
+		return ActiveConfig{}, false
+	}
+	return cloneActiveConfig(active), true
+}
+
+// activeForMatching borrows the immutable published configuration. Package-local
+// readers must never mutate its slices or maps, or pass them to mutable callers.
+// Public Active continues to return an independently owned configuration.
+func (m *ConfigManager) activeForMatching() (ActiveConfig, bool) {
 	if m == nil {
 		return ActiveConfig{}, false
 	}
@@ -194,7 +205,17 @@ func (m *ConfigManager) Active() (ActiveConfig, bool) {
 	if snapshot == nil {
 		return ActiveConfig{}, false
 	}
-	return cloneActiveConfig(snapshot.active), true
+	return snapshot.active, true
+}
+
+func readOnlyActiveConfig(store ConfigStore) (ActiveConfig, bool) {
+	if store == nil {
+		return ActiveConfig{}, false
+	}
+	if reader, ok := store.(interface{ activeForMatching() (ActiveConfig, bool) }); ok {
+		return reader.activeForMatching()
+	}
+	return store.Active()
 }
 
 func (m *ConfigManager) BlockingActivationDegraded() bool {
@@ -210,7 +231,7 @@ func (m *ConfigManager) BlockingActivationDegraded() bool {
 	if m.configUntrusted.Load() {
 		return true
 	}
-	active, ok := m.Active()
+	active, ok := m.activeForMatching()
 	if !ok {
 		return true
 	}
@@ -224,7 +245,7 @@ func (m *ConfigManager) EffectiveMode() Mode {
 	if m != nil && m.BlockingActivationDegraded() {
 		return ModeBlocking
 	}
-	active, ok := m.Active()
+	active, ok := m.activeForMatching()
 	if !ok {
 		return ModeOff
 	}
@@ -242,7 +263,7 @@ func (m *ConfigManager) markUntrustedIfNoActiveSnapshot() {
 	if m == nil {
 		return
 	}
-	if _, ok := m.Active(); !ok {
+	if _, ok := m.activeForMatching(); !ok {
 		m.markConfigUntrusted()
 	}
 }
@@ -292,10 +313,15 @@ func (m *ConfigManager) Save(ctx context.Context, req UpdateConfigRequest, actor
 	if err != nil {
 		return PublicConfig{}, err
 	}
+	var changedWhitelistKeys []KeywordWhitelistKey
 	if req.KeywordWhitelistKeys != nil {
-		if err := validateKeywordWhitelistOwnership(ctx, tx, next.KeywordWhitelistKeys); err != nil {
-			return PublicConfig{}, err
-		}
+		changedWhitelistKeys = append(changedWhitelistKeys, next.KeywordWhitelistKeys...)
+	}
+	if req.CombinationPolicies != nil {
+		changedWhitelistKeys = append(changedWhitelistKeys, addedCombinationWhitelistKeys(current.CombinationPolicies, next.CombinationPolicies)...)
+	}
+	if err := validateKeywordWhitelistOwnership(ctx, tx, canonicalKeywordWhitelistKeys(changedWhitelistKeys)); err != nil {
+		return PublicConfig{}, err
 	}
 	next.ConfigVersion = current.ConfigVersion + 1
 	next.UpdatedAt = m.clock.Now()
@@ -559,7 +585,7 @@ func (m *ConfigManager) subscribeLoop(ctx context.Context) {
 			if err := m.Reload(ctx); err != nil {
 				// A newer published version failed to activate. Until reload
 				// succeeds, do not keep serving a potentially stale weaker mode.
-				if active, ok := m.Active(); !ok || active.ConfigVersion < version {
+				if active, ok := m.activeForMatching(); !ok || active.ConfigVersion < version {
 					m.markConfigUntrusted()
 				}
 				LogWarn(EventConfigReloadDegraded, map[string]any{

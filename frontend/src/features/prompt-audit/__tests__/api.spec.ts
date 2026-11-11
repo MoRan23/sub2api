@@ -10,8 +10,8 @@ describe('Prompt Audit API', () => {
   beforeEach(() => Object.values(client).forEach((mock) => mock.mockReset()))
 
   it('loads paginated user-owned keys and discards secret fields', async () => {
-    client.get.mockResolvedValue({ data: { items: [{ id: 8, email: 'owner@example.test', notes: 'private' }], total: 21, page: 2, page_size: 20, pages: 2 } })
-    expect((await listKeywordWhitelistUsers('owner', 2)).items).toEqual([{ id: 8, email: 'owner@example.test' }])
+    client.get.mockResolvedValue({ data: { items: [{ id: 8, email: 'owner@example.test', username: 'Owner', notes: 'private' }], total: 21, page: 2, page_size: 20, pages: 2 } })
+    expect((await listKeywordWhitelistUsers('owner', 2)).items).toEqual([{ id: 8, email: 'owner@example.test', username: 'Owner' }])
     expect(client.get).toHaveBeenLastCalledWith('/admin/users', { params: { search: 'owner', page: 2, page_size: 20 } })
     client.get.mockResolvedValue({ data: { items: [{ id: 17, user_id: 8, name: 'my-key', key: 'secret-must-not-remain' }], total: 21, page: 2, page_size: 20, pages: 2 } })
     const result = await listKeywordWhitelistKeys(8, 2)

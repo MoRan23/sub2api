@@ -20,6 +20,13 @@
     <div class="mt-4 space-y-4">
       <KeywordEditor :model-value="policy.topic_rules" data-test="combination-topic-editor" :label="t('admin.promptAudit.combination.topicRules')" limit-label="" :count-label="t('admin.promptAudit.policy.keywordCount', { count: effectiveTopics.length })" :error="ruleError(effectiveTopics)" @update:model-value="patch({ topic_rules: $event })" />
       <KeywordEditor :model-value="policy.intent_rules" data-test="combination-intent-editor" :label="t('admin.promptAudit.combination.intentRules')" limit-label="" :count-label="t('admin.promptAudit.policy.keywordCount', { count: effectiveIntents.length })" :error="ruleError(effectiveIntents)" @update:model-value="patch({ intent_rules: $event })" />
+      <KeywordKeyWhitelist
+        :model-value="policy.keyword_whitelist_keys ?? []"
+        scope="combination"
+        class="border-t border-gray-100 pt-4 dark:border-dark-800"
+        data-test="combination-whitelist"
+        @update:model-value="patch({ keyword_whitelist_keys: $event })"
+      />
       <details :open="Boolean(policy.migrate_keywords?.length)" data-test="combination-migration">
         <summary class="cursor-pointer text-sm font-medium text-gray-700 dark:text-dark-200">{{ t('admin.promptAudit.combination.migrateTitle') }}</summary>
         <p class="my-2 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.combination.migrateHint') }}</p>
@@ -35,6 +42,7 @@ import { useI18n } from 'vue-i18n'
 import type { PromptCombinationPolicy } from '../types'
 import { keywordRuleLengthError, normalizeKeywordRules } from '../keywordRules'
 import KeywordEditor from './KeywordEditor.vue'
+import KeywordKeyWhitelist from './KeywordKeyWhitelist.vue'
 
 const props = defineProps<{ policy: PromptCombinationPolicy; canMoveUp: boolean; canMoveDown: boolean }>()
 const emit = defineEmits<{ (event: 'update:policy', value: PromptCombinationPolicy): void; (event: 'remove'): void; (event: 'move-up'): void; (event: 'move-down'): void }>()

@@ -4,6 +4,7 @@ import type {
   PromptAuditEndpointDraft,
   PromptAuditUpdateRequest,
   PromptEventFilters,
+  PromptCombinationPolicy,
 } from './types'
 import { normalizeKeywordRules } from './keywordRules'
 
@@ -28,9 +29,17 @@ export function cloneData<T>(value: T): T {
   return JSON.parse(JSON.stringify(value)) as T
 }
 
-export function configToDraft(config: PromptAuditConfig): PromptAuditDraft {
+function combinationToDraft(policy: PromptCombinationPolicy): PromptCombinationPolicy {
   return {
-    ...cloneData(config),
+    ...policy,
+    keyword_whitelist_keys: (policy.keyword_whitelist_keys ?? []).map(({ user_id, api_key_id }) => ({ user_id, api_key_id })),
+  }
+}
+
+export function configToDraft(config: PromptAuditConfig): PromptAuditDraft {
+  const copied = cloneData(config)
+  return {
+    ...copied,
     blocked_keywords: [...(config.blocked_keywords ?? [])],
     jailbreak_keywords: [...(config.jailbreak_keywords === undefined ? config.blocked_keywords ?? [] : config.jailbreak_keywords ?? [])],
     other_keywords: [...(config.other_keywords ?? [])],
@@ -39,12 +48,12 @@ export function configToDraft(config: PromptAuditConfig): PromptAuditDraft {
     auto_ban_enabled: config.auto_ban_enabled ?? true,
     violation_window_hours: config.violation_window_hours ?? 24,
     ban_threshold: config.ban_threshold ?? 10,
-    combination_policies: cloneData(config.combination_policies ?? (
-      config.cbrn_blocking_enabled || config.cbrn_topic_rules?.length || config.cbrn_intent_rules?.length
-        ? [{ id: 'cbrn', name: 'CBRN', enabled: config.cbrn_blocking_enabled ?? false, topic_rules: config.cbrn_topic_rules ?? [], intent_rules: config.cbrn_intent_rules ?? [] }]
+    combination_policies: (copied.combination_policies ?? (
+      copied.cbrn_blocking_enabled || copied.cbrn_topic_rules?.length || copied.cbrn_intent_rules?.length
+        ? [{ id: 'cbrn', name: 'CBRN', enabled: copied.cbrn_blocking_enabled ?? false, topic_rules: copied.cbrn_topic_rules ?? [], intent_rules: copied.cbrn_intent_rules ?? [] }]
         : []
-    )),
-    combination_templates: cloneData(config.combination_templates ?? []),
+    )).map(combinationToDraft),
+    combination_templates: (copied.combination_templates ?? []).map(combinationToDraft),
     keyword_all_groups: config.keyword_all_groups ?? config.all_groups ?? true,
     keyword_group_ids: [...(config.keyword_group_ids ?? config.group_ids ?? [])],
     keyword_whitelist_keys: (config.keyword_whitelist_keys ?? []).map(({ user_id, api_key_id }) => ({ user_id, api_key_id })),
@@ -87,6 +96,7 @@ export function buildUpdateRequest(draft: PromptAuditDraft): PromptAuditUpdateRe
       topic_rules: normalizeKeywordRules(policy.topic_rules ?? []),
       intent_rules: normalizeKeywordRules(policy.intent_rules ?? []),
       migrate_keywords: normalizeKeywordRules(policy.migrate_keywords ?? []),
+      keyword_whitelist_keys: (policy.keyword_whitelist_keys ?? []).map(({ user_id, api_key_id }) => ({ user_id, api_key_id })),
     })),
     jailbreak_keywords: normalizeKeywordRules(draft.jailbreak_keywords),
     other_keywords: normalizeKeywordRules(draft.other_keywords),

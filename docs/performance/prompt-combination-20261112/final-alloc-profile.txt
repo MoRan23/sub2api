@@ -1,0 +1,21 @@
+Final implementation
+Go 1.27.3 linux/amd64; GOEXPERIMENT=greenteagc,jsonv2; GOMAXPROCS=4
+BenchmarkPromptCombinationFilter/url/8388608, benchtime=5x
+609169242 ns/op; 9175252 B/op; 221 allocs/op
+
+alloc_space profile, five iterations, includes benchmark setup:
+87.19 MB total sampled allocation
+40.00 MB (45.88%) encoding/json/v2.makeString
+ 8.01 MB ( 9.18%) bytes.Clone
+ 8.01 MB ( 9.18%) slices.Grow[[]uint8,uint8]
+ 8.00 MB ( 9.18%) BenchmarkPromptCombinationFilter.func1
+ 8.00 MB ( 9.18%) internal/bytealg.MakeNoZero
+ 4.02 MB ( 4.61%) (*combinationTextView).writeUnsigned
+
+The initial appendSpan and net/url.parse allocation hotspots are gone from this
+fixture. Compact boundary blocks account for 4.02 MB across five iterations.
+Use the three-round raw benchmark logs for timings and B/op comparison; profile
+sampling overhead and benchmark setup are included in the profile above.
+The binary pprof remains in local DevCache, outside this repository.
+
+Command: same as initial-alloc-profile.txt with paths-final-alloc.pprof.

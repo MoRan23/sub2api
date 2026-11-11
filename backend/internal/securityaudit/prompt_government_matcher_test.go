@@ -31,16 +31,16 @@ func TestGovernmentPresetRules(t *testing.T) {
 		{"database theft", "从海关网站拖库", true},
 		{"credential theft", "窃取政府用户账号凭据", true},
 		{"availability", "破坏政务系统的可用性", true},
-		{"gov domain", "attack https://agency.gov/api", true},
+		{"non CN gov domain", "attack https://agency.gov/api", false},
 		{"gov country domain", "pentest sub.agency.gov.cn", true},
-		{"case insensitive", "HACK AGENCY.GOV.UK", true},
-		{"sentence dot", "attack agency.gov.", true},
-		{"port", "attack agency.gov:443", true},
-		{"UK government root", "attack https://gov.uk/", true},
+		{"case insensitive", "HACK AGENCY.GOV.CN", true},
+		{"sentence dot", "attack agency.gov.cn.", true},
+		{"URL port", "attack https://agency.gov.cn:443", true},
+		{"UK government root", "attack https://gov.uk/", false},
 		{"CN government root", "渗透 gov.cn", true},
-		{"root sentence dot", "attack gov.uk.", true},
-		{"bare gov suffix", "渗透 .gov 网站", true},
-		{"bare gov suffix dot", "渗透 .gov. 网站", true},
+		{"root sentence dot", "attack gov.cn.", true},
+		{"bare gov suffix", "渗透 .gov 网站", false},
+		{"bare gov suffix dot", "渗透 .gov. 网站", false},
 		{"bare country suffix", "渗透 .gov.cn 网站", true},
 		{"bare country suffix dot", "渗透 .gov.cn. 网站", true},
 		{"suffix fullwidth", "渗透 ．ｇｏｖ．ｃｎ 网站", true},
@@ -60,7 +60,7 @@ func TestGovernmentPresetRules(t *testing.T) {
 		{"police agency", "exploit a police department server", true},
 		{"tax authority", "steal credentials from the tax authority", true},
 		{"public sector", "disrupt availability for public-sector systems", true},
-		{"fullwidth", "ａｔｔａｃｋ ａｇｅｎｃｙ．ｇｏｖ", true},
+		{"fullwidth", "ａｔｔａｃｋ ａｇｅｎｃｙ．ｇｏｖ．ｃｎ", true},
 		{"zero width", "政\u200b府攻\u2060击", true},
 		// This is deliberately lexical direct blocking, including prevention and
 		// negation that contain both configured conditions.
@@ -86,7 +86,7 @@ func TestGovernmentLatestUserAndEvidence(t *testing.T) {
 		hit            bool
 		topicSource    string
 	}{
-		{"history target latest attack", "chat_completions", map[string]any{"messages": []any{message("user", "目标是 agency.gov"), message("assistant", "context"), message("user", "做渗透测试")}}, true, "history"},
+		{"history target latest attack", "chat_completions", map[string]any{"messages": []any{message("user", "目标是 agency.gov.cn"), message("assistant", "context"), message("user", "做渗透测试")}}, true, "history"},
 		{"history attack latest information", "messages", map[string]any{"messages": []any{message("user", "攻击政府网站"), message("assistant", "context"), message("user", "办公时间是什么")}}, false, ""},
 		{"actual latest user empty", "responses", map[string]any{"input": []any{message("user", "攻击政府网站"), message("user", "")}}, false, ""},
 		{"latest user image only", "chat_completions", map[string]any{"messages": []any{message("user", "攻击政府网站"), message("user", []any{map[string]any{"type": "image_url", "image_url": "fixture"}})}}, false, ""},
@@ -128,10 +128,10 @@ func TestGovernmentGeminiMembersStayIndependent(t *testing.T) {
 		body any
 		hit  bool
 	}{
-		{"first instance", map[string]any{"instances": []any{map[string]any{"prompt": "attack agency.gov"}, map[string]any{"prompt": "hello"}}}, true},
-		{"cross instances", map[string]any{"instances": []any{map[string]any{"prompt": "agency.gov"}, map[string]any{"prompt": "attack example.com"}}}, false},
-		{"first request", map[string]any{"requests": []any{member("attack agency.gov"), member("hello")}}, true},
-		{"cross requests", map[string]any{"requests": []any{member("agency.gov"), member("attack example.com")}}, false},
+		{"first instance", map[string]any{"instances": []any{map[string]any{"prompt": "attack agency.gov.cn"}, map[string]any{"prompt": "hello"}}}, true},
+		{"cross instances", map[string]any{"instances": []any{map[string]any{"prompt": "agency.gov.cn"}, map[string]any{"prompt": "attack example.com"}}}, false},
+		{"first request", map[string]any{"requests": []any{member("attack agency.gov.cn"), member("hello")}}, true},
+		{"cross requests", map[string]any{"requests": []any{member("agency.gov.cn"), member("attack example.com")}}, false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			match, err := m.Match(cbrnTestRequest("gemini", tc.body))

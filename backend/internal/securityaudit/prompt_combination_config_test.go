@@ -11,7 +11,7 @@ import (
 )
 
 func testCombinationPolicy(id string) CombinationPolicy {
-	return CombinationPolicy{ID: id, Name: "自定义 " + id, Enabled: true, TopicRules: []string{"target"}, IntentRules: []string{"attack"}, MigrateKeywords: []string{}}
+	return CombinationPolicy{ID: id, Name: "自定义 " + id, Enabled: true, TopicRules: []string{"target"}, IntentRules: []string{"attack"}, MigrateKeywords: []string{}, KeywordWhitelistKeys: []KeywordWhitelistKey{}}
 }
 
 func TestCombinationConfigLegacyMigrationAndExplicitListAuthority(t *testing.T) {

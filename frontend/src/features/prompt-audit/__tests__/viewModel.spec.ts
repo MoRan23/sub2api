@@ -74,7 +74,7 @@ describe('Prompt Audit view model', () => {
 
   it('projects old CBRN settings only when the generic list is absent, preserving an explicit empty list', () => {
     const legacy = { ...config(), cbrn_blocking_enabled: true, cbrn_topic_rules: ['Topic'], cbrn_intent_rules: ['intent'] }
-    expect(configToDraft(legacy).combination_policies).toEqual([{ id: 'cbrn', name: 'CBRN', enabled: true, topic_rules: ['Topic'], intent_rules: ['intent'] }])
+    expect(configToDraft(legacy).combination_policies).toEqual([{ id: 'cbrn', name: 'CBRN', enabled: true, topic_rules: ['Topic'], intent_rules: ['intent'], keyword_whitelist_keys: [] }])
     expect(configToDraft({ ...legacy, combination_policies: [] }).combination_policies).toEqual([])
     expect(buildUpdateRequest(configToDraft({ ...legacy, combination_policies: [] })).combination_policies).toEqual([])
   })
@@ -93,6 +93,38 @@ describe('Prompt Audit view model', () => {
     const { keyword_whitelist_keys: _removed, ...legacy } = saved
     expect(configToDraft(legacy as PromptAuditConfig).keyword_whitelist_keys).toEqual([])
     expect(configToDraft({ ...saved, keyword_whitelist_keys: null } as unknown as PromptAuditConfig).keyword_whitelist_keys).toEqual([])
+  })
+
+  it('clones each combination allowlist, saves only IDs, and clears only the edited group', () => {
+    const pair = { user_id: 7, api_key_id: 12, key_name: 'display-only', key: 'secret-must-not-copy' }
+    const policy = { id: 'government', name: 'Existing government rule', enabled: true, topic_rules: ['regex:(?i)\\.gov'], intent_rules: ['attack'], keyword_whitelist_keys: [pair] }
+    const saved = { ...config(), keyword_whitelist_keys: [pair], combination_policies: [policy, { ...policy, id: 'other' }], combination_templates: [policy] }
+    const draft = configToDraft(saved)
+    expect(draft.combination_policies[0]!.keyword_whitelist_keys).toEqual([{ user_id: 7, api_key_id: 12 }])
+    expect(JSON.stringify(draft.combination_policies)).not.toContain('secret-must-not-copy')
+    const fingerprint = draftFingerprint(draft)
+    draft.combination_policies[0]!.keyword_whitelist_keys![0]!.api_key_id = 13
+    expect(draftFingerprint(draft)).not.toBe(fingerprint)
+    expect(pair.api_key_id).toBe(12)
+    expect(draft.combination_policies[1]!.keyword_whitelist_keys![0]!.api_key_id).toBe(12)
+    expect(draft.combination_templates[0]!.keyword_whitelist_keys![0]!.api_key_id).toBe(12)
+    draft.combination_policies[0]!.name = 'Renamed existing rule'
+    draft.combination_policies[0]!.enabled = false
+    const payload = buildUpdateRequest(draft)
+    expect(payload.combination_policies[0]).toMatchObject({ name: 'Renamed existing rule', enabled: false, topic_rules: policy.topic_rules, keyword_whitelist_keys: [{ user_id: 7, api_key_id: 13 }] })
+    expect(payload.keyword_whitelist_keys).toEqual([{ user_id: 7, api_key_id: 12 }])
+    draft.combination_policies[0]!.keyword_whitelist_keys = []
+    expect(buildUpdateRequest(draft).combination_policies.map((group) => group.keyword_whitelist_keys)).toEqual([[], [{ user_id: 7, api_key_id: 12 }]])
+    draft.combination_policies[1]!.keyword_whitelist_keys = [pair]
+    expect(buildUpdateRequest(draft).combination_policies[1]!.keyword_whitelist_keys).toEqual([{ user_id: 7, api_key_id: 12 }])
+  })
+
+  it.each([undefined, null, []])('initializes a legacy combination allowlist %s as an empty independent array', (keyword_whitelist_keys) => {
+    const policy = { id: 'existing', name: 'Existing', enabled: false, topic_rules: ['original'], intent_rules: ['intent'], keyword_whitelist_keys }
+    const draft = configToDraft({ ...config(), combination_policies: [policy], combination_templates: [policy] })
+    expect(draft.combination_policies[0]!.keyword_whitelist_keys).toEqual([])
+    expect(draft.combination_templates[0]!.keyword_whitelist_keys).toEqual([])
+    expect(buildUpdateRequest(draft).combination_policies[0]!.keyword_whitelist_keys).toEqual([])
   })
   it('normalizes legacy null collections from the public config', () => {
     const legacy = { ...config(), keyword_group_ids: null, group_ids: null, scanners: null, endpoints: null } as unknown as PromptAuditConfig

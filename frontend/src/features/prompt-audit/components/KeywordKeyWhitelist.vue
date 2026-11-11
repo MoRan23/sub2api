@@ -1,7 +1,7 @@
 <template>
   <div>
-    <h3 class="text-sm font-medium text-gray-900 dark:text-white">{{ t('admin.promptAudit.keywordWhitelist.title') }}</h3>
-    <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t('admin.promptAudit.keywordWhitelist.description') }}</p>
+    <h3 class="text-sm font-medium text-gray-900 dark:text-white">{{ t(scope === 'combination' ? 'admin.promptAudit.combination.whitelistTitle' : 'admin.promptAudit.keywordWhitelist.title') }}</h3>
+    <p class="mt-1 text-xs text-gray-500 dark:text-dark-400">{{ t(scope === 'combination' ? 'admin.promptAudit.combination.whitelistDescription' : 'admin.promptAudit.keywordWhitelist.description') }}</p>
     <div class="mt-3 flex items-end gap-2">
       <label class="min-w-0 flex-1 text-sm text-gray-700 dark:text-dark-200">
         {{ t('admin.promptAudit.keywordWhitelist.searchUsers') }}
@@ -15,7 +15,7 @@
         {{ t('admin.promptAudit.keywordWhitelist.user') }}
         <select v-model.number="selectedUserId" class="input mt-1 w-full" data-test="user" :aria-label="t('admin.promptAudit.keywordWhitelist.user')" :disabled="usersLoading">
           <option :value="0">{{ t('admin.promptAudit.keywordWhitelist.selectUser') }}</option>
-          <option v-for="user in users" :key="user.id" :value="user.id">{{ user.email }} · #{{ user.id }}</option>
+          <option v-for="user in users" :key="user.id" :value="user.id">{{ [user.email, user.username].filter(Boolean).join(' / ') }} · #{{ user.id }}</option>
         </select>
       </label>
       <p v-if="!usersLoading && !users.length" class="mt-1 text-xs text-gray-500">{{ t('admin.promptAudit.keywordWhitelist.noUsers') }}</p>
@@ -68,7 +68,7 @@ import { useI18n } from 'vue-i18n'
 import { getKeywordWhitelistIdentities, listKeywordWhitelistKeys, listKeywordWhitelistUsers } from '../api'
 import type { PromptKeywordKeyOption, PromptKeywordUserOption, PromptKeywordWhitelistIdentity, PromptKeywordWhitelistKey } from '../types'
 
-const props = defineProps<{ modelValue: PromptKeywordWhitelistKey[] }>()
+const props = withDefaults(defineProps<{ modelValue: PromptKeywordWhitelistKey[]; scope?: 'global' | 'combination' }>(), { scope: 'global' })
 const emit = defineEmits<{ (event: 'update:modelValue', value: PromptKeywordWhitelistKey[]): void }>()
 const { t } = useI18n()
 const pageSize = 20
@@ -193,7 +193,7 @@ async function loadKeys(page: number) {
 function addKey() {
   if (!canAdd.value || !selectedUser.value || !selectedKey.value) return
   const entry = { user_id: selectedUser.value.id, api_key_id: selectedKey.value.id }
-  identities.value[entryId(entry)] = { ...entry, user_email: selectedUser.value.email, username: '', key_name: selectedKey.value.name, available: true }
+  identities.value[entryId(entry)] = { ...entry, user_email: selectedUser.value.email, username: selectedUser.value.username ?? '', key_name: selectedKey.value.name, available: true }
   emit('update:modelValue', [...props.modelValue.map((value) => ({ ...value })), entry])
   selectedKeyId.value = 0
 }

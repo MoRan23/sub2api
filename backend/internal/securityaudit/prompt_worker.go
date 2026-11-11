@@ -124,7 +124,7 @@ func (r *Runner) worker(ctx context.Context, workerID int) {
 		case <-wake:
 		}
 		r.runtime.heartbeatNS.Store(r.clock.Now().UnixNano())
-		cfg, ok := r.config.Active()
+		cfg, ok := readOnlyActiveConfig(r.config)
 		if !ok || !cfg.RiskControlEnabled || !cfg.Enabled || workerID >= cfg.WorkerCount {
 			continue
 		}
@@ -340,7 +340,9 @@ func (r *Runner) setLastError(code, _ string) {
 func scanWithFailover(ctx context.Context, scanner PromptScanner, scanners []string, endpoints []ActiveEndpoint, chunk string, metrics Metrics) (*NormalizedResult, error) {
 	var lastErr error
 	for index, endpoint := range endpoints {
-		result, err := scanner.Scan(ctx, endpoint, chunk, scanners)
+		// Scanner implementations must not acquire mutable access to a published
+		// configuration shared with concurrent requests and workers.
+		result, err := scanner.Scan(ctx, endpoint, chunk, append([]string(nil), scanners...))
 		if err == nil && result != nil {
 			return result, nil
 		}
