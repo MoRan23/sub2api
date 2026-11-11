@@ -69,17 +69,52 @@ func codexEngineMayHaveImages(data []byte) bool {
 	return false
 }
 
+// These borrowed fields live only for one observation. Indexing the root once
+// avoids rescanning a large image result for each absent top-level field.
+type codexEngineImageView struct {
+	data, output, responseOutput, eventType, item gjson.Result
+}
+
+func newCodexEngineImageView(root gjson.Result) (view codexEngineImageView) {
+	root.ForEach(func(key, value gjson.Result) bool {
+		var field *gjson.Result
+		switch key.Str {
+		case "data":
+			field = &view.data
+		case "output":
+			field = &view.output
+		case "type":
+			field = &view.eventType
+		case "item":
+			field = &view.item
+		case "response":
+			// GJSON paths select the first matching leaf, including null. A
+			// duplicate response whose output is missing does not hide a later
+			// response.output; caching only the first response would change that.
+			if !view.responseOutput.Exists() {
+				view.responseOutput = value.Get("output")
+			}
+		}
+		if field != nil && !field.Exists() {
+			*field = value
+		}
+		return true
+	})
+	return view
+}
+
 func observeCodexEngineImages(result *OpenAIForwardResult, data []byte, stream *openAIImageOutputCounter) (parsed *gjson.Result) {
 	if len(data) > 0 && codexEngineMayHaveImages(data) && gjson.ValidBytes(data) {
 		// One temporary string, shared by both JSON-response and incremental
 		// SSE accounting, replaces repeated copies of the image/output subtree.
 		root := gjson.ParseBytes(data)
 		parsed = &root
+		view := newCodexEngineImageView(root)
 		current := newOpenAIImageOutputCounter()
 		current.ownStrings = true
-		current.addDataArray(root.Get("data"))
-		current.addOutputArray(root.Get("output"))
-		current.addOutputArray(root.Get("response.output"))
+		current.addDataArray(view.data)
+		current.addOutputArray(view.output)
+		current.addOutputArray(view.responseOutput)
 		if sizes := current.Sizes(); len(sizes) > 0 {
 			result.ImageOutputSizes = sizes
 		}
@@ -89,23 +124,23 @@ func observeCodexEngineImages(result *OpenAIForwardResult, data []byte, stream *
 			if count <= 0 {
 				count = int(root.Get("tool_usage.image_gen.images").Int())
 			}
-			if count <= 0 && strings.HasSuffix(strings.TrimSpace(root.Get("type").String()), ".completed") && (root.Get("b64_json").Exists() || root.Get("url").Exists()) {
+			if count <= 0 && strings.HasSuffix(strings.TrimSpace(view.eventType.String()), ".completed") && (root.Get("b64_json").Exists() || root.Get("url").Exists()) {
 				count = 1
 			}
 		}
 		result.ImageCount = max(result.ImageCount, count)
 		if stream != nil {
 			stream.ownStrings = true
-			stream.addDataArray(root.Get("data"))
-			switch strings.TrimSpace(root.Get("type").String()) {
+			stream.addDataArray(view.data)
+			switch strings.TrimSpace(view.eventType.String()) {
 			case "response.output_item.done":
-				stream.addImageOutputItem(root.Get("item"))
+				stream.addImageOutputItem(view.item)
 			case "response.completed", "response.done":
-				stream.addOutputArray(root.Get("response.output"))
+				stream.addOutputArray(view.responseOutput)
 			case "image_generation.completed", "image_edit.completed":
-				if item := root.Get("item"); item.Exists() {
+				if item := view.item; item.Exists() {
 					stream.addImageOutputItem(item)
-				} else if output := root.Get("output"); output.Exists() {
+				} else if output := view.output; output.Exists() {
 					stream.addImageOutputItem(output)
 				} else {
 					stream.addImageOutputItem(root)
