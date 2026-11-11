@@ -6,8 +6,8 @@ import "github.com/tidwall/gjson"
 // whose sum equals the upstream-reported aggregate. Request cache settings do
 // not prove that a cache write occurred or establish its lifetime.
 func CacheCreationTTLTokens(value gjson.Result, aggregate int) (int, int) {
-	for _, path := range []string{"input_tokens_details", "prompt_tokens_details"} {
-		details := value.Get(path + ".cache_write_tokens_details")
+	for _, path := range []string{"input_tokens_details.cache_write_tokens_details", "prompt_tokens_details.cache_write_tokens_details"} {
+		details := value.Get(path)
 		if !details.Exists() {
 			continue
 		}

@@ -172,8 +172,23 @@ type openAIFastPolicyForwardingSettingRepo struct {
 	value string
 }
 
-func (r *openAIFastPolicyForwardingSettingRepo) GetValue(context.Context, string) (string, error) {
-	return r.value, nil
+func (r *openAIFastPolicyForwardingSettingRepo) GetValue(_ context.Context, key string) (string, error) {
+	if key == service.SettingKeyOpenAIFastPolicySettings {
+		return r.value, nil
+	}
+	return "", service.ErrSettingNotFound
+}
+
+func (r *openAIFastPolicyForwardingSettingRepo) GetMultiple(_ context.Context, keys []string) (map[string]string, error) {
+	values := make(map[string]string)
+	for _, key := range keys {
+		if key == service.SettingKeyOpenAIFastPolicySettings {
+			values[key] = r.value
+		}
+	}
+	// Unconfigured keys are absent, as in the real settings repository, so
+	// request policy and fingerprint settings use their compiled defaults.
+	return values, nil
 }
 
 type openAIFastPolicyForwardingHTTPUpstream struct {
