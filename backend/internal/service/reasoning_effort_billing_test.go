@@ -33,7 +33,7 @@ func TestReasoningEffortBillingMultiplier(t *testing.T) {
 }
 
 func TestReasoningEffortBillingSupportsAllModelsAndLevels(t *testing.T) {
-	for _, model := range []string{"claude-fable-5-1", "gpt-5.4", "gemini-2.5-pro", "custom-model"} {
+	for _, model := range []string{"claude-fable-5-1", "gpt-5.4", "gpt-5.6-cyber", "gpt-6-cyber", "gemini-2.5-pro", "custom-model"} {
 		t.Run(model, func(t *testing.T) {
 			bs, resolver := newTokenCostTestEnv(t, PlatformOpenAI, []ChannelModelPricing{{
 				Platform: PlatformOpenAI, Models: []string{model}, BillingMode: BillingModeToken,
