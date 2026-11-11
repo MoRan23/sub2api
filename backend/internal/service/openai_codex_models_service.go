@@ -1635,6 +1635,8 @@ type openAIModelsRequest struct {
 	// Cached bodies have already been converted to their requested format.
 	standardModelsList bool
 	auxiliary          bool
+	// Directory-wide source failover has one budget, including detached refreshes.
+	refreshDeadline time.Time
 }
 
 type openAIModelsCacheEntry struct {
@@ -1863,6 +1865,7 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifest(ctx context.Context, acc
 		accountConcurrency:  account.Concurrency,
 		useAPIKeyUpstream:   useAPIKeyUpstream,
 		auxiliary:           auxiliary,
+		refreshDeadline:     officialCatalogRefreshDeadline(ctx),
 	}
 	if !useAPIKeyUpstream {
 		scope, _ := codexnative.ScopeFromContext(WithOpenAINativeHTTPScope(ctx, credAccount, ""))
@@ -1998,7 +2001,11 @@ func (s *OpenAIGatewayService) refreshCachedOpenAIModels(cacheKey string, reques
 		if state == openAIModelsCacheFresh {
 			return cached, nil
 		}
-		ctx, cancel := context.WithTimeout(context.Background(), codexModelsManifestRequestTimeout)
+		deadline := time.Now().Add(codexModelsManifestRequestTimeout)
+		if !request.refreshDeadline.IsZero() && request.refreshDeadline.Before(deadline) {
+			deadline = request.refreshDeadline
+		}
+		ctx, cancel := context.WithDeadline(context.Background(), deadline)
 		defer cancel()
 		ifNoneMatch := ""
 		if cached != nil {

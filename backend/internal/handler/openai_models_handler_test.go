@@ -166,7 +166,8 @@ func TestPinnedModelsAllowlistExpandsWildcardsForBothRepresentations(t *testing.
 				recorder := performPinnedCodexModelsRequest(t, h, group, "")
 				require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 				require.Equal(t, []string{"public-b", "public-a"}, codexHandlerManifestSlugs(t, recorder))
-				require.Contains(t, recorder.Body.String(), `"context_window":424242`)
+				require.Contains(t, recorder.Body.String(), `"context_window":272000`, "known model metadata comes from the official catalog")
+				require.NotContains(t, recorder.Body.String(), `"context_window":424242`)
 			} else {
 				recorder := performOrdinaryPinnedModelsRequest(t, h, group, "/v1/models", "")
 				require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
@@ -207,7 +208,8 @@ func TestPinnedModelsMappingFollowsUpstreamDiscoveryForBothRepresentations(t *te
 			require.Equal(t, []int64{2}, upstream.accountIDs(), "mappings must not bypass pinned discovery")
 			if codex {
 				require.Equal(t, []string{"custom-concrete", "public-alias"}, codexHandlerManifestSlugs(t, recorder))
-				require.Contains(t, recorder.Body.String(), `"context_window":424242`)
+				require.Contains(t, recorder.Body.String(), `"context_window":272000`, "known model metadata comes from the official catalog")
+				require.NotContains(t, recorder.Body.String(), `"context_window":424242`)
 			} else {
 				require.Equal(t, []string{"custom-concrete", "public-alias"}, ordinaryPinnedModelIDs(t, recorder))
 				require.Contains(t, recorder.Body.String(), `"owned_by":"provider"`)

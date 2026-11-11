@@ -400,7 +400,7 @@ func TestCodexModelsUnmappedParentAndSparkShadowHonorCustomListAndETag(t *testin
 	}
 	second := performCodexModelsRequestForGroup(t, handler, group, firstETag)
 	require.Equal(t, http.StatusOK, second.Code, second.Body.String())
-	require.ElementsMatch(t, []string{"gpt-5.6-sol", sparkModel}, codexHandlerManifestSlugs(t, second))
+	require.ElementsMatch(t, []string{"gpt-5.6-sol", sparkModel, "unknown-model"}, codexHandlerManifestSlugs(t, second))
 	require.NotEqual(t, firstETag, second.Header().Get("ETag"))
 	third := performCodexModelsRequestForGroup(t, handler, group, second.Header().Get("ETag"))
 	require.Equal(t, http.StatusNotModified, third.Code)
@@ -481,7 +481,7 @@ func TestCodexModelsFailsOverFromUpstreamTransportError(t *testing.T) {
 
 func TestCodexModelsFailsOverFromInvalidManifestEnvelope(t *testing.T) {
 	handler, upstream, groupID := newCodexModelsFailoverTestHandler(http.StatusOK)
-	upstream.firstBody = `{"object":"list","data":[]}`
+	upstream.firstBody = `{"object":"list","data":null}`
 	recorder := performCodexModelsRequest(t, handler, groupID)
 
 	if got, want := upstream.calls(), []int64{1, 2}; !equalInt64Slices(got, want) {
@@ -604,7 +604,12 @@ func newCodexModelsFailoverTestHandlerWithAccountCount(firstStatus, accountCount
 }
 
 func performCodexModelsRequest(t *testing.T, handler *OpenAIGatewayHandler, groupID int64) *httptest.ResponseRecorder {
-	return performCodexModelsRequestForGroup(t, handler, &service.Group{ID: groupID, Platform: service.PlatformOpenAI}, "")
+	// API-key failover remains available only when explicitly configured as the
+	// fixed-source fallback. Unpinned OpenAI catalogs use official metadata.
+	return performCodexModelsRequestForGroup(t, handler, &service.Group{
+		ID: groupID, Platform: service.PlatformOpenAI,
+		CodexModelsManifestConfig: service.GroupCodexModelsManifestConfig{Enabled: true, AccountIDs: []int64{999}, FallbackToScheduler: true},
+	}, "")
 }
 
 func performCodexModelsRequestForPlatform(t *testing.T, handler *OpenAIGatewayHandler, groupID int64, platform string) *httptest.ResponseRecorder {
@@ -1023,7 +1028,21 @@ func TestCodexModelsDiscoveryProjectsWildcardMappingWithoutAllowlist(t *testing.
 			}
 			first := performCodexModelsRequestForGroup(t, handler, group, "")
 			require.Equal(t, http.StatusOK, first.Code, first.Body.String())
-			require.Equal(t, []string{"gpt-5.4"}, codexHandlerManifestSlugs(t, first))
+			if mode == "ordinary" {
+				// Unpinned API Key groups expand wildcard routes against the official
+				// catalog instead of probing a provider's potentially partial list.
+				slugs := codexHandlerManifestSlugs(t, first)
+				require.Contains(t, slugs, "gpt-6-astra")
+				require.Contains(t, slugs, "gpt-6.1-sol")
+				for _, slug := range slugs {
+					require.True(t, strings.HasPrefix(slug, "gpt-"))
+					require.NotContains(t, slug, "*")
+					require.NotContains(t, slug, "gpt-image-")
+				}
+				require.Empty(t, upstream.accountIDs())
+			} else {
+				require.Equal(t, []string{"gpt-5.4"}, codexHandlerManifestSlugs(t, first))
+			}
 			require.NotEmpty(t, first.Header().Get("ETag"))
 			second := performCodexModelsRequestForGroup(t, handler, group, first.Header().Get("ETag"))
 			require.Equal(t, http.StatusNotModified, second.Code)

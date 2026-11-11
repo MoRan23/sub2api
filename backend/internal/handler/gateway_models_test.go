@@ -98,6 +98,11 @@ func newGatewayModelsHandlerForTest(repo service.AccountRepository, routeRepo ..
 		resolver = service.NewCompositeRouteResolver(routeRepo[0])
 	}
 	return &GatewayHandler{
+		openAIGatewayService: service.NewOpenAIGatewayService(
+			repo,
+			nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
+			nil, nil, nil, nil, nil, nil, nil, nil, nil,
+		),
 		gatewayService: service.NewGatewayService(
 			repo,
 			nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil,
@@ -311,9 +316,16 @@ func TestGatewayModels_UnmappedOpenAIAccountsSupplementMappedModels(t *testing.T
 	const groupID int64 = 28
 	const sparkModel = "gpt-5.3-codex-spark"
 	const alias = "team-coder"
-	defaultsByID := make(map[string]openai.Model, len(openai.DefaultModels))
-	for _, model := range openai.DefaultModels {
-		defaultsByID[model.ID] = model
+	// Public metadata supplies the official LLM set. Legacy synthesized LLM
+	// defaults are not added unless an account mapping or exact group allowlist
+	// makes them visible; dedicated Images remain in the standard API catalog.
+	publicDefaults := []string{
+		"gpt-6-astra", "gpt-6.1-sol", "gpt-6.1-terra", "gpt-6-sol", "gpt-6-luna",
+		"gpt-5.6-sol", "gpt-5.6-terra", "gpt-5.6-luna",
+		"gpt-daybreak-blue-latest", "gpt-daybreak-red-latest", "gpt-5.5",
+		"gpt-image-1", "gpt-image-1.5", "gpt-image-2",
+		"gpt-image-2.5-flare", "gpt-image-2.5-sunburst",
+		"gpt-image-2.6-flare", "gpt-image-2.6-sunburst",
 	}
 	parentID := int64(1)
 	accounts := []service.Account{
@@ -329,7 +341,7 @@ func TestGatewayModels_UnmappedOpenAIAccountsSupplementMappedModels(t *testing.T
 		},
 	}
 	subscriptionDefaults := make([]string, 0)
-	for _, model := range openai.DefaultModelIDs() {
+	for _, model := range publicDefaults {
 		if model != "gpt-5.5" {
 			subscriptionDefaults = append(subscriptionDefaults, model)
 		}
@@ -343,12 +355,12 @@ func TestGatewayModels_UnmappedOpenAIAccountsSupplementMappedModels(t *testing.T
 		{
 			name:     "unmapped parent and Spark shadow retain defaults and aliases",
 			accounts: accounts,
-			want:     append(append([]string{}, subscriptionDefaults...), alias),
+			want:     append(append([]string{}, subscriptionDefaults...), sparkModel, alias),
 		},
 		{
 			name:     "unmapped API key account also contributes defaults",
 			accounts: append([]service.Account{{ID: 4, Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey}}, accounts[1:]...),
-			want:     append(openai.DefaultModelIDs(), alias),
+			want:     append(append([]string{}, publicDefaults...), sparkModel, alias),
 		},
 		{
 			name:     "unmapped accounts alone retain default response shape",
@@ -359,13 +371,13 @@ func TestGatewayModels_UnmappedOpenAIAccountsSupplementMappedModels(t *testing.T
 			name:     "custom list can select defaults and aliases",
 			accounts: accounts,
 			config:   service.GroupModelAllowlist{Enabled: true, Models: []string{alias, "gpt-5.6-sol", sparkModel, "unknown-model"}},
-			want:     []string{alias, "gpt-5.6-sol", sparkModel},
+			want:     []string{alias, "gpt-5.6-sol", sparkModel, "unknown-model"},
 		},
 		{
-			name:     "unavailable custom selection remains empty",
+			name:     "exact custom selection adds a routable unknown model",
 			accounts: accounts,
 			config:   service.GroupModelAllowlist{Enabled: true, Models: []string{"unknown-model"}},
-			want:     []string{},
+			want:     []string{"unknown-model"},
 		},
 		{
 			name:     "mapped accounts alone do not gain defaults",
@@ -382,7 +394,7 @@ func TestGatewayModels_UnmappedOpenAIAccountsSupplementMappedModels(t *testing.T
 				Credentials: map[string]any{"model_mapping": map[string]any{"stale-model": "stale-model"}},
 				Extra:       map[string]any{"openai_passthrough": true},
 			}}, accounts[1:]...),
-			want: append(append([]string{}, subscriptionDefaults...), alias),
+			want: append(append([]string{}, subscriptionDefaults...), sparkModel, alias),
 		},
 		{
 			name:     "unmapped accounts from another platform do not add defaults",
@@ -410,13 +422,9 @@ func TestGatewayModels_UnmappedOpenAIAccountsSupplementMappedModels(t *testing.T
 				require.ElementsMatch(t, tt.want, modelIDsForTest(got.Data))
 				for _, model := range got.Data {
 					require.Equal(t, "model", model.Object, model.ID)
-					if source, ok := defaultsByID[model.ID]; ok {
-						// A catalog entry with an unknown release timestamp stays at
-						// zero; listing it must not invent a timestamp.
-						require.EqualValues(t, source.Created, model.Created, model.ID)
-					} else {
-						require.Positive(t, model.Created, model.ID)
-					}
+					// ModelInfo has no release timestamp; the standard projection
+					// consistently preserves that unknown value instead of inventing one.
+					require.Zero(t, model.Created, model.ID)
 					require.Equal(t, "openai", model.OwnedBy, model.ID)
 					require.Empty(t, model.CreatedAt, model.ID)
 				}
@@ -788,7 +796,9 @@ func TestGatewayModels_CustomModelsListDisabledKeepsOriginalModels(t *testing.T)
 
 	var got gatewayModelsResponseForTest
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
-	require.Equal(t, []string{"gpt-5.4", "gpt-5.5"}, modelIDsForTest(got.Data))
+	// Official entries keep their catalog order, followed by mapped names that
+	// require a synthesized descriptor.
+	require.Equal(t, []string{"gpt-5.5", "gpt-5.4"}, modelIDsForTest(got.Data))
 }
 
 func TestGatewayModels_CustomModelsListFiltersAndOrdersMappedModels(t *testing.T) {
@@ -1338,12 +1348,9 @@ func TestGatewayModels_CustomModelsListCanReturnEmptyWhenSelectionsUnavailable(t
 	require.Empty(t, modelIDsForTest(got.Data))
 }
 
-func TestGatewayModels_CustomModelsListFiltersDefaultFallbackModels(t *testing.T) {
+func TestGatewayModels_CustomModelsListAddsRoutableExactModelsToOfficialCatalog(t *testing.T) {
 	gin.SetMode(gin.TestMode)
-	defaults := openai.DefaultModelIDs()
-	require.GreaterOrEqual(t, len(defaults), 2)
-	require.NotContains(t, defaults, "legacy-gpt-2024")
-	want := []string{defaults[1], defaults[0]}
+	want := []string{"gpt-6-astra", "legacy-gpt-2024", "gpt-5.6-sol"}
 
 	groupID := int64(25)
 	h := newGatewayModelsHandlerForTest(
@@ -1365,7 +1372,7 @@ func TestGatewayModels_CustomModelsListFiltersDefaultFallbackModels(t *testing.T
 			Platform: service.PlatformOpenAI,
 			ModelAllowlist: service.GroupModelAllowlist{
 				Enabled: true,
-				Models:  []string{want[0], "legacy-gpt-2024", want[1]},
+				Models:  want,
 			},
 		},
 	})
@@ -1416,9 +1423,9 @@ func TestGatewayModels_OpenAICustomModelsListKeepsOpenAIResponseShapeForDefaultF
 	var got gatewayModelsResponseForTest
 	require.NoError(t, json.Unmarshal(rec.Body.Bytes(), &got))
 	require.Equal(t, want, modelIDsForTest(got.Data))
-	for i, source := range []openai.Model{openai.DefaultModels[1], openai.DefaultModels[0]} {
+	for i := range got.Data {
 		require.Equal(t, "model", got.Data[i].Object)
-		require.EqualValues(t, source.Created, got.Data[i].Created)
+		require.Zero(t, got.Data[i].Created)
 		require.Equal(t, "openai", got.Data[i].OwnedBy)
 		require.Empty(t, got.Data[i].CreatedAt)
 	}

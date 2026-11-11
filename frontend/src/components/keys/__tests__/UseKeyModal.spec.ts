@@ -903,6 +903,60 @@ token_budget = false`)
     expect(fable.options.thinking).not.toHaveProperty('budgetTokens')
   })
 
+  it('keeps catalog reasoning defaults in the download without forcing them into OpenAI HTTP or WS configuration', async () => {
+    const manifest = {
+      models: [{
+        slug: 'gpt-6.1-sol',
+        default_reasoning_level: 'low',
+        supported_reasoning_levels: [
+          { effort: 'low', description: 'Low' },
+          { effort: 'ultra', description: 'Ultra' }
+        ],
+        shell_type: 'unified_exec',
+        model_messages: { instructions_template: 'Keep this descriptor intact.' }
+      }]
+    }
+    vi.stubGlobal('fetch', vi.fn().mockResolvedValue({
+      ok: true,
+      status: 200,
+      text: async () => JSON.stringify(manifest)
+    }))
+    const wrapper = mount(UseKeyModal, {
+      props: { show: true, apiKey: 'sk-openai-test', baseUrl: 'https://example.com/v1', platform: 'openai' },
+      global: {
+        stubs: {
+          BaseDialog: { template: '<div><slot /><slot name="footer" /></div>' },
+          Icon: { template: '<span />' }
+        }
+      }
+    })
+
+    await wrapper.get('[data-testid="codex-model-catalog-mode"]').setValue('file')
+    await wrapper.get('[data-testid="codex-model-catalog-fetch"]').trigger('click')
+    await flushPromises()
+
+    for (const transport of ['keys.useKeyModal.cliTabs.codexCli', 'keys.useKeyModal.cliTabs.codexCliWs']) {
+      await wrapper.findAll('button').find((button) => button.text().trim() === transport)!.trigger('click')
+      for (const os of ['macOS / Linux', 'Windows']) {
+        await wrapper.findAll('button').find((button) => button.text().trim() === os)!.trigger('click')
+        const configToml = wrapper.findAll('pre code').map((code) => code.text())
+          .find((content) => content.includes('model_provider = "OpenAI"'))
+        expect(configToml).toContain('model = "gpt-6.1-sol"')
+        expect(configToml).toContain('model_catalog_json = "~/.codex/codex-models.json"')
+        expect(configToml).not.toContain('model_reasoning_effort')
+      }
+    }
+
+    const downloadButton = wrapper.findAll('button').find((button) =>
+      button.text().includes('keys.useKeyModal.codexModelCatalog.download')
+    )
+    expect(downloadButton).toBeDefined()
+    await downloadButton!.trigger('click')
+    expect(saveAsMock).toHaveBeenCalledWith(expect.any(Blob), 'codex-models.json')
+    expect(JSON.parse(await readBlobAsText(saveAsMock.mock.calls[0]![0] as Blob))).toEqual(manifest)
+    wrapper.unmount()
+  })
+
   // Scenario: API Key users can load a routed catalog remotely or download it for older clients.
   it('offers remote and downloadable Codex catalogs for Composite API keys', async () => {
     const manifest = {

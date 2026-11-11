@@ -171,7 +171,9 @@ func initializeApplication(buildInfo handler.BuildInfo) (*Application, error) {
 	openAIEgressLocationService := service.ProvideOpenAIEgressLocationService(proxyExitInfoProber, proxyLatencyCache)
 	codexEngineBillingStore := repository.NewCodexEngineBillingStore(db)
 	codexEngineBillingService := service.NewCodexEngineBillingService(codexEngineBillingStore, accountRepository, httpUpstream, configConfig)
-	openAIGatewayService := service.ProvideOpenAIGatewayService(accountRepository, usageLogRepository, usageBillingRepository, userRepository, userSubscriptionRepository, userGroupRateRepository, gatewayCache, configConfig, schedulerSnapshotService, concurrencyService, billingService, rateLimitService, billingCacheService, httpUpstream, deferredService, openAITokenProvider, grokTokenProvider, modelPricingResolver, channelService, balanceNotifyService, settingService, serviceUserPlatformQuotaRepository, oAuthSyncSessionRepository, oAuthDailySessionRepository, codexTelemetryService, openAIEgressLocationService, codexEngineBillingService, codexEngineBillingStore, apiKeyService)
+	publicCodexCatalogStore := repository.NewPublicCodexCatalogStore(redisClient)
+	publicCodexCatalogService := service.ProvidePublicCodexCatalogService(configConfig, publicCodexCatalogStore)
+	openAIGatewayService := service.ProvideOpenAIGatewayService(accountRepository, usageLogRepository, usageBillingRepository, userRepository, userSubscriptionRepository, userGroupRateRepository, gatewayCache, configConfig, schedulerSnapshotService, concurrencyService, billingService, rateLimitService, billingCacheService, httpUpstream, deferredService, openAITokenProvider, grokTokenProvider, modelPricingResolver, channelService, balanceNotifyService, settingService, serviceUserPlatformQuotaRepository, oAuthSyncSessionRepository, oAuthDailySessionRepository, codexTelemetryService, openAIEgressLocationService, codexEngineBillingService, codexEngineBillingStore, apiKeyService, publicCodexCatalogService)
 	geminiOAuthClient := repository.NewGeminiOAuthClient(configConfig)
 	geminiCliCodeAssistClient := repository.NewGeminiCliCodeAssistClient()
 	driveClient := repository.NewGeminiDriveClient()
@@ -491,6 +493,9 @@ func provideCleanup(
 	pluginManager *service.PluginManager,
 ) func() {
 	return func() {
+		if openAIGateway != nil {
+			openAIGateway.StopPublicCodexCatalog()
+		}
 		if openAIOAuthOSProfiles != nil {
 			openAIOAuthOSProfiles.Stop()
 		}

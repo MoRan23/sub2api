@@ -97,6 +97,6 @@ func newEngineBillingHandlerGateway(t *testing.T, accounts service.AccountReposi
 	return service.ProvideOpenAIGatewayService(
 		accounts, usageRepo, nil, nil, nil, nil, nil, cfg, nil, nil,
 		service.NewBillingService(cfg, nil), nil, nil, transport, &service.DeferredService{},
-		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, billing, store, nil,
+		nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, nil, billing, store, nil, nil,
 	)
 }

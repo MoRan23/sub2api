@@ -151,6 +151,9 @@ func provideCleanup(
 	pluginManager *service.PluginManager,
 ) func() {
 	return func() {
+		if openAIGateway != nil {
+			openAIGateway.StopPublicCodexCatalog()
+		}
 		if openAIOAuthOSProfiles != nil {
 			openAIOAuthOSProfiles.Stop()
 		}

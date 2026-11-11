@@ -16,10 +16,9 @@ import (
 // Codex CLI and the Codex desktop app refresh their model picker from
 // GET {base_url}/models?client_version=... (custom provider mode) or
 // GET /backend-api/codex/models (chatgpt_base_url mode). Both routes land
-// here. Pinned discovery takes precedence over local account model mappings;
-// when disabled, groups with explicit mappings are generated locally;
-// otherwise ChatGPT manifests are proxied verbatim and custom API key manifests
-// receive provider-compatibility normalization plus short-lived caching.
+// here. OpenAI groups share one routing-name projection with /v1/models and use
+// complete official descriptions; pinned discovery still controls visible names.
+// Composite keeps its existing platform capability projection.
 func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 	service.CaptureOpenAIRequestOS(c, nil)
 	if c.Request.Context().Err() != nil {
@@ -32,6 +31,25 @@ func (h *OpenAIGatewayHandler) CodexModels(c *gin.Context) {
 	}
 	if apiKey.Group.Platform != service.PlatformOpenAI && apiKey.Group.Platform != service.PlatformComposite {
 		h.errorResponse(c, http.StatusNotFound, "not_found_error", "Codex models manifest is only available for OpenAI and Composite groups")
+		return
+	}
+	if apiKey.Group.Platform == service.PlatformOpenAI {
+		manifest, account, err := h.gatewayService.BuildOpenAIGroupModelsCatalog(c.Request.Context(), apiKey.Group, c.Query("client_version"), c.GetHeader("If-None-Match"), true, h.maxAccountSwitches)
+		if c.Request.Context().Err() != nil {
+			return
+		}
+		if err != nil {
+			if errors.Is(err, service.ErrNoPinnedCodexModelsAccounts) {
+				h.errorResponse(c, http.StatusServiceUnavailable, "upstream_error", "No available OpenAI model discovery accounts")
+				return
+			}
+			h.errorResponse(c, infraerrors.Code(err), "upstream_error", infraerrors.Message(err))
+			return
+		}
+		if account != nil {
+			setOpsSelectedAccount(c, account.ID, account.Platform)
+		}
+		writeOpenAIModelsResponse(c, manifest)
 		return
 	}
 

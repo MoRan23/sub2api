@@ -1188,15 +1188,15 @@ export default {
       },
       codexModelsManifest: {
         title: 'Pinned Accounts for Model Lists',
-        hint: 'When enabled, ordinary model lists and Codex Model Manifest are discovered from the pinned accounts first, then merged and filtered using account mappings and the group model list. Rate-limited or overloaded pinned accounts are still used.',
+        hint: 'When enabled, visible models are discovered from the pinned accounts, merged, then filtered by account mappings and the group allowlist. Rate-limited or overloaded pinned accounts are still used. OpenAI groups continue to prefer the supplied Cyber descriptors and official catalog metadata.',
         enable: 'Fetch model lists with specific accounts',
         enabledHint: 'Accounts are limited to OpenAI accounts bound to this group, at most 10.',
-        disabledHint: 'Disabled: ordinary lists use local mappings or defaults; Codex uses a local catalog when configured, otherwise scheduler discovery.',
+        disabledHint: 'For OpenAI groups, the default source is the official catalog from an OAuth account in the group, or the public official catalog when unavailable. Account mappings and the allowlist determine the final list. Only models absent from the official catalog use synthesized descriptors.',
         accounts: 'Pinned accounts',
         searchPlaceholder: 'Search accounts (OpenAI accounts in this group)',
         searchEmpty: 'No matching accounts',
-        fallback: 'Fall back to the scheduler when all pinned accounts are unavailable',
-        fallbackHint: 'Off: return 503 / the upstream error. On: fall back to the existing scheduler path.',
+        fallback: 'Schedule a backup catalog source when all pinned accounts are unavailable',
+        fallbackHint: 'Off: return 503 / the upstream error. On: select a backup source using the account scheduling policy. Known OpenAI models still prefer official descriptors.',
         selectAtLeastOne: 'Select at least one account after enabling pinned accounts'
       },
       compositeRoutes: {

@@ -528,6 +528,7 @@ type OpenAIGatewayService struct {
 	responseHeaderFilter                *responseheaders.CompiledHeaderFilter
 	codexSnapshotThrottle               *accountWriteThrottle
 	openAIModelsCache                   openAIModelsCache
+	publicCodexCatalog                  *PublicCodexCatalogService
 	codexModelCapabilities              codexModelCapabilityCache
 	openaiCompatSessionResponses        sessionMemoryCache
 	openaiCompatAnthropicDigestSessions sessionMemoryCache

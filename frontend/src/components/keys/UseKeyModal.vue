@@ -316,12 +316,7 @@ import { useClipboard } from '@/composables/useClipboard'
 import { buildCodexModelCatalogUrl, fetchCodexModelsManifest } from '@/api/codex'
 import type { GroupPlatform } from '@/types'
 import { buildCodexApiKeyAuthConfig } from '@/utils/codexAuthConfig'
-import {
-  findCodexCatalogModel,
-  formatCodexReasoningEffortTomlLine,
-  parseCodexCatalogModels,
-  selectCodexConfigReasoningEffort
-} from '@/utils/codexCatalogConfig'
+import { parseCodexCatalogModels } from '@/utils/codexCatalogConfig'
 
 interface Props {
   show: boolean
@@ -752,12 +747,6 @@ function selectCodexCatalogModel(preferredModel: string): string {
   return codexCatalogModelSlugs.value[0] || preferredModel
 }
 
-function codexReasoningEffortTomlLine(modelSlug: string): string {
-  return formatCodexReasoningEffortTomlLine(
-    selectCodexConfigReasoningEffort(findCodexCatalogModel(codexModelManifestContent.value, modelSlug))
-  )
-}
-
 const escapeHtml = (value: string) => value
   .replace(/&/g, '&amp;')
   .replace(/</g, '&lt;')
@@ -1121,12 +1110,11 @@ function generateOpenAIFiles(baseUrl: string, apiKey: string): FileConfig[] {
   const configDir = isWindows ? '%userprofile%\\.codex' : '~/.codex'
 
   const model = selectCodexCatalogModel('gpt-6.1-sol')
-  const reasoningEffortLine = codexReasoningEffortTomlLine(model)
 
   // config.toml content
   const configContent = `model_provider = "OpenAI"
 model = "${model}"
-${reasoningEffortLine}${codexLocalCatalogToml.value}web_search = "live"
+${codexLocalCatalogToml.value}web_search = "live"
 
 [model_providers.OpenAI]
 name = "OpenAI"
@@ -1465,12 +1453,11 @@ function generateOpenAIWsFiles(baseUrl: string, apiKey: string): FileConfig[] {
   const isWindows = activeTab.value === 'windows'
   const configDir = isWindows ? '%userprofile%\\.codex' : '~/.codex'
   const model = selectCodexCatalogModel('gpt-6.1-sol')
-  const reasoningEffortLine = codexReasoningEffortTomlLine(model)
 
   // config.toml content with WebSocket v2
   const configContent = `model_provider = "OpenAI"
 model = "${model}"
-${reasoningEffortLine}${codexLocalCatalogToml.value}web_search = "live"
+${codexLocalCatalogToml.value}web_search = "live"
 
 [model_providers.OpenAI]
 name = "OpenAI"

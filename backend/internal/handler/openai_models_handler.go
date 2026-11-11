@@ -42,6 +42,37 @@ func (h *GatewayHandler) pinnedOpenAIModels(c *gin.Context, group *service.Group
 	writeOpenAIModelsResponse(c, response)
 }
 
+func (h *GatewayHandler) groupOpenAIModels(c *gin.Context, group *service.Group) {
+	service.CaptureOpenAIRequestOS(c, nil)
+	if c.Request.Context().Err() != nil {
+		return
+	}
+	if h.openAIGatewayService == nil {
+		writeOpenAIModelsError(c, http.StatusInternalServerError, "api_error", "OpenAI model discovery is not configured")
+		return
+	}
+	etag := c.GetHeader("If-None-Match")
+	if c.Param("model") != "" {
+		etag = ""
+	}
+	response, account, err := h.openAIGatewayService.BuildOpenAIGroupModelsCatalog(c.Request.Context(), group, "", etag, false, h.maxAccountSwitches)
+	if c.Request.Context().Err() != nil {
+		return
+	}
+	if err != nil {
+		if errors.Is(err, service.ErrNoPinnedCodexModelsAccounts) {
+			writeOpenAIModelsError(c, http.StatusServiceUnavailable, "upstream_error", "No available OpenAI model discovery accounts")
+			return
+		}
+		writeOpenAIModelsError(c, infraerrors.Code(err), "upstream_error", infraerrors.Message(err))
+		return
+	}
+	if account != nil {
+		setOpsSelectedAccount(c, account.ID, account.Platform)
+	}
+	writeOpenAIModelsResponse(c, response)
+}
+
 func writeOpenAIModelsError(c *gin.Context, status int, errorType, message string) {
 	c.JSON(status, gin.H{"error": gin.H{"type": errorType, "message": message}})
 }
