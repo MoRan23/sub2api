@@ -1,0 +1,19 @@
+{'baseline': {'entry': '0x14065f800', 'entry_mod_64': 0, 'instruction_count': 229, 'byte_length': 864}, 'final': {'entry': '0x14065fe20', 'entry_mod_64': 32, 'instruction_count': 229, 'byte_length': 864}}
+Normalized instruction/source/relative-offset differences: 0
+Raw encoding differences (relocated globals/runtime calls): 16
+gjson.go:1058 LEAQ github.com/tidwall/gjson.vchars(SB), R10: 4c8d158b313507 -> 4c8d156bbb3607
+gjson.go:1100 LEAQ github.com/tidwall/gjson.vchars(SB), R9: 4c8d0db8303507 -> 4c8d0d98ba3607
+gjson.go:1102 LEAQ github.com/tidwall/gjson.vchars(SB), R10: 4c8d15a4303507 -> 4c8d1584ba3607
+gjson.go:1103 LEAQ github.com/tidwall/gjson.vchars(SB), R10: 4c8d1594303507 -> 4c8d1574ba3607
+gjson.go:1186 CALL runtime.panicBounds(SB): e84872a3ff -> e8286ca3ff
+gjson.go:1181 CALL runtime.panicBounds(SB): e81272a3ff -> e8f26ba3ff
+gjson.go:1181 CALL runtime.panicBounds(SB): e80d72a3ff -> e8ed6ba3ff
+gjson.go:1163 CALL runtime.panicBounds(SB): e8ae70a3ff -> e88e6aa3ff
+gjson.go:1160 CALL runtime.panicBounds(SB): e8a970a3ff -> e8896aa3ff
+gjson.go:1155 CALL runtime.panicBounds(SB): e8a470a3ff -> e8846aa3ff
+gjson.go:1149 CALL runtime.panicBounds(SB): e89b70a3ff -> e87b6aa3ff
+gjson.go:1112 CALL runtime.panicBounds(SB): e89670a3ff -> e8766aa3ff
+gjson.go:1112 CALL runtime.panicBounds(SB): e89170a3ff -> e8716aa3ff
+gjson.go:1100 CALL runtime.panicBounds(SB): e88c70a3ff -> e86c6aa3ff
+gjson.go:1057 CALL runtime.panicBounds(SB): e88770a3ff -> e8676aa3ff
+gjson.go:1057 CALL runtime.panicBounds(SB): e88270a3ff -> e8626aa3ff

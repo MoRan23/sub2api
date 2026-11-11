@@ -1,0 +1,182 @@
+{
+  "ws32-baseline": {
+    "sample_ms": 7700.0,
+    "categories_ms": {
+      "other/setup/runtime": 310.0,
+      "reader": 370.0,
+      "usage": 870.0,
+      "response ID": 550.0,
+      "payload fields other": 640.0,
+      "images": 3360.0,
+      "terminal validation": 980.0,
+      "WS validation/write": 420.0,
+      "relay other": 200.0
+    },
+    "parseSquash_ms": {
+      "usage": 350.0,
+      "payload fields other": 640.0,
+      "images": 690.0,
+      "terminal validation": 540.0,
+      "relay other": 200.0,
+      "response ID": 100.0
+    }
+  },
+  "ws32-final": {
+    "sample_ms": 8140.0,
+    "categories_ms": {
+      "other/setup/runtime": 290.0,
+      "reader": 310.0,
+      "usage": 920.0,
+      "payload fields other": 770.0,
+      "response ID": 560.0,
+      "images": 3480.0,
+      "relay other": 270.0,
+      "terminal validation": 1070.0,
+      "WS validation/write": 470.0
+    },
+    "parseSquash_ms": {
+      "usage": 420.0,
+      "payload fields other": 770.0,
+      "response ID": 140.0,
+      "images": 950.0,
+      "relay other": 270.0,
+      "terminal validation": 630.0
+    }
+  },
+  "cache50-baseline": {
+    "sample_ms": 14130.0,
+    "loop_ms": 1570.0,
+    "warmup_ms": 1620.0,
+    "fixture_ms": 310.0,
+    "loop_flat_ms": {
+      "runtime.cgocall": 1110.0,
+      "github.com/Wei-Shaw/sub2api/internal/repository.(*schedulerCache).resolveSchedulerCandidates": 60.0,
+      "memeqbody": 40.0,
+      "runtime.ifaceeq": 30.0,
+      "runtime.memmove": 30.0,
+      "github.com/redis/go-redis/v9.cmdable.MGet": 20.0,
+      "internal/runtime/maps.ctrlGroup.matchH2": 20.0,
+      "runtime.nextFreeFast": 10.0,
+      "runtime.mapaccess1": 10.0,
+      "github.com/redis/go-redis/v9/internal/pool.(*Conn).WithReader": 10.0,
+      "runtime.(*timer).modify": 10.0,
+      "runtime.spanOf": 10.0
+    },
+    "loop_cum_ms": {
+      "github.com/Wei-Shaw/sub2api/internal/repository.(*schedulerCache).snapshotCandidatesFromEntry": 1450.0,
+      "github.com/Wei-Shaw/sub2api/internal/repository.(*schedulerCache).GetCandidateSnapshot": 1570.0,
+      "github.com/Wei-Shaw/sub2api/internal/repository.(*schedulerCache).snapshotCandidates": 1310.0,
+      "reflect.Value.call": 1570.0,
+      "github.com/redis/go-redis/v9.cmdable.MGet": 1390.0,
+      "github.com/Wei-Shaw/sub2api/internal/repository.(*schedulerCache).mgetChunked": 1300.0,
+      "syscall.WSASend": 1080.0,
+      "github.com/Wei-Shaw/sub2api/internal/repository.(*schedulerCache).resolveSchedulerCandidates": 140.0,
+      "runtime.mallocgcSmallScanHeader": 20.0,
+      "runtime.mallocgc": 40.0,
+      "syscall.WSARecv": 30.0,
+      "runtime.mallocgcSmallScanNoHeaderSC2": 20.0
+    }
+  },
+  "cache50-final": {
+    "sample_ms": 14210.0,
+    "loop_ms": 1780.0,
+    "warmup_ms": 2010.0,
+    "fixture_ms": 350.0,
+    "loop_flat_ms": {
+      "runtime.cgocall": 1260.0,
+      "github.com/Wei-Shaw/sub2api/internal/repository.(*schedulerCache).resolveSchedulerCandidates": 70.0,
+      "internal/runtime/maps.ctrlGroup.matchH2": 50.0,
+      "runtime.(*mspan).writeHeapBitsSmall": 20.0,
+      "bufio.(*Writer).Write": 20.0,
+      "time.Time.Sub": 20.0,
+      "runtime.mapaccess2": 20.0,
+      "runtime.memmove": 20.0,
+      "memeqbody": 20.0,
+      "internal/sync.(*Mutex).Unlock": 10.0,
+      "time.Now": 10.0,
+      "runtime.(*moduledata).textAddr": 10.0
+    },
+    "loop_cum_ms": {
+      "github.com/Wei-Shaw/sub2api/internal/repository.(*schedulerCache).snapshotCandidatesFromEntry": 1520.0,
+      "github.com/Wei-Shaw/sub2api/internal/repository.(*schedulerCache).GetCandidateSnapshot": 1780.0,
+      "github.com/Wei-Shaw/sub2api/internal/repository.(*schedulerCache).snapshotCandidates": 1300.0,
+      "reflect.Value.call": 1780.0,
+      "github.com/redis/go-redis/v9.cmdable.MGet": 1530.0,
+      "github.com/Wei-Shaw/sub2api/internal/repository.(*schedulerCache).mgetChunked": 1300.0,
+      "syscall.WSASend": 1230.0,
+      "runtime.mallocgcSmallScanNoHeader": 20.0,
+      "runtime.mallocgc": 70.0,
+      "runtime.mallocgcSmallScanHeader": 40.0,
+      "github.com/Wei-Shaw/sub2api/internal/repository.(*schedulerCache).resolveSchedulerCandidates": 220.0,
+      "syscall.WSARecv": 30.0
+    }
+  },
+  "cache100-baseline": {
+    "sample_ms": 24050.0,
+    "loop_ms": 1720.0,
+    "warmup_ms": 3340.0,
+    "fixture_ms": 660.0,
+    "loop_flat_ms": {
+      "runtime.cgocall": 1120.0,
+      "github.com/Wei-Shaw/sub2api/internal/repository.(*schedulerCache).resolveSchedulerCandidates": 50.0,
+      "internal/runtime/maps.ctrlGroup.matchH2": 40.0,
+      "runtime.mallocgcSmallScanNoHeaderSC2": 40.0,
+      "runtime.mapaccess2": 40.0,
+      "runtime.semawakeup": 30.0,
+      "runtime.ifaceeq": 20.0,
+      "runtime.strequal": 20.0,
+      "runtime.mallocgc": 20.0,
+      "runtime.(*timer).modify": 20.0,
+      "indexbytebody": 20.0,
+      "github.com/redis/go-redis/v9.cmdable.MGet": 20.0
+    },
+    "loop_cum_ms": {
+      "github.com/Wei-Shaw/sub2api/internal/repository.(*schedulerCache).snapshotCandidatesFromEntry": 1630.0,
+      "github.com/Wei-Shaw/sub2api/internal/repository.(*schedulerCache).GetCandidateSnapshot": 1720.0,
+      "github.com/Wei-Shaw/sub2api/internal/repository.(*schedulerCache).snapshotCandidates": 1470.0,
+      "reflect.Value.call": 1720.0,
+      "github.com/redis/go-redis/v9.cmdable.MGet": 1530.0,
+      "github.com/Wei-Shaw/sub2api/internal/repository.(*schedulerCache).mgetChunked": 1470.0,
+      "syscall.WSASend": 1090.0,
+      "syscall.WSARecv": 30.0,
+      "runtime.mallocgc": 90.0,
+      "runtime.mallocgcSmallNoScanSC3": 10.0,
+      "runtime.mallocgcSmallScanHeader": 10.0,
+      "github.com/Wei-Shaw/sub2api/internal/repository.(*schedulerCache).resolveSchedulerCandidates": 160.0,
+      "runtime.mallocgcSmallScanNoHeaderSC2": 50.0
+    }
+  },
+  "cache100-final": {
+    "sample_ms": 23900.0,
+    "loop_ms": 1870.0,
+    "warmup_ms": 3400.0,
+    "fixture_ms": 500.0,
+    "loop_flat_ms": {
+      "runtime.cgocall": 1300.0,
+      "github.com/Wei-Shaw/sub2api/internal/repository.(*schedulerCache).resolveSchedulerCandidates": 90.0,
+      "runtime.memmove": 50.0,
+      "runtime.semawakeup": 40.0,
+      "bufio.(*Writer).WriteByte": 40.0,
+      "internal/runtime/maps.ctrlGroup.matchH2": 30.0,
+      "time.Time.Sub": 30.0,
+      "memeqbody": 30.0,
+      "runtime.mallocgcSmallScanNoHeaderSC2": 20.0,
+      "bufio.(*Reader).Peek": 10.0,
+      "github.com/redis/go-redis/v9/internal/proto.(*Writer).writeLen": 10.0,
+      "internal/abi.(*MapType).IndirectKey": 10.0
+    },
+    "loop_cum_ms": {
+      "github.com/Wei-Shaw/sub2api/internal/repository.(*schedulerCache).snapshotCandidatesFromEntry": 1790.0,
+      "github.com/Wei-Shaw/sub2api/internal/repository.(*schedulerCache).GetCandidateSnapshot": 1870.0,
+      "github.com/Wei-Shaw/sub2api/internal/repository.(*schedulerCache).snapshotCandidates": 1600.0,
+      "reflect.Value.call": 1870.0,
+      "github.com/redis/go-redis/v9.cmdable.MGet": 1660.0,
+      "github.com/Wei-Shaw/sub2api/internal/repository.(*schedulerCache).mgetChunked": 1600.0,
+      "syscall.WSARecv": 90.0,
+      "syscall.WSASend": 1220.0,
+      "github.com/Wei-Shaw/sub2api/internal/repository.(*schedulerCache).resolveSchedulerCandidates": 190.0,
+      "runtime.mallocgcSmallScanNoHeaderSC2": 20.0,
+      "runtime.mallocgc": 20.0
+    }
+  }
+}

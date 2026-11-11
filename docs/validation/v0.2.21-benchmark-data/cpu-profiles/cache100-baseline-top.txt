@@ -1,0 +1,44 @@
+File: baseline-repository-unit.test.exe
+Build ID: D:\DevCache\sub2-v221-baseline.IWPO8C\bench-recheck\baseline-repository-unit.test.exe2026-11-11 22:48:08.5637945 +0800 CST
+Type: cpu
+Time: 2026-11-11 23:17:53 CST
+Duration: 21.44s, Total samples = 24050ms (112.19%)
+Showing nodes accounting for 20480ms, 85.16% of 24050ms total
+Dropped 442 nodes (cum <= 120.25ms)
+Showing top 35 nodes out of 154
+      flat  flat%   sum%        cum   cum%
+   15600ms 64.86% 64.86%    15650ms 65.07%  runtime.cgocall
+    1620ms  6.74% 71.60%     1620ms  6.74%  crypto/internal/fips140/sha256.blockSHANI
+     670ms  2.79% 74.39%      670ms  2.79%  runtime.memmove
+     310ms  1.29% 75.68%      910ms  3.78%  runtime.scanObject
+     300ms  1.25% 76.92%      300ms  1.25%  runtime.netpollQueueTimer
+     260ms  1.08% 78.00%      330ms  1.37%  runtime.tryDeferToSpanScan
+     250ms  1.04% 79.04%      250ms  1.04%  runtime.semawakeup
+     180ms  0.75% 79.79%      180ms  0.75%  internal/runtime/maps.ctrlGroup.matchH2 (inline)
+     140ms  0.58% 80.37%      450ms  1.87%  runtime.netpoll
+     130ms  0.54% 80.91%      130ms  0.54%  internal/runtime/maps.memHashAES
+     120ms   0.5% 81.41%      180ms  0.75%  runtime.typePointers.next
+      80ms  0.33% 81.75%      220ms  0.91%  runtime.sweepone
+      70ms  0.29% 82.04%    13540ms 56.30%  github.com/alicebob/miniredis/v2/server.(*Peer).Block
+      60ms  0.25% 82.29%      810ms  3.37%  runtime.mallocgc
+      60ms  0.25% 82.54%      320ms  1.33%  runtime.mapaccess2_faststr
+      50ms  0.21% 82.74%      340ms  1.41%  fmt.(*buffer).writeString (inline)
+      50ms  0.21% 82.95%      160ms  0.67%  github.com/Wei-Shaw/sub2api/internal/repository.(*schedulerCache).resolveSchedulerCandidates
+      50ms  0.21% 83.16%    13860ms 57.63%  github.com/alicebob/miniredis/v2.(*Miniredis).cmdMget.func1
+      50ms  0.21% 83.37%    15950ms 66.32%  internal/poll.(*FD).execIO
+      40ms  0.17% 83.53%      220ms  0.91%  encoding/json/v2.makeStructArshaler.func2
+      40ms  0.17% 83.70%      150ms  0.62%  runtime.mapaccess2
+      30ms  0.12% 83.83%      470ms  1.95%  bufio.(*Reader).ReadSlice
+      30ms  0.12% 83.95%    13040ms 54.22%  bufio.(*Writer).Write
+      30ms  0.12% 84.07%      350ms  1.46%  fmt.(*pp).doPrintf
+      30ms  0.12% 84.20%      280ms  1.16%  fmt.Fprint
+      30ms  0.12% 84.32%     5060ms 21.04%  github.com/Wei-Shaw/sub2api/internal/repository.(*schedulerCache).GetCandidateSnapshot
+      30ms  0.12% 84.45%      580ms  2.41%  github.com/alicebob/miniredis/v2/server.readArray
+      30ms  0.12% 84.57%      240ms     1%  runtime.(*mheap).allocSpan
+      20ms 0.083% 84.66%     1640ms  6.82%  crypto/internal/fips140/sha256.block
+      20ms 0.083% 84.74%      160ms  0.67%  encoding/json/v2.makeStructArshaler.func3
+      20ms 0.083% 84.82%      350ms  1.46%  fmt.(*fmt).padString
+      20ms 0.083% 84.91%    13090ms 54.43%  github.com/alicebob/miniredis/v2/server.(*Writer).WriteBulk
+      20ms 0.083% 84.99%     2270ms  9.44%  github.com/redis/go-redis/v9.cmdable.MGet (inline)
+      20ms 0.083% 85.07%      530ms  2.20%  github.com/redis/go-redis/v9/internal/proto.(*Reader).ReadReply
+      20ms 0.083% 85.16%      400ms  1.66%  github.com/redis/go-redis/v9/internal/proto.(*Writer).WriteArg

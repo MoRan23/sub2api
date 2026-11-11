@@ -1,0 +1,44 @@
+File: final-repository-unit.test.exe
+Build ID: D:\DevCache\sub2-v221-baseline.IWPO8C\bench-recheck\final-repository-unit.test.exe2026-11-11 22:54:45.659155 +0800 CST
+Type: cpu
+Time: 2026-11-11 23:17:29 CST
+Duration: 12.03s, Total samples = 14210ms (118.12%)
+Showing nodes accounting for 9240ms, 65.02% of 14210ms total
+Dropped 336 nodes (cum <= 71.05ms)
+Showing top 35 nodes out of 155
+      flat  flat%   sum%        cum   cum%
+      10ms  0.07%  0.07%     9190ms 64.67%  internal/poll.(*FD).execIO
+         0     0%  0.07%     9050ms 63.69%  syscall.SyscallN
+      20ms  0.14%  0.21%     9050ms 63.69%  syscall.syscalln
+    9020ms 63.48% 63.69%     9030ms 63.55%  runtime.cgocall
+         0     0% 63.69%     8860ms 62.35%  net.(*conn).Write
+         0     0% 63.69%     8860ms 62.35%  net.(*netFD).Write
+      10ms  0.07% 63.76%     8850ms 62.28%  internal/poll.(*FD).Write
+      10ms  0.07% 63.83%     8780ms 61.79%  internal/poll.(*FD).Write.func2
+      10ms  0.07% 63.90%     8770ms 61.72%  syscall.WSASend
+         0     0% 63.90%     8120ms 57.14%  github.com/alicebob/miniredis/v2/server.(*Server).ServeConn.func1
+         0     0% 63.90%     8120ms 57.14%  github.com/alicebob/miniredis/v2/server.(*Server).servePeer
+      10ms  0.07% 63.97%     6860ms 48.28%  github.com/alicebob/miniredis/v2/server.(*Server).Dispatch
+         0     0% 63.97%     6780ms 47.71%  github.com/alicebob/miniredis/v2.withTx
+      10ms  0.07% 64.04%     6720ms 47.29%  github.com/alicebob/miniredis/v2.(*Miniredis).cmdMget
+         0     0% 64.04%     6690ms 47.08%  github.com/alicebob/miniredis/v2.(*Miniredis).cmdMget.func1
+      10ms  0.07% 64.11%     6500ms 45.74%  github.com/alicebob/miniredis/v2/server.(*Peer).Block
+      60ms  0.42% 64.53%     6360ms 44.76%  bufio.(*Writer).Write
+         0     0% 64.53%     6300ms 44.33%  github.com/alicebob/miniredis/v2/server.(*Peer).WriteBulk (inline)
+      10ms  0.07% 64.60%     6290ms 44.26%  github.com/alicebob/miniredis/v2/server.(*Writer).WriteBulk
+         0     0% 64.60%     6280ms 44.19%  github.com/alicebob/miniredis/v2/server.(*Peer).WriteBulk.1
+      10ms  0.07% 64.67%     6270ms 44.12%  fmt.Fprintf
+         0     0% 64.67%     4150ms 29.20%  testing.(*B).runN
+         0     0% 64.67%     4140ms 29.13%  github.com/Wei-Shaw/sub2api/internal/repository.BenchmarkSchedulerCacheSharingModes.func1
+      40ms  0.28% 64.95%     3790ms 26.67%  github.com/Wei-Shaw/sub2api/internal/repository.(*schedulerCache).GetCandidateSnapshot
+         0     0% 64.95%     3790ms 26.67%  github.com/Wei-Shaw/sub2api/internal/repository.BenchmarkSchedulerCacheSharingModes.func1.3
+         0     0% 64.95%     3790ms 26.67%  reflect.Value.Call
+         0     0% 64.95%     3790ms 26.67%  reflect.Value.call
+         0     0% 64.95%     2860ms 20.13%  testing.(*B).launch
+         0     0% 64.95%     2830ms 19.92%  bufio.(*Writer).Flush
+         0     0% 64.95%     2160ms 15.20%  github.com/redis/go-redis/v9.(*baseClient).withConn
+      10ms  0.07% 65.02%     1980ms 13.93%  github.com/redis/go-redis/v9.cmdable.MGet (inline)
+         0     0% 65.02%     1960ms 13.79%  github.com/redis/go-redis/v9.(*Client).Process
+         0     0% 65.02%     1960ms 13.79%  github.com/redis/go-redis/v9.(*baseClient)._process
+         0     0% 65.02%     1960ms 13.79%  github.com/redis/go-redis/v9.(*baseClient).process
+         0     0% 65.02%     1960ms 13.79%  github.com/redis/go-redis/v9.(*baseClient).processCommand

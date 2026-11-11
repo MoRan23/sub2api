@@ -1,0 +1,24 @@
+# round=1 GOMAXPROCS=4 benchtime=500ms count=1 pattern=^BenchmarkPromptAuditMemory$/^text$/^(65536|1048576)$/^off$
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/securityaudit
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkPromptAuditMemory/text/65536/off-4         	 2729062	       226.5 ns/op	289964.87 MB/s	     896 B/op	       4 allocs/op
+BenchmarkPromptAuditMemory/text/1048576/off-4       	 2940854	       215.4 ns/op	4869082.14 MB/s	     896 B/op	       4 allocs/op
+PASS
+# round=2 GOMAXPROCS=4 benchtime=500ms count=1 pattern=^BenchmarkPromptAuditMemory$/^text$/^(65536|1048576)$/^off$
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/securityaudit
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkPromptAuditMemory/text/65536/off-4         	 2192709	       278.7 ns/op	235607.76 MB/s	     896 B/op	       4 allocs/op
+BenchmarkPromptAuditMemory/text/1048576/off-4       	 2237194	       276.8 ns/op	3788412.23 MB/s	     896 B/op	       4 allocs/op
+PASS
+# round=3 GOMAXPROCS=4 benchtime=500ms count=1 pattern=^BenchmarkPromptAuditMemory$/^text$/^(65536|1048576)$/^off$
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/securityaudit
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkPromptAuditMemory/text/65536/off-4         	 2331243	       256.8 ns/op	255684.76 MB/s	     896 B/op	       4 allocs/op
+BenchmarkPromptAuditMemory/text/1048576/off-4       	 2186881	       260.9 ns/op	4019210.42 MB/s	     896 B/op	       4 allocs/op
+PASS

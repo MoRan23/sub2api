@@ -1,0 +1,627 @@
+PeriodType: cpu nanoseconds
+Period: 10000000
+Time: 2026-11-11 23:17:21.2369636 +0800 CST
+Duration: 8.12
+Samples:
+samples/count cpu/nanoseconds
+          1   10000000: 1 2 3 4 5 6 7 
+          1   10000000: 8 9 10 11 
+          4   40000000: 12 13 10 11 
+          2   20000000: 14 15 16 17 18 19 16 17 16 17 20 21 22 23 24 25 26 27 28 
+          1   10000000: 29 30 31 32 33 22 23 24 25 26 27 28 
+          1   10000000: 34 30 31 32 35 24 25 26 27 28 
+          1   10000000: 14 15 16 17 18 19 16 17 16 17 20 36 37 24 25 26 27 28 
+          1   10000000: 29 30 31 32 38 37 24 25 26 27 28 
+          1   10000000: 39 30 31 32 40 24 25 26 27 28 
+          1   10000000: 41 42 43 31 32 44 24 25 26 27 28 
+          1   10000000: 45 46 47 48 25 26 27 28 
+          1   10000000: 14 15 16 17 18 19 16 17 16 17 20 49 48 25 26 27 28 
+          1   10000000: 50 30 31 51 52 48 25 26 27 28 
+          1   10000000: 53 30 31 51 54 48 25 26 27 28 
+          1   10000000: 55 56 57 58 59 48 25 26 27 28 
+          1   10000000: 60 61 62 63 58 59 48 25 26 27 28 
+          1   10000000: 64 61 62 63 58 59 48 25 26 27 28 
+          1   10000000: 65 66 31 51 67 62 63 58 59 48 25 26 27 28 
+          1   10000000: 68 30 31 51 69 48 25 26 27 28 
+          1   10000000: 39 56 57 58 70 48 25 26 27 28 
+          1   10000000: 71 61 62 63 58 70 48 25 26 27 28 
+          1   10000000: 64 61 62 63 58 70 48 25 26 27 28 
+          1   10000000: 65 66 31 51 67 62 63 58 70 48 25 26 27 28 
+          1   10000000: 72 30 31 32 73 25 26 27 28 
+          1   10000000: 74 15 16 17 18 19 16 17 16 17 20 75 76 25 26 27 28 
+          1   10000000: 53 30 31 32 77 76 25 26 27 28 
+          1   10000000: 78 42 43 31 32 77 76 25 26 27 28 
+          1   10000000: 41 30 31 32 79 76 25 26 27 28 
+          1   10000000: 14 15 16 17 18 19 16 17 16 17 20 80 81 82 25 26 27 28 
+          1   10000000: 83 15 16 17 18 19 16 17 16 17 20 80 81 82 25 26 27 28 
+          8   80000000: 84 9 10 11 
+         28  280000000: 14 15 16 17 18 19 16 17 16 17 20 21 22 23 24 25 26 27 85 
+          1   10000000: 41 30 31 32 33 22 23 24 25 26 27 85 
+          1   10000000: 34 42 43 31 32 86 22 23 24 25 26 27 85 
+         36  360000000: 14 15 16 17 18 19 16 17 16 17 20 36 37 24 25 26 27 85 
+          1   10000000: 50 42 43 31 32 40 24 25 26 27 85 
+          1   10000000: 34 30 31 32 40 24 25 26 27 85 
+          3   30000000: 68 30 31 32 44 24 25 26 27 85 
+         35  350000000: 14 15 16 17 18 19 16 17 16 17 20 49 48 25 26 27 85 
+          1   10000000: 87 30 31 51 54 48 25 26 27 85 
+          4   40000000: 39 56 57 58 59 48 25 26 27 85 
+         13  130000000: 71 61 62 63 58 59 48 25 26 27 85 
+         25  250000000: 64 61 62 63 58 59 48 25 26 27 85 
+         34  340000000: 65 66 31 51 67 62 63 58 59 48 25 26 27 85 
+          1   10000000: 55 30 31 51 69 48 25 26 27 85 
+          2   20000000: 88 56 57 58 70 48 25 26 27 85 
+         29  290000000: 64 61 62 63 58 70 48 25 26 27 85 
+         12  120000000: 71 61 62 63 58 70 48 25 26 27 85 
+         31  310000000: 65 66 31 51 67 62 63 58 70 48 25 26 27 85 
+          2   20000000: 89 30 31 32 90 25 26 27 85 
+          2   20000000: 83 15 16 17 18 19 16 17 16 17 20 75 76 25 26 27 85 
+         36  360000000: 14 15 16 17 18 19 16 17 16 17 20 75 76 25 26 27 85 
+          1   10000000: 89 42 43 31 32 77 76 25 26 27 85 
+          3   30000000: 89 30 31 32 79 76 25 26 27 85 
+         37  370000000: 14 15 16 17 18 19 16 17 16 17 20 80 81 82 25 26 27 85 
+          1   10000000: 91 92 11 
+          1   10000000: 93 94 95 96 
+          2   20000000: 97 30 31 32 33 22 23 24 25 26 27 85 
+          1   10000000: 98 30 31 32 35 24 25 26 27 85 
+          1   10000000: 99 15 16 17 18 19 16 17 16 17 20 36 37 24 25 26 27 85 
+          2   20000000: 53 30 31 32 38 37 24 25 26 27 85 
+          2   20000000: 78 30 31 32 40 24 25 26 27 85 
+          1   10000000: 53 30 31 32 44 24 25 26 27 85 
+          1   10000000: 53 30 31 51 54 48 25 26 27 85 
+          1   10000000: 100 61 62 63 58 59 48 25 26 27 85 
+          1   10000000: 78 56 57 58 70 48 25 26 27 85 
+          2   20000000: 101 66 31 51 67 62 63 58 70 48 25 26 27 85 
+          1   10000000: 102 42 43 31 32 77 76 25 26 27 85 
+          1   10000000: 68 42 43 31 32 79 76 25 26 27 85 
+          1   10000000: 103 15 16 17 18 19 16 17 16 17 20 80 81 82 25 26 27 85 
+          4   40000000: 104 105 106 107 108 109 7 110 
+          1   10000000: 111 9 10 11 
+          1   10000000: 112 113 109 7 110 
+          2   20000000: 29 42 43 31 32 86 22 23 24 25 26 27 85 
+          2   20000000: 114 42 43 31 32 40 24 25 26 27 85 
+          2   20000000: 39 42 43 31 32 44 24 25 26 27 85 
+          3   30000000: 115 116 117 47 48 25 26 27 85 
+          2   20000000: 87 30 31 51 52 48 25 26 27 85 
+          2   20000000: 114 42 43 31 51 118 48 25 26 27 85 
+          1   10000000: 119 61 62 63 58 59 48 25 26 27 85 
+          9   90000000: 60 61 62 63 58 59 48 25 26 27 85 
+          1   10000000: 120 30 31 51 69 48 25 26 27 85 
+          2   20000000: 68 56 57 58 70 48 25 26 27 85 
+          2   20000000: 39 30 31 32 90 25 26 27 85 
+          1   10000000: 39 42 43 31 32 77 76 25 26 27 85 
+          2   20000000: 121 30 31 32 79 76 25 26 27 85 
+          3   30000000: 122 116 123 23 24 25 26 27 85 
+          3   30000000: 103 15 16 17 18 19 16 17 16 17 20 21 22 23 24 25 26 27 85 
+          1   10000000: 55 30 31 32 33 22 23 24 25 26 27 85 
+          2   20000000: 41 42 43 31 32 86 22 23 24 25 26 27 85 
+          1   10000000: 88 30 31 32 38 37 24 25 26 27 85 
+          1   10000000: 39 30 31 32 40 24 25 26 27 85 
+          1   10000000: 29 42 43 31 32 44 24 25 26 27 85 
+          1   10000000: 41 30 31 51 54 48 25 26 27 85 
+          1   10000000: 102 56 57 58 59 48 25 26 27 85 
+          2   20000000: 101 66 31 51 67 62 63 58 59 48 25 26 27 85 
+          2   20000000: 88 42 43 31 51 124 48 25 26 27 85 
+          4   40000000: 100 61 62 63 58 70 48 25 26 27 85 
+          1   10000000: 68 30 31 32 73 25 26 27 85 
+          2   20000000: 114 42 43 31 32 77 76 25 26 27 85 
+          1   10000000: 41 30 31 32 79 76 25 26 27 85 
+          1   10000000: 98 42 43 31 32 33 22 23 24 25 26 27 85 
+          1   10000000: 125 30 31 32 35 24 25 26 27 85 
+          2   20000000: 74 15 16 17 18 19 16 17 16 17 20 36 37 24 25 26 27 85 
+          2   20000000: 50 30 31 32 38 37 24 25 26 27 85 
+          5   50000000: 50 30 31 32 40 24 25 26 27 85 
+          1   10000000: 50 30 31 32 44 24 25 26 27 85 
+          1   10000000: 29 30 31 51 52 48 25 26 27 85 
+          2   20000000: 120 56 57 58 59 48 25 26 27 85 
+          5   50000000: 126 66 31 51 67 62 63 58 59 48 25 26 27 85 
+          1   10000000: 97 56 57 58 70 48 25 26 27 85 
+          2   20000000: 55 30 31 32 90 25 26 27 85 
+          1   10000000: 41 42 43 31 32 77 76 25 26 27 85 
+          1   10000000: 41 42 43 31 32 79 76 25 26 27 85 
+          9   90000000: 127 9 10 11 
+          6   60000000: 115 116 123 23 24 25 26 27 85 
+          1   10000000: 68 42 43 31 32 33 22 23 24 25 26 27 85 
+          1   10000000: 89 42 43 31 32 40 24 25 26 27 85 
+          5   50000000: 41 30 31 32 40 24 25 26 27 85 
+          5   50000000: 122 116 117 47 48 25 26 27 85 
+          1   10000000: 55 30 31 51 54 48 25 26 27 85 
+          1   10000000: 97 56 57 58 59 48 25 26 27 85 
+          2   20000000: 128 66 31 51 67 62 63 58 59 48 25 26 27 85 
+          2   20000000: 41 56 57 58 70 48 25 26 27 85 
+          3   30000000: 129 66 31 51 67 62 63 58 70 48 25 26 27 85 
+          1   10000000: 97 30 31 32 90 25 26 27 85 
+          2   20000000: 55 30 31 32 79 76 25 26 27 85 
+          4   40000000: 74 15 16 17 18 19 16 17 16 17 20 80 81 82 25 26 27 85 
+          3   30000000: 68 30 31 32 33 22 23 24 25 26 27 85 
+          2   20000000: 89 42 43 31 32 33 22 23 24 25 26 27 85 
+          1   10000000: 130 30 31 32 35 24 25 26 27 85 
+          1   10000000: 114 30 31 32 38 37 24 25 26 27 85 
+          2   20000000: 131 42 43 31 32 40 24 25 26 27 85 
+          1   10000000: 114 30 31 32 44 24 25 26 27 85 
+          2   20000000: 121 30 31 51 52 48 25 26 27 85 
+          1   10000000: 87 42 43 31 51 118 48 25 26 27 85 
+          2   20000000: 87 42 43 31 51 124 48 25 26 27 85 
+          6   60000000: 60 61 62 63 58 70 48 25 26 27 85 
+          2   20000000: 97 30 31 32 73 25 26 27 85 
+          1   10000000: 103 15 16 17 18 19 16 17 16 17 20 75 76 25 26 27 85 
+          1   10000000: 88 42 43 31 32 77 76 25 26 27 85 
+          1   10000000: 98 42 43 31 32 79 76 25 26 27 85 
+          1   10000000: 88 42 43 31 32 33 22 23 24 25 26 27 85 
+          2   20000000: 97 30 31 32 35 24 25 26 27 85 
+          1   10000000: 125 42 43 31 32 40 24 25 26 27 85 
+          1   10000000: 68 30 31 32 40 24 25 26 27 85 
+          2   20000000: 132 46 47 48 25 26 27 85 
+          2   20000000: 131 30 31 51 52 48 25 26 27 85 
+          1   10000000: 50 42 43 31 51 118 48 25 26 27 85 
+          1   10000000: 55 42 43 31 51 124 48 25 26 27 85 
+          1   10000000: 78 30 31 32 73 25 26 27 85 
+          1   10000000: 41 30 31 32 77 76 25 26 27 85 
+          1   10000000: 29 42 43 31 32 79 76 25 26 27 85 
+          3   30000000: 133 9 10 11 
+          1   10000000: 83 15 16 17 18 19 16 17 16 17 20 21 22 23 24 25 26 27 85 
+          1   10000000: 78 42 43 31 32 33 22 23 24 25 26 27 85 
+          2   20000000: 121 42 43 31 32 44 24 25 26 27 85 
+          1   10000000: 98 30 31 51 54 48 25 26 27 85 
+          1   10000000: 121 56 57 58 59 48 25 26 27 85 
+          1   10000000: 134 135 136 137 138 139 140 141 142 143 144 145 
+          3   30000000: 146 61 62 63 58 70 48 25 26 27 85 
+          3   30000000: 120 42 43 31 32 77 76 25 26 27 85 
+          1   10000000: 53 30 31 32 79 76 25 26 27 85 
+          1   10000000: 147 113 148 7 110 
+          1   10000000: 149 150 113 109 7 110 
+          1   10000000: 53 42 43 31 32 86 22 23 24 25 26 27 85 
+          2   20000000: 68 42 43 31 32 40 24 25 26 27 85 
+          1   10000000: 83 15 16 17 18 19 16 17 16 17 20 49 48 25 26 27 85 
+          1   10000000: 41 42 43 31 51 118 48 25 26 27 85 
+          1   10000000: 41 30 31 51 69 48 25 26 27 85 
+          2   20000000: 41 30 31 32 73 25 26 27 85 
+          2   20000000: 78 30 31 32 77 76 25 26 27 85 
+          2   20000000: 50 42 43 31 32 79 76 25 26 27 85 
+          2   20000000: 1 2 3 7 
+          1   10000000: 53 30 31 32 33 22 23 24 25 26 27 85 
+          1   10000000: 120 42 43 31 32 86 22 23 24 25 26 27 85 
+          1   10000000: 55 30 31 32 38 37 24 25 26 27 85 
+          1   10000000: 55 30 31 32 44 24 25 26 27 85 
+          1   10000000: 151 152 153 48 25 26 27 85 
+          2   20000000: 102 30 31 51 54 48 25 26 27 85 
+          1   10000000: 68 56 57 58 59 48 25 26 27 85 
+          1   10000000: 50 56 57 58 70 48 25 26 27 85 
+          1   10000000: 68 30 31 32 90 25 26 27 85 
+          1   10000000: 121 42 43 31 32 77 76 25 26 27 85 
+          1   10000000: 88 42 43 31 32 79 76 25 26 27 85 
+          1   10000000: 97 42 43 31 32 33 22 23 24 25 26 27 85 
+          1   10000000: 87 42 43 31 32 40 24 25 26 27 85 
+          1   10000000: 87 42 43 31 32 44 24 25 26 27 85 
+          1   10000000: 45 46 47 48 25 26 27 85 
+          3   30000000: 68 30 31 51 52 48 25 26 27 85 
+          1   10000000: 131 42 43 31 51 118 48 25 26 27 85 
+          1   10000000: 68 42 43 31 51 124 48 25 26 27 85 
+          1   10000000: 55 42 43 31 32 77 76 25 26 27 85 
+          1   10000000: 154 15 16 17 18 19 16 17 16 17 20 80 81 82 25 26 27 85 
+          1   10000000: 155 156 6 7 157 158 159 160 161 10 11 
+          1   10000000: 162 163 164 165 92 11 
+          1   10000000: 78 30 31 32 33 22 23 24 25 26 27 85 
+          2   20000000: 121 30 31 32 35 24 25 26 27 85 
+          1   10000000: 78 42 43 31 32 40 24 25 26 27 85 
+          1   10000000: 50 30 31 51 52 48 25 26 27 85 
+          1   10000000: 29 56 57 58 59 48 25 26 27 85 
+          1   10000000: 114 42 43 31 51 124 48 25 26 27 85 
+          1   10000000: 55 30 31 32 77 76 25 26 27 85 
+          1   10000000: 131 42 43 31 32 79 76 25 26 27 85 
+          1   10000000: 166 167 168 145 
+          3   30000000: 98 30 31 32 33 22 23 24 25 26 27 85 
+          2   20000000: 131 42 43 31 32 86 22 23 24 25 26 27 85 
+          1   10000000: 120 30 31 32 38 37 24 25 26 27 85 
+          1   10000000: 53 30 31 32 40 24 25 26 27 85 
+          1   10000000: 120 30 31 32 44 24 25 26 27 85 
+          1   10000000: 169 152 153 48 25 26 27 85 
+          1   10000000: 88 42 43 31 51 118 48 25 26 27 85 
+          1   10000000: 146 61 62 63 58 59 48 25 26 27 85 
+          1   10000000: 89 42 43 31 51 124 48 25 26 27 85 
+          1   10000000: 125 30 31 32 77 76 25 26 27 85 
+          1   10000000: 34 42 43 31 32 79 76 25 26 27 85 
+          1   10000000: 170 171 6 7 
+          1   10000000: 41 42 43 31 32 33 22 23 24 25 26 27 85 
+          1   10000000: 114 30 31 32 35 24 25 26 27 85 
+          2   20000000: 72 42 43 31 32 40 24 25 26 27 85 
+          1   10000000: 55 42 43 31 32 44 24 25 26 27 85 
+          2   20000000: 29 30 31 51 54 48 25 26 27 85 
+          1   10000000: 53 56 57 58 70 48 25 26 27 85 
+          1   10000000: 121 30 31 32 90 25 26 27 85 
+          2   20000000: 39 30 31 32 77 76 25 26 27 85 
+          1   10000000: 120 30 31 32 79 76 25 26 27 85 
+          1   10000000: 50 56 57 58 59 48 25 26 27 85 
+          1   10000000: 172 173 3 7 4 174 175 176 
+          1   10000000: 88 30 31 51 69 48 25 26 27 85 
+          1   10000000: 29 56 57 58 70 48 25 26 27 85 
+          1   10000000: 177 66 31 51 67 62 63 58 70 48 25 26 27 85 
+          2   20000000: 74 15 16 17 18 19 16 17 16 17 20 75 76 25 26 27 85 
+          1   10000000: 178 179 180 113 109 7 110 
+          1   10000000: 181 163 164 165 92 11 
+          1   10000000: 182 113 109 7 110 
+          1   10000000: 183 184 185 148 7 110 
+          1   10000000: 34 30 31 32 33 22 23 24 25 26 27 85 
+          1   10000000: 88 42 43 31 32 86 22 23 24 25 26 27 85 
+          1   10000000: 131 30 31 32 38 37 24 25 26 27 85 
+          2   20000000: 130 30 31 32 40 24 25 26 27 85 
+          1   10000000: 41 30 31 32 44 24 25 26 27 85 
+          2   20000000: 133 152 153 48 25 26 27 85 
+          2   20000000: 89 42 43 31 51 118 48 25 26 27 85 
+          2   20000000: 29 42 43 31 51 124 48 25 26 27 85 
+          1   10000000: 125 30 31 32 73 25 26 27 85 
+          1   10000000: 87 42 43 31 32 77 76 25 26 27 85 
+          1   10000000: 125 42 43 31 32 33 22 23 24 25 26 27 85 
+          1   10000000: 29 30 31 32 35 24 25 26 27 85 
+          1   10000000: 102 30 31 32 40 24 25 26 27 85 
+          2   20000000: 186 15 16 17 18 19 16 17 16 17 20 49 48 25 26 27 85 
+          2   20000000: 72 30 31 51 54 48 25 26 27 85 
+          1   10000000: 114 56 57 58 59 48 25 26 27 85 
+          1   10000000: 187 61 62 63 58 70 48 25 26 27 85 
+          1   10000000: 128 66 31 51 67 62 63 58 70 48 25 26 27 85 
+          2   20000000: 88 30 31 32 90 25 26 27 85 
+          2   20000000: 186 15 16 17 18 19 16 17 16 17 20 75 76 25 26 27 85 
+          2   20000000: 131 30 31 32 79 76 25 26 27 85 
+          4   40000000: 99 15 16 17 18 19 16 17 16 17 20 21 22 23 24 25 26 27 85 
+          1   10000000: 188 189 190 143 144 145 
+          1   10000000: 29 30 31 32 40 24 25 26 27 85 
+          1   10000000: 74 15 16 17 18 19 16 17 16 17 20 49 48 25 26 27 85 
+          1   10000000: 89 30 31 51 54 48 25 26 27 85 
+          1   10000000: 78 56 57 58 59 48 25 26 27 85 
+          1   10000000: 125 30 31 32 90 25 26 27 85 
+          3   30000000: 89 30 31 32 77 76 25 26 27 85 
+          2   20000000: 104 105 106 107 108 148 7 110 
+          1   10000000: 125 30 31 32 33 22 23 24 25 26 27 85 
+          1   10000000: 102 42 43 31 32 86 22 23 24 25 26 27 85 
+          1   10000000: 88 30 31 32 40 24 25 26 27 85 
+          1   10000000: 78 30 31 51 54 48 25 26 27 85 
+          1   10000000: 131 30 31 51 69 48 25 26 27 85 
+          2   20000000: 53 30 31 32 73 25 26 27 85 
+          1   10000000: 130 30 31 32 33 22 23 24 25 26 27 85 
+          1   10000000: 103 15 16 17 18 19 16 17 16 17 20 36 37 24 25 26 27 85 
+          1   10000000: 50 30 31 51 54 48 25 26 27 85 
+          1   10000000: 41 56 57 58 59 48 25 26 27 85 
+          2   20000000: 98 30 31 32 90 25 26 27 85 
+          1   10000000: 29 42 43 31 32 77 76 25 26 27 85 
+          1   10000000: 74 15 16 17 18 19 16 17 16 17 20 21 22 23 24 25 26 27 85 
+          1   10000000: 114 30 31 32 33 22 23 24 25 26 27 85 
+          1   10000000: 97 42 43 31 32 86 22 23 24 25 26 27 85 
+          2   20000000: 55 30 31 32 40 24 25 26 27 85 
+          2   20000000: 41 42 43 31 32 44 24 25 26 27 85 
+          1   10000000: 125 42 43 31 51 118 48 25 26 27 85 
+          1   10000000: 72 42 43 31 51 124 48 25 26 27 85 
+          1   10000000: 191 3 7 4 174 175 176 
+          1   10000000: 72 42 43 31 32 77 76 25 26 27 85 
+          1   10000000: 88 30 31 32 79 76 25 26 27 85 
+          1   10000000: 192 193 194 195 196 7 
+          1   10000000: 197 198 199 200 143 144 145 
+          1   10000000: 197 198 167 201 202 
+          1   10000000: 68 30 31 32 35 24 25 26 27 85 
+          1   10000000: 68 30 31 32 38 37 24 25 26 27 85 
+          1   10000000: 131 30 31 32 40 24 25 26 27 85 
+          1   10000000: 97 42 43 31 32 44 24 25 26 27 85 
+          1   10000000: 98 42 43 31 51 118 48 25 26 27 85 
+          1   10000000: 120 42 43 31 51 124 48 25 26 27 85 
+          2   20000000: 126 66 31 51 67 62 63 58 70 48 25 26 27 85 
+          2   20000000: 121 30 31 32 73 25 26 27 85 
+          1   10000000: 97 30 31 32 77 76 25 26 27 85 
+          2   20000000: 50 30 31 32 77 76 25 26 27 85 
+          1   10000000: 203 204 205 206 207 208 209 210 33 22 23 24 25 26 27 85 
+          1   10000000: 211 15 16 17 18 19 16 17 16 17 20 36 37 24 25 26 27 85 
+          2   20000000: 53 42 43 31 32 44 24 25 26 27 85 
+          1   10000000: 89 56 57 58 59 48 25 26 27 85 
+          1   10000000: 78 42 43 31 32 79 76 25 26 27 85 
+          1   10000000: 99 15 16 17 18 19 16 17 16 17 20 80 81 82 25 26 27 85 
+          1   10000000: 212 213 113 148 7 110 
+          1   10000000: 214 215 113 109 7 110 
+          1   10000000: 216 217 11 
+          1   10000000: 218 180 113 109 7 110 
+          1   10000000: 211 15 16 17 18 19 16 17 16 17 20 21 22 23 24 25 26 27 85 
+          1   10000000: 50 42 43 31 32 86 22 23 24 25 26 27 85 
+          1   10000000: 131 42 43 31 32 44 24 25 26 27 85 
+          1   10000000: 87 56 57 58 70 48 25 26 27 85 
+          1   10000000: 130 30 31 32 77 76 25 26 27 85 
+          1   10000000: 102 30 31 32 79 76 25 26 27 85 
+          1   10000000: 219 30 31 32 40 24 25 26 27 85 
+          1   10000000: 219 30 31 51 54 48 25 26 27 85 
+          1   10000000: 55 56 57 58 59 48 25 26 27 85 
+          1   10000000: 114 42 43 31 32 79 76 25 26 27 85 
+          1   10000000: 130 42 43 31 32 33 22 23 24 25 26 27 85 
+          1   10000000: 34 42 43 31 32 40 24 25 26 27 85 
+          1   10000000: 211 15 16 17 18 19 16 17 16 17 20 49 48 25 26 27 85 
+          1   10000000: 120 30 31 51 52 48 25 26 27 85 
+          1   10000000: 39 30 31 51 69 48 25 26 27 85 
+          1   10000000: 121 56 57 58 70 48 25 26 27 85 
+          1   10000000: 53 30 31 32 77 76 25 26 27 85 
+          1   10000000: 41 30 31 32 35 24 25 26 27 85 
+          1   10000000: 29 30 31 32 38 37 24 25 26 27 85 
+          1   10000000: 125 30 31 32 44 24 25 26 27 85 
+          1   10000000: 34 42 43 31 51 118 48 25 26 27 85 
+          1   10000000: 97 30 31 51 69 48 25 26 27 85 
+          1   10000000: 114 30 31 32 77 76 25 26 27 85 
+          1   10000000: 55 42 43 31 32 79 76 25 26 27 85 
+          1   10000000: 125 42 43 31 32 86 22 23 24 25 26 27 85 
+          1   10000000: 125 30 31 32 38 37 24 25 26 27 85 
+          1   10000000: 98 30 31 32 44 24 25 26 27 85 
+          1   10000000: 50 42 43 31 51 124 48 25 26 27 85 
+          1   10000000: 131 42 43 31 32 77 76 25 26 27 85 
+          1   10000000: 166 220 221 
+          1   10000000: 89 42 43 31 32 86 22 23 24 25 26 27 85 
+          1   10000000: 87 30 31 32 38 37 24 25 26 27 85 
+          1   10000000: 99 15 16 17 18 19 16 17 16 17 20 49 48 25 26 27 85 
+          1   10000000: 222 66 31 51 67 62 63 58 59 48 25 26 27 85 
+          1   10000000: 89 56 57 58 70 48 25 26 27 85 
+          1   10000000: 78 30 31 32 90 25 26 27 85 
+          1   10000000: 78 42 43 31 32 77 76 25 26 27 85 
+          1   10000000: 72 30 31 32 79 76 25 26 27 85 
+          1   10000000: 83 15 16 17 18 19 16 17 16 17 20 80 81 82 25 26 27 85 
+Locations
+     1: 0x7ff75653b744 M=1 runtime.sysUnusedOS D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mem_windows.go:33:0 s=32
+     2: 0x7ff75654bbc8 M=1 runtime.sysUnused D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mem.go:70:0 s=68
+             runtime.(*pageAlloc).scavengeOne D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcscavenge.go:778:0 s=732
+     3: 0x7ff756594f0e M=1 runtime.(*pageAlloc).scavenge.func1 D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcscavenge.go:683:0 s=682
+     4: 0x7ff75654b746 M=1 runtime.(*pageAlloc).scavenge D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcscavenge.go:682:0 s=675
+     5: 0x7ff756551177 M=1 runtime.(*mheap).allocSpan D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mheap.go:1369:0 s=1215
+     6: 0x7ff7565951fb M=1 runtime.(*mheap).alloc.func1 D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mheap.go:1008:0 s=1002
+     7: 0x7ff7565a4cc8 M=1 runtime.systemstack D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/asm_amd64.s:531:0 s=489
+     8: 0x7ff7565a74b5 M=1 runtime.memmove D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/memmove_amd64.s:447:0 s=35
+     9: 0x7ff7565a19c5 M=1 runtime.growslice D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/slice.go:284:0 s=178
+    10: 0x7ff758bb5e0c M=1 github.com/Wei-Shaw/sub2api/internal/service.(*codexEngineSSEReader).readFrame D:/Code/sub2api/backend/internal/service/openai_codex_engine_sse_frame.go:150:0 s=131
+    11: 0x7ff758bb5aba M=1 github.com/Wei-Shaw/sub2api/internal/service.(*codexEngineSSEReader).read D:/Code/sub2api/backend/internal/service/openai_codex_engine_sse_frame.go:118:0 s=107
+    12: 0x7ff7565a6e19 M=1 runtime.memclrNoHeapPointers D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/memclr_amd64.s:127:0 s=15
+    13: 0x7ff7565a19ac M=1 runtime.growslice D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/slice.go:270:0 s=178
+    14: 0x7ff756b76e8e M=1 github.com/tidwall/gjson.validstring D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:2608:0 s=2607
+    15: 0x7ff756b7688c M=1 github.com/tidwall/gjson.validany D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:2501:0 s=2489
+    16: 0x7ff756b76bfb M=1 github.com/tidwall/gjson.validobject D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:2531:0 s=2514
+    17: 0x7ff756b76a57 M=1 github.com/tidwall/gjson.validany D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:2497:0 s=2489
+    18: 0x7ff756b76daf M=1 github.com/tidwall/gjson.validarray D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:2589:0 s=2584
+    19: 0x7ff756b76956 M=1 github.com/tidwall/gjson.validany D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:2499:0 s=2489
+    20: 0x7ff756b76773 M=1 github.com/tidwall/gjson.validpayload D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:2470:0 s=2466
+    21: 0x7ff758d00b29 M=1 github.com/tidwall/gjson.ValidBytes D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:2756:0 s=2755
+             github.com/Wei-Shaw/sub2api/internal/service.extractOpenAIUsageFromJSONBytes D:/Code/sub2api/backend/internal/service/openai_gateway_response_handling.go:1575:0 s=1574
+    22: 0x7ff758cffb54 M=1 github.com/Wei-Shaw/sub2api/internal/service.parseOpenAIResponseUsageInto D:/Code/sub2api/backend/internal/service/openai_gateway_response_handling.go:1460:0 s=1450
+    23: 0x7ff758bb1486 M=1 github.com/Wei-Shaw/sub2api/internal/service.observeCodexEnginePayloadFields D:/Code/sub2api/backend/internal/service/openai_codex_engine.go:546:0 s=545
+    24: 0x7ff7598d4f9d M=1 github.com/Wei-Shaw/sub2api/internal/service.(*OpenAIGatewayService).relayCodexEngineStream.func2 D:/Code/sub2api/backend/internal/service/openai_codex_engine.go:617:0 s=611
+    25: 0x7ff758bb20ac M=1 github.com/Wei-Shaw/sub2api/internal/service.(*OpenAIGatewayService).relayCodexEngineStream D:/Code/sub2api/backend/internal/service/openai_codex_engine.go:777:0 s=572
+    26: 0x7ff759a19bba M=1 github.com/Wei-Shaw/sub2api/internal/service.BenchmarkCodexEngineRelay.func1 D:/Code/sub2api/backend/internal/service/openai_codex_engine_benchmark_test.go:74:0 s=50
+    27: 0x7ff75667b84f M=1 testing.(*B).runN D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/testing/benchmark.go:219:0 s=197
+    28: 0x7ff75668eac7 M=1 testing.(*B).run1.func1 D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/testing/benchmark.go:245:0 s=238
+    29: 0x7ff756b70028 M=1 github.com/tidwall/gjson.parseSquash D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:1113:0 s=1047
+    30: 0x7ff756b70632 M=1 github.com/tidwall/gjson.parseObject D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:1293:0 s=1189
+    31: 0x7ff756b745ce M=1 github.com/tidwall/gjson.Get D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:2215:0 s=2123
+    32: 0x7ff756b79ec8 M=1 github.com/tidwall/gjson.getBytes D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:3299:0 s=3295
+    33: 0x7ff758d00cc6 M=1 github.com/tidwall/gjson.GetBytes D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:2237:0 s=2236
+             github.com/Wei-Shaw/sub2api/internal/service.extractOpenAIUsageFromJSONBytes D:/Code/sub2api/backend/internal/service/openai_gateway_response_handling.go:1592:0 s=1574
+    34: 0x7ff756b7007c M=1 github.com/tidwall/gjson.parseSquash D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:1141:0 s=1047
+    35: 0x7ff758bb14af M=1 github.com/tidwall/gjson.GetBytes D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:2237:0 s=2236
+             github.com/Wei-Shaw/sub2api/internal/service.observeCodexEnginePayloadFields D:/Code/sub2api/backend/internal/service/openai_codex_engine.go:547:0 s=545
+    36: 0x7ff758d018a5 M=1 github.com/tidwall/gjson.ValidBytes D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:2756:0 s=2755
+             github.com/Wei-Shaw/sub2api/internal/service.extractOpenAIResponseIDFromJSONBytes D:/Code/sub2api/backend/internal/service/openai_gateway_response_handling.go:1643:0 s=1642
+    37: 0x7ff758bb1604 M=1 github.com/Wei-Shaw/sub2api/internal/service.observeCodexEnginePayloadFields D:/Code/sub2api/backend/internal/service/openai_codex_engine.go:550:0 s=545
+    38: 0x7ff758d018e4 M=1 github.com/tidwall/gjson.GetBytes D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:2237:0 s=2236
+             github.com/Wei-Shaw/sub2api/internal/service.extractOpenAIResponseIDFromJSONBytes D:/Code/sub2api/backend/internal/service/openai_gateway_response_handling.go:1646:0 s=1642
+    39: 0x7ff756b70034 M=1 github.com/tidwall/gjson.parseSquash D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:1117:0 s=1047
+    40: 0x7ff758bb16ea M=1 github.com/tidwall/gjson.GetBytes D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:2237:0 s=2236
+             github.com/Wei-Shaw/sub2api/internal/service.observeCodexEnginePayloadFields D:/Code/sub2api/backend/internal/service/openai_codex_engine.go:554:0 s=545
+    41: 0x7ff756b7000d M=1 github.com/tidwall/gjson.parseSquash D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:1112:0 s=1047
+    42: 0x7ff756b705b2 M=1 github.com/tidwall/gjson.parseObject D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:1307:0 s=1189
+    43: 0x7ff756b70616 M=1 github.com/tidwall/gjson.parseObject D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:1288:0 s=1189
+    44: 0x7ff758bb18b7 M=1 github.com/tidwall/gjson.GetBytes D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:2237:0 s=2236
+             github.com/Wei-Shaw/sub2api/internal/service.observeCodexEnginePayloadFields D:/Code/sub2api/backend/internal/service/openai_codex_engine.go:563:0 s=545
+    45: 0x7ff7565131d3 M=1 indexbytebody D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/internal/bytealg/indexbyte_amd64.s:136:0 s=29
+    46: 0x7ff758bb3f49 M=1 bytes.IndexByte D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/bytes/bytes.go:99:0 s=98
+             github.com/Wei-Shaw/sub2api/internal/service.codexEngineMayHaveImages D:/Code/sub2api/backend/internal/service/openai_codex_engine_observer.go:61:0 s=60
+    47: 0x7ff758bb4124 M=1 github.com/Wei-Shaw/sub2api/internal/service.observeCodexEngineImages D:/Code/sub2api/backend/internal/service/openai_codex_engine_observer.go:73:0 s=72
+    48: 0x7ff7598d4fc4 M=1 github.com/Wei-Shaw/sub2api/internal/service.(*OpenAIGatewayService).relayCodexEngineStream.func2 D:/Code/sub2api/backend/internal/service/openai_codex_engine.go:618:0 s=611
+    49: 0x7ff758bb416b M=1 github.com/tidwall/gjson.ValidBytes D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:2756:0 s=2755
+             github.com/Wei-Shaw/sub2api/internal/service.observeCodexEngineImages D:/Code/sub2api/backend/internal/service/openai_codex_engine_observer.go:73:0 s=72
+    50: 0x7ff756b70064 M=1 github.com/tidwall/gjson.parseSquash D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:1133:0 s=1047
+    51: 0x7ff756b6d52f M=1 github.com/tidwall/gjson.Result.Get D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:317:0 s=316
+    52: 0x7ff758bb4365 M=1 github.com/Wei-Shaw/sub2api/internal/service.observeCodexEngineImages D:/Code/sub2api/backend/internal/service/openai_codex_engine_observer.go:80:0 s=72
+    53: 0x7ff756b70050 M=1 github.com/tidwall/gjson.parseSquash D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:1125:0 s=1047
+    54: 0x7ff758bb444d M=1 github.com/Wei-Shaw/sub2api/internal/service.observeCodexEngineImages D:/Code/sub2api/backend/internal/service/openai_codex_engine_observer.go:81:0 s=72
+    55: 0x7ff756b70003 M=1 github.com/tidwall/gjson.parseSquash D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:1111:0 s=1047
+    56: 0x7ff756b75f4b M=1 github.com/tidwall/gjson.parseAny D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:2374:0 s=2369
+    57: 0x7ff756b6d086 M=1 github.com/tidwall/gjson.Result.ForEach D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:286:0 s=227
+    58: 0x7ff758b387c6 M=1 github.com/Wei-Shaw/sub2api/internal/service.(*openAIImageOutputCounter).addOutputArray D:/Code/sub2api/backend/internal/service/image_output_accounting.go:136:0 s=132
+    59: 0x7ff758bb45ce M=1 github.com/Wei-Shaw/sub2api/internal/service.observeCodexEngineImages D:/Code/sub2api/backend/internal/service/openai_codex_engine_observer.go:82:0 s=72
+    60: 0x7ff758bb3a96 M=1 github.com/Wei-Shaw/sub2api/internal/service.codexEngineContainsPartialImage D:/Code/sub2api/backend/internal/service/openai_codex_engine_observer.go:22:0 s=14
+    61: 0x7ff758b38a45 M=1 github.com/Wei-Shaw/sub2api/internal/service.(*openAIImageOutputCounter).addImageOutputItem D:/Code/sub2api/backend/internal/service/image_output_accounting.go:152:0 s=142
+    62: 0x7ff7598ccece M=1 github.com/Wei-Shaw/sub2api/internal/service.(*openAIImageOutputCounter).addOutputArray.func1 D:/Code/sub2api/backend/internal/service/image_output_accounting.go:137:0 s=136
+    63: 0x7ff756b6d1f5 M=1 github.com/tidwall/gjson.Result.ForEach D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:297:0 s=227
+    64: 0x7ff758bb3ab2 M=1 github.com/Wei-Shaw/sub2api/internal/service.codexEngineContainsPartialImage D:/Code/sub2api/backend/internal/service/openai_codex_engine_observer.go:25:0 s=14
+    65: 0x7ff756b6ebd1 M=1 github.com/tidwall/gjson.parseString D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:690:0 s=688
+    66: 0x7ff756b70527 M=1 github.com/tidwall/gjson.parseObject D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:1272:0 s=1189
+    67: 0x7ff758b38ae5 M=1 github.com/Wei-Shaw/sub2api/internal/service.(*openAIImageOutputCounter).addImageOutputItem D:/Code/sub2api/backend/internal/service/image_output_accounting.go:159:0 s=142
+    68: 0x7ff756b70019 M=1 github.com/tidwall/gjson.parseSquash D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:1112:0 s=1047
+    69: 0x7ff758bb4b75 M=1 github.com/Wei-Shaw/sub2api/internal/service.observeCodexEngineImages D:/Code/sub2api/backend/internal/service/openai_codex_engine_observer.go:99:0 s=72
+    70: 0x7ff758bb4e53 M=1 github.com/Wei-Shaw/sub2api/internal/service.observeCodexEngineImages D:/Code/sub2api/backend/internal/service/openai_codex_engine_observer.go:104:0 s=72
+    71: 0x7ff758bb3a89 M=1 github.com/Wei-Shaw/sub2api/internal/service.codexEngineContainsPartialImage D:/Code/sub2api/backend/internal/service/openai_codex_engine_observer.go:19:0 s=14
+    72: 0x7ff756b70038 M=1 github.com/tidwall/gjson.parseSquash D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:1117:0 s=1047
+    73: 0x7ff7598d52b6 M=1 github.com/tidwall/gjson.GetBytes D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:2237:0 s=2236
+             github.com/Wei-Shaw/sub2api/internal/service.(*OpenAIGatewayService).relayCodexEngineStream.func2 D:/Code/sub2api/backend/internal/service/openai_codex_engine.go:632:0 s=611
+    74: 0x7ff756b76f4c M=1 github.com/tidwall/gjson.validstring D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:2633:0 s=2607
+    75: 0x7ff758ba9b9b M=1 github.com/tidwall/gjson.ValidBytes D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:2756:0 s=2755
+             github.com/Wei-Shaw/sub2api/internal/service.codexEngineSuccessfulDeliveryPayload D:/Code/sub2api/backend/internal/service/openai_codex_engine.go:51:0 s=50
+    76: 0x7ff7598d5872 M=1 github.com/Wei-Shaw/sub2api/internal/service.(*OpenAIGatewayService).relayCodexEngineStream.func2 D:/Code/sub2api/backend/internal/service/openai_codex_engine.go:661:0 s=611
+    77: 0x7ff758ba9c9a M=1 github.com/tidwall/gjson.GetBytes D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:2237:0 s=2236
+             github.com/Wei-Shaw/sub2api/internal/service.codexEngineSuccessfulDeliveryPayload D:/Code/sub2api/backend/internal/service/openai_codex_engine.go:58:0 s=50
+    78: 0x7ff756b70074 M=1 github.com/tidwall/gjson.parseSquash D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:1137:0 s=1047
+    79: 0x7ff758ba9ded M=1 github.com/tidwall/gjson.GetBytes D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:2237:0 s=2236
+             github.com/Wei-Shaw/sub2api/internal/service.codexEngineSuccessfulDeliveryPayload D:/Code/sub2api/backend/internal/service/openai_codex_engine.go:63:0 s=50
+    80: 0x7ff758bbd4f1 M=1 github.com/tidwall/gjson.ValidBytes D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:2756:0 s=2755
+             github.com/Wei-Shaw/sub2api/internal/service.(*codexEngineWSWriter).writePayload D:/Code/sub2api/backend/internal/service/openai_codex_engine_ws.go:313:0 s=312
+    81: 0x7ff758bbd3c6 M=1 github.com/Wei-Shaw/sub2api/internal/service.(*codexEngineWSWriter).writeSSEFrame D:/Code/sub2api/backend/internal/service/openai_codex_engine_ws.go:309:0 s=299
+    82: 0x7ff7598d5cfb M=1 github.com/Wei-Shaw/sub2api/internal/service.(*OpenAIGatewayService).relayCodexEngineStream.func2 D:/Code/sub2api/backend/internal/service/openai_codex_engine.go:703:0 s=611
+    83: 0x7ff756b76ead M=1 github.com/tidwall/gjson.validstring D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:2611:0 s=2607
+    84: 0x7ff7565a7496 M=1 runtime.memmove D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/memmove_amd64.s:441:0 s=35
+    85: 0x7ff75667bfca M=1 testing.(*B).launch D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/testing/benchmark.go:347:0 s=331
+    86: 0x7ff758d00e24 M=1 github.com/tidwall/gjson.GetBytes D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:2237:0 s=2236
+             github.com/Wei-Shaw/sub2api/internal/service.extractOpenAIUsageFromJSONBytes D:/Code/sub2api/backend/internal/service/openai_gateway_response_handling.go:1593:0 s=1574
+    87: 0x7ff756b7004c M=1 github.com/tidwall/gjson.parseSquash D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:1125:0 s=1047
+    88: 0x7ff756b70070 M=1 github.com/tidwall/gjson.parseSquash D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:1137:0 s=1047
+    89: 0x7ff756b70058 M=1 github.com/tidwall/gjson.parseSquash D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:1129:0 s=1047
+    90: 0x7ff7598d537e M=1 github.com/tidwall/gjson.GetBytes D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:2237:0 s=2236
+             github.com/Wei-Shaw/sub2api/internal/service.(*OpenAIGatewayService).relayCodexEngineStream.func2 D:/Code/sub2api/backend/internal/service/openai_codex_engine.go:636:0 s=611
+    91: 0x7ff756694851 M=1 bufio.(*Reader).ReadSlice D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/bufio/bufio.go:352:0 s=348
+    92: 0x7ff758bb5d08 M=1 github.com/Wei-Shaw/sub2api/internal/service.(*codexEngineSSEReader).readFrame D:/Code/sub2api/backend/internal/service/openai_codex_engine_sse_frame.go:135:0 s=131
+    93: 0x7ff75655bec4 M=1 runtime.(*spanSet).pop D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mspanset.go:211:0 s=150
+    94: 0x7ff75654d164 M=1 runtime.(*mheap).nextSpanForSweep D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcsweep.go:105:0 s=96
+    95: 0x7ff75654d76c M=1 runtime.sweepone D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcsweep.go:378:0 s=359
+    96: 0x7ff75654d545 M=1 runtime.bgsweep D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcsweep.go:300:0 s=272
+    97: 0x7ff756b70024 M=1 github.com/tidwall/gjson.parseSquash D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:1113:0 s=1047
+    98: 0x7ff756b7005c M=1 github.com/tidwall/gjson.parseSquash D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:1129:0 s=1047
+    99: 0x7ff756b76e9d M=1 github.com/tidwall/gjson.validstring D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:2609:0 s=2607
+   100: 0x7ff758bb3a8d M=1 github.com/Wei-Shaw/sub2api/internal/service.codexEngineContainsPartialImage D:/Code/sub2api/backend/internal/service/openai_codex_engine_observer.go:19:0 s=14
+   101: 0x7ff756b6ebf1 M=1 github.com/tidwall/gjson.parseString D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:697:0 s=688
+   102: 0x7ff756b70084 M=1 github.com/tidwall/gjson.parseSquash D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:1141:0 s=1047
+   103: 0x7ff756b76ea1 M=1 github.com/tidwall/gjson.validstring D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:2609:0 s=2607
+   104: 0x7ff7565a64aa M=1 runtime.procyieldAsm D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/asm_amd64.s:838:0 s=832
+   105: 0x7ff756564ae6 M=1 runtime.procyield D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/stubs.go:290:0 s=286
+             runtime.suspendG D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/preempt.go:249:0 s=106
+   106: 0x7ff756594d84 M=1 runtime.markroot.func1 D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcmark.go:298:0 s=280
+   107: 0x7ff7565437a4 M=1 runtime.markroot D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcmark.go:280:0 s=221
+   108: 0x7ff756545ae6 M=1 runtime.gcDrain D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcmark.go:1289:0 s=1253
+   109: 0x7ff756594aa6 M=1 runtime.gcDrainMarkWorkerIdle D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcmark.go:1182:0 s=1181
+             runtime.gcBgMarkWorker.func2 D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgc.go:1897:0 s=1863
+   110: 0x7ff756541b44 M=1 runtime.gcBgMarkWorker D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgc.go:1863:0 s=1766
+   111: 0x7ff7565a74ba M=1 runtime.memmove D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/memmove_amd64.s:448:0 s=35
+   112: 0x7ff756548f8e M=1 runtime.scanObject D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcmark_greenteagc.go:1258:0 s=1187
+   113: 0x7ff7565458e5 M=1 runtime.gcDrain D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcmark.go:1345:0 s=1253
+   114: 0x7ff756b70010 M=1 github.com/tidwall/gjson.parseSquash D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:1112:0 s=1047
+   115: 0x7ff756513029 M=1 indexbody D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/internal/bytealg/index_amd64.s:265:0 s=32
+   116: 0x7ff75667345a M=1 bytes.Index D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/bytes/bytes.go:1329:0 s=1288
+   117: 0x7ff758bb406c M=1 bytes.Contains D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/bytes/bytes.go:78:0 s=77
+             github.com/Wei-Shaw/sub2api/internal/service.codexEngineMayHaveImages D:/Code/sub2api/backend/internal/service/openai_codex_engine_observer.go:65:0 s=60
+   118: 0x7ff758bb4535 M=1 github.com/Wei-Shaw/sub2api/internal/service.observeCodexEngineImages D:/Code/sub2api/backend/internal/service/openai_codex_engine_observer.go:82:0 s=72
+   119: 0x7ff758bb3ab5 M=1 github.com/Wei-Shaw/sub2api/internal/service.codexEngineContainsPartialImage D:/Code/sub2api/backend/internal/service/openai_codex_engine_observer.go:25:0 s=14
+   120: 0x7ff756b70040 M=1 github.com/tidwall/gjson.parseSquash D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:1121:0 s=1047
+   121: 0x7ff756b70044 M=1 github.com/tidwall/gjson.parseSquash D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:1121:0 s=1047
+   122: 0x7ff756513026 M=1 indexbody D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/internal/bytealg/index_amd64.s:264:0 s=32
+   123: 0x7ff758cffb2d M=1 bytes.Contains D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/bytes/bytes.go:78:0 s=77
+             github.com/Wei-Shaw/sub2api/internal/service.parseOpenAIResponseUsageInto D:/Code/sub2api/backend/internal/service/openai_gateway_response_handling.go:1457:0 s=1450
+   124: 0x7ff758bb4db5 M=1 github.com/Wei-Shaw/sub2api/internal/service.observeCodexEngineImages D:/Code/sub2api/backend/internal/service/openai_codex_engine_observer.go:104:0 s=72
+   125: 0x7ff756b70000 M=1 github.com/tidwall/gjson.parseSquash D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:1111:0 s=1047
+   126: 0x7ff756b6ebe1 M=1 github.com/tidwall/gjson.parseString D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:691:0 s=688
+   127: 0x7ff7565a74a0 M=1 runtime.memmove D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/memmove_amd64.s:443:0 s=35
+   128: 0x7ff756b6ebdc M=1 github.com/tidwall/gjson.parseString D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:691:0 s=688
+   129: 0x7ff756b6ebe5 M=1 github.com/tidwall/gjson.parseString D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:691:0 s=688
+   130: 0x7ff756b6fffb M=1 github.com/tidwall/gjson.parseSquash D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:1111:0 s=1047
+   131: 0x7ff756b70068 M=1 github.com/tidwall/gjson.parseSquash D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:1133:0 s=1047
+   132: 0x7ff7565131c4 M=1 indexbytebody D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/internal/bytealg/indexbyte_amd64.s:132:0 s=29
+   133: 0x7ff7565a749b M=1 runtime.memmove D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/memmove_amd64.s:442:0 s=35
+   134: 0x7ff75656878f M=1 runtime.casgstatus D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/proc.go:1308:0 s=1290
+   135: 0x7ff75656d72a M=1 runtime.injectglist D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/proc.go:4071:0 s=4060
+   136: 0x7ff75654b184 M=1 runtime.(*scavengerState).wake D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcscavenge.go:453:0 s=436
+   137: 0x7ff756599a6c M=1 runtime.(*scavengerState).init.func1 D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcscavenge.go:365:0 s=364
+   138: 0x7ff75658538d M=1 runtime.(*timer).unlockAndRun D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/time.go:1205:0 s=1092
+   139: 0x7ff7565850cd M=1 runtime.(*timers).run D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/time.go:1081:0 s=1047
+   140: 0x7ff756584edd M=1 runtime.(*timers).check D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/time.go:1015:0 s=982
+   141: 0x7ff75656d08e M=1 runtime.stealWork D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/proc.go:3876:0 s=3843
+   142: 0x7ff75656c004 M=1 runtime.findRunnable D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/proc.go:3537:0 s=3404
+   143: 0x7ff75656daf0 M=1 runtime.schedule D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/proc.go:4179:0 s=4150
+   144: 0x7ff75656df78 M=1 runtime.park_m D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/proc.go:4319:0 s=4268
+   145: 0x7ff7565a4c37 M=1 runtime.mcall D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/asm_amd64.s:463:0 s=425
+   146: 0x7ff758bb3ad0 M=1 github.com/Wei-Shaw/sub2api/internal/service.codexEngineContainsPartialImage D:/Code/sub2api/backend/internal/service/openai_codex_engine_observer.go:30:0 s=14
+   147: 0x7ff756548f79 M=1 runtime.scanObject D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcmark_greenteagc.go:1250:0 s=1187
+   148: 0x7ff756594ad9 M=1 runtime.gcDrainMarkWorkerDedicated D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcmark.go:1192:0 s=1187
+             runtime.gcBgMarkWorker.func2 D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgc.go:1878:0 s=1863
+   149: 0x7ff756537061 M=1 runtime.getGCMask D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/type.go:88:0 s=87
+             runtime.(*mspan).typePointersOfUnchecked D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mbitmap.go:166:0 s=135
+   150: 0x7ff756548f0b M=1 runtime.scanObject D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcmark_greenteagc.go:1235:0 s=1187
+   151: 0x7ff7565a74b0 M=1 runtime.memmove D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/memmove_amd64.s:446:0 s=35
+   152: 0x7ff75658000a M=1 runtime.slicebytetostring D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/string.go:173:0 s=140
+   153: 0x7ff758bb41cd M=1 github.com/tidwall/gjson.ParseBytes D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:514:0 s=513
+             github.com/Wei-Shaw/sub2api/internal/service.observeCodexEngineImages D:/Code/sub2api/backend/internal/service/openai_codex_engine_observer.go:76:0 s=72
+   154: 0x7ff756b76f49 M=1 github.com/tidwall/gjson.validstring D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:2633:0 s=2607
+   155: 0x7ff75655cbd5 M=1 runtime.(*sysMemStat).add D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mstats.go:660:0 s=659
+   156: 0x7ff756551293 M=1 runtime.(*mheap).allocSpan D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mheap.go:1399:0 s=1215
+   157: 0x7ff7565509f6 M=1 runtime.(*mheap).alloc D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mheap.go:1002:0 s=997
+   158: 0x7ff756538e9e M=1 runtime.(*mcache).allocLarge D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mcache.go:257:0 s=242
+   159: 0x7ff7565329f8 M=1 runtime.mallocgcLarge D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/malloc.go:1709:0 s=1693
+   160: 0x7ff75659c719 M=1 runtime.mallocgc D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/malloc.go:1137:0 s=1067
+   161: 0x7ff7565a1992 M=1 runtime.growslice D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/slice.go:265:0 s=178
+   162: 0x7ff7565a7372 M=1 runtime.memmove D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/memmove_amd64.s:355:0 s=35
+   163: 0x7ff7566736d9 M=1 bytes.(*Reader).Read D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/bytes/reader.go:44:0 s=39
+   164: 0x7ff756693d62 M=1 bufio.(*Reader).fill D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/bufio/bufio.go:113:0 s=99
+   165: 0x7ff756694808 M=1 bufio.(*Reader).ReadSlice D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/bufio/bufio.go:377:0 s=348
+   166: 0x7ff756530778 M=1 runtime.lock2 D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/lock_spinbit.go:175:0 s=164
+   167: 0x7ff75656e114 M=1 runtime.lockWithRank D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/lockrank_off.go:24:0 s=23
+             runtime.lock D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/lock_spinbit.go:161:0 s=160
+             runtime.goschedImpl D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/proc.go:4351:0 s=4322
+   168: 0x7ff75656e2f4 M=1 runtime.gosched_m D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/proc.go:4365:0 s=4364
+   169: 0x7ff7565a74a7 M=1 runtime.memmove D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/memmove_amd64.s:444:0 s=35
+   170: 0x7ff75653b9dd M=1 runtime.sysUsedOS D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mem_windows.go:74:0 s=62
+   171: 0x7ff756551266 M=1 runtime.sysUsed D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mem.go:91:0 s=89
+             runtime.(*mheap).allocSpan D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mheap.go:1395:0 s=1215
+   172: 0x7ff75655489c M=1 runtime.(*pageAlloc).update D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mpagealloc.go:560:0 s=492
+   173: 0x7ff75654bb56 M=1 runtime.(*pageAlloc).scavengeOne D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcscavenge.go:770:0 s=732
+   174: 0x7ff756599b0c M=1 runtime.(*scavengerState).init.func2 D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcscavenge.go:395:0 s=393
+   175: 0x7ff75654b505 M=1 runtime.(*scavengerState).run D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcscavenge.go:602:0 s=576
+   176: 0x7ff75654b647 M=1 runtime.bgscavenge D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcscavenge.go:656:0 s=649
+   177: 0x7ff756b6ebd4 M=1 github.com/tidwall/gjson.parseString D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:690:0 s=688
+   178: 0x7ff756546ecb M=1 runtime.(*spanScanOwnership).or D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcmark_greenteagc.go:110:0 s=95
+             runtime.(*spanInlineMarkBits).tryAcquire D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcmark_greenteagc.go:160:0 s=146
+   179: 0x7ff756547110 M=1 runtime.tryDeferToSpanScan D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcmark_greenteagc.go:299:0 s=264
+   180: 0x7ff756548fc4 M=1 runtime.scanObject D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcmark_greenteagc.go:1268:0 s=1187
+   181: 0x7ff7565a73c3 M=1 runtime.memmove D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/memmove_amd64.s:384:0 s=35
+   182: 0x7ff75654900f M=1 runtime.scanObject D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcmark_greenteagc.go:1270:0 s=1187
+   183: 0x7ff756546fb9 M=1 runtime.tryDeferToSpanScan D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcmark_greenteagc.go:265:0 s=264
+   184: 0x7ff756548150 M=1 runtime.scanSpan D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcmark_greenteagc.go:923:0 s=844
+   185: 0x7ff7565458d8 M=1 runtime.gcDrain D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcmark.go:1347:0 s=1253
+   186: 0x7ff756b76e91 M=1 github.com/tidwall/gjson.validstring D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:2608:0 s=2607
+   187: 0x7ff758bb3aa4 M=1 github.com/Wei-Shaw/sub2api/internal/service.codexEngineContainsPartialImage D:/Code/sub2api/backend/internal/service/openai_codex_engine_observer.go:25:0 s=14
+   188: 0x7ff75655e7a4 M=1 runtime.netpollQueueTimer D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/netpoll_windows.go:251:0 s=242
+   189: 0x7ff75655e3ae M=1 runtime.netpoll D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/netpoll_windows.go:174:0 s=151
+   190: 0x7ff75656c49e M=1 runtime.findRunnable D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/proc.go:3769:0 s=3404
+   191: 0x7ff75654b9e4 M=1 runtime.(*pageAlloc).scavengeOne D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcscavenge.go:749:0 s=732
+   192: 0x7ff756561775 M=1 runtime.preemptM D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/os_windows.go:1268:0 s=1202
+   193: 0x7ff756573210 M=1 runtime.preemptone D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/proc.go:6942:0 s=6917
+   194: 0x7ff75657316b M=1 runtime.preemptall D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/proc.go:6900:0 s=6894
+   195: 0x7ff756569c08 M=1 runtime.forEachPInternal D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/proc.go:2175:0 s=2158
+   196: 0x7ff75659485e M=1 runtime.forEachP.func1 D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/proc.go:2144:0 s=2130
+   197: 0x7ff75655fec4 M=1 runtime.semasleep D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/os_windows.go:670:0 s=660
+   198: 0x7ff756530a78 M=1 runtime.lock2 D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/lock_spinbit.go:259:0 s=164
+   199: 0x7ff756569e91 M=1 runtime.lockWithRank D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/lockrank_off.go:24:0 s=23
+             runtime.lock D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/lock_spinbit.go:161:0 s=160
+             runtime.runSafePointFn D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/proc.go:2259:0 s=2250
+   200: 0x7ff75656bb84 M=1 runtime.findRunnable D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/proc.go:3423:0 s=3404
+   201: 0x7ff75657de99 M=1 runtime.gopreempt_m D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/proc.go:4377:0 s=4376
+             runtime.newstack D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/stack.go:1174:0 s=1055
+   202: 0x7ff7565a4d99 M=1 runtime.morestack D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/asm_amd64.s:650:0 s=597
+   203: 0x7ff756537e66 M=1 runtime.(*mspan).refillAllocCache D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mbitmap.go:1098:0 s=1097
+   204: 0x7ff756539499 M=1 runtime.(*mcentral).cacheSpan D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mcentral.go:192:0 s=82
+   205: 0x7ff756538d2a M=1 runtime.(*mcache).refill D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mcache.go:205:0 s=160
+   206: 0x7ff756531e3d M=1 runtime.(*mcache).nextFree D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/malloc.go:1006:0 s=996
+   207: 0x7ff756535964 M=1 runtime.mallocgcSmallNoScanSC5 D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/malloc_generated.go:1558:0 s=1488
+   208: 0x7ff75659c66a M=1 runtime.mallocgc D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/malloc.go:1082:0 s=1067
+   209: 0x7ff75657fff6 M=1 runtime.slicebytetostring D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/string.go:171:0 s=140
+   210: 0x7ff756b7a0f8 M=1 github.com/tidwall/gjson.getBytes D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:3313:0 s=3295
+   211: 0x7ff756b76ea4 M=1 github.com/tidwall/gjson.validstring D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:2609:0 s=2607
+   212: 0x7ff756537219 M=1 runtime.typePointers.next D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mbitmap.go:269:0 s=243
+   213: 0x7ff756548f54 M=1 runtime.scanObject D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcmark_greenteagc.go:1242:0 s=1187
+   214: 0x7ff75659d344 M=1 runtime.spanOf D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mheap.go:701:0 s=687
+             runtime.findObject D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mbitmap.go:1364:0 s=1363
+   215: 0x7ff756548fe4 M=1 runtime.scanObject D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcmark_greenteagc.go:1269:0 s=1187
+   216: 0x7ff7565a73de M=1 runtime.memmove D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/memmove_amd64.s:390:0 s=35
+   217: 0x7ff758bb5e51 M=1 github.com/Wei-Shaw/sub2api/internal/service.(*codexEngineSSEReader).readFrame D:/Code/sub2api/backend/internal/service/openai_codex_engine_sse_frame.go:150:0 s=131
+   218: 0x7ff7565471f6 M=1 runtime.tryDeferToSpanScan D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcmark_greenteagc.go:272:0 s=264
+   219: 0x7ff756b70080 M=1 github.com/tidwall/gjson.parseSquash D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:1141:0 s=1047
+   220: 0x7ff756547b44 M=1 runtime.lockWithRank D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/lockrank_off.go:24:0 s=23
+             runtime.lock D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/lock_spinbit.go:161:0 s=160
+             runtime.freeDeadSpanSPMCs D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcmark_greenteagc.go:775:0 s=757
+   221: 0x7ff75654d5a4 M=1 runtime.bgsweep D:/DevCache/go-mod/golang.org/toolchain@v0.0.1-go1.27.3.windows-amd64/src/runtime/mgcsweep.go:310:0 s=272
+   222: 0x7ff756b6ebeb M=1 github.com/tidwall/gjson.parseString D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go:694:0 s=688
+Mappings
+1: 0x7ff756510000/0x7ff763055000/0x0 D:\DevCache\sub2-v221-baseline.IWPO8C\bench-recheck\final-service.test.exe D:\DevCache\sub2-v221-baseline.IWPO8C\bench-recheck\final-service.test.exe2026-11-11 14:54:33.7901056 +0000 UTC [FN]
+2: 0x7fff7b4a0000/0x7fff7b708000/0x0 C:\Windows\SYSTEM32\ntdll.dll C:\Windows\SYSTEM32\ntdll.dll2025-11-20 02:53:45.4637045 +0000 UTC 
+3: 0x7fff7a410000/0x7fff7a4d9000/0x0 C:\Windows\System32\KERNEL32.DLL C:\Windows\System32\KERNEL32.DLL2025-11-20 02:53:43.4193143 +0000 UTC 
+4: 0x7fff78d90000/0x7fff79188000/0x0 C:\Windows\System32\KERNELBASE.dll C:\Windows\System32\KERNELBASE.dll2025-11-20 02:53:43.5608337 +0000 UTC 
+5: 0x7fff78740000/0x7fff787e5000/0x0 C:\Windows\System32\bcryptprimitives.dll C:\Windows\System32\bcryptprimitives.dll2025-11-20 02:53:38.9384022 +0000 UTC 
+6: 0x7fff782b0000/0x7fff7830e000/0x0 C:\Windows\SYSTEM32\powrprof.dll C:\Windows\SYSTEM32\powrprof.dll2025-05-10 01:04:45.1651126 +0000 UTC 
+7: 0x7fff78b10000/0x7fff78c5b000/0x0 C:\Windows\System32\ucrtbase.dll C:\Windows\System32\ucrtbase.dll2025-11-20 02:53:49.3854403 +0000 UTC 
+8: 0x7fff7b330000/0x7fff7b448000/0x0 C:\Windows\System32\RPCRT4.dll C:\Windows\System32\RPCRT4.dll2025-11-20 02:53:46.9483545 +0000 UTC 
+9: 0x7fff78290000/0x7fff782a4000/0x0 C:\Windows\SYSTEM32\UMPDC.dll C:\Windows\SYSTEM32\UMPDC.dll2025-11-20 02:53:45.8877546 +0000 UTC 
+10: 0x7fff7a340000/0x7fff7a3f4000/0x0 C:\Windows\System32\advapi32.dll C:\Windows\System32\advapi32.dll2025-11-20 02:53:38.2908258 +0000 UTC 
+11: 0x7fff794c0000/0x7fff79569000/0x0 C:\Windows\System32\msvcrt.dll C:\Windows\System32\msvcrt.dll2025-11-20 02:53:45.0226519 +0000 UTC 
+12: 0x7fff79240000/0x7fff792e6000/0x0 C:\Windows\System32\sechost.dll C:\Windows\System32\sechost.dll2025-11-20 02:53:47.5896684 +0000 UTC 
+13: 0x7fff79720000/0x7fff79794000/0x0 C:\Windows\System32\ws2_32.dll C:\Windows\System32\ws2_32.dll2025-11-20 02:53:50.3256447 +0000 UTC 

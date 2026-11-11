@@ -1,0 +1,61 @@
+2026/11/11 14:23:32 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkOpenAIAccountSchedulerSelectTopK/n_16_k_3/heap_topk-16         	  217342	       535.2 ns/op	     896 B/op	       9 allocs/op
+BenchmarkOpenAIAccountSchedulerSelectTopK/n_16_k_3/heap_topk-16         	  251130	       544.6 ns/op	     896 B/op	       9 allocs/op
+BenchmarkOpenAIAccountSchedulerSelectTopK/n_16_k_3/heap_topk-16         	  290809	       532.3 ns/op	     896 B/op	       9 allocs/op
+BenchmarkOpenAIAccountSchedulerSelectTopK/n_16_k_3/full_sort-16         	  191594	       757.4 ns/op	    1560 B/op	       4 allocs/op
+BenchmarkOpenAIAccountSchedulerSelectTopK/n_16_k_3/full_sort-16         	  188252	       743.8 ns/op	    1560 B/op	       4 allocs/op
+BenchmarkOpenAIAccountSchedulerSelectTopK/n_16_k_3/full_sort-16         	  190502	      1042 ns/op	    1560 B/op	       4 allocs/op
+BenchmarkOpenAIAccountSchedulerSelectTopK/n_64_k_3/heap_topk-16         	  167156	       757.2 ns/op	     896 B/op	       9 allocs/op
+BenchmarkOpenAIAccountSchedulerSelectTopK/n_64_k_3/heap_topk-16         	  154018	       766.2 ns/op	     896 B/op	       9 allocs/op
+BenchmarkOpenAIAccountSchedulerSelectTopK/n_64_k_3/heap_topk-16         	  176714	       784.5 ns/op	     896 B/op	       9 allocs/op
+BenchmarkOpenAIAccountSchedulerSelectTopK/n_64_k_3/full_sort-16         	   29928	      4623 ns/op	    5528 B/op	       4 allocs/op
+BenchmarkOpenAIAccountSchedulerSelectTopK/n_64_k_3/full_sort-16         	   26480	      4672 ns/op	    5528 B/op	       4 allocs/op
+BenchmarkOpenAIAccountSchedulerSelectTopK/n_64_k_3/full_sort-16         	   26539	      4913 ns/op	    5528 B/op	       4 allocs/op
+BenchmarkOpenAIAccountSchedulerSelectTopK/n_256_k_5/heap_topk-16        	   61508	      2137 ns/op	    1408 B/op	      11 allocs/op
+BenchmarkOpenAIAccountSchedulerSelectTopK/n_256_k_5/heap_topk-16        	   62593	      1849 ns/op	    1408 B/op	      11 allocs/op
+BenchmarkOpenAIAccountSchedulerSelectTopK/n_256_k_5/heap_topk-16        	   63998	      1817 ns/op	    1408 B/op	      11 allocs/op
+BenchmarkOpenAIAccountSchedulerSelectTopK/n_256_k_5/full_sort-16        	    8078	     20830 ns/op	   21912 B/op	       4 allocs/op
+BenchmarkOpenAIAccountSchedulerSelectTopK/n_256_k_5/full_sort-16        	    7953	     21677 ns/op	   21912 B/op	       4 allocs/op
+BenchmarkOpenAIAccountSchedulerSelectTopK/n_256_k_5/full_sort-16        	    7646	     19548 ns/op	   21912 B/op	       4 allocs/op
+BenchmarkCodexEngineRelay/HTTP/small_256-16                             	     170	    637339 ns/op	  42.03 MB/s	         0 first-write-ns/op	   1130700 p95-ns	      3056 write-ns/op	   16518 B/op	     306 allocs/op
+BenchmarkCodexEngineRelay/HTTP/small_256-16                             	     195	    621188 ns/op	  43.13 MB/s	     12539 first-write-ns/op	   1456300 p95-ns	         0 write-ns/op	   16472 B/op	     306 allocs/op
+BenchmarkCodexEngineRelay/HTTP/small_256-16                             	     212	    591464 ns/op	  45.29 MB/s	      7847 first-write-ns/op	   1423900 p95-ns	      9526 write-ns/op	   16453 B/op	     306 allocs/op
+BenchmarkCodexEngineRelay/WS/small_256-16                               	     163	    706695 ns/op	  37.91 MB/s	      6317 first-write-ns/op	   1854900 p95-ns	         0 write-ns/op	   25153 B/op	     567 allocs/op
+BenchmarkCodexEngineRelay/WS/small_256-16                               	     178	    639995 ns/op	  41.86 MB/s	     17081 first-write-ns/op	   1513400 p95-ns	         0 write-ns/op	   25109 B/op	     567 allocs/op
+BenchmarkCodexEngineRelay/WS/small_256-16                               	     194	    658391 ns/op	  40.69 MB/s	      7972 first-write-ns/op	   1138100 p95-ns	      8465 write-ns/op	   25125 B/op	     567 allocs/op
+BenchmarkCodexEngineRelay/HTTP/multiline_128-16                         	     342	    345730 ns/op	  43.06 MB/s	     15289 first-write-ns/op	   1005500 p95-ns	      3019 write-ns/op	   12779 B/op	     183 allocs/op
+BenchmarkCodexEngineRelay/HTTP/multiline_128-16                         	     382	    306731 ns/op	  48.53 MB/s	      6572 first-write-ns/op	   1003900 p95-ns	         0 write-ns/op	   12754 B/op	     183 allocs/op
+BenchmarkCodexEngineRelay/HTTP/multiline_128-16                         	     391	    332849 ns/op	  44.72 MB/s	      7813 first-write-ns/op	   1116300 p95-ns	         0 write-ns/op	   12774 B/op	     183 allocs/op
+BenchmarkCodexEngineRelay/WS/multiline_128-16                           	     330	    370252 ns/op	  40.21 MB/s	      3035 first-write-ns/op	   1502500 p95-ns	      3136 write-ns/op	   17333 B/op	     316 allocs/op
+BenchmarkCodexEngineRelay/WS/multiline_128-16                           	     326	    328094 ns/op	  45.37 MB/s	      4559 first-write-ns/op	   1016200 p95-ns	         0 write-ns/op	   17337 B/op	     316 allocs/op
+BenchmarkCodexEngineRelay/WS/multiline_128-16                           	     361	    323530 ns/op	  46.01 MB/s	      8261 first-write-ns/op	   1002800 p95-ns	         0 write-ns/op	   17339 B/op	     316 allocs/op
+BenchmarkCodexEngineRelay/HTTP/slow_write_32-16                         	       6	  17487967 ns/op	   0.20 MB/s	    778650 first-write-ns/op	  18562400 p95-ns	  17698650 write-ns/op	    9285 B/op	      82 allocs/op
+BenchmarkCodexEngineRelay/HTTP/slow_write_32-16                         	       6	  17973917 ns/op	   0.19 MB/s	    752133 first-write-ns/op	  18318100 p95-ns	  18093233 write-ns/op	    9274 B/op	      82 allocs/op
+BenchmarkCodexEngineRelay/HTTP/slow_write_32-16                         	       6	  17590317 ns/op	   0.20 MB/s	    729017 first-write-ns/op	  18914400 p95-ns	  17787400 write-ns/op	    9274 B/op	      82 allocs/op
+BenchmarkCodexEngineRelay/WS/slow_write_32-16                           	       6	  17142200 ns/op	   0.20 MB/s	    520233 first-write-ns/op	  17556900 p95-ns	  17144983 write-ns/op	   10786 B/op	     119 allocs/op
+BenchmarkCodexEngineRelay/WS/slow_write_32-16                           	       6	  17256283 ns/op	   0.20 MB/s	    574917 first-write-ns/op	  17642600 p95-ns	  17325833 write-ns/op	   10784 B/op	     119 allocs/op
+BenchmarkCodexEngineRelay/WS/slow_write_32-16                           	       6	  17619417 ns/op	   0.20 MB/s	    883833 first-write-ns/op	  19112400 p95-ns	  17782917 write-ns/op	   10882 B/op	     120 allocs/op
+BenchmarkCodexEngineRelay/HTTP/terminal_1MiB-16                         	      15	   7254067 ns/op	 144.64 MB/s	         0 first-write-ns/op	  11928700 p95-ns	         0 write-ns/op	 6765831 B/op	      88 allocs/op
+BenchmarkCodexEngineRelay/HTTP/terminal_1MiB-16                         	      15	   7445760 ns/op	 140.92 MB/s	         0 first-write-ns/op	   8290200 p95-ns	         0 write-ns/op	 6765769 B/op	      88 allocs/op
+BenchmarkCodexEngineRelay/HTTP/terminal_1MiB-16                         	      14	   7499400 ns/op	 139.91 MB/s	     27629 first-write-ns/op	   8953300 p95-ns	         0 write-ns/op	 6765836 B/op	      88 allocs/op
+BenchmarkCodexEngineRelay/WS/terminal_1MiB-16                           	      15	   7925673 ns/op	 132.38 MB/s	         0 first-write-ns/op	  10365100 p95-ns	         0 write-ns/op	 6766440 B/op	      97 allocs/op
+BenchmarkCodexEngineRelay/WS/terminal_1MiB-16                           	      15	   7815173 ns/op	 134.26 MB/s	         0 first-write-ns/op	   9657900 p95-ns	         0 write-ns/op	 6766476 B/op	      97 allocs/op
+BenchmarkCodexEngineRelay/WS/terminal_1MiB-16                           	      14	   7930493 ns/op	 132.30 MB/s	     36964 first-write-ns/op	  12623600 p95-ns	         0 write-ns/op	 6766419 B/op	      97 allocs/op
+BenchmarkCodexEngineRelay/HTTP/terminal_8MiB-16                         	       2	  58784950 ns/op	 142.71 MB/s	         0 first-write-ns/op	  59821500 p95-ns	         0 write-ns/op	53353680 B/op	      97 allocs/op
+BenchmarkCodexEngineRelay/HTTP/terminal_8MiB-16                         	       2	  61786050 ns/op	 135.78 MB/s	         0 first-write-ns/op	  66201500 p95-ns	         0 write-ns/op	53353680 B/op	      97 allocs/op
+BenchmarkCodexEngineRelay/HTTP/terminal_8MiB-16                         	       2	  57480850 ns/op	 145.95 MB/s	    251550 first-write-ns/op	  57279800 p95-ns	         0 write-ns/op	53353680 B/op	      97 allocs/op
+BenchmarkCodexEngineRelay/WS/terminal_8MiB-16                           	       2	  62359500 ns/op	 134.53 MB/s	         0 first-write-ns/op	  62962000 p95-ns	         0 write-ns/op	53354296 B/op	     106 allocs/op
+BenchmarkCodexEngineRelay/WS/terminal_8MiB-16                           	       2	  59899200 ns/op	 140.06 MB/s	         0 first-write-ns/op	  59255200 p95-ns	         0 write-ns/op	53354296 B/op	     106 allocs/op
+BenchmarkCodexEngineRelay/WS/terminal_8MiB-16                           	       2	  59185950 ns/op	 141.74 MB/s	         0 first-write-ns/op	  59709000 p95-ns	         0 write-ns/op	53354296 B/op	     106 allocs/op
+BenchmarkCodexEngineRelay/HTTP/terminal_32MiB-16                        	       1	 238838000 ns/op	 140.49 MB/s	         0 first-write-ns/op	 237089800 p95-ns	         0 write-ns/op	206527696 B/op	     103 allocs/op
+BenchmarkCodexEngineRelay/HTTP/terminal_32MiB-16                        	       1	 232637900 ns/op	 144.24 MB/s	         0 first-write-ns/op	 233740100 p95-ns	         0 write-ns/op	206528736 B/op	     109 allocs/op
+BenchmarkCodexEngineRelay/HTTP/terminal_32MiB-16                        	       1	 224573300 ns/op	 149.42 MB/s	         0 first-write-ns/op	 224346600 p95-ns	         0 write-ns/op	206527696 B/op	     103 allocs/op
+BenchmarkCodexEngineRelay/WS/terminal_32MiB-16                          	       1	 240480200 ns/op	 139.53 MB/s	         0 first-write-ns/op	 241034500 p95-ns	         0 write-ns/op	206528312 B/op	     112 allocs/op
+BenchmarkCodexEngineRelay/WS/terminal_32MiB-16                          	       1	 249402800 ns/op	 134.54 MB/s	         0 first-write-ns/op	 246490200 p95-ns	         0 write-ns/op	206528312 B/op	     112 allocs/op
+BenchmarkCodexEngineRelay/WS/terminal_32MiB-16                          	       1	 260860500 ns/op	 128.63 MB/s	         0 first-write-ns/op	 266810000 p95-ns	         0 write-ns/op	206528648 B/op	     115 allocs/op
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/service	9.420s

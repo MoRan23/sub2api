@@ -1,0 +1,34 @@
+Total: 96.38MB
+ROUTINE ======================== github.com/Wei-Shaw/sub2api/internal/securityaudit.(*PromptService).CheckKeyword in internal\securityaudit\prompt_service.go
+     625kB     2.14MB (flat, cum)  2.22% of Total
+         .          .    140:func (s *PromptService) CheckKeyword(ctx context.Context, req Request) (*PromptDecision, error) {
+         .          .    141:	if s == nil || s.config == nil {
+         .          .    142:		return &PromptDecision{Kind: DecisionAllow, AllowNextStage: true}, nil
+         .          .    143:	}
+         .          .    144:	if s.config.BlockingActivationDegraded() {
+         .          .    145:		return nil, &GuardError{Code: ErrorCodeUnavailable}
+         .          .    146:	}
+         .     1.53MB    147:	cfg, ok := s.config.Active()
+         .          .    148:	if !ok || (!cfg.KeywordBlockingActive() && !cfg.CombinationBlockingActive()) || !cfg.KeywordIncludesGroup(req.GroupID) {
+     625kB      625kB    149:		return &PromptDecision{Kind: DecisionAllow, AllowNextStage: true}, nil
+         .          .    150:	}
+         .          .    151:	if cfg.KeywordWhitelistsKey(req.UserID, req.APIKeyID) {
+         .          .    152:		return &PromptDecision{Kind: DecisionAllow, AllowNextStage: true}, nil
+         .          .    153:	}
+         .          .    154:
+ROUTINE ======================== github.com/Wei-Shaw/sub2api/internal/securityaudit.cloneActiveConfig in internal\securityaudit\prompt_config_store.go
+  156.25kB     1.53MB (flat, cum)  1.58% of Total
+         .          .    610:func cloneActiveConfig(cfg ActiveConfig) ActiveConfig {
+         .     1.22MB    611:	cfg.CombinationPolicies = cloneActiveCombinationPolicies(cfg.CombinationPolicies)
+         .          .    612:	cfg.CBRNTopicRules = append([]string{}, cfg.CBRNTopicRules...)
+         .          .    613:	cfg.CBRNIntentRules = append([]string{}, cfg.CBRNIntentRules...)
+         .          .    614:	cfg.KeywordWhitelistKeys = append([]KeywordWhitelistKey{}, cfg.KeywordWhitelistKeys...)
+         .          .    615:	cfg.Scanners = append([]string(nil), cfg.Scanners...)
+         .          .    616:	cfg.GroupIDs = append([]int64(nil), cfg.GroupIDs...)
+         .          .    617:	cfg.KeywordGroupIDs = append([]int64(nil), cfg.KeywordGroupIDs...)
+  156.25kB   156.25kB    618:	cfg.BlockedKeywords = append([]string(nil), cfg.BlockedKeywords...)
+         .   156.25kB    619:	cfg.JailbreakKeywords = slices.Clone(cfg.JailbreakKeywords)
+         .          .    620:	cfg.OtherKeywords = slices.Clone(cfg.OtherKeywords)
+         .          .    621:	cfg.Endpoints = append([]ActiveEndpoint(nil), cfg.Endpoints...)
+         .          .    622:	return cfg
+         .          .    623:}

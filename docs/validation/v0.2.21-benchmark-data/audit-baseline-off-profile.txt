@@ -1,0 +1,6 @@
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/securityaudit
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkPromptAuditMemory/text/65536/off-4         	   10000	      5519 ns/op	11897.29 MB/s	     896 B/op	       4 allocs/op
+PASS

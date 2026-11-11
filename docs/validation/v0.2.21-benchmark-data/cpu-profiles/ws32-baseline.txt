@@ -1,0 +1,8 @@
+# GOMAXPROCS=4 GOEXPERIMENT=greenteagc,jsonv2 D:\DevCache\sub2-v221-baseline.IWPO8C\bench-recheck\baseline-service.test.exe -test.run=^$ -test.bench=^BenchmarkCodexEngineRelay$/^WS$/^terminal_32MiB$ -test.benchmem -test.benchtime=30x -test.count=1 -test.cpu=4 -test.cpuprofile=D:\DevCache\sub2-v221-baseline.IWPO8C\bench-recheck\cpu-profiles\ws32-baseline.cpu
+2026/11/11 15:17:13 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkCodexEngineRelay/WS/terminal_32MiB-4         	      30	 245828770 ns/op	 136.50 MB/s	     30917 first-write-ns/op	 277208200 p95-ns	         0 write-ns/op	206528379 B/op	     111 allocs/op
+PASS

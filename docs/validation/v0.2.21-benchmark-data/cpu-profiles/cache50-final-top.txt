@@ -1,0 +1,44 @@
+File: final-repository-unit.test.exe
+Build ID: D:\DevCache\sub2-v221-baseline.IWPO8C\bench-recheck\final-repository-unit.test.exe2026-11-11 22:54:45.659155 +0800 CST
+Type: cpu
+Time: 2026-11-11 23:17:29 CST
+Duration: 12.03s, Total samples = 14210ms (118.12%)
+Showing nodes accounting for 12130ms, 85.36% of 14210ms total
+Dropped 336 nodes (cum <= 71.05ms)
+Showing top 35 nodes out of 155
+      flat  flat%   sum%        cum   cum%
+    9020ms 63.48% 63.48%     9030ms 63.55%  runtime.cgocall
+     910ms  6.40% 69.88%      910ms  6.40%  crypto/internal/fips140/sha256.blockSHANI
+     430ms  3.03% 72.91%      430ms  3.03%  runtime.memmove
+     240ms  1.69% 74.60%      580ms  4.08%  runtime.scanObject
+     210ms  1.48% 76.07%      210ms  1.48%  runtime.netpollQueueTimer
+     170ms  1.20% 77.27%      170ms  1.20%  internal/runtime/maps.ctrlGroup.matchH2 (inline)
+     160ms  1.13% 78.40%      200ms  1.41%  runtime.tryDeferToSpanScan
+     120ms  0.84% 79.24%      120ms  0.84%  runtime.semawakeup
+      90ms  0.63% 79.87%       90ms  0.63%  memeqbody
+      90ms  0.63% 80.51%      100ms   0.7%  runtime.findObject
+      70ms  0.49% 81.00%      220ms  1.55%  github.com/Wei-Shaw/sub2api/internal/repository.(*schedulerCache).resolveSchedulerCandidates
+      70ms  0.49% 81.49%      280ms  1.97%  runtime.netpoll
+      60ms  0.42% 81.91%     6360ms 44.76%  bufio.(*Writer).Write
+      50ms  0.35% 82.27%      190ms  1.34%  fmt.(*pp).printArg
+      50ms  0.35% 82.62%      170ms  1.20%  runtime.sweepone
+      40ms  0.28% 82.90%     3790ms 26.67%  github.com/Wei-Shaw/sub2api/internal/repository.(*schedulerCache).GetCandidateSnapshot
+      30ms  0.21% 83.11%       90ms  0.63%  encoding/json/v2.makeStructArshaler.func2
+      30ms  0.21% 83.32%      230ms  1.62%  runtime.mallocgcSmallNoscan
+      20ms  0.14% 83.46%      150ms  1.06%  bufio.(*Reader).collectFragments
+      20ms  0.14% 83.60%      380ms  2.67%  bufio.(*Reader).fill
+      20ms  0.14% 83.74%       80ms  0.56%  encoding/json/v2.makeStructArshaler.func3
+      20ms  0.14% 83.88%      140ms  0.99%  fmt.(*fmt).fmtS
+      20ms  0.14% 84.03%      160ms  1.13%  fmt.Fprint
+      20ms  0.14% 84.17%      450ms  3.17%  github.com/alicebob/miniredis/v2/server.readArray
+      20ms  0.14% 84.31%      140ms  0.99%  runtime.(*mheap).allocSpan
+      20ms  0.14% 84.45%       90ms  0.63%  runtime.(*sweepLocked).sweep
+      20ms  0.14% 84.59%      510ms  3.59%  runtime.mallocgc
+      20ms  0.14% 84.73%      150ms  1.06%  runtime.mapaccess2
+      20ms  0.14% 84.87%      230ms  1.62%  runtime.mapaccess2_faststr
+      20ms  0.14% 85.01%     9050ms 63.69%  syscall.syscalln
+      10ms  0.07% 85.08%      380ms  2.67%  bufio.(*Reader).ReadSlice
+      10ms  0.07% 85.15%      230ms  1.62%  bufio.(*Reader).ReadString
+      10ms  0.07% 85.22%      120ms  0.84%  fmt.(*buffer).writeString (inline)
+      10ms  0.07% 85.29%       80ms  0.56%  fmt.(*pp).doPrint
+      10ms  0.07% 85.36%     6270ms 44.12%  fmt.Fprintf

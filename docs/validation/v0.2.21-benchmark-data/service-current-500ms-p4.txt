@@ -1,0 +1,81 @@
+# round=1 GOMAXPROCS=4 benchtime=500ms count=1 pattern=^BenchmarkOpenAIAccountSchedulerSelectTopK$/^n_64_k_3$/^full_sort$
+2026/11/11 14:37:43 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkOpenAIAccountSchedulerSelectTopK/n_64_k_3/full_sort-4         	  128707	      5088 ns/op	    5528 B/op	       4 allocs/op
+PASS
+# round=1 GOMAXPROCS=4 benchtime=500ms count=1 pattern=^BenchmarkCodexEngineRelay$/^(HTTP|WS)$/^(small_256|multiline_128)$
+2026/11/11 14:37:46 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkCodexEngineRelay/HTTP/small_256-4         	     945	    613638 ns/op	  43.66 MB/s	      3996 first-write-ns/op	   1640700 p95-ns	      2513 write-ns/op	   16444 B/op	     306 allocs/op
+BenchmarkCodexEngineRelay/WS/small_256-4           	     819	    707314 ns/op	  37.88 MB/s	      7675 first-write-ns/op	   1519300 p95-ns	      2547 write-ns/op	   25139 B/op	     567 allocs/op
+BenchmarkCodexEngineRelay/HTTP/multiline_128-4     	    1614	    323428 ns/op	  46.03 MB/s	      4682 first-write-ns/op	   1047900 p95-ns	      1638 write-ns/op	   12756 B/op	     183 allocs/op
+BenchmarkCodexEngineRelay/WS/multiline_128-4       	    1766	    356836 ns/op	  41.72 MB/s	      9166 first-write-ns/op	   1045200 p95-ns	       464.4 write-ns/op	   17339 B/op	     316 allocs/op
+PASS
+# round=1 GOMAXPROCS=4 benchtime=500ms count=1 pattern=^BenchmarkCodexEngineRelay$/^WS$/^terminal_32MiB$
+2026/11/11 14:37:50 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkCodexEngineRelay/WS/terminal_32MiB-4         	       2	 255135100 ns/op	 131.52 MB/s	         0 first-write-ns/op	 259310000 p95-ns	         0 write-ns/op	206528536 B/op	     114 allocs/op
+PASS
+# round=2 GOMAXPROCS=4 benchtime=500ms count=1 pattern=^BenchmarkOpenAIAccountSchedulerSelectTopK$/^n_64_k_3$/^full_sort$
+2026/11/11 14:37:58 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkOpenAIAccountSchedulerSelectTopK/n_64_k_3/full_sort-4         	  130734	      4010 ns/op	    5528 B/op	       4 allocs/op
+PASS
+# round=2 GOMAXPROCS=4 benchtime=500ms count=1 pattern=^BenchmarkCodexEngineRelay$/^(HTTP|WS)$/^(small_256|multiline_128)$
+2026/11/11 14:37:59 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkCodexEngineRelay/HTTP/small_256-4         	     895	    636801 ns/op	  42.07 MB/s	      6213 first-write-ns/op	   1503300 p95-ns	       998.0 write-ns/op	   16452 B/op	     306 allocs/op
+BenchmarkCodexEngineRelay/WS/small_256-4           	     892	    706700 ns/op	  37.91 MB/s	     19273 first-write-ns/op	   1523800 p95-ns	      2146 write-ns/op	   25133 B/op	     567 allocs/op
+BenchmarkCodexEngineRelay/HTTP/multiline_128-4     	    1788	    351881 ns/op	  42.30 MB/s	     10242 first-write-ns/op	    998700 p95-ns	      1412 write-ns/op	   12756 B/op	     183 allocs/op
+BenchmarkCodexEngineRelay/WS/multiline_128-4       	    1495	    363116 ns/op	  41.00 MB/s	      7265 first-write-ns/op	   1047100 p95-ns	      3913 write-ns/op	   17346 B/op	     316 allocs/op
+PASS
+# round=2 GOMAXPROCS=4 benchtime=500ms count=1 pattern=^BenchmarkCodexEngineRelay$/^WS$/^terminal_32MiB$
+2026/11/11 14:38:04 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkCodexEngineRelay/WS/terminal_32MiB-4         	       2	 253851450 ns/op	 132.18 MB/s	         0 first-write-ns/op	 254552300 p95-ns	         0 write-ns/op	206528896 B/op	     116 allocs/op
+PASS
+# round=3 GOMAXPROCS=4 benchtime=500ms count=1 pattern=^BenchmarkOpenAIAccountSchedulerSelectTopK$/^n_64_k_3$/^full_sort$
+2026/11/11 14:38:14 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkOpenAIAccountSchedulerSelectTopK/n_64_k_3/full_sort-4         	  108427	      4831 ns/op	    5528 B/op	       4 allocs/op
+PASS
+# round=3 GOMAXPROCS=4 benchtime=500ms count=1 pattern=^BenchmarkCodexEngineRelay$/^(HTTP|WS)$/^(small_256|multiline_128)$
+2026/11/11 14:38:18 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkCodexEngineRelay/HTTP/small_256-4         	    1264	    499287 ns/op	  53.66 MB/s	      6849 first-write-ns/op	   1045000 p95-ns	      2834 write-ns/op	   16454 B/op	     306 allocs/op
+BenchmarkCodexEngineRelay/WS/small_256-4           	    1264	    598945 ns/op	  44.73 MB/s	      7776 first-write-ns/op	   1503700 p95-ns	      1200 write-ns/op	   25122 B/op	     567 allocs/op
+BenchmarkCodexEngineRelay/HTTP/multiline_128-4     	    1984	    268492 ns/op	  55.44 MB/s	      6671 first-write-ns/op	   1003800 p95-ns	      1040 write-ns/op	   12752 B/op	     183 allocs/op
+BenchmarkCodexEngineRelay/WS/multiline_128-4       	    1964	    310059 ns/op	  48.01 MB/s	     12407 first-write-ns/op	   1009600 p95-ns	       777.1 write-ns/op	   17328 B/op	     316 allocs/op
+PASS
+# round=3 GOMAXPROCS=4 benchtime=500ms count=1 pattern=^BenchmarkCodexEngineRelay$/^WS$/^terminal_32MiB$
+2026/11/11 14:38:22 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkCodexEngineRelay/WS/terminal_32MiB-4         	       2	 258405450 ns/op	 129.85 MB/s	         0 first-write-ns/op	 259135700 p95-ns	         0 write-ns/op	206528440 B/op	     114 allocs/op
+PASS

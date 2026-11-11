@@ -1,0 +1,24 @@
+# round=1 order=current GOMAXPROCS=4 benchtime=10x count=1 pattern=^BenchmarkCodexEngineRelay$/^WS$/^terminal_32MiB$
+2026/11/11 14:42:48 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkCodexEngineRelay/WS/terminal_32MiB-4         	      10	 249903530 ns/op	 134.27 MB/s	     96810 first-write-ns/op	 259833600 p95-ns	         0 write-ns/op	206528524 B/op	     113 allocs/op
+PASS
+# round=2 order=current GOMAXPROCS=4 benchtime=10x count=1 pattern=^BenchmarkCodexEngineRelay$/^WS$/^terminal_32MiB$
+2026/11/11 14:42:51 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkCodexEngineRelay/WS/terminal_32MiB-4         	      10	 262318560 ns/op	 127.92 MB/s	         0 first-write-ns/op	 299807600 p95-ns	         0 write-ns/op	206528619 B/op	     113 allocs/op
+PASS
+# round=3 order=current GOMAXPROCS=4 benchtime=10x count=1 pattern=^BenchmarkCodexEngineRelay$/^WS$/^terminal_32MiB$
+2026/11/11 14:43:00 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkCodexEngineRelay/WS/terminal_32MiB-4         	      10	 280552490 ns/op	 119.60 MB/s	         0 first-write-ns/op	 319420000 p95-ns	         0 write-ns/op	206528544 B/op	     113 allocs/op
+PASS

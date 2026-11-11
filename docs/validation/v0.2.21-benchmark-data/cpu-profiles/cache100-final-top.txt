@@ -1,0 +1,44 @@
+File: final-repository-unit.test.exe
+Build ID: D:\DevCache\sub2-v221-baseline.IWPO8C\bench-recheck\final-repository-unit.test.exe2026-11-11 22:54:45.659155 +0800 CST
+Type: cpu
+Time: 2026-11-11 23:18:15 CST
+Duration: 20.96s, Total samples = 23900ms (114.01%)
+Showing nodes accounting for 20830ms, 87.15% of 23900ms total
+Dropped 432 nodes (cum <= 119.50ms)
+Showing top 35 nodes out of 164
+      flat  flat%   sum%        cum   cum%
+   15890ms 66.49% 66.49%    15940ms 66.69%  runtime.cgocall
+    1500ms  6.28% 72.76%     1500ms  6.28%  crypto/internal/fips140/sha256.blockSHANI
+     760ms  3.18% 75.94%      760ms  3.18%  runtime.memmove
+     340ms  1.42% 77.36%      340ms  1.42%  runtime.netpollQueueTimer
+     310ms  1.30% 78.66%      870ms  3.64%  runtime.scanObject
+     290ms  1.21% 79.87%      290ms  1.21%  runtime.semawakeup
+     250ms  1.05% 80.92%      320ms  1.34%  runtime.tryDeferToSpanScan
+     180ms  0.75% 81.67%      180ms  0.75%  internal/runtime/maps.ctrlGroup.matchH2 (inline)
+     150ms  0.63% 82.30%      490ms  2.05%  runtime.netpoll
+     140ms  0.59% 82.89%      410ms  1.72%  runtime.mapaccess2_faststr
+     140ms  0.59% 83.47%      140ms  0.59%  runtime.sysUnusedOS
+     130ms  0.54% 84.02%      150ms  0.63%  runtime.findObject
+      90ms  0.38% 84.39%      190ms  0.79%  github.com/Wei-Shaw/sub2api/internal/repository.(*schedulerCache).resolveSchedulerCandidates
+      60ms  0.25% 84.64%      170ms  0.71%  runtime.(*sweepLocked).sweep
+      50ms  0.21% 84.85%      540ms  2.26%  bufio.(*Reader).ReadSlice
+      50ms  0.21% 85.06%     5270ms 22.05%  github.com/Wei-Shaw/sub2api/internal/repository.(*schedulerCache).GetCandidateSnapshot
+      50ms  0.21% 85.27%      240ms  1.00%  runtime.sweepone
+      40ms  0.17% 85.44%      380ms  1.59%  fmt.(*pp).printArg
+      40ms  0.17% 85.61%    16110ms 67.41%  internal/poll.(*FD).execIO
+      30ms  0.13% 85.73%      210ms  0.88%  encoding/json/v2.makeStructArshaler.func3
+      30ms  0.13% 85.86%      150ms  0.63%  fmt.Fprint
+      30ms  0.13% 85.98%    13520ms 56.57%  github.com/alicebob/miniredis/v2.(*Miniredis).cmdMget.func1
+      30ms  0.13% 86.11%    13200ms 55.23%  github.com/alicebob/miniredis/v2/server.(*Peer).Block
+      30ms  0.13% 86.23%      320ms  1.34%  runtime.mallocgcSmallNoscan
+      20ms 0.084% 86.32%      290ms  1.21%  bufio.(*Reader).ReadString
+      20ms 0.084% 86.40%      190ms  0.79%  bufio.(*Reader).collectFragments
+      20ms 0.084% 86.49%    12850ms 53.77%  bufio.(*Writer).Write
+      20ms 0.084% 86.57%     1540ms  6.44%  crypto/internal/fips140/sha256.(*Digest).Write
+      20ms 0.084% 86.65%      300ms  1.26%  fmt.(*buffer).writeString (inline)
+      20ms 0.084% 86.74%      320ms  1.34%  fmt.(*fmt).padString
+      20ms 0.084% 86.82%     2480ms 10.38%  github.com/Wei-Shaw/sub2api/internal/repository.(*schedulerCache).internSchedulerAccount
+      20ms 0.084% 86.90%      170ms  0.71%  github.com/alicebob/miniredis/v2/server.(*Writer).WriteNull
+      20ms 0.084% 86.99%      540ms  2.26%  github.com/alicebob/miniredis/v2/server.readArray
+      20ms 0.084% 87.07%    15570ms 65.15%  internal/poll.(*FD).Write
+      20ms 0.084% 87.15%    15580ms 65.19%  net.(*conn).Write

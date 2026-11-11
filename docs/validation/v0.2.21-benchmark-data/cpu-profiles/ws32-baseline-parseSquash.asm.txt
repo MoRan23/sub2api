@@ -1,0 +1,230 @@
+TEXT github.com/tidwall/gjson.parseSquash(SB) D:/DevCache/go-mod/github.com/tidwall/gjson@v1.18.0/gjson.go
+  gjson.go:1047		0x14065f800		55			PUSHQ BP					
+  gjson.go:1047		0x14065f801		4889e5			MOVQ SP, BP					
+  gjson.go:1047		0x14065f804		4889442410		MOVQ AX, 0x10(SP)				
+  gjson.go:1052		0x14065f809		488d5101		LEAQ 0x1(CX), DX				
+  gjson.go:1055		0x14065f80d		be01000000		MOVL $0x1, SI					
+  gjson.go:1055		0x14065f812		4839d3			CMPQ BX, DX					
+  gjson.go:1055		0x14065f815		0f8e58010000		JLE 0x14065f973					
+  gjson.go:1056		0x14065f81b		488d7bf8		LEAQ -0x8(BX), DI				
+  gjson.go:1056		0x14065f81f		90			NOPL						
+  gjson.go:1056		0x14065f820		eb03			JMP 0x14065f825					
+  gjson.go:1056		0x14065f822		4c89c2			MOVQ R8, DX					
+  gjson.go:1056		0x14065f825		4839fa			CMPQ DX, DI					
+  gjson.go:1056		0x14065f828		0f8de5000000		JGE 0x14065f913					
+  gjson.go:1057		0x14065f82e		4c8d4208		LEAQ 0x8(DX), R8				
+  gjson.go:1057		0x14065f832		4c39c3			CMPQ BX, R8					
+  gjson.go:1057		0x14065f835		0f821e030000		JB 0x14065fb59					
+  gjson.go:1057		0x14065f83b		0f1f440000		NOPL 0(AX)(AX*1)				
+  gjson.go:1057		0x14065f840		4c39c2			CMPQ DX, R8					
+  gjson.go:1057		0x14065f843		0f870b030000		JA 0x14065fb54					
+  gjson.go:1058		0x14065f849		440fb60c10		MOVZX 0(AX)(DX*1), R9				
+  gjson.go:1058		0x14065f84e		4c8d158b313507		LEAQ github.com/tidwall/gjson.vchars(SB), R10	
+  gjson.go:1058		0x14065f855		470fb60c0a		MOVZX 0(R10)(R9*1), R9				
+  gjson.go:1058		0x14065f85a		660f1f440000		NOPW 0(AX)(AX*1)				
+  gjson.go:1059		0x14065f860		4584c9			TESTL R9, R9					
+  gjson.go:1059		0x14065f863		0f85e6000000		JNE 0x14065f94f					
+  gjson.go:1063		0x14065f869		440fb64c1001		MOVZX 0x1(AX)(DX*1), R9				
+  gjson.go:1063		0x14065f86f		470fb60c11		MOVZX 0(R9)(R10*1), R9				
+  gjson.go:1064		0x14065f874		4584c9			TESTL R9, R9					
+  gjson.go:1064		0x14065f877		0f8591000000		JNE 0x14065f90e					
+  gjson.go:1068		0x14065f87d		440fb64c1002		MOVZX 0x2(AX)(DX*1), R9				
+  gjson.go:1068		0x14065f883		470fb60c11		MOVZX 0(R9)(R10*1), R9				
+  gjson.go:1069		0x14065f888		4584c9			TESTL R9, R9					
+  gjson.go:1069		0x14065f88b		757b			JNE 0x14065f908					
+  gjson.go:1073		0x14065f88d		440fb64c1003		MOVZX 0x3(AX)(DX*1), R9				
+  gjson.go:1073		0x14065f893		470fb60c11		MOVZX 0(R9)(R10*1), R9				
+  gjson.go:1074		0x14065f898		4584c9			TESTL R9, R9					
+  gjson.go:1074		0x14065f89b		7565			JNE 0x14065f902					
+  gjson.go:1078		0x14065f89d		440fb64c1004		MOVZX 0x4(AX)(DX*1), R9				
+  gjson.go:1078		0x14065f8a3		470fb60c11		MOVZX 0(R9)(R10*1), R9				
+  gjson.go:1079		0x14065f8a8		4584c9			TESTL R9, R9					
+  gjson.go:1079		0x14065f8ab		754e			JNE 0x14065f8fb					
+  gjson.go:1083		0x14065f8ad		440fb64c1005		MOVZX 0x5(AX)(DX*1), R9				
+  gjson.go:1083		0x14065f8b3		470fb60c11		MOVZX 0(R9)(R10*1), R9				
+  gjson.go:1084		0x14065f8b8		4584c9			TESTL R9, R9					
+  gjson.go:1084		0x14065f8bb		7538			JNE 0x14065f8f5					
+  gjson.go:1088		0x14065f8bd		440fb64c1006		MOVZX 0x6(AX)(DX*1), R9				
+  gjson.go:1088		0x14065f8c3		470fb60c11		MOVZX 0(R9)(R10*1), R9				
+  gjson.go:1089		0x14065f8c8		4584c9			TESTL R9, R9					
+  gjson.go:1089		0x14065f8cb		7522			JNE 0x14065f8ef					
+  gjson.go:1093		0x14065f8cd		440fb64c1007		MOVZX 0x7(AX)(DX*1), R9				
+  gjson.go:1093		0x14065f8d3		470fb60c11		MOVZX 0(R9)(R10*1), R9				
+  gjson.go:1093		0x14065f8d8		0f1f840000000000	NOPL 0(AX)(AX*1)				
+  gjson.go:1094		0x14065f8e0		4584c9			TESTL R9, R9					
+  gjson.go:1094		0x14065f8e3		0f8439ffffff		JE 0x14065f822					
+  gjson.go:1095		0x14065f8e9		4883c207		ADDQ $0x7, DX					
+  gjson.go:1096		0x14065f8ed		eb60			JMP 0x14065f94f					
+  gjson.go:1090		0x14065f8ef		4883c206		ADDQ $0x6, DX					
+  gjson.go:1091		0x14065f8f3		eb5a			JMP 0x14065f94f					
+  gjson.go:1085		0x14065f8f5		4883c205		ADDQ $0x5, DX					
+  gjson.go:1086		0x14065f8f9		eb54			JMP 0x14065f94f					
+  gjson.go:1080		0x14065f8fb		4883c204		ADDQ $0x4, DX					
+  gjson.go:1080		0x14065f8ff		90			NOPL						
+  gjson.go:1081		0x14065f900		eb4d			JMP 0x14065f94f					
+  gjson.go:1075		0x14065f902		4883c203		ADDQ $0x3, DX					
+  gjson.go:1076		0x14065f906		eb47			JMP 0x14065f94f					
+  gjson.go:1070		0x14065f908		4883c202		ADDQ $0x2, DX					
+  gjson.go:1071		0x14065f90c		eb41			JMP 0x14065f94f					
+  gjson.go:1065		0x14065f90e		48ffc2			INCQ DX						
+  gjson.go:1066		0x14065f911		eb3c			JMP 0x14065f94f					
+  gjson.go:1100		0x14065f913		4839d3			CMPQ BX, DX					
+  gjson.go:1100		0x14065f916		0f8633020000		JBE 0x14065fb4f					
+  gjson.go:1100		0x14065f91c		440fb60410		MOVZX 0(AX)(DX*1), R8				
+  gjson.go:1100		0x14065f921		4c8d0db8303507		LEAQ github.com/tidwall/gjson.vchars(SB), R9	
+  gjson.go:1100		0x14065f928		470fb60401		MOVZX 0(R9)(R8*1), R8				
+  gjson.go:1101		0x14065f92d		4584c0			TESTL R8, R8					
+  gjson.go:1101		0x14065f930		7513			JNE 0x14065f945					
+  gjson.go:1102		0x14065f932		48ffc2			INCQ DX						
+  gjson.go:1102		0x14065f935		4c8d15a4303507		LEAQ github.com/tidwall/gjson.vchars(SB), R10	
+  gjson.go:1102		0x14065f93c		0f1f4000		NOPL 0(AX)					
+  gjson.go:1103		0x14065f940		e9cdfeffff		JMP 0x14065f812					
+  gjson.go:1103		0x14065f945		4c8d1594303507		LEAQ github.com/tidwall/gjson.vchars(SB), R10	
+  gjson.go:1106		0x14065f94c		4589c1			MOVL R8, R9					
+  gjson.go:1106		0x14065f94f		4180f902		CMPL R9, $0x2					
+  gjson.go:1106		0x14065f953		7509			JNE 0x14065f95e					
+  gjson.go:1108		0x14065f955		4c8d4201		LEAQ 0x1(DX), R8				
+  gjson.go:1110		0x14065f959		e982000000		JMP 0x14065f9e0					
+  gjson.go:1178		0x14065f95e		4a8d340e		LEAQ 0(SI)(R9*1), SI				
+  gjson.go:1178		0x14065f962		488d76fe		LEAQ -0x2(SI), SI				
+  gjson.go:1179		0x14065f966		4885f6			TESTQ SI, SI					
+  gjson.go:1179		0x14065f969		742d			JE 0x14065f998					
+  gjson.go:1184		0x14065f96b		48ffc2			INCQ DX						
+  gjson.go:1184		0x14065f96e		e99ffeffff		JMP 0x14065f812					
+  gjson.go:1186		0x14065f973		4839cb			CMPQ BX, CX					
+  gjson.go:1186		0x14065f976		721b			JB 0x14065f993					
+  gjson.go:1186		0x14065f978		4829cb			SUBQ CX, BX					
+  gjson.go:1186		0x14065f97b		4889de			MOVQ BX, SI					
+  gjson.go:1186		0x14065f97e		48f7db			NEGQ BX						
+  gjson.go:1186		0x14065f981		48c1fb3f		SARQ $0x3f, BX					
+  gjson.go:1186		0x14065f985		4821cb			ANDQ CX, BX					
+  gjson.go:1186		0x14065f988		4801c3			ADDQ AX, BX					
+  gjson.go:1186		0x14065f98b		4889d0			MOVQ DX, AX					
+  gjson.go:1186		0x14065f98e		4889f1			MOVQ SI, CX					
+  gjson.go:1186		0x14065f991		5d			POPQ BP						
+  gjson.go:1186		0x14065f992		c3			RET						
+  gjson.go:1186		0x14065f993		e84872a3ff		CALL runtime.panicBounds(SB)			
+  gjson.go:1180		0x14065f998		488d7201		LEAQ 0x1(DX), SI				
+  gjson.go:1180		0x14065f99c		0f1f4000		NOPL 0(AX)					
+  gjson.go:1181		0x14065f9a0		4839f3			CMPQ BX, SI					
+  gjson.go:1181		0x14065f9a3		7229			JB 0x14065f9ce					
+  gjson.go:1181		0x14065f9a5		4839f1			CMPQ CX, SI					
+  gjson.go:1181		0x14065f9a8		771f			JA 0x14065f9c9					
+  gjson.go:1181		0x14065f9aa		4829ca			SUBQ CX, DX					
+  gjson.go:1181		0x14065f9ad		48ffc2			INCQ DX						
+  gjson.go:1181		0x14065f9b0		4889d7			MOVQ DX, DI					
+  gjson.go:1181		0x14065f9b3		48f7da			NEGQ DX						
+  gjson.go:1181		0x14065f9b6		48c1fa3f		SARQ $0x3f, DX					
+  gjson.go:1181		0x14065f9ba		4821ca			ANDQ CX, DX					
+  gjson.go:1181		0x14065f9bd		488d1c02		LEAQ 0(DX)(AX*1), BX				
+  gjson.go:1181		0x14065f9c1		4889f0			MOVQ SI, AX					
+  gjson.go:1181		0x14065f9c4		4889f9			MOVQ DI, CX					
+  gjson.go:1181		0x14065f9c7		5d			POPQ BP						
+  gjson.go:1181		0x14065f9c8		c3			RET						
+  gjson.go:1181		0x14065f9c9		e81272a3ff		CALL runtime.panicBounds(SB)			
+  gjson.go:1181		0x14065f9ce		e80d72a3ff		CALL runtime.panicBounds(SB)			
+  gjson.go:1169		0x14065f9d3		49ffc0			INCQ R8						
+  gjson.go:1170		0x14065f9d6		eb08			JMP 0x14065f9e0					
+  gjson.go:1111		0x14065f9d8		4d89c8			MOVQ R9, R8					
+  gjson.go:1111		0x14065f9db		0f1f440000		NOPL 0(AX)(AX*1)				
+  gjson.go:1111		0x14065f9e0		4939f8			CMPQ R8, DI					
+  gjson.go:1111		0x14065f9e3		0f8dc6000000		JGE 0x14065faaf					
+  gjson.go:1112		0x14065f9e9		4d8d4808		LEAQ 0x8(R8), R9				
+  gjson.go:1112		0x14065f9ed		4c39cb			CMPQ BX, R9					
+  gjson.go:1112		0x14065f9f0		0f8254010000		JB 0x14065fb4a					
+  gjson.go:1112		0x14065f9f6		4d39c8			CMPQ R8, R9					
+  gjson.go:1112		0x14065f9f9		0f8746010000		JA 0x14065fb45					
+  gjson.go:1113		0x14065f9ff		460fb61c00		MOVZX 0(AX)(R8*1), R11				
+  gjson.go:1113		0x14065fa04		4180fb22		CMPL R11, $0x22					
+  gjson.go:1113		0x14065fa08		0f8483000000		JE 0x14065fa91					
+  gjson.go:1117		0x14065fa0e		460fb65c0001		MOVZX 0x1(AX)(R8*1), R11			
+  gjson.go:1117		0x14065fa14		4180fb22		CMPL R11, $0x22					
+  gjson.go:1117		0x14065fa18		7474			JE 0x14065fa8e					
+  gjson.go:1121		0x14065fa1a		460fb65c0002		MOVZX 0x2(AX)(R8*1), R11			
+  gjson.go:1121		0x14065fa20		4180fb22		CMPL R11, $0x22					
+  gjson.go:1121		0x14065fa24		7462			JE 0x14065fa88					
+  gjson.go:1125		0x14065fa26		460fb65c0003		MOVZX 0x3(AX)(R8*1), R11			
+  gjson.go:1125		0x14065fa2c		4180fb22		CMPL R11, $0x22					
+  gjson.go:1125		0x14065fa30		7450			JE 0x14065fa82					
+  gjson.go:1129		0x14065fa32		460fb65c0004		MOVZX 0x4(AX)(R8*1), R11			
+  gjson.go:1129		0x14065fa38		4180fb22		CMPL R11, $0x22					
+  gjson.go:1129		0x14065fa3c		743e			JE 0x14065fa7c					
+  gjson.go:1133		0x14065fa3e		460fb65c0005		MOVZX 0x5(AX)(R8*1), R11			
+  gjson.go:1133		0x14065fa44		4180fb22		CMPL R11, $0x22					
+  gjson.go:1133		0x14065fa48		742c			JE 0x14065fa76					
+  gjson.go:1137		0x14065fa4a		460fb65c0006		MOVZX 0x6(AX)(R8*1), R11			
+  gjson.go:1137		0x14065fa50		4180fb22		CMPL R11, $0x22					
+  gjson.go:1137		0x14065fa54		741a			JE 0x14065fa70					
+  gjson.go:1141		0x14065fa56		460fb65c0007		MOVZX 0x7(AX)(R8*1), R11			
+  gjson.go:1141		0x14065fa5c		0f1f4000		NOPL 0(AX)					
+  gjson.go:1141		0x14065fa60		4180fb22		CMPL R11, $0x22					
+  gjson.go:1141		0x14065fa64		0f856effffff		JNE 0x14065f9d8					
+  gjson.go:1142		0x14065fa6a		4983c007		ADDQ $0x7, R8					
+  gjson.go:1143		0x14065fa6e		eb21			JMP 0x14065fa91					
+  gjson.go:1138		0x14065fa70		4983c006		ADDQ $0x6, R8					
+  gjson.go:1139		0x14065fa74		eb1b			JMP 0x14065fa91					
+  gjson.go:1134		0x14065fa76		4983c005		ADDQ $0x5, R8					
+  gjson.go:1135		0x14065fa7a		eb15			JMP 0x14065fa91					
+  gjson.go:1130		0x14065fa7c		4983c004		ADDQ $0x4, R8					
+  gjson.go:1131		0x14065fa80		eb0f			JMP 0x14065fa91					
+  gjson.go:1126		0x14065fa82		4983c003		ADDQ $0x3, R8					
+  gjson.go:1127		0x14065fa86		eb09			JMP 0x14065fa91					
+  gjson.go:1122		0x14065fa88		4983c002		ADDQ $0x2, R8					
+  gjson.go:1123		0x14065fa8c		eb03			JMP 0x14065fa91					
+  gjson.go:1118		0x14065fa8e		49ffc0			INCQ R8						
+  gjson.go:1149		0x14065fa91		4d8d48ff		LEAQ -0x1(R8), R9				
+  gjson.go:1149		0x14065fa95		4c39cb			CMPQ BX, R9					
+  gjson.go:1149		0x14065fa98		0f869e000000		JBE 0x14065fb3c					
+  gjson.go:1149		0x14065fa9e		460fb64c00ff		MOVZX -0x1(AX)(R8*1), R9			
+  gjson.go:1149		0x14065faa4		4180f95c		CMPL R9, $0x5c					
+  gjson.go:1149		0x14065faa8		7405			JE 0x14065faaf					
+  gjson.go:1149		0x14065faaa		eb6b			JMP 0x14065fb17					
+  gjson.go:1156		0x14065faac		49ffc0			INCQ R8						
+  gjson.go:1154		0x14065faaf		4c39c3			CMPQ BX, R8					
+  gjson.go:1154		0x14065fab2		7e71			JLE 0x14065fb25					
+  gjson.go:1155		0x14065fab4		0f867d000000		JBE 0x14065fb37					
+  gjson.go:1155		0x14065faba		460fb60c00		MOVZX 0(AX)(R8*1), R9				
+  gjson.go:1155		0x14065fabf		90			NOPL						
+  gjson.go:1155		0x14065fac0		4180f95c		CMPL R9, $0x5c					
+  gjson.go:1155		0x14065fac4		77e6			JA 0x14065faac					
+  gjson.go:1155		0x14065fac6		4180f922		CMPL R9, $0x22					
+  gjson.go:1155		0x14065faca		75e0			JNE 0x14065faac					
+  gjson.go:1160		0x14065facc		4d8d48ff		LEAQ -0x1(R8), R9				
+  gjson.go:1160		0x14065fad0		4c39cb			CMPQ BX, R9					
+  gjson.go:1160		0x14065fad3		765d			JBE 0x14065fb32					
+  gjson.go:1160		0x14065fad5		460fb64c00ff		MOVZX -0x1(AX)(R8*1), R9			
+  gjson.go:1160		0x14065fadb		0f1f440000		NOPL 0(AX)(AX*1)				
+  gjson.go:1160		0x14065fae0		4180f95c		CMPL R9, $0x5c					
+  gjson.go:1160		0x14065fae4		753f			JNE 0x14065fb25					
+  gjson.go:1162		0x14065fae6		4d8d48fe		LEAQ -0x2(R8), R9				
+  gjson.go:1162		0x14065faea		4531db			XORL R11, R11					
+  gjson.go:1162		0x14065faed		eb06			JMP 0x14065faf5					
+  gjson.go:1162		0x14065faef		49ffc9			DECQ R9						
+  gjson.go:1166		0x14065faf2		49ffc3			INCQ R11					
+  gjson.go:1162		0x14065faf5		4939d1			CMPQ R9, DX					
+  gjson.go:1162		0x14065faf8		7e10			JLE 0x14065fb0a					
+  gjson.go:1163		0x14065fafa		4c39cb			CMPQ BX, R9					
+  gjson.go:1163		0x14065fafd		762e			JBE 0x14065fb2d					
+  gjson.go:1163		0x14065faff		450fb62401		MOVZX 0(R9)(AX*1), R12				
+  gjson.go:1163		0x14065fb04		4180fc5c		CMPL R12, $0x5c					
+  gjson.go:1163		0x14065fb08		74e5			JE 0x14065faef					
+  gjson.go:1168		0x14065fb0a		410fbae300		BTL $0x0, R11					
+  gjson.go:1168		0x14065fb0f		0f83befeffff		JAE 0x14065f9d3					
+  gjson.go:1168		0x14065fb15		eb0e			JMP 0x14065fb25					
+  gjson.go:1150		0x14065fb17		498d5001		LEAQ 0x1(R8), DX				
+  gjson.go:1150		0x14065fb1b		0f1f440000		NOPL 0(AX)(AX*1)				
+  gjson.go:1151		0x14065fb20		e9edfcffff		JMP 0x14065f812					
+  gjson.go:1184		0x14065fb25		4c89c2			MOVQ R8, DX					
+  gjson.go:1184		0x14065fb28		e93efeffff		JMP 0x14065f96b					
+  gjson.go:1163		0x14065fb2d		e8ae70a3ff		CALL runtime.panicBounds(SB)			
+  gjson.go:1160		0x14065fb32		e8a970a3ff		CALL runtime.panicBounds(SB)			
+  gjson.go:1155		0x14065fb37		e8a470a3ff		CALL runtime.panicBounds(SB)			
+  gjson.go:1149		0x14065fb3c		0f1f4000		NOPL 0(AX)					
+  gjson.go:1149		0x14065fb40		e89b70a3ff		CALL runtime.panicBounds(SB)			
+  gjson.go:1112		0x14065fb45		e89670a3ff		CALL runtime.panicBounds(SB)			
+  gjson.go:1112		0x14065fb4a		e89170a3ff		CALL runtime.panicBounds(SB)			
+  gjson.go:1100		0x14065fb4f		e88c70a3ff		CALL runtime.panicBounds(SB)			
+  gjson.go:1057		0x14065fb54		e88770a3ff		CALL runtime.panicBounds(SB)			
+  gjson.go:1057		0x14065fb59		e88270a3ff		CALL runtime.panicBounds(SB)			
+  gjson.go:1057		0x14065fb5e		90			NOPL						
+  :-1			0x14065fb5f		cc			INT $0x3					

@@ -1,0 +1,44 @@
+File: final-service.test.exe
+Build ID: D:\DevCache\sub2-v221-baseline.IWPO8C\bench-recheck\final-service.test.exe2026-11-11 14:54:33.7901056 +0000 UTC
+Type: cpu
+Time: 2026-11-11 23:17:21 CST
+Duration: 8.12s, Total samples = 8140ms (100.23%)
+Showing nodes accounting for 7840ms, 96.31% of 8140ms total
+Dropped 71 nodes (cum <= 40.70ms)
+Showing top 35 nodes out of 56
+      flat  flat%   sum%        cum   cum%
+    3180ms 39.07% 39.07%     3180ms 39.07%  github.com/tidwall/gjson.parseSquash
+    2150ms 26.41% 65.48%     2150ms 26.41%  github.com/tidwall/gjson.validstring
+    1090ms 13.39% 78.87%     1090ms 13.39%  github.com/Wei-Shaw/sub2api/internal/service.codexEngineContainsPartialImage
+     860ms 10.57% 89.43%      860ms 10.57%  github.com/tidwall/gjson.parseString
+     290ms  3.56% 93.00%      290ms  3.56%  runtime.memmove
+     170ms  2.09% 95.09%      170ms  2.09%  indexbody
+      60ms  0.74% 95.82%       60ms  0.74%  runtime.procyieldAsm
+      30ms  0.37% 96.19%       80ms  0.98%  runtime.scanObject
+      10ms  0.12% 96.31%       50ms  0.61%  runtime.(*pageAlloc).scavengeOne
+         0     0% 96.31%      170ms  2.09%  bytes.Contains (inline)
+         0     0% 96.31%      170ms  2.09%  bytes.Index
+         0     0% 96.31%     7540ms 92.63%  github.com/Wei-Shaw/sub2api/internal/service.(*OpenAIGatewayService).relayCodexEngineStream
+         0     0% 96.31%     7540ms 92.63%  github.com/Wei-Shaw/sub2api/internal/service.(*OpenAIGatewayService).relayCodexEngineStream.func2
+         0     0% 96.31%      310ms  3.81%  github.com/Wei-Shaw/sub2api/internal/service.(*codexEngineSSEReader).read
+         0     0% 96.31%      310ms  3.81%  github.com/Wei-Shaw/sub2api/internal/service.(*codexEngineSSEReader).readFrame
+         0     0% 96.31%      470ms  5.77%  github.com/Wei-Shaw/sub2api/internal/service.(*codexEngineWSWriter).writePayload
+         0     0% 96.31%      470ms  5.77%  github.com/Wei-Shaw/sub2api/internal/service.(*codexEngineWSWriter).writeSSEFrame
+         0     0% 96.31%     1950ms 23.96%  github.com/Wei-Shaw/sub2api/internal/service.(*openAIImageOutputCounter).addImageOutputItem
+         0     0% 96.31%     2280ms 28.01%  github.com/Wei-Shaw/sub2api/internal/service.(*openAIImageOutputCounter).addOutputArray
+         0     0% 96.31%     1950ms 23.96%  github.com/Wei-Shaw/sub2api/internal/service.(*openAIImageOutputCounter).addOutputArray.func1
+         0     0% 96.31%     7540ms 92.63%  github.com/Wei-Shaw/sub2api/internal/service.BenchmarkCodexEngineRelay.func1
+         0     0% 96.31%      120ms  1.47%  github.com/Wei-Shaw/sub2api/internal/service.codexEngineMayHaveImages
+         0     0% 96.31%     1070ms 13.14%  github.com/Wei-Shaw/sub2api/internal/service.codexEngineSuccessfulDeliveryPayload
+         0     0% 96.31%      560ms  6.88%  github.com/Wei-Shaw/sub2api/internal/service.extractOpenAIResponseIDFromJSONBytes
+         0     0% 96.31%      830ms 10.20%  github.com/Wei-Shaw/sub2api/internal/service.extractOpenAIUsageFromJSONBytes
+         0     0% 96.31%     3480ms 42.75%  github.com/Wei-Shaw/sub2api/internal/service.observeCodexEngineImages
+         0     0% 96.31%     2250ms 27.64%  github.com/Wei-Shaw/sub2api/internal/service.observeCodexEnginePayloadFields
+         0     0% 96.31%      920ms 11.30%  github.com/Wei-Shaw/sub2api/internal/service.parseOpenAIResponseUsageInto
+         0     0% 96.31%     3710ms 45.58%  github.com/tidwall/gjson.Get
+         0     0% 96.31%     2240ms 27.52%  github.com/tidwall/gjson.GetBytes (inline)
+         0     0% 96.31%     2280ms 28.01%  github.com/tidwall/gjson.Result.ForEach
+         0     0% 96.31%     1480ms 18.18%  github.com/tidwall/gjson.Result.Get
+         0     0% 96.31%     2150ms 26.41%  github.com/tidwall/gjson.ValidBytes (inline)
+         0     0% 96.31%     2240ms 27.52%  github.com/tidwall/gjson.getBytes
+         0     0% 96.31%      330ms  4.05%  github.com/tidwall/gjson.parseAny

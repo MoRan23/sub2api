@@ -1,0 +1,19 @@
+# round=1 GOMAXPROCS=4 benchtime=500ms count=1 pattern=^BenchmarkSchedulerCacheReadSharing$/^accounts_2000_groups_(1|10|100)$
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/repository
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_1-4         	     588	   1019783 ns/op	   7069608 decoded-retained-B	   1787300 p95-ns	  421056 B/op	   10318 allocs/op
+BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_10-4        	     567	   1077516 ns/op	  11142352 decoded-retained-B	   2029400 p95-ns	  421049 B/op	   10318 allocs/op
+BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_100-4       	     554	   1083922 ns/op	  46247912 decoded-retained-B	   1822600 p95-ns	  421042 B/op	   10318 allocs/op
+PASS
+# round=1 GOMAXPROCS=4 benchtime=500ms count=1 pattern=^BenchmarkSchedulerCacheSharingModes$/^accounts_2000_groups_100_shared_(0|50|100)_warm$
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/repository
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkSchedulerCacheSharingModes/accounts_2000_groups_100_shared_0_warm-4         	      79	   6923216 ns/op	      2000 account-views/op	       100.0 bucket-reads/op	   8381000 p95-sweep-ns	  617648 B/op	   17604 allocs/op
+BenchmarkSchedulerCacheSharingModes/accounts_2000_groups_100_shared_50_warm-4        	      10	  55813480 ns/op	    101000 account-views/op	       100.0 bucket-reads/op	  62622800 p95-sweep-ns	21226914 B/op	  524010 allocs/op
+BenchmarkSchedulerCacheSharingModes/accounts_2000_groups_100_shared_100_warm-4       	       5	 103232480 ns/op	    200000 account-views/op	       100.0 bucket-reads/op	 105616600 p95-sweep-ns	42104038 B/op	 1031812 allocs/op
+PASS
+# round=2 GOMAXPROCS=4 benchtime=500ms count=1 pattern=^BenchmarkSchedulerCacheReadSharing$/^accounts_2000_groups_(1|10|100)$

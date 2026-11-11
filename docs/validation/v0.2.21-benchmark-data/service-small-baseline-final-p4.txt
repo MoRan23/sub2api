@@ -1,0 +1,33 @@
+# round=1 GOMAXPROCS=4 benchtime=500ms count=1 pattern=^BenchmarkCodexEngineRelay$/^(HTTP|WS)$/^(small_256|multiline_128)$
+2026/11/11 14:58:00 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkCodexEngineRelay/HTTP/small_256-4         	    1482	    673049 ns/op	  39.80 MB/s	     16669 first-write-ns/op	   1643400 p95-ns	      1391 write-ns/op	   16343 B/op	     304 allocs/op
+BenchmarkCodexEngineRelay/WS/small_256-4           	     813	    731912 ns/op	  36.60 MB/s	     11168 first-write-ns/op	   1876300 p95-ns	      5079 write-ns/op	   25022 B/op	     565 allocs/op
+BenchmarkCodexEngineRelay/HTTP/multiline_128-4     	    1527	    372382 ns/op	  39.98 MB/s	     10707 first-write-ns/op	   1282200 p95-ns	       995.2 write-ns/op	   12666 B/op	     181 allocs/op
+BenchmarkCodexEngineRelay/WS/multiline_128-4       	    1502	    388056 ns/op	  38.36 MB/s	     10646 first-write-ns/op	   1411100 p95-ns	      2737 write-ns/op	   17238 B/op	     314 allocs/op
+PASS
+# round=2 GOMAXPROCS=4 benchtime=500ms count=1 pattern=^BenchmarkCodexEngineRelay$/^(HTTP|WS)$/^(small_256|multiline_128)$
+2026/11/11 15:00:35 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkCodexEngineRelay/HTTP/small_256-4         	     901	    647735 ns/op	  41.36 MB/s	     12462 first-write-ns/op	   1653100 p95-ns	      3906 write-ns/op	   16357 B/op	     304 allocs/op
+BenchmarkCodexEngineRelay/WS/small_256-4           	     837	    710627 ns/op	  37.70 MB/s	      8316 first-write-ns/op	   1508600 p95-ns	      7763 write-ns/op	   25028 B/op	     565 allocs/op
+BenchmarkCodexEngineRelay/HTTP/multiline_128-4     	    1648	    346643 ns/op	  42.94 MB/s	      1655 first-write-ns/op	   1178600 p95-ns	      1624 write-ns/op	   12657 B/op	     181 allocs/op
+BenchmarkCodexEngineRelay/WS/multiline_128-4       	    1608	    371983 ns/op	  40.02 MB/s	     18227 first-write-ns/op	   1199900 p95-ns	       968.7 write-ns/op	   17247 B/op	     314 allocs/op
+PASS
+# round=3 GOMAXPROCS=4 benchtime=500ms count=1 pattern=^BenchmarkCodexEngineRelay$/^(HTTP|WS)$/^(small_256|multiline_128)$
+2026/11/11 15:02:56 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkCodexEngineRelay/HTTP/small_256-4         	     930	    646640 ns/op	  41.43 MB/s	     10356 first-write-ns/op	   1508200 p95-ns	      2372 write-ns/op	   16360 B/op	     304 allocs/op
+BenchmarkCodexEngineRelay/WS/small_256-4           	     864	    685065 ns/op	  39.11 MB/s	      8847 first-write-ns/op	   1622200 p95-ns	      5347 write-ns/op	   25014 B/op	     565 allocs/op
+BenchmarkCodexEngineRelay/HTTP/multiline_128-4     	    1894	    334281 ns/op	  44.53 MB/s	     10010 first-write-ns/op	   1502900 p95-ns	      1324 write-ns/op	   12655 B/op	     181 allocs/op
+BenchmarkCodexEngineRelay/WS/multiline_128-4       	    1598	    377689 ns/op	  39.41 MB/s	      7643 first-write-ns/op	   1234600 p95-ns	      1594 write-ns/op	   17240 B/op	     314 allocs/op
+PASS

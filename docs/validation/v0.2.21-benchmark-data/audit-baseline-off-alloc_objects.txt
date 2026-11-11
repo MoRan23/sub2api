@@ -1,0 +1,32 @@
+Total: 44666
+ROUTINE ======================== github.com/Wei-Shaw/sub2api/internal/securityaudit.(*PromptService).CheckKeyword in internal\securityaudit\prompt_service.go
+     10000      30000 (flat, cum) 67.17% of Total
+         .          .    112:func (s *PromptService) CheckKeyword(ctx context.Context, req Request) (*PromptDecision, error) {
+         .          .    113:	if s == nil || s.config == nil {
+         .          .    114:		return &PromptDecision{Kind: DecisionAllow, AllowNextStage: true}, nil
+         .          .    115:	}
+         .          .    116:	if s.config.BlockingActivationDegraded() {
+         .          .    117:		return nil, &GuardError{Code: ErrorCodeUnavailable}
+         .          .    118:	}
+         .      20000    119:	cfg, ok := s.config.Active()
+         .          .    120:	if !ok || (!cfg.KeywordBlockingActive() && !cfg.CombinationBlockingActive()) || !cfg.KeywordIncludesGroup(req.GroupID) {
+     10000      10000    121:		return &PromptDecision{Kind: DecisionAllow, AllowNextStage: true}, nil
+         .          .    122:	}
+         .          .    123:	if cfg.KeywordWhitelistsKey(req.UserID, req.APIKeyID) {
+         .          .    124:		return &PromptDecision{Kind: DecisionAllow, AllowNextStage: true}, nil
+         .          .    125:	}
+         .          .    126:
+ROUTINE ======================== github.com/Wei-Shaw/sub2api/internal/securityaudit.cloneActiveConfig in internal\securityaudit\prompt_config_store.go
+     10000      20000 (flat, cum) 44.78% of Total
+         .          .    564:func cloneActiveConfig(cfg ActiveConfig) ActiveConfig {
+         .      10000    565:	cfg.CombinationPolicies = cloneActiveCombinationPolicies(cfg.CombinationPolicies)
+         .          .    566:	cfg.CBRNTopicRules = append([]string{}, cfg.CBRNTopicRules...)
+         .          .    567:	cfg.CBRNIntentRules = append([]string{}, cfg.CBRNIntentRules...)
+         .          .    568:	cfg.KeywordWhitelistKeys = append([]KeywordWhitelistKey{}, cfg.KeywordWhitelistKeys...)
+         .          .    569:	cfg.Scanners = append([]string(nil), cfg.Scanners...)
+         .          .    570:	cfg.GroupIDs = append([]int64(nil), cfg.GroupIDs...)
+         .          .    571:	cfg.KeywordGroupIDs = append([]int64(nil), cfg.KeywordGroupIDs...)
+     10000      10000    572:	cfg.BlockedKeywords = append([]string(nil), cfg.BlockedKeywords...)
+         .          .    573:	cfg.Endpoints = append([]ActiveEndpoint(nil), cfg.Endpoints...)
+         .          .    574:	return cfg
+         .          .    575:}
