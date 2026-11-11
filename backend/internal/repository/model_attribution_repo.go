@@ -559,7 +559,7 @@ func (r *attributionRepository) DeferRetry(ctx context.Context, j *service.Attri
 }
 
 func (r *attributionRepository) saveCheckpoint(ctx context.Context, j *service.AttributionJob, next *time.Time) (bool, error) {
-	if j == nil || j.Checkpoint == nil || j.Checkpoint.Version != 1 || len(j.Checkpoint.Outputs) > 3 || len(j.Checkpoint.Challenges) != 3 {
+	if j == nil || !service.ValidAttributionCheckpoint(j.Checkpoint) {
 		return false, service.ErrAttributionInvalid
 	}
 	checkpoint, err := json.Marshal(j.Checkpoint)
@@ -594,7 +594,7 @@ func (r *attributionRepository) saveCheckpoint(ctx context.Context, j *service.A
 				return false, err
 			}
 		}
-		if !service.SameAttributionDetector(j.Snapshot.Detector, storedDetector) && (!firstCheckpoint || len(j.Checkpoint.Outputs) != 0 || j.Result.CompletedProbes != 0 || j.Result.Retries != 0) {
+		if !service.SameAttributionDetector(j.Snapshot.Detector, storedDetector) && (!firstCheckpoint || j.Checkpoint.CompletedCount() != 0 || j.Result.CompletedProbes != 0 || j.Result.Retries != 0) {
 			return false, service.ErrAttributionInvalid
 		}
 		detectorJSON, err := json.Marshal(j.Snapshot.Detector)

@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -49,10 +50,13 @@ func TestAttributionLiveDetectorWithoutConfigResave(t *testing.T) {
 				live := attributionUpdatedDetector()
 				analyzer := &attributionLiveAnalyzer{detector: live}
 				s.analyzer = analyzer
+				var probeMu sync.Mutex
 				probes := 0
 				s.probe = attributionProbeFunc(func(_ context.Context, _ int64, model, prompt string) (*CandyTestExecution, error) {
+					probeMu.Lock()
+					defer probeMu.Unlock()
 					probes++
-					require.Equal(t, live, repo.stored.Snapshot.Detector, "identity must be persisted before the first probe")
+					require.Equal(t, live, repo.storedJob().Snapshot.Detector, "identity must be persisted before the first probe")
 					return &CandyTestExecution{ActualModel: model, Completed: true, ResponseText: prompt}, nil
 				})
 				s.execute(context.Background(), job)
@@ -75,18 +79,27 @@ func TestAttributionLiveDetectorResumeUsesFrozenIdentity(t *testing.T) {
 			live := attributionUpdatedDetector()
 			analyzer := &attributionLiveAnalyzer{detector: live}
 			s.analyzer = analyzer
+			var probeMu sync.Mutex
 			var prompts []string
+			thirdCalls := 0
 			s.probe = attributionProbeFunc(func(_ context.Context, _ int64, model, prompt string) (*CandyTestExecution, error) {
+				probeMu.Lock()
+				defer probeMu.Unlock()
 				prompts = append(prompts, prompt)
-				if len(prompts) == 3 {
-					return &CandyTestExecution{UpstreamStatus: 503}, candyTestError("account_rate_limited")
+				if prompt == "challenge C" {
+					thirdCalls++
+					if thirdCalls == 1 {
+						return &CandyTestExecution{UpstreamStatus: 503}, candyTestError("account_rate_limited")
+					}
 				}
 				return &CandyTestExecution{ActualModel: model, Completed: true, ResponseText: prompt}, nil
 			})
 			s.execute(context.Background(), job)
 			require.Equal(t, "retry_wait", repo.stored.Status)
 			require.Equal(t, live, repo.stored.Snapshot.Detector)
-			require.Len(t, repo.stored.Checkpoint.Outputs, 2)
+			require.NotNil(t, repo.stored.Checkpoint.Slots[0].Output)
+			require.NotNil(t, repo.stored.Checkpoint.Slots[1].Output)
+			require.Nil(t, repo.stored.Checkpoint.Slots[2].Output)
 			if upgraded {
 				analyzer.detector = testAttributionDetector()
 			}
@@ -100,7 +113,7 @@ func TestAttributionLiveDetectorResumeUsesFrozenIdentity(t *testing.T) {
 				require.Empty(t, analyzer.outputs)
 			} else {
 				require.Equal(t, "passed", repo.stored.Status)
-				require.Equal(t, []string{"challenge A", "challenge B", "challenge C", "challenge C"}, prompts)
+				require.ElementsMatch(t, []string{"challenge A", "challenge B", "challenge C", "challenge C"}, prompts)
 			}
 		})
 	}

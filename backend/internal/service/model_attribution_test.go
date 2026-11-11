@@ -10,6 +10,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -306,6 +307,7 @@ func (f attributionProbeFunc) Probe(c context.Context, id int64, m, p string) (*
 func TestAttributionPipelineMockLMDetector(t *testing.T) {
 	for _, scenario := range []string{"pass", "mismatch", "unavailable", "not enrolled", "bad challenges", "invalid answer", "probe failure", "rate limited", "429", "interrupted", "stale", "timeout", "version changed", "analyzer changed", "uncalibrated", "expected multi", "expected alternate", "expected mismatch", "expected missing", "alias probe"} {
 		t.Run(scenario, func(t *testing.T) {
+			var probeMu sync.Mutex
 			probes, analyzes := 0, 0
 			policy := AttributionPolicy{Model: AttributionDefaultModel}
 			switch scenario {
@@ -389,6 +391,8 @@ func TestAttributionPipelineMockLMDetector(t *testing.T) {
 			ctx, cancel := context.WithCancel(context.Background())
 			defer cancel()
 			probe := attributionProbeFunc(func(probeCtx context.Context, id int64, model, prompt string) (*CandyTestExecution, error) {
+				probeMu.Lock()
+				defer probeMu.Unlock()
 				probes++
 				require.True(t, isManualAttribution(probeCtx))
 				require.EqualValues(t, 11, id)
@@ -440,7 +444,8 @@ func TestAttributionPipelineMockLMDetector(t *testing.T) {
 				require.Equal(t, 3, probes)
 				require.Equal(t, 1, analyzes)
 			case "probe failure", "interrupted", "rate limited", "429":
-				require.Equal(t, 1, probes)
+				require.GreaterOrEqual(t, probes, 1)
+				require.LessOrEqual(t, probes, 3, "terminal failures must not launch retries")
 				require.Zero(t, analyzes)
 			default:
 				require.Zero(t, probes)

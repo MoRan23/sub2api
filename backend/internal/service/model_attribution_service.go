@@ -35,6 +35,7 @@ type ModelAttributionService struct {
 	wake             chan struct{}
 	now              func() time.Time
 	wait             func(context.Context, time.Duration) error
+	attemptElapsed   func(time.Time, *CandyTestExecution) time.Duration
 	fetchProbeModels func(context.Context, *Account) (*OpenAIModelsResponse, error)
 }
 
@@ -252,13 +253,14 @@ func (s *ModelAttributionService) execute(parent context.Context, j *Attribution
 			j.Reason = safeAttributionAnalyzerError(err)
 			return
 		}
-		j.Checkpoint = &AttributionCheckpoint{Version: 1, Challenges: challenges, Outputs: []AttributionOutput{}, RemainingBudgetMS: (10 * time.Minute).Milliseconds()}
+		j.Checkpoint = &AttributionCheckpoint{Version: 2, Challenges: challenges, Slots: make([]AttributionProbeCheckpoint, len(challenges)), RemainingBudgetMS: (10 * time.Minute).Milliseconds()}
 	}
 	cp := j.Checkpoint
 	if !validAttributionCheckpoint(cp) {
 		j.Status, j.Reason = "failed", "checkpoint_invalid"
 		return
 	}
+	upgradeAttributionCheckpoint(cp)
 	checkpoint := func() bool {
 		ok, err := s.repo.SaveCheckpoint(ctx, j)
 		if err != nil {
@@ -284,130 +286,12 @@ func (s *ModelAttributionService) execute(parent context.Context, j *Attribution
 	if j.Snapshot.Version >= 3 {
 		probeBaseCtx = withDiagnosticDaybreakPreferences(probeBaseCtx, *j.Snapshot.Daybreak)
 	}
-	for len(cp.Outputs) < len(cp.Challenges) {
-		if cp.RemainingBudgetMS <= 0 {
-			j.Status, j.Reason = "failed", "timeout"
-			return
-		}
-		valid, err = s.repo.Validate(ctx, j)
-		if err != nil || !valid {
-			j.Status = "failed"
-			j.Reason = "configuration_or_authorization_changed"
-			if diagnosticRateLimitError(err) {
-				j.Status = "skipped"
-				j.Reason = ErrDiagnosticRateLimited.Error()
-			}
-			return
-		}
-		index := len(cp.Outputs)
-		challenge := cp.Challenges[index]
-		if cp.OrdinaryRetries > 0 || cp.UnavailableRetries > 0 {
-			j.Result.Retries++
-		}
-		attemptStart := s.attributionNow()
-		attemptCtx := context.WithValue(probeBaseCtx, attributionProbeAuthorizationKey{}, cp.ProbeAuthorization)
-		// Classification is only known when the attempt ends. A nearly spent
-		// ordinary budget must not cancel an otherwise definite slow 503.
-		probeCtx, release := context.WithTimeout(attemptCtx, 10*time.Minute)
-		execution, e := s.probe.Probe(probeCtx, j.AccountID, j.Snapshot.Policy.Model, challenge.Prompt)
-		attemptErr := probeCtx.Err()
-		release()
-		accumulateAttributionExecution(&j.Result, index, execution)
-		if ctx.Err() == nil {
-			valid, err := s.repo.Validate(ctx, j)
-			if err != nil || !valid {
-				j.Status, j.Reason = "failed", "configuration_or_authorization_changed"
-				if diagnosticRateLimitError(err) {
-					j.Status, j.Reason = "skipped", ErrDiagnosticRateLimited.Error()
-				}
-				return
-			}
-		}
-		if execution != nil && execution.AttributionAuthorization != "" {
-			if cp.ProbeAuthorization != "" && cp.ProbeAuthorization != execution.AttributionAuthorization {
-				j.Status, j.Reason = "failed", "authorization_changed"
-				return
-			}
-			cp.ProbeAuthorization = execution.AttributionAuthorization
-		}
-		status, retryAfter := AttributionProbeRetryStatus(e, execution)
-		if status == 503 && ctx.Err() == nil {
-			// A definite rejection is safe to retry. Neither its request duration
-			// nor its durable wait consumes the ordinary execution budget.
-			cp.UnavailableRetries++
-			next := s.attributionNow().Add(attributionRetryDelay(cp.UnavailableRetries, retryAfter))
-			j.Status, j.Reason = "retry_wait", "upstream_http_503"
-			j.Result.DurationMS = previousDuration + s.attributionNow().Sub(started).Milliseconds()
-			ok, err := s.repo.DeferRetry(ctx, j, next)
-			if err != nil {
-				j.Status, j.Reason = "failed", "checkpoint_failed"
-				return
-			}
-			deferred, lostClaim = ok, !ok
-			return
-		}
-		if elapsed := s.attributionNow().Sub(attemptStart).Milliseconds(); elapsed > 0 {
-			cp.RemainingBudgetMS -= elapsed
-		}
-		if cp.RemainingBudgetMS <= 0 || errors.Is(attemptErr, context.DeadlineExceeded) {
-			j.Status, j.Reason = "failed", "timeout"
-			return
-		}
-		if e != nil || execution == nil || !execution.Completed {
-			if e == nil {
-				e = candyTestError("missing_terminal")
-			}
-			if ctx.Err() == nil && status != 429 && !diagnosticRateLimitError(e) && retryableDiagnosticError(e) && cp.OrdinaryRetries < 2 {
-				cp.OrdinaryRetries++
-				waitStart := s.attributionNow()
-				delay := min(time.Duration(cp.OrdinaryRetries)*time.Second, time.Duration(cp.RemainingBudgetMS)*time.Millisecond)
-				waitErr := s.attributionWait(ctx, delay)
-				if elapsed := s.attributionNow().Sub(waitStart).Milliseconds(); elapsed > 0 {
-					cp.RemainingBudgetMS -= elapsed
-				}
-				if waitErr == nil {
-					continue
-				}
-			}
-			j.Status = "failed"
-			j.Reason = "probe_failed"
-			var failure CandyTestFailure
-			if errors.As(e, &failure) {
-				j.Reason = failure.CandyTestFailureCode()
-			}
-			if status == 429 || diagnosticRateLimitError(e) {
-				j.Status = "skipped"
-				j.Reason = ErrDiagnosticRateLimited.Error()
-			}
-			if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-				j.Reason = "timeout"
-			} else if ctx.Err() != nil {
-				j.Reason = "interrupted"
-			}
-			return
-		}
-		if execution.ActualModel != j.Snapshot.Policy.Model {
-			j.Status = "failed"
-			j.Reason = "probe_model_changed"
-			return
-		}
-		if j.Snapshot.Version >= 3 {
-			for len(j.Result.Daybreak) <= index {
-				j.Result.Daybreak = append(j.Result.Daybreak, nil)
-			}
-			if execution.Daybreak != nil {
-				evidence := *execution.Daybreak
-				j.Result.Daybreak[index] = &evidence
-			}
-		}
-		cp.Outputs = append(cp.Outputs, AttributionOutput{Text: execution.ResponseText, ExpectedCount: challenge.ExpectedCount})
-		cp.OrdinaryRetries, cp.UnavailableRetries = 0, 0
-		j.Result.CompletedProbes = len(cp.Outputs)
-		if !checkpoint() {
-			return
-		}
+	probes := s.runAttributionProbes(ctx, probeBaseCtx, j, started, previousDuration)
+	deferred, lostClaim = probes.deferred, probes.lostClaim
+	if !probes.complete {
+		return
 	}
-	analysis, err := s.analyzer.Analyze(ctx, c.BaseURL, detector, cp.Outputs)
+	analysis, err := s.analyzer.Analyze(ctx, c.BaseURL, detector, cp.orderedOutputs())
 	if err != nil {
 		j.Reason = safeAttributionAnalyzerError(err)
 		return
@@ -459,25 +343,6 @@ func attributionRetryDelay(unavailableRetries int, retryAfter time.Duration) tim
 		return retryAfter
 	}
 	return delay
-}
-
-func validAttributionCheckpoint(cp *AttributionCheckpoint) bool {
-	if cp == nil || cp.Version != 1 || len(cp.Challenges) != 3 || len(cp.Outputs) > 3 || cp.OrdinaryRetries < 0 || cp.OrdinaryRetries > 2 || cp.UnavailableRetries < 0 || cp.RemainingBudgetMS > (10*time.Minute).Milliseconds() {
-		return false
-	}
-	seen := make(map[string]bool, 3)
-	for _, challenge := range cp.Challenges {
-		if challenge.ID == "" || seen[challenge.ID] || challenge.Prompt == "" || challenge.ExpectedCount <= 0 {
-			return false
-		}
-		seen[challenge.ID] = true
-	}
-	for i, output := range cp.Outputs {
-		if len(output.Text) > CandyTestMaxResponseBytes || output.ExpectedCount != cp.Challenges[i].ExpectedCount {
-			return false
-		}
-	}
-	return true
 }
 
 func accumulateAttributionExecution(result *AttributionResult, index int, execution *CandyTestExecution) {

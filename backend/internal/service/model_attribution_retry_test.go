@@ -16,6 +16,7 @@ import (
 // successful answers or retry counters from the previous worker's memory.
 type attributionRetryRepo struct {
 	AttributionRepository
+	mu           sync.Mutex
 	config       AttributionConfig
 	stored       *AttributionJob
 	claim        int
@@ -58,6 +59,8 @@ func (r *attributionRetryRepo) Config(context.Context) (AttributionConfig, error
 }
 
 func (r *attributionRetryRepo) Validate(_ context.Context, j *AttributionJob) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	return r.owned && r.stored.Claim == j.Claim, nil
 }
 
@@ -66,10 +69,11 @@ func (r *attributionRetryRepo) Heartbeat(ctx context.Context, j *AttributionJob)
 }
 
 func (r *attributionRetryRepo) SaveCheckpoint(ctx context.Context, j *AttributionJob) (bool, error) {
-	valid, err := r.Validate(ctx, j)
-	if !valid || err != nil || r.loseSave {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.owned || r.stored.Claim != j.Claim || r.loseSave {
 		r.owned = false
-		return false, err
+		return false, nil
 	}
 	r.saves++
 	status, reason := r.stored.Status, r.stored.Reason
@@ -79,10 +83,11 @@ func (r *attributionRetryRepo) SaveCheckpoint(ctx context.Context, j *Attributio
 }
 
 func (r *attributionRetryRepo) DeferRetry(ctx context.Context, j *AttributionJob, next time.Time) (bool, error) {
-	valid, err := r.Validate(ctx, j)
-	if !valid || err != nil || r.loseDefer {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	if !r.owned || r.stored.Claim != j.Claim || r.loseDefer {
 		r.owned = false
-		return false, err
+		return false, nil
 	}
 	r.defers++
 	r.stored = copyAttributionRetryJob(j)
@@ -93,6 +98,8 @@ func (r *attributionRetryRepo) DeferRetry(ctx context.Context, j *AttributionJob
 }
 
 func (r *attributionRetryRepo) Claim(context.Context) (*AttributionJob, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if r.owned || r.stored.Status != "retry_wait" || r.stored.NextAttemptAt == nil || r.clock.Now().Before(*r.stored.NextAttemptAt) {
 		return nil, nil
 	}
@@ -105,6 +112,8 @@ func (r *attributionRetryRepo) Claim(context.Context) (*AttributionJob, error) {
 }
 
 func (r *attributionRetryRepo) Finish(_ context.Context, j *AttributionJob) error {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if !r.owned || r.stored.Claim != j.Claim {
 		return nil
 	}
@@ -117,6 +126,8 @@ func (r *attributionRetryRepo) Finish(_ context.Context, j *AttributionJob) erro
 }
 
 func (r *attributionRetryRepo) Cancel(_ context.Context, id int64) (*AttributionJob, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
 	if id != r.stored.ID {
 		return nil, ErrAttributionNotFound
 	}
@@ -128,6 +139,18 @@ func (r *attributionRetryRepo) Cancel(_ context.Context, id int64) (*Attribution
 		r.owned = false
 	}
 	return copyAttributionRetryJob(r.stored), nil
+}
+
+func (r *attributionRetryRepo) storedJob() *AttributionJob {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	return copyAttributionRetryJob(r.stored)
+}
+
+func (r *attributionRetryRepo) loseCheckpoint(save bool) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.loseSave, r.loseDefer = save, !save
 }
 
 type attributionRetryClock struct {
@@ -190,7 +213,13 @@ func newAttributionRetryHarness(source string) (*ModelAttributionService, *attri
 	repo := &attributionRetryRepo{stored: copyAttributionRetryJob(j), owned: true, clock: clock,
 		config: AttributionConfig{Version: 1, BaseURL: "http://detector.invalid", Detector: testAttributionDetector()}}
 	analyzer := &attributionRetryAnalyzer{}
-	s := &ModelAttributionService{repo: repo, analyzer: analyzer, now: clock.Now, wait: clock.Wait}
+	s := &ModelAttributionService{repo: repo, analyzer: analyzer, now: clock.Now, wait: clock.Wait,
+		attemptElapsed: func(_ time.Time, execution *CandyTestExecution) time.Duration {
+			if execution == nil {
+				return 0
+			}
+			return time.Duration(execution.DurationMs) * time.Millisecond
+		}}
 	return s, repo, analyzer, clock, j
 }
 
@@ -209,13 +238,16 @@ func TestAttributionRetry503ResumesFrozenThirdProbePastTenMinutes(t *testing.T) 
 	for _, source := range []string{"manual", "scheduled", "initial"} {
 		t.Run(source, func(t *testing.T) {
 			s, repo, analyzer, clock, j := newAttributionRetryHarness(source)
+			var probeMu sync.Mutex
 			var prompts []string
 			thirdAttempts := 0
 			s.probe = attributionProbeFunc(func(ctx context.Context, _ int64, model, prompt string) (*CandyTestExecution, error) {
+				probeMu.Lock()
+				defer probeMu.Unlock()
 				require.True(t, isAttributionExecution(ctx))
 				require.Equal(t, source == "manual", isManualAttribution(ctx))
 				prompts = append(prompts, prompt)
-				execution := &CandyTestExecution{ActualModel: model, UpstreamModel: model, Usage: &OpenAIUsage{InputTokens: 10, OutputTokens: 20}}
+				execution := &CandyTestExecution{ActualModel: model, UpstreamModel: model, DurationMs: 1000, Usage: &OpenAIUsage{InputTokens: 10, OutputTokens: 20}}
 				if prompt == "challenge C" {
 					thirdAttempts++
 					if thirdAttempts <= 4 {
@@ -233,9 +265,11 @@ func TestAttributionRetry503ResumesFrozenThirdProbePastTenMinutes(t *testing.T) 
 				s.execute(context.Background(), j)
 				require.Zero(t, repo.finishes, "a deferred round must not be finalized")
 				require.Equal(t, 2, repo.stored.Result.CompletedProbes)
-				require.Len(t, repo.stored.Checkpoint.Outputs, 2)
+				require.NotNil(t, repo.stored.Checkpoint.Slots[0].Output)
+				require.NotNil(t, repo.stored.Checkpoint.Slots[1].Output)
+				require.Nil(t, repo.stored.Checkpoint.Slots[2].Output)
 				require.EqualValues(t, (10*time.Minute - 2*time.Second).Milliseconds(), repo.stored.Checkpoint.RemainingBudgetMS)
-				require.Equal(t, attempt+1, repo.stored.Checkpoint.UnavailableRetries)
+				require.Equal(t, attempt+1, repo.stored.Checkpoint.Slots[2].UnavailableRetries)
 				public, err := json.Marshal(repo.stored)
 				require.NoError(t, err)
 				require.NotContains(t, string(public), "private full answer")
@@ -249,7 +283,7 @@ func TestAttributionRetry503ResumesFrozenThirdProbePastTenMinutes(t *testing.T) 
 			require.Equal(t, 1, repo.finishes)
 			require.Equal(t, 4, repo.defers)
 			require.Equal(t, 1, analyzer.challengeCalls)
-			require.Equal(t, []string{"challenge A", "challenge B", "challenge C", "challenge C", "challenge C", "challenge C", "challenge C"}, prompts)
+			require.ElementsMatch(t, []string{"challenge A", "challenge B", "challenge C", "challenge C", "challenge C", "challenge C", "challenge C"}, prompts)
 			require.Equal(t, 3, repo.stored.Result.CompletedProbes)
 			require.Equal(t, 4, repo.stored.Result.Retries)
 			require.Len(t, repo.stored.Result.Usage, 3)
@@ -266,19 +300,24 @@ func TestAttributionRetry503ResumesFrozenThirdProbePastTenMinutes(t *testing.T) 
 func TestAttributionRetryOrdinaryFailuresKeepLimitAndBudgetAcross503(t *testing.T) {
 	s, repo, analyzer, clock, j := newAttributionRetryHarness("manual")
 	statuses := []int{502, 503, 502, 503, 502}
+	var probeMu sync.Mutex
 	probes := 0
-	s.probe = attributionProbeFunc(func(_ context.Context, _ int64, _, prompt string) (*CandyTestExecution, error) {
-		require.Equal(t, "challenge A", prompt)
+	s.probe = attributionProbeFunc(func(_ context.Context, _ int64, model, prompt string) (*CandyTestExecution, error) {
+		probeMu.Lock()
+		defer probeMu.Unlock()
+		if prompt != "challenge A" {
+			return &CandyTestExecution{ActualModel: model, Completed: true, ResponseText: prompt}, nil
+		}
 		require.Less(t, probes, len(statuses))
 		status := statuses[probes]
 		probes++
 		clock.Advance(2 * time.Minute)
-		return &CandyTestExecution{UpstreamStatus: status}, candyTestError(fmt.Sprintf("upstream_http_%d", status))
+		return &CandyTestExecution{UpstreamStatus: status, DurationMs: (2 * time.Minute).Milliseconds()}, candyTestError(fmt.Sprintf("upstream_http_%d", status))
 	})
 	for i := 0; i < 2; i++ {
 		s.execute(context.Background(), j)
 		require.Zero(t, repo.finishes)
-		require.Equal(t, i+1, repo.stored.Checkpoint.OrdinaryRetries)
+		require.Equal(t, i+1, repo.stored.Checkpoint.Slots[0].OrdinaryRetries)
 		wantConsumed := time.Duration(i+1)*2*time.Minute + time.Duration((1<<(i+1))-1)*time.Second
 		require.EqualValues(t, (10*time.Minute - wantConsumed).Milliseconds(), repo.stored.Checkpoint.RemainingBudgetMS)
 		j = resumeAttributionRetry(t, repo, clock)
@@ -304,13 +343,16 @@ func TestAttributionRetry429AndUnclassifiedLimitsRemainTerminal(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			s, repo, analyzer, _, j := newAttributionRetryHarness("scheduled")
+			var probeMu sync.Mutex
 			probes := 0
 			s.probe = attributionProbeFunc(func(context.Context, int64, string, string) (*CandyTestExecution, error) {
+				probeMu.Lock()
+				defer probeMu.Unlock()
 				probes++
 				return tc.execution, tc.err
 			})
 			s.execute(context.Background(), j)
-			require.Equal(t, 1, probes)
+			require.Equal(t, 3, probes)
 			require.Zero(t, repo.defers)
 			require.Equal(t, "skipped", repo.stored.Status)
 			require.Equal(t, "account_rate_limited", repo.stored.Reason)
@@ -343,10 +385,10 @@ func TestAttributionRetryLostCheckpointClaimNeverFinishes(t *testing.T) {
 				case "initial checkpoint":
 					t.Fatal("lost checkpoint ownership must stop before inference")
 				case "success checkpoint":
-					repo.loseSave = true
+					repo.loseCheckpoint(true)
 					return &CandyTestExecution{ActualModel: model, Completed: true, ResponseText: "private completed answer"}, nil
 				case "retry checkpoint":
-					repo.loseDefer = true
+					repo.loseCheckpoint(false)
 					return nil, candyTestError("upstream_http_503")
 				}
 				return nil, errors.New("unexpected probe")
@@ -396,6 +438,8 @@ func TestAttributionRetryCancellationDuringProbeRejectsLateSuccess(t *testing.T)
 func TestAttributionRetryOrdinaryWaitConsumesRemainingBudget(t *testing.T) {
 	s, repo, analyzer, clock, j := newAttributionRetryHarness("manual")
 	j.Checkpoint = &AttributionCheckpoint{Version: 1, Challenges: attributionRetryChallenges(), RemainingBudgetMS: 1500}
+	j.Checkpoint.Outputs = []AttributionOutput{{Text: "first answer", ExpectedCount: 300}, {Text: "second answer", ExpectedCount: 301}}
+	j.Result.CompletedProbes = 2
 	probes := 0
 	s.probe = attributionProbeFunc(func(ctx context.Context, _ int64, _, _ string) (*CandyTestExecution, error) {
 		probes++
@@ -404,7 +448,7 @@ func TestAttributionRetryOrdinaryWaitConsumesRemainingBudget(t *testing.T) {
 		require.LessOrEqual(t, time.Until(deadline), 10*time.Minute)
 		require.Greater(t, time.Until(deadline), 9*time.Minute, "physical timeout must not preempt a definite 503 before its status arrives")
 		clock.Advance(time.Second)
-		return nil, candyTestError("upstream_http_502")
+		return &CandyTestExecution{DurationMs: 1000}, candyTestError("upstream_http_502")
 	})
 	s.execute(context.Background(), j)
 	require.Equal(t, 1, probes)
@@ -457,13 +501,16 @@ func TestAttributionRetry503BackoffAndRetryAfter(t *testing.T) {
 
 func TestAttributionRetryDoesNotInfer503FromErrorText(t *testing.T) {
 	s, repo, _, _, j := newAttributionRetryHarness("manual")
+	var probeMu sync.Mutex
 	probes := 0
 	s.probe = attributionProbeFunc(func(context.Context, int64, string, string) (*CandyTestExecution, error) {
+		probeMu.Lock()
+		defer probeMu.Unlock()
 		probes++
 		return nil, errors.New("HTTP 503 rate_limit_exceeded: private upstream body")
 	})
 	s.execute(context.Background(), j)
-	require.Equal(t, 1, probes)
+	require.Equal(t, 3, probes)
 	require.Zero(t, repo.defers)
 	require.Equal(t, "failed", repo.stored.Status)
 	require.Equal(t, "probe_failed", repo.stored.Reason)
@@ -474,20 +521,28 @@ func TestAttributionRetryDoesNotInfer503FromErrorText(t *testing.T) {
 
 func TestAttributionRetryRestoresAuthorizationFence(t *testing.T) {
 	s, repo, _, clock, j := newAttributionRetryHarness("manual")
+	var probeMu sync.Mutex
 	probes := 0
+	resuming := false
 	s.probe = attributionProbeFunc(func(ctx context.Context, _ int64, model, prompt string) (*CandyTestExecution, error) {
+		probeMu.Lock()
+		defer probeMu.Unlock()
 		probes++
 		expected, _ := ctx.Value(attributionProbeAuthorizationKey{}).(string)
-		if probes == 1 {
+		if !resuming {
 			require.Empty(t, expected)
-			return &CandyTestExecution{AttributionAuthorization: "original-authorization", UpstreamStatus: 503}, candyTestError("upstream_http_503")
+			if prompt == "challenge C" {
+				return &CandyTestExecution{AttributionAuthorization: "original-authorization", UpstreamStatus: 503}, candyTestError("upstream_http_503")
+			}
+		} else {
+			require.Equal(t, "original-authorization", expected)
 		}
-		require.Equal(t, "original-authorization", expected)
 		return &CandyTestExecution{AttributionAuthorization: "original-authorization", ActualModel: model, Completed: true, ResponseText: "answer " + prompt}, nil
 	})
 	s.execute(context.Background(), j)
 	require.Equal(t, "original-authorization", repo.stored.Checkpoint.ProbeAuthorization)
 	j = resumeAttributionRetry(t, repo, clock)
+	resuming = true
 	s.execute(context.Background(), j)
 	require.Equal(t, "passed", repo.stored.Status)
 	require.Equal(t, 4, probes)

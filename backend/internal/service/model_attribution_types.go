@@ -557,13 +557,24 @@ func (j *AttributionJob) ManualResultWritebackReason(a *Account) string {
 // AttributionCheckpoint is private recovery data, stored separately from the
 // public job snapshot/result. Terminal transitions must erase the raw answers.
 type AttributionCheckpoint struct {
-	Version            int                    `json:"version"`
-	Challenges         []AttributionChallenge `json:"challenges"`
-	Outputs            []AttributionOutput    `json:"outputs"`
-	OrdinaryRetries    int                    `json:"ordinary_retries"`
-	UnavailableRetries int                    `json:"unavailable_retries"`
-	RemainingBudgetMS  int64                  `json:"remaining_budget_ms"`
-	ProbeAuthorization string                 `json:"probe_authorization,omitempty"`
+	Version            int                          `json:"version"`
+	Challenges         []AttributionChallenge       `json:"challenges"`
+	Outputs            []AttributionOutput          `json:"outputs,omitempty"` // Version 1 successful prefix.
+	OrdinaryRetries    int                          `json:"ordinary_retries,omitempty"`
+	UnavailableRetries int                          `json:"unavailable_retries,omitempty"`
+	Slots              []AttributionProbeCheckpoint `json:"slots,omitempty"`
+	RemainingBudgetMS  int64                        `json:"remaining_budget_ms"`
+	ProbeAuthorization string                       `json:"probe_authorization,omitempty"`
+}
+
+// Slots retain challenge order even when requests complete in a different order.
+// Only explicit 503 waits survive a lease release; ordinary retries stay bounded
+// by the round's shared execution budget.
+type AttributionProbeCheckpoint struct {
+	Output             *AttributionOutput `json:"output,omitempty"`
+	OrdinaryRetries    int                `json:"ordinary_retries,omitempty"`
+	UnavailableRetries int                `json:"unavailable_retries,omitempty"`
+	NextAttemptAt      *time.Time         `json:"next_attempt_at,omitempty"`
 }
 type AttributionSummary struct {
 	Latest                        *AttributionJob `json:"latest,omitempty"`

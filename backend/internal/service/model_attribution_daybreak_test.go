@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -19,8 +20,11 @@ func TestAttributionDaybreakFreezesPreferencesForEveryTaskSource(t *testing.T) {
 			frozen := ReadDiagnosticDaybreakPreferences(account)
 			job.Snapshot.Version, job.Snapshot.Daybreak = 3, &frozen
 			repo.stored = copyAttributionRetryJob(job)
+			var probeMu sync.Mutex
 			calls := 0
 			s.probe = attributionProbeFunc(func(ctx context.Context, _ int64, model, prompt string) (*CandyTestExecution, error) {
+				probeMu.Lock()
+				defer probeMu.Unlock()
 				preferences, ok := diagnosticDaybreakPreferencesFromContext(ctx)
 				require.True(t, ok)
 				require.Equal(t, DiagnosticDaybreakPreferences{Blue: true, Red: true}, preferences)
@@ -86,8 +90,11 @@ func TestAttributionDaybreak503RestoresOnlySuccessfulEvidence(t *testing.T) {
 	job.Snapshot.Version = 3
 	job.Snapshot.Daybreak = &DiagnosticDaybreakPreferences{Blue: true, Red: true}
 	repo.stored = copyAttributionRetryJob(job)
+	var probeMu sync.Mutex
 	var prompts []string
 	s.probe = attributionProbeFunc(func(ctx context.Context, _ int64, model, prompt string) (*CandyTestExecution, error) {
+		probeMu.Lock()
+		defer probeMu.Unlock()
 		preferences, ok := diagnosticDaybreakPreferencesFromContext(ctx)
 		require.True(t, ok)
 		require.Equal(t, DiagnosticDaybreakPreferences{Blue: true, Red: true}, preferences)
@@ -105,11 +112,15 @@ func TestAttributionDaybreak503RestoresOnlySuccessfulEvidence(t *testing.T) {
 	s.execute(context.Background(), job)
 	require.Equal(t, "retry_wait", repo.stored.Status)
 	require.Equal(t, 2, repo.stored.Result.CompletedProbes)
-	require.Len(t, repo.stored.Result.Daybreak, 2)
-	require.Len(t, repo.stored.Checkpoint.Outputs, 2)
+	require.GreaterOrEqual(t, len(repo.stored.Result.Daybreak), 2)
+	require.NotNil(t, repo.stored.Checkpoint.Slots[0].Output)
+	require.NotNil(t, repo.stored.Checkpoint.Slots[1].Output)
+	require.Nil(t, repo.stored.Checkpoint.Slots[2].Output)
 	require.Empty(t, analyzer.outputs)
 	for _, evidence := range repo.stored.Result.Daybreak {
-		require.Equal(t, "daybreak_blue", evidence.Cyber)
+		if evidence != nil {
+			require.Equal(t, "daybreak_blue", evidence.Cyber)
+		}
 	}
 	public, err := json.Marshal(repo.stored)
 	require.NoError(t, err)
@@ -120,7 +131,7 @@ func TestAttributionDaybreak503RestoresOnlySuccessfulEvidence(t *testing.T) {
 	// worker's values, then resume with a fresh worker after durable waiting.
 	job.Snapshot.Daybreak.Blue, job.Snapshot.Daybreak.Red = false, false
 	job.Result.Daybreak[0].Cyber = "changed old worker memory"
-	job.Checkpoint.Outputs[0].Text = "changed old worker memory"
+	job.Checkpoint.Slots[0].Output.Text = "changed old worker memory"
 	resumed := resumeAttributionRetry(t, repo, clock)
 	newAnalyzer := &attributionRetryAnalyzer{}
 	newWorker := &ModelAttributionService{repo: repo, analyzer: newAnalyzer, now: clock.Now, wait: clock.Wait}
@@ -134,7 +145,7 @@ func TestAttributionDaybreak503RestoresOnlySuccessfulEvidence(t *testing.T) {
 			Usage: &OpenAIUsage{InputTokens: 10}, Daybreak: &DiagnosticDaybreakEvidence{Cyber: "daybreak_blue", Reason: "injected"}}, nil
 	})
 	newWorker.execute(context.Background(), resumed)
-	require.Equal(t, []string{"challenge A", "challenge B", "challenge C", "challenge C"}, prompts)
+	require.ElementsMatch(t, []string{"challenge A", "challenge B", "challenge C", "challenge C"}, prompts)
 	require.Equal(t, "passed", repo.stored.Status)
 	require.Zero(t, newAnalyzer.challengeCalls, "the frozen challenges must survive restart")
 	require.Equal(t, []AttributionOutput{{Text: "private answer challenge A", ExpectedCount: 300}, {Text: "private answer challenge B", ExpectedCount: 301}, {Text: "private answer challenge C", ExpectedCount: 302}}, newAnalyzer.outputs)
