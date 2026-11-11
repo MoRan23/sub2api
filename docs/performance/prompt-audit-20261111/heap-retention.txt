@@ -1,0 +1,49 @@
+=== RUN   TestPromptAuditHeapRetention
+    prompt_memory_retention_test.go:26: toolchain=go1.27.3 experiments=greenteagc,jsonv2 gomaxprocs=16
+    prompt_memory_retention_test.go:71: heap round=1 scenario=text_snapshot references=1 old=true allocated=193155080 sampled_peak_delta=92446720 held_after_gc_delta=8469312 released_after_gc_delta=6584 elapsed_ms=1342
+    prompt_memory_retention_test.go:71: heap round=1 scenario=text_snapshot references=1 old=false allocated=42058856 sampled_peak_delta=33669744 held_after_gc_delta=8463304 released_after_gc_delta=576 elapsed_ms=1351
+    prompt_memory_retention_test.go:71: heap round=1 scenario=text_snapshot references=5 old=true allocated=193144520 sampled_peak_delta=92442104 held_after_gc_delta=8464456 released_after_gc_delta=592 elapsed_ms=1628
+    prompt_memory_retention_test.go:71: heap round=1 scenario=text_snapshot references=5 old=false allocated=42060008 sampled_peak_delta=33670896 held_after_gc_delta=8464504 released_after_gc_delta=640 elapsed_ms=1362
+    prompt_memory_retention_test.go:71: heap round=1 scenario=text_snapshot references=8 old=true allocated=193151536 sampled_peak_delta=83919056 held_after_gc_delta=8465576 released_after_gc_delta=832 elapsed_ms=1381
+    prompt_memory_retention_test.go:71: heap round=1 scenario=text_snapshot references=8 old=false allocated=42060864 sampled_peak_delta=33668544 held_after_gc_delta=8465384 released_after_gc_delta=624 elapsed_ms=1498
+    prompt_memory_retention_test.go:71: heap round=1 scenario=image_async_handoff references=1 old=true allocated=50386392 sampled_peak_delta=33600528 held_after_gc_delta=8398320 released_after_gc_delta=1288 elapsed_ms=24
+    prompt_memory_retention_test.go:71: heap round=1 scenario=image_async_handoff references=1 old=false allocated=42007144 sampled_peak_delta=33618344 held_after_gc_delta=6728 released_after_gc_delta=5592 elapsed_ms=53
+    prompt_memory_retention_test.go:71: heap round=1 scenario=image_async_handoff references=5 old=true allocated=50386512 sampled_peak_delta=41997712 held_after_gc_delta=8398440 released_after_gc_delta=464 elapsed_ms=21
+    prompt_memory_retention_test.go:71: heap round=1 scenario=image_async_handoff references=5 old=false allocated=42002608 sampled_peak_delta=33613792 held_after_gc_delta=2192 released_after_gc_delta=128 elapsed_ms=21
+    prompt_memory_retention_test.go:71: heap round=1 scenario=image_async_handoff references=8 old=true allocated=50387040 sampled_peak_delta=41998240 held_after_gc_delta=8398968 released_after_gc_delta=352 elapsed_ms=14
+    prompt_memory_retention_test.go:71: heap round=1 scenario=image_async_handoff references=8 old=false allocated=42003728 sampled_peak_delta=33614928 held_after_gc_delta=3648 released_after_gc_delta=944 elapsed_ms=20
+    prompt_memory_retention_test.go:71: heap round=2 scenario=text_snapshot references=1 old=true allocated=193143832 sampled_peak_delta=92441352 held_after_gc_delta=8463832 released_after_gc_delta=1088 elapsed_ms=1294
+    prompt_memory_retention_test.go:71: heap round=2 scenario=text_snapshot references=1 old=false allocated=42058384 sampled_peak_delta=33666064 held_after_gc_delta=8462888 released_after_gc_delta=144 elapsed_ms=1362
+    prompt_memory_retention_test.go:71: heap round=2 scenario=text_snapshot references=5 old=true allocated=193144536 sampled_peak_delta=92442408 held_after_gc_delta=8464472 released_after_gc_delta=608 elapsed_ms=1262
+    prompt_memory_retention_test.go:71: heap round=2 scenario=text_snapshot references=5 old=false allocated=42059384 sampled_peak_delta=33670272 held_after_gc_delta=8463880 released_after_gc_delta=16 elapsed_ms=1514
+    prompt_memory_retention_test.go:71: heap round=2 scenario=text_snapshot references=8 old=true allocated=193145224 sampled_peak_delta=92443160 held_after_gc_delta=8465224 released_after_gc_delta=464 elapsed_ms=1338
+    prompt_memory_retention_test.go:71: heap round=2 scenario=text_snapshot references=8 old=false allocated=42060504 sampled_peak_delta=33671392 held_after_gc_delta=8465000 released_after_gc_delta=240 elapsed_ms=1522
+    prompt_memory_retention_test.go:71: heap round=2 scenario=image_async_handoff references=1 old=true allocated=50385616 sampled_peak_delta=41996816 held_after_gc_delta=8397768 released_after_gc_delta=720 elapsed_ms=15
+    prompt_memory_retention_test.go:71: heap round=2 scenario=image_async_handoff references=1 old=false allocated=41999480 sampled_peak_delta=33610680 held_after_gc_delta=1376 released_after_gc_delta=240 elapsed_ms=21
+    prompt_memory_retention_test.go:71: heap round=2 scenario=image_async_handoff references=5 old=true allocated=50386544 sampled_peak_delta=41997744 held_after_gc_delta=8398472 released_after_gc_delta=496 elapsed_ms=13
+    prompt_memory_retention_test.go:71: heap round=2 scenario=image_async_handoff references=5 old=false allocated=42000888 sampled_peak_delta=33612088 held_after_gc_delta=2784 released_after_gc_delta=720 elapsed_ms=18
+    prompt_memory_retention_test.go:71: heap round=2 scenario=image_async_handoff references=8 old=true allocated=50387296 sampled_peak_delta=41998496 held_after_gc_delta=8399336 released_after_gc_delta=720 elapsed_ms=14
+    prompt_memory_retention_test.go:71: heap round=2 scenario=image_async_handoff references=8 old=false allocated=42000824 sampled_peak_delta=33612024 held_after_gc_delta=2720 released_after_gc_delta=16 elapsed_ms=18
+    prompt_memory_retention_test.go:71: heap round=3 scenario=text_snapshot references=1 old=true allocated=193142280 sampled_peak_delta=92445776 held_after_gc_delta=8468192 released_after_gc_delta=5448 elapsed_ms=1209
+    prompt_memory_retention_test.go:71: heap round=3 scenario=text_snapshot references=1 old=false allocated=42058264 sampled_peak_delta=33669152 held_after_gc_delta=8462760 released_after_gc_delta=16 elapsed_ms=1479
+    prompt_memory_retention_test.go:71: heap round=3 scenario=text_snapshot references=5 old=true allocated=193144360 sampled_peak_delta=92442296 held_after_gc_delta=8464360 released_after_gc_delta=496 elapsed_ms=1298
+    prompt_memory_retention_test.go:71: heap round=3 scenario=text_snapshot references=5 old=false allocated=42060200 sampled_peak_delta=33671088 held_after_gc_delta=8464696 released_after_gc_delta=832 elapsed_ms=1300
+    prompt_memory_retention_test.go:71: heap round=3 scenario=text_snapshot references=8 old=true allocated=193139088 sampled_peak_delta=92442584 held_after_gc_delta=8465000 released_after_gc_delta=240 elapsed_ms=1146
+    prompt_memory_retention_test.go:71: heap round=3 scenario=text_snapshot references=8 old=false allocated=42060592 sampled_peak_delta=33668272 held_after_gc_delta=8465112 released_after_gc_delta=352 elapsed_ms=1098
+    prompt_memory_retention_test.go:71: heap round=3 scenario=image_async_handoff references=1 old=true allocated=50385136 sampled_peak_delta=33599288 held_after_gc_delta=8397064 released_after_gc_delta=16 elapsed_ms=14
+    prompt_memory_retention_test.go:71: heap round=3 scenario=image_async_handoff references=1 old=false allocated=42001568 sampled_peak_delta=33612768 held_after_gc_delta=1264 released_after_gc_delta=128 elapsed_ms=17
+    prompt_memory_retention_test.go:71: heap round=3 scenario=image_async_handoff references=5 old=true allocated=50386880 sampled_peak_delta=41998032 held_after_gc_delta=8398808 released_after_gc_delta=832 elapsed_ms=12
+    prompt_memory_retention_test.go:71: heap round=3 scenario=image_async_handoff references=5 old=false allocated=42002496 sampled_peak_delta=33613696 held_after_gc_delta=2080 released_after_gc_delta=16 elapsed_ms=16
+    prompt_memory_retention_test.go:71: heap round=3 scenario=image_async_handoff references=8 old=true allocated=50386704 sampled_peak_delta=41997904 held_after_gc_delta=8398632 released_after_gc_delta=16 elapsed_ms=12
+    prompt_memory_retention_test.go:71: heap round=3 scenario=image_async_handoff references=8 old=false allocated=42003136 sampled_peak_delta=33614336 held_after_gc_delta=2720 released_after_gc_delta=16 elapsed_ms=17
+--- PASS: TestPromptAuditHeapRetention (24.82s)
+=== RUN   TestPromptDecodedTextOwnershipHeap
+    prompt_memory_retention_test.go:193: ownership round=1 owned=false retained=1072
+    prompt_memory_retention_test.go:193: ownership round=1 owned=true retained=880
+    prompt_memory_retention_test.go:193: ownership round=2 owned=false retained=880
+    prompt_memory_retention_test.go:193: ownership round=2 owned=true retained=896
+    prompt_memory_retention_test.go:193: ownership round=3 owned=false retained=880
+    prompt_memory_retention_test.go:193: ownership round=3 owned=true retained=880
+--- PASS: TestPromptDecodedTextOwnershipHeap (0.07s)
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/securityaudit	24.962s

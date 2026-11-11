@@ -129,7 +129,11 @@ func (s *PromptService) CheckKeyword(ctx context.Context, req Request) (*PromptD
 		clock = realClock{}
 	}
 	started := clock.Now()
-	snapshot, err := ExtractPromptSnapshot(req)
+	req = preparePromptRequest(req)
+	err := req.prepared.prepare(req)
+	if err == nil && !req.prepared.hasText() {
+		err = ErrNoPromptText
+	}
 	if errors.Is(err, ErrNoPromptText) {
 		return &PromptDecision{Kind: DecisionAllow, AllowNextStage: true}, nil
 	}
@@ -139,10 +143,16 @@ func (s *PromptService) CheckKeyword(ctx context.Context, req Request) (*PromptD
 		}
 		return nil, &GuardError{Code: ErrorCodeInvalidResponse, Cause: err}
 	}
-	keyword, content, matched := cfg.MatchBlockedKeyword(snapshot.ScanText)
-	if !matched {
-		return s.checkCombinations(ctx, req, cfg, snapshot, started)
+	var keyword, content string
+	var matched bool
+	if cfg.KeywordBlockingActive() {
+		scanText, _ := req.prepared.scanText(req)
+		keyword, content, matched = cfg.MatchBlockedKeyword(scanText)
 	}
+	if !matched {
+		return s.checkCombinations(ctx, req, cfg, started)
+	}
+	snapshot, _ := req.prepared.snapshot(req, false)
 
 	digest := sha256.Sum256([]byte(promptKeywordEvidenceText(keyword)))
 	keywordHash := hex.EncodeToString(digest[:])
@@ -180,7 +190,7 @@ func (s *PromptService) CheckKeyword(ctx context.Context, req Request) (*PromptD
 	}, nil
 }
 
-func (s *PromptService) checkCombinations(ctx context.Context, req Request, cfg ActiveConfig, snapshot PromptSnapshot, started time.Time) (*PromptDecision, error) {
+func (s *PromptService) checkCombinations(ctx context.Context, req Request, cfg ActiveConfig, started time.Time) (*PromptDecision, error) {
 	match, err := cfg.MatchCombination(req)
 	clock := s.clock
 	if clock == nil {
@@ -196,6 +206,7 @@ func (s *PromptService) checkCombinations(ctx context.Context, req Request, cfg 
 	if match == nil {
 		return &PromptDecision{Kind: DecisionAllow, AllowNextStage: true}, nil
 	}
+	snapshot, _ := req.prepared.snapshot(req, false)
 	rules, _ := json.Marshal([]string{match.Topic.Rule, match.Intent.Rule})
 	digest := sha256.Sum256(rules)
 	ruleHash := hex.EncodeToString(digest[:])
@@ -237,6 +248,12 @@ func (s *PromptService) Enqueue(_ context.Context, req Request) error {
 	if s == nil || s.enqueuer == nil || s.EffectiveMode() != ModeAsync {
 		return nil
 	}
+	// Do not parse out-of-scope bodies on the handler. Reuse the enqueuer's
+	// existing skip/drop accounting, without waiting for a background slot.
+	cfg, ok := s.config.Active()
+	if !ok || cfg.EffectiveMode() != ModeAsync || !cfg.IncludesGroup(req.GroupID) || len(cfg.EnabledEndpoints()) == 0 {
+		return s.enqueuer.enqueueWithConfig(context.Background(), req, cfg, ok)
+	}
 	select {
 	case s.enqueueSlots <- struct{}{}:
 	default:
@@ -253,7 +270,13 @@ func (s *PromptService) Enqueue(_ context.Context, req Request) error {
 		<-s.enqueueSlots
 		return errors.New("prompt audit service not started")
 	}
-	requestCopy := req.Clone()
+	// Decode while the caller still owns Body, then hand off only extracted text
+	// and scalar identity. The goroutine must not keep image payloads or reusable
+	// ingress buffers alive. A saved parse error is handled by Enqueuer as before.
+	requestCopy := preparePromptRequest(req)
+	_ = requestCopy.prepared.prepare(requestCopy)
+	requestCopy.Body = nil
+	requestCopy.GroupID = cloneInt64Ptr(req.GroupID)
 	s.enqueueWG.Add(1)
 	go func() {
 		defer s.enqueueWG.Done()

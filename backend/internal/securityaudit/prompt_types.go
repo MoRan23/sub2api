@@ -84,10 +84,12 @@ type Request struct {
 	Model      string
 	Body       []byte
 	Stage      string
+	prepared   *preparedPromptInput
 }
 
 func (r Request) Clone() Request {
 	r.Body = append([]byte(nil), r.Body...)
+	r.prepared = nil
 	if r.GroupID != nil {
 		id := *r.GroupID
 		r.GroupID = &id

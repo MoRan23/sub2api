@@ -3,7 +3,6 @@ package securityaudit
 import (
 	"crypto/sha256"
 	"encoding/hex"
-	"encoding/json"
 	"errors"
 	"regexp"
 	"sort"
@@ -41,19 +40,18 @@ func ExtractBlockingPromptSnapshot(req Request, latestTurnOnly bool) (PromptSnap
 }
 
 func extractPromptSnapshot(req Request, latestTurnOnly bool) (PromptSnapshot, error) {
-	var document any
-	if err := json.Unmarshal(req.Body, &document); err != nil {
-		return PromptSnapshot{}, errors.New("prompt audit request JSON is invalid")
+	req = preparePromptRequest(req)
+	return req.prepared.snapshot(req, latestTurnOnly)
+}
+
+func snapshotFromPromptSegments(req Request, segments []string, scanText string) PromptSnapshot {
+	metadataText := strings.Join(segments, "\n\n")
+	if scanText == "" {
+		scanText = metadataText
+		if len(segments) > 1 {
+			scanText = segments[0] + promptAuditPrioritySeparator + strings.Join(segments[1:], "\n\n")
+		}
 	}
-	extracted := extractProtocolSegments(req.Protocol, document)
-	segments := normalizeSegmentsLatestUserFirst(extracted)
-	if latestTurnOnly {
-		segments = blockingSegmentsLatestUserAndPreviousOutput(extracted)
-	}
-	if len(segments) == 0 {
-		return PromptSnapshot{}, ErrNoPromptText
-	}
-	scanText, metadataText := buildPrioritizedScanText(segments)
 	digest := sha256.Sum256([]byte(metadataText))
 	stage := strings.TrimSpace(req.Stage)
 	if stage == "" {
@@ -68,7 +66,7 @@ func extractPromptSnapshot(req Request, latestTurnOnly bool) (PromptSnapshot, er
 		FullPrompt:   BuildFullPrompt(metadataText, DefaultFullPromptMaxRunes),
 		PromptLength: utf8.RuneCountInString(metadataText), MessageCount: len(segments), Stage: stage,
 		ScanText: scanText,
-	}, nil
+	}
 }
 
 // DefaultPromptPreviewMaxRunes caps how much sanitized prompt text may be
@@ -636,17 +634,32 @@ func systemPromptSegments(texts []string) []promptSegment {
 }
 
 func RedactPreview(value string, maxRunes int) string {
-	value = bearerPattern.ReplaceAllString(value, "Bearer ***")
-	value = apiKeyPattern.ReplaceAllStringFunc(value, func(match string) string {
-		if index := strings.IndexAny(match, ":= \t"); index >= 0 {
-			return match[:index+1] + "***"
-		}
-		return "***"
-	})
-	value = canaryPattern.ReplaceAllString(value, "${1}***")
-	value = emailPattern.ReplaceAllString(value, "***@***")
-	value = phonePattern.ReplaceAllString(value, "***PHONE***")
+	value = replacePreviewMatches(bearerPattern, value, "Bearer ***")
+	if first := apiKeyPattern.FindStringIndex(value); first != nil {
+		value = value[:first[0]] + apiKeyPattern.ReplaceAllStringFunc(value[first[0]:], func(match string) string {
+			if index := strings.IndexAny(match, ":= \t"); index >= 0 {
+				return match[:index+1] + "***"
+			}
+			return "***"
+		})
+	}
+	value = replacePreviewMatches(canaryPattern, value, "${1}***")
+	value = replacePreviewMatches(emailPattern, value, "***@***")
+	value = replacePreviewMatches(phonePattern, value, "***PHONE***")
 	return TrimRunes(value, maxRunes)
+}
+
+func replacePreviewMatches(pattern *regexp.Regexp, value, replacement string) string {
+	// regexp.ReplaceAllString allocates a whole copy even when it finds nothing.
+	// Keep the original matching/replacement semantics for actual secrets.
+	first := pattern.FindStringIndex(value)
+	if first == nil {
+		return value
+	}
+	// These fixed redaction expressions have no left-context assertion beyond
+	// the word boundary already established by the first match. Start there so a
+	// secret near the end does not cause a second full-text scan.
+	return value[:first[0]] + pattern.ReplaceAllString(value[first[0]:], replacement)
 }
 
 // BuildPromptPreview stores only a short, non-recoverable head of sanitized
@@ -713,11 +726,19 @@ func TrimRunes(value string, limit int) string {
 	if limit <= 0 {
 		return ""
 	}
-	runes := []rune(value)
-	if len(runes) <= limit {
-		return value
+	count := 0
+	for offset := range value {
+		if count == limit {
+			prefix := value[:offset]
+			// []rune historically repaired invalid UTF-8 only when truncating.
+			if !utf8.ValidString(prefix) {
+				prefix = string([]rune(prefix))
+			}
+			return prefix + "…"
+		}
+		count++
 	}
-	return string(runes[:limit]) + "…"
+	return value
 }
 
 func stringValue(value any) string {

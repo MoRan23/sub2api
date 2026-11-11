@@ -34,8 +34,11 @@ func (c *Coordinator) Check(ctx context.Context, req Request) Decision {
 	}
 	mode := ModeOff
 	if c.prompt != nil {
+		if preparer, ok := c.prompt.(interface{ prepareRequest(Request) Request }); ok {
+			req = preparer.prepareRequest(req)
+		}
 		mode = c.prompt.EffectiveMode()
-		keyword, err := c.prompt.CheckKeyword(ctx, req.Clone())
+		keyword, err := c.prompt.CheckKeyword(ctx, promptEngineRequest(req))
 		if err != nil {
 			var guardErr *GuardError
 			if errors.As(err, &guardErr) && guardErr.Code == ErrorCodeInvalidResponse {
@@ -54,7 +57,7 @@ func (c *Coordinator) Check(ctx context.Context, req Request) Decision {
 	case ModeAsync:
 		// Enqueue is deliberately best-effort. The implementation owns a bounded
 		// context and copies request memory before it can outlive the Handler.
-		_ = c.prompt.Enqueue(ctx, req.Clone())
+		_ = c.prompt.Enqueue(ctx, promptEngineRequest(req))
 		legacy, _ := c.checkLegacy(ctx, req)
 		return prioritize(legacy, nil)
 	case ModeBlocking:
@@ -80,7 +83,7 @@ func (c *Coordinator) checkBlocking(ctx context.Context, req Request) Decision {
 			prompt = unavailablePromptDecision(ErrorCodeUnavailable)
 			return
 		}
-		result, err := c.prompt.Evaluate(ctx, req.Clone())
+		result, err := c.prompt.Evaluate(ctx, promptEngineRequest(req))
 		if err != nil {
 			var guardErr *GuardError
 			if errors.As(err, &guardErr) && guardErr.Code == ErrorCodeInvalidResponse {

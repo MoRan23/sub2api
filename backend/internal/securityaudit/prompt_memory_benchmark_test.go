@@ -6,7 +6,89 @@ import (
 	"fmt"
 	"strings"
 	"testing"
+	"time"
 )
+
+func originalRedactPreview(value string, maxRunes int) string {
+	value = bearerPattern.ReplaceAllString(value, "Bearer ***")
+	value = apiKeyPattern.ReplaceAllStringFunc(value, func(match string) string {
+		if index := strings.IndexAny(match, ":= \t"); index >= 0 {
+			return match[:index+1] + "***"
+		}
+		return "***"
+	})
+	value = canaryPattern.ReplaceAllString(value, "${1}***")
+	value = emailPattern.ReplaceAllString(value, "***@***")
+	value = phonePattern.ReplaceAllString(value, "***PHONE***")
+	return originalTrimRunes(value, maxRunes)
+}
+
+// Alternate order inside the same sample to distinguish host scheduling noise
+// from redaction CPU changes. Both implementations produce identical summaries.
+func BenchmarkPromptRedactionPaired(b *testing.B) {
+	input := strings.Repeat("ordinary text ", (8<<20)/14)
+	var oldTime, newTime time.Duration
+	for b.Loop() {
+		started := time.Now()
+		originalRedactPreview(input, 96)
+		oldTime += time.Since(started)
+		started = time.Now()
+		RedactPreview(input, 96)
+		newTime += time.Since(started)
+		started = time.Now()
+		RedactPreview(input, 96)
+		newTime += time.Since(started)
+		started = time.Now()
+		originalRedactPreview(input, 96)
+		oldTime += time.Since(started)
+	}
+	b.ReportMetric(float64(oldTime.Nanoseconds())/float64(2*b.N), "old-ns/call")
+	b.ReportMetric(float64(newTime.Nanoseconds())/float64(2*b.N), "new-ns/call")
+}
+
+func TestPromptRedactionPreservesWholeInputSemantics(t *testing.T) {
+	for _, input := range []string{
+		"", "short secret", strings.Repeat("ordinary text ", 100),
+		"Bearer " + strings.Repeat("s", 300) + " tail",
+		strings.Repeat("x", 94) + " api_key=" + strings.Repeat("s", 200),
+		"test@example.invalid +1 123 456 7890 TEST_CANARY_secret api_key=exampleSECRET123",
+		"\xffBearer exampleTOKEN123\xfe 中文😀 test@example.invalid",
+		strings.Repeat("Bearer exampleTOKEN123 ", 100),
+	} {
+		for _, limit := range []int{-1, 0, 1, 31, 32, 96, 65536} {
+			got, want := RedactPreview(input, limit), originalRedactPreview(input, limit)
+			if got != want {
+				t.Fatalf("limit=%d: got %q, want %q", limit, got, want)
+			}
+		}
+	}
+}
+
+func BenchmarkPromptRedactionMemory(b *testing.B) {
+	for _, size := range []int{64 << 10, 1 << 20, 8 << 20} {
+		for _, secret := range []string{"none", "head", "tail"} {
+			input := strings.Repeat("ordinary text ", size/14)
+			if secret == "head" {
+				input = "Bearer exampleTOKEN123 " + input
+			}
+			if secret == "tail" {
+				input += " Bearer exampleTOKEN123"
+			}
+			for _, old := range []bool{true, false} {
+				b.Run(fmt.Sprintf("%d/%s/old=%t", size, secret, old), func(b *testing.B) {
+					b.ReportAllocs()
+					for b.Loop() {
+						if old {
+							originalRedactPreview(input, 96)
+						} else {
+							RedactPreview(input, 96)
+						}
+					}
+				})
+			}
+		}
+	}
+}
 
 // Run identically before and after changes. Fixtures contain synthetic text only;
 // image payloads verify that audit work does not retain non-text request data.

@@ -28,12 +28,16 @@ func preparePromptCombination(req Request) (*preparedPromptCombination, error) {
 	if err := json.Unmarshal(req.Body, &document); err != nil {
 		return nil, errors.New("prompt audit request JSON is invalid")
 	}
+	return preparePromptCombinationDocument(req.Protocol, document), nil
+}
+
+func preparePromptCombinationDocument(protocol string, document any) *preparedPromptCombination {
 	prepared := &preparedPromptCombination{}
 	root, _ := document.(map[string]any)
-	protocol := strings.ToLower(strings.TrimSpace(req.Protocol))
+	protocol = strings.ToLower(strings.TrimSpace(protocol))
 	if protocol == "gemini" || protocol == "gemini_generate_content" {
 		if root == nil {
-			return prepared, nil
+			return prepared
 		}
 		offset := prepared.appendGeminiUnit(root, 0)
 		if requests, ok := root["requests"].([]any); ok {
@@ -43,13 +47,13 @@ func preparePromptCombination(req Request) (*preparedPromptCombination, error) {
 				}
 			}
 		}
-		return prepared, nil
+		return prepared
 	}
-	latest := latestCBRNUserTexts(req.Protocol, root)
+	latest := latestCBRNUserTexts(protocol, root)
 	if len(latest) > 0 {
-		prepared.appendSegments(extractProtocolSegments(req.Protocol, document), latest, 0, nil)
+		prepared.appendSegments(extractProtocolSegments(protocol, document), latest, 0, nil)
 	}
-	return prepared, nil
+	return prepared
 }
 
 func (prepared *preparedPromptCombination) appendSegments(extracted []promptSegment, latest []string, offset int, originalIndexes []int) {

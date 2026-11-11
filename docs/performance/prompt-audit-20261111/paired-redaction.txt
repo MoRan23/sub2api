@@ -1,0 +1,9 @@
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/securityaudit
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkPromptRedactionPaired-16    	       1	3441155300 ns/op	 837020300 new-ns/call	 883661100 old-ns/call	234925272 B/op	     133 allocs/op
+BenchmarkPromptRedactionPaired-16    	       1	3799218100 ns/op	 955551550 new-ns/call	 944100250 old-ns/call	234920928 B/op	     130 allocs/op
+BenchmarkPromptRedactionPaired-16    	       1	3605678500 ns/op	 861813700 new-ns/call	 940877950 old-ns/call	234919984 B/op	     127 allocs/op
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/securityaudit	16.614s

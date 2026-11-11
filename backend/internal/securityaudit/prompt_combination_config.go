@@ -259,7 +259,14 @@ func (cfg ActiveConfig) MatchCombination(req Request) (*CombinationMatch, error)
 		}
 		if prepared == nil {
 			var err error
-			prepared, err = preparePromptCombination(req)
+			if req.prepared != nil {
+				err = req.prepared.prepare(req)
+				req.prepared.combinationMu.Lock()
+				defer req.prepared.combinationMu.Unlock()
+				prepared = req.prepared.combination
+			} else {
+				prepared, err = preparePromptCombination(req)
+			}
 			if err != nil {
 				return nil, err
 			}
