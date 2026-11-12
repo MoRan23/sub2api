@@ -28,6 +28,14 @@ func TestAttributionFirstVerdictInitializesWhitelist(t *testing.T) {
 					attributionSetAutomatic(t, a.ID, true)
 				}
 				first := attributionRun(t, r, a.ID, verdict)
+				if kind == "codex_engine" {
+					require.Equal(t, verdict, first.Status)
+					require.Equal(t, "record_only", first.Result.Action)
+					require.Equal(t, "engine_models_managed_by_upstream", first.Reason)
+					require.Zero(t, first.Result.PassStreak)
+					require.Equal(t, a.Credentials["model_mapping"], attributionMapping(t, ar, a.ID))
+					return
+				}
 				want := map[string]any{"alias": "custom"}
 				if verdict == "passed" {
 					require.Equal(t, "high", first.Result.Action)

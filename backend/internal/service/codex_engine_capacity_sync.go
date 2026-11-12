@@ -28,11 +28,12 @@ const (
 )
 
 // CodexEngineCapacityRepository keeps the sync write separate from admin edits.
-// Implementations recheck the endpoint, credential and scheduling revision under
-// the account row lock before applying a response.
+// Implementations recheck source identity and independent observations under the
+// account row lock; capacity additionally checks the scheduling revision.
 type CodexEngineCapacityRepository interface {
 	ListCodexEngineCapacityCandidates(context.Context, int64, int) ([]Account, error)
 	ApplyCodexEngineCapacity(context.Context, *Account, int) (bool, error)
+	ApplyCodexEngineModels(context.Context, *Account, []string) (bool, error)
 }
 
 // CodexEngineCapacityIdentity is a non-secret binding for persisted pause
@@ -57,8 +58,8 @@ func CodexEngineCapacityIdentityMatches(current, expected *Account) bool {
 		CodexEngineCapacityIdentity(current) == CodexEngineCapacityIdentity(expected)
 }
 
-// CodexEngineCapacitySyncService observes the Engine key's available group
-// limit. Busy request slots do not reduce this limit. Each account progresses
+// CodexEngineCapacitySyncService observes the Engine key's group capacity and
+// public model IDs. Busy slots do not reduce the capacity. Each account progresses
 // independently, including accounts paused by a previous zero-capacity result.
 type CodexEngineCapacitySyncService struct {
 	repo     CodexEngineCapacityRepository
@@ -133,7 +134,7 @@ func (s *CodexEngineCapacitySyncService) scan(ctx context.Context) {
 		cancel()
 		if err != nil {
 			if ctx.Err() == nil {
-				slog.Warn("Codex Engine capacity scan failed")
+				slog.Warn("Codex Engine sync scan failed")
 			}
 			return
 		}
@@ -181,9 +182,9 @@ func (s *CodexEngineCapacitySyncService) scan(ctx context.Context) {
 				if ctx.Err() != nil {
 					return
 				}
-				if err := s.syncAccount(ctx, &account); err != nil && ctx.Err() == nil {
+				if err := s.syncAccountObservations(ctx, &account); err != nil && ctx.Err() == nil {
 					// Do not log URLs, API keys, proxy credentials or upstream bodies.
-					slog.Warn("Codex Engine capacity sync failed; retained last capacity", "account_id", account.ID)
+					slog.Warn("Codex Engine sync partially failed; retained last successful values", "account_id", account.ID)
 				}
 			}()
 		}

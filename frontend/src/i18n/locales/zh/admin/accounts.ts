@@ -494,6 +494,8 @@ export default {
         engineCapacityAutoResume: '每 60 秒同步，并发恢复后自动解除容量暂停',
         engineCapacityNoAutoResume: '最近同步上游并发为 0；此暂停不由容量同步恢复',
         engineCapacityAwaitingSync: '最近同步上游并发为 0，等待下次容量同步',
+        engineModelsSync: '模型名单每分钟从 Engine 同步',
+        engineModelsEmpty: '上游暂无可用模型',
         engineCapacityDetail: 'Engine 最近成功同步的可用并发为 0。列表保留上次的正数并发配置，以免将 0 当作无限并发；其他账号限制仍按原规则生效。',
         limited: '限流',
         rateLimited: '限流中',
@@ -857,6 +859,7 @@ export default {
         accessMode: '接入模式',
         accessModeGeneric: '通用',
         accessModeHint: 'Codex-Engine 需填写平台 API 地址和 Engine Key。按原协议转发，普通透传与协议兼容设置不生效；模型白名单、映射和分组权限仍生效。',
+        engineModelsSyncHint: '模型名单每分钟从 Engine 同步并整体替换；本地额外名单与别名会在下次同步时移除。分组权限仍生效。',
         engineBaseUrlRequired: '请填写 Codex-Engine 平台 API 地址',
         oauthPassthrough: '自动透传（仅替换认证）',
         oauthPassthroughDesc:

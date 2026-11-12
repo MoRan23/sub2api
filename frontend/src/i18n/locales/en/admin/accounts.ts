@@ -290,6 +290,8 @@ export default {
         engineCapacityAutoResume: 'Syncs every 60 seconds; the capacity pause clears when capacity returns',
         engineCapacityNoAutoResume: 'Last synced upstream capacity is 0; capacity sync will not clear this pause',
         engineCapacityAwaitingSync: 'Last synced upstream capacity is 0; awaiting the next capacity sync',
+        engineModelsSync: 'Models sync from Engine every minute',
+        engineModelsEmpty: 'No models currently available upstream',
         engineCapacityDetail: 'The last successful Engine sync reported 0 available concurrency. The list retains the previous positive limit to avoid treating 0 as unlimited. Other account restrictions still apply.',
         limited: 'Limited',
         rateLimited: 'Rate Limited',
@@ -733,6 +735,7 @@ export default {
         accessMode: 'Access mode',
         accessModeGeneric: 'Generic',
         accessModeHint: 'Codex-Engine requires its platform API URL and Engine Key. It forwards the original protocol, ignoring generic passthrough and compatibility settings. Model restrictions, mappings and group permissions still apply.',
+        engineModelsSyncHint: 'The model list is fully replaced from Engine every minute. Local additions and aliases are removed on the next sync. Group permissions still apply.',
         engineBaseUrlRequired: 'Enter the Codex-Engine platform API URL',
         oauthPassthrough: 'Auto passthrough (auth only)',
         oauthPassthroughDesc:

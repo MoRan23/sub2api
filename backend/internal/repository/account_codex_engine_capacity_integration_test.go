@@ -252,13 +252,14 @@ func TestCodexEngineCapacityIntegrationMappingEditRetainsOwnership(t *testing.T)
 			edit, err := repo.GetByID(t.Context(), account.ID)
 			require.NoError(t, err)
 			edit.Credentials["model_mapping"] = map[string]any{"client-model": "upstream-model"}
+			adminCtx := service.WithAccountModelMappingWriteIntent(t.Context(), []int64{account.ID})
 			switch path {
 			case "full":
-				err = repo.Update(t.Context(), edit)
+				err = repo.Update(adminCtx, edit)
 			case "credentials":
-				err = repo.UpdateCredentials(t.Context(), account.ID, edit.Credentials)
+				err = repo.UpdateCredentials(adminCtx, account.ID, edit.Credentials)
 			case "bulk":
-				_, err = repo.BulkUpdate(t.Context(), []int64{account.ID}, service.AccountBulkUpdate{Credentials: edit.Credentials})
+				_, err = repo.BulkUpdate(adminCtx, []int64{account.ID}, service.AccountBulkUpdate{Credentials: edit.Credentials})
 			}
 			require.NoError(t, err)
 			changed, err := repo.ApplyCodexEngineCapacity(t.Context(), stale, 30)

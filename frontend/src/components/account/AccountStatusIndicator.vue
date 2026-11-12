@@ -41,6 +41,16 @@
       >
         {{ engineCapacityHint }}
       </span>
+      <span
+        v-if="account.platform === 'openai' && account.type === 'apikey' && account.extra?.openai_api_key_mode === 'codex_engine'"
+        data-testid="engine-models-hint"
+        class="max-w-[220px] text-center text-[11px] leading-4 text-gray-500 dark:text-gray-400"
+        :title="t('admin.accounts.openai.engineModelsSyncHint')"
+      >
+        {{ t(account.codex_engine_models?.synced && account.codex_engine_models.model_count === 0
+          ? 'admin.accounts.status.engineModelsEmpty'
+          : 'admin.accounts.status.engineModelsSync') }}
+      </span>
     </div>
 
     <!-- Error Info Indicator -->

@@ -348,6 +348,7 @@ func TestApplyCodexEngineCapacityRechecksProxyBeforeAccountLock(t *testing.T) {
 				WillReturnRows(sqlmock.NewRows([]string{"protocol", "host", "port", "username", "password", "status"}).
 					AddRow(currentProxy.Protocol, currentProxy.Host, currentProxy.Port, currentProxy.Username, currentProxy.Password, currentProxy.Status))
 			if test.mutate == nil {
+				m.ExpectQuery(`SELECT updated_at FROM proxies`).WithArgs(proxyID).WillReturnRows(sqlmock.NewRows([]string{"updated_at"}).AddRow(a.Proxy.UpdatedAt))
 				expectCapacityLock(t, m, a)
 				expectCapacityWrite(t, m, a, 20, true, false)
 				m.ExpectExec(`INSERT INTO scheduler_outbox`).WillReturnResult(sqlmock.NewResult(1, 1))
@@ -451,6 +452,7 @@ func TestApplyCodexEngineCapacityFreshIdentityRetainsPauseOwnership(t *testing.T
 					m.ExpectQuery(`SELECT protocol, host, port, .* FROM proxies .* FOR SHARE`).WithArgs(proxy.ID).
 						WillReturnRows(sqlmock.NewRows([]string{"protocol", "host", "port", "username", "password", "status"}).
 							AddRow(proxy.Protocol, proxy.Host, proxy.Port, proxy.Username, proxy.Password, proxy.Status))
+					m.ExpectQuery(`SELECT updated_at FROM proxies`).WithArgs(proxy.ID).WillReturnRows(sqlmock.NewRows([]string{"updated_at"}).AddRow(proxy.UpdatedAt))
 				}
 				expectCapacityLock(t, m, a)
 				schedule := observation.limit > 0 && !observation.manualStop

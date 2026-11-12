@@ -21,6 +21,7 @@ type capacitySyncTestRepo struct {
 	mu       sync.Mutex
 	accounts []Account
 	limits   []int
+	models   [][]string
 	list     func(context.Context, int64, int) ([]Account, error)
 }
 
@@ -43,6 +44,13 @@ func (r *capacitySyncTestRepo) ApplyCodexEngineCapacity(_ context.Context, _ *Ac
 	r.mu.Lock()
 	defer r.mu.Unlock()
 	r.limits = append(r.limits, limit)
+	return true, nil
+}
+
+func (r *capacitySyncTestRepo) ApplyCodexEngineModels(_ context.Context, _ *Account, models []string) (bool, error) {
+	r.mu.Lock()
+	defer r.mu.Unlock()
+	r.models = append(r.models, models)
 	return true, nil
 }
 
@@ -241,6 +249,9 @@ func TestCodexEngineCapacitySyncIndependentAccountsAndStop(t *testing.T) {
 			return nil, req.Context().Err()
 		}
 		secondCalls.Add(1)
+		if strings.HasSuffix(req.URL.Path, "/models") {
+			return capacitySyncTestResponse(200, `{"object":"list","data":[{"id":"gpt-test"}]}`), nil
+		}
 		return capacitySyncTestResponse(200, capacitySyncTestDocument(30)), nil
 	}}
 	svc := NewCodexEngineCapacitySyncService(repo, upstream, nil)
@@ -254,7 +265,7 @@ func TestCodexEngineCapacitySyncIndependentAccountsAndStop(t *testing.T) {
 		t.Fatal("paused Engine account was not scanned at startup")
 	}
 	require.Eventually(t, func() bool { return secondCalls.Load() >= 3 }, time.Second, time.Millisecond)
-	require.EqualValues(t, 1, firstCalls.Load(), "slow account has only one request in flight")
+	require.EqualValues(t, 2, firstCalls.Load(), "slow account has only one pair of requests in flight")
 	svc.Stop()
 	count := secondCalls.Load()
 	svc.Stop()
@@ -302,14 +313,14 @@ func TestCodexEngineCapacitySyncBoundsRequestsAndCancelsQueue(t *testing.T) {
 	svc := NewCodexEngineCapacitySyncService(repo, upstream, nil)
 	svc.timeout = time.Minute
 	svc.Start()
-	for range codexEngineCapacityParallelism {
+	for range codexEngineCapacityParallelism * 2 {
 		select {
 		case <-started:
 		case <-time.After(time.Second):
 			t.Fatal("worker did not start")
 		}
 	}
-	require.EqualValues(t, codexEngineCapacityParallelism, active.Load())
+	require.EqualValues(t, codexEngineCapacityParallelism*2, active.Load())
 	svc.mu.Lock()
 	require.Len(t, svc.inFlight, codexEngineCapacityParallelism, "pending goroutines are bounded too")
 	svc.mu.Unlock()

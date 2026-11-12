@@ -39,7 +39,7 @@ func supplementUnmappedOpenAIModels(accounts []Account, models []string) []strin
 	}
 	for i := range accounts {
 		account := &accounts[i]
-		if account.Platform == PlatformOpenAI && (account.IsOpenAIPassthroughEnabled() || len(account.GetModelMapping()) == 0) {
+		if account.Platform == PlatformOpenAI && !hasEmptyEngineModelCatalog(account) && (account.IsOpenAIPassthroughEnabled() || len(account.GetModelMapping()) == 0) {
 			return dedupeAndSortModelIDs(slices.Concat(models, openai.DefaultModelIDs()))
 		}
 	}
@@ -243,4 +243,11 @@ func allowlistSourcePatternAllowsModel(patterns []string, model string) bool {
 		}
 	}
 	return false
+}
+
+// hasEmptyEngineModelCatalog distinguishes an authoritative empty upstream list
+// from an ordinary API-key account without a configured whitelist.
+func hasEmptyEngineModelCatalog(account *Account) bool {
+	count, known := codexEngineKnownModelCount(account)
+	return known && count == 0
 }

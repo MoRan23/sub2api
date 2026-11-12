@@ -260,6 +260,14 @@ func TestAttributionAPIKeyConfigurationFence(t *testing.T) {
 			require.Equal(t, "authorization_changed", stale.Reason)
 			require.Equal(t, a.Credentials["model_mapping"], attributionMapping(t, ar, a.ID))
 			fresh := attributionRun(t, r, a.ID, "passed")
+			if change == `extra=jsonb_set(extra,'{openai_api_key_mode}','"codex_engine"')` {
+				require.Equal(t, "record_only", fresh.Result.Action)
+				require.Equal(t, "engine_models_managed_by_upstream", fresh.Reason)
+				require.Zero(t, fresh.Result.PassStreak)
+				require.NotEqual(t, j.Snapshot.Authorization, fresh.Snapshot.Authorization)
+				require.Equal(t, a.Credentials["model_mapping"], attributionMapping(t, ar, a.ID))
+				return
+			}
 			require.Equal(t, "high", fresh.Result.Action)
 			require.Equal(t, 1, fresh.Result.PassStreak)
 			require.NotEqual(t, j.Snapshot.Authorization, fresh.Snapshot.Authorization)

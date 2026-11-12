@@ -152,6 +152,8 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 		delete(account.Extra, service.OpenAIDaybreakRedEnabledKey)
 	}
 	delete(account.Extra, service.CodexEngineCapacitySyncExtraKey)
+	delete(account.Extra, service.CodexEngineModelsSyncExtraKey)
+	delete(account.Extra, codexEngineSourceRevisionKey)
 	builder := client.Account.Create().
 		SetName(account.Name).
 		SetNillableNotes(account.Notes).
@@ -594,6 +596,8 @@ func (r *accountRepository) updateLockedAccount(
 	if err := preserveCodexEngineCapacityLocked(ctx, client, current, account); err != nil {
 		return nil, err
 	}
+	preserveCodexEngineModelsLocked(ctx, current, account)
+	preserveCodexEngineSourceRevision(current, account)
 	if err := validateDaybreakPatchLocked(ctx, client, current, account, service.AccountConfigurationIntentFromContext(ctx, account.ID).Extra); err != nil {
 		return nil, err
 	}
@@ -966,7 +970,13 @@ func decodeAccountExtraJSON(raw []byte) (any, bool, error) {
 
 func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, credentials map[string]any) error {
 	guardedCredentials := func(expression string) string {
-		return guardedAccountCredentialsExpression(expression, service.OpenAIOAuthCredentialModeChangeAllowed(ctx, id))
+		return guardedCodexEngineModelsCredentialsExpression(guardedAccountCredentialsExpression(expression, service.OpenAIOAuthCredentialModeChangeAllowed(ctx, id)), service.AccountConfigurationIntentFromContext(ctx, id).ModelMapping)
+	}
+	guardedModelExtra := func(expression string) string {
+		if service.AccountConfigurationIntentFromContext(ctx, id).ModelMapping {
+			return guardedCodexEngineSourceExpression(codexEngineModelsEditedExtraExpression(expression, guardedCredentials("$1::jsonb")), guardedCredentials("$1::jsonb"), "proxy_id")
+		}
+		return guardedCodexEngineSourceExpression(expression, guardedCredentials("$1::jsonb"), "proxy_id")
 	}
 	payload, err := json.Marshal(normalizeJSONMap(credentials))
 	if err != nil {
@@ -998,7 +1008,7 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 		UPDATE accounts
 		SET
 			credentials = `+guardedCredentials("$1::jsonb")+`,
-			extra = CASE
+			extra = `+guardedModelExtra(`CASE
 				-- 正确性依赖（非防御）：OpenCode 分支必须先于 Ollama 分支求值。两分支
 				-- 的 WHEN 并不互斥：Ollama 分支的守卫是宽谓词——NOT(ollamaMatch(old)
 				-- AND ollamaMatch(new)) 在旧行不匹配 ollama.com 基址时恒真，且两侧
@@ -1060,7 +1070,7 @@ func (r *accountRepository) UpdateCredentials(ctx context.Context, id int64, cre
 				AND credentials IS DISTINCT FROM (`+guardedCredentials("$1::jsonb")+`)
 				THEN COALESCE(extra, '{}'::jsonb) - 'upstream_billing_probe'
 				ELSE extra
-		END,
+		END`)+`,
 			updated_at = NOW()
 		FROM previous_profile
 		WHERE id = previous_profile.profile_account_id AND deleted_at IS NULL
@@ -3499,7 +3509,7 @@ func ollamaCloudUsageSnapshotClearRequested(extra map[string]any) bool {
 
 func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates service.AccountBulkUpdate) (int64, error) {
 	guardedCredentials := func(expression string) string {
-		return guardedAccountCredentialsExpression(expression, service.OpenAIOAuthCredentialModeChangeAllowed(ctx, ids...))
+		return guardedCodexEngineModelsCredentialsExpression(guardedAccountCredentialsExpression(expression, service.OpenAIOAuthCredentialModeChangeAllowed(ctx, ids...)), codexEngineModelsExplicitIntent(ctx, ids))
 	}
 	if len(ids) == 0 {
 		return 0, nil
@@ -3708,7 +3718,17 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		if credentialPlaceholder != "" {
 			daybreakCredentials = guardedCredentials("COALESCE(credentials, '{}'::jsonb) || " + credentialPlaceholder + "::jsonb")
 		}
-		setClauses = append(setClauses, "extra = "+guardedAccountExtraExpression(extraExpression, daybreakCredentials))
+		if credentialPlaceholder != "" && codexEngineModelsExplicitIntent(ctx, ids) {
+			extraExpression = codexEngineModelsEditedExtraExpression(extraExpression, daybreakCredentials)
+		}
+		proxyExpression := "proxy_id"
+		if updates.ProxyID != nil {
+			proxyExpression = strconv.FormatInt(*updates.ProxyID, 10)
+			if *updates.ProxyID == 0 {
+				proxyExpression = "NULL::bigint"
+			}
+		}
+		setClauses = append(setClauses, "extra = "+guardedAccountExtraExpression(extraExpression, daybreakCredentials, proxyExpression))
 	}
 
 	if len(setClauses) == 0 {

@@ -11,8 +11,9 @@ import (
 // AccountConfigurationIntent is an immutable, request-local write intent. Only
 // typed admin entrypoints create it; a credentials/extra snapshot is not intent.
 type AccountConfigurationIntent struct {
-	Extra       map[string]any
-	Environment *string
+	Extra        map[string]any
+	Environment  *string
+	ModelMapping bool
 }
 
 type accountConfigurationIntentKey struct{}
@@ -21,8 +22,11 @@ type accountConfigurationIntentScope struct {
 	intent AccountConfigurationIntent
 }
 
-func withAccountConfigurationIntent(ctx context.Context, ids []int64, extra map[string]any, environment *string) context.Context {
+func withAccountConfigurationIntent(ctx context.Context, ids []int64, extra map[string]any, environment *string, credentials ...map[string]any) context.Context {
 	intent := AccountConfigurationIntent{Extra: make(map[string]any)}
+	if len(credentials) > 0 {
+		_, intent.ModelMapping = credentials[0]["model_mapping"]
+	}
 	for _, key := range []string{openAIInstallationPinEnabledKey, "enable_tls_fingerprint", "tls_fingerprint_profile_id", OpenAIDaybreakBlueEnabledKey, OpenAIDaybreakRedEnabledKey, OpenAIAPIKeyAutoAttributionEnabledExtraKey, OpenAIAttributionReplaceWhitelistEnabledExtraKey} {
 		if value, exists := extra[key]; exists {
 			intent.Extra[key] = value
@@ -165,4 +169,19 @@ func PreserveAccountConfiguration(current, target *Account, intent AccountConfig
 // so read-only gateway repositories need not implement admin writes.
 type AccountInstallationRegenerator interface {
 	RegenerateOpenAIInstallationID(context.Context, int64, string) (string, error)
+}
+
+// WithAccountModelMappingWriteIntent marks explicit administrator model writes.
+// Background credential refreshes must not use this request-scoped capability.
+func WithAccountModelMappingWriteIntent(ctx context.Context, ids []int64) context.Context {
+	scope, _ := ctx.Value(accountConfigurationIntentKey{}).(accountConfigurationIntentScope)
+	scope.ids = maps.Clone(scope.ids)
+	if scope.ids == nil {
+		scope.ids = make(map[int64]struct{}, len(ids))
+	}
+	scope.intent.ModelMapping = true
+	for _, id := range ids {
+		scope.ids[id] = struct{}{}
+	}
+	return context.WithValue(ctx, accountConfigurationIntentKey{}, scope)
 }

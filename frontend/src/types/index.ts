@@ -1344,6 +1344,10 @@ export interface Account {
   openai_oauth_os_profiles?: OpenAIOAuthOSProfiles
   candy_test?: import('@/api/admin/candyTests').CandyTestSummary | null
   model_attribution?: import('@/api/admin/modelAttribution').AttributionSummary | null
+  codex_engine_models?: {
+    synced: boolean
+    model_count: number
+  } | null
   codex_engine_capacity?: {
     limit: number
     scheduling_paused_by_capacity: boolean

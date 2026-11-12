@@ -57,6 +57,7 @@ export const attributionZh = {
   status: { queued: '启动中', running: '检测中', retry_wait: '等待重试', cancelled: '已取消', passed: '通过', mismatch: '不通过', abnormal: '异常', failed: '执行失败', skipped: '已跳过' },
   actions: { high: '已应用高级配置', low: '已应用低级配置', awaiting_confirmation: '已通过 1 次，等待再次通过；账号配置未修改', unchanged: '无需修改', stale: '结果已过期，未修改', stale_policy: '判定已保存；未更新账号配置或累计升级', actions_blocked: '判定已保存；目标分组不可应用，账号配置未修改', record_only: '仅记录判定；模型配置、分组和调度未修改，不累计升级／恢复次数', none: '未修改', unconfigured: '未配置高低级白名单，仅记录结果', schedule_paused: '已暂停调度，白名单未修改', schedule_resumed: '已连续通过两次，恢复由归因暂停的调度', schedule_already_paused: '调度原已关闭，保持原暂停来源', schedule_manual_pause: '已连续通过两次，保留管理员暂停', schedule_ineligible: '已连续通过两次，账号已停用或过期，保留暂停' },
   reasons: {
+    engine_models_managed_by_upstream: 'Engine 模型名单由上游同步管理；本轮仅记录判定，不修改白名单、映射或所属分组，也不累计升级次数',
     account_groups_changed: '检测期间账号所属分组或绑定优先级已被修改；本轮只保存判定，不覆盖该调整',
     target_groups_unavailable: '目标分组已删除或不可用；本轮只保存判定，不修改模型配置和所属分组',
     target_groups_incompatible: '目标分组与当前账号或运行模式不兼容；本轮只保存判定，不修改模型配置和所属分组',
@@ -135,6 +136,7 @@ export const attributionEn = {
   status: { queued: 'Starting', running: 'Running', retry_wait: 'Waiting to retry', cancelled: 'Cancelled', passed: 'Passed', mismatch: 'Mismatch', abnormal: 'Abnormal', failed: 'Failed', skipped: 'Skipped' },
   actions: { high: 'High-tier configuration applied', low: 'Low-tier configuration applied', awaiting_confirmation: 'Passed once; awaiting another pass. Account configuration unchanged', unchanged: 'No change needed', stale: 'Stale result, no changes', stale_policy: 'Verdict recorded without updating account configuration or promotion streak', actions_blocked: 'Verdict recorded; target groups cannot be applied, account configuration unchanged', record_only: 'Verdict recorded only; model configuration, groups and scheduling unchanged, with no promotion or recovery progress', none: 'Unchanged', unconfigured: 'Allowlists not configured; result recorded only', schedule_paused: 'Scheduling paused; allowlists unchanged', schedule_resumed: 'Two consecutive passes; attribution-paused scheduling resumed', schedule_already_paused: 'Scheduling was already disabled; original pause ownership retained', schedule_manual_pause: 'Two consecutive passes; administrator pause preserved', schedule_ineligible: 'Two consecutive passes; account inactive or expired, scheduling remains paused' },
   reasons: {
+    engine_models_managed_by_upstream: 'Engine manages the synced model list; verdict recorded without changing allowlists, mappings or groups, or accumulating promotion passes',
     account_groups_changed: 'Account groups or binding priorities changed during the test; verdict recorded without overwriting those changes',
     target_groups_unavailable: 'A target group was deleted or is unavailable; verdict recorded without changing model configuration or groups',
     target_groups_incompatible: 'Target groups are incompatible with the account or run mode; verdict recorded without changing model configuration or groups',

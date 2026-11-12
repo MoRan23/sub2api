@@ -224,6 +224,18 @@ func projectAccountModelsBody(body []byte, account *Account, group *Group, codex
 // projectAccountModelAliases retains the source entry's metadata, never changes
 // the shared response, and never synthesizes models absent from this account.
 func projectAccountModelAliases(body []byte, account *Account, group *Group, codex bool) ([]byte, error) {
+	if hasEmptyEngineModelCatalog(account) {
+		field := "data"
+		if codex {
+			field = "models"
+		}
+		envelope, _, err := modelCatalogEntries(body, field)
+		if err != nil {
+			return nil, err
+		}
+		envelope[field] = json.RawMessage(`[]`)
+		return json.Marshal(envelope)
+	}
 	if account.IsOpenAIPassthroughEnabled() || len(account.GetModelMapping()) == 0 {
 		return body, nil
 	}

@@ -51,6 +51,22 @@ function makeAccount(overrides: Partial<Account>): Account {
 }
 
 describe('AccountStatusIndicator', () => {
+  it('shows known empty Engine models and resumes the sync hint after recovery', async () => {
+    const account = makeAccount({ platform: 'openai', type: 'apikey',
+      extra: { openai_api_key_mode: 'codex_engine' },
+      codex_engine_models: { synced: true, model_count: 0 }
+    })
+    const wrapper = mount(AccountStatusIndicator, { props: { account } })
+    expect(wrapper.get('[data-testid="engine-models-hint"]').text()).toBe('admin.accounts.status.engineModelsEmpty')
+    await wrapper.setProps({ account: { ...account, codex_engine_models: { synced: true, model_count: 2 } } })
+    expect(wrapper.get('[data-testid="engine-models-hint"]').text()).toBe('admin.accounts.status.engineModelsSync')
+    await wrapper.setProps({ account: { ...account, codex_engine_models: undefined } })
+    expect(wrapper.get('[data-testid="engine-models-hint"]').text()).toBe('admin.accounts.status.engineModelsSync')
+    await wrapper.setProps({ account: { ...account, extra: { openai_api_key_mode: 'generic' } } })
+    expect(wrapper.find('[data-testid="engine-models-hint"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+
   it('shows the upstream capacity pause and follows capacity recovery', async () => {
     const account = makeAccount({
       platform: 'openai', type: 'apikey', concurrency: 20, schedulable: false,

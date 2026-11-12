@@ -1076,7 +1076,7 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 		}
 	}
 
-	configurationCtx := withAccountConfigurationIntent(ctx, []int64{id}, input.Extra, input.OpenAIEnvironmentFingerprint)
+	configurationCtx := withAccountConfigurationIntent(ctx, []int64{id}, input.Extra, input.OpenAIEnvironmentFingerprint, input.Credentials)
 	billingSettingsAppliedAtomically := false
 	updater := s.accountBillingRepo
 	if updater == nil {
@@ -1524,7 +1524,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	}
 
 	// Run bulk update for column/jsonb fields first.
-	configurationCtx := withAccountConfigurationIntent(ctx, input.AccountIDs, input.Extra, nil)
+	configurationCtx := withAccountConfigurationIntent(ctx, input.AccountIDs, input.Extra, nil, input.Credentials)
 	if _, err := s.accountRepo.BulkUpdate(configurationCtx, input.AccountIDs, repoUpdates); err != nil {
 		return nil, err
 	}

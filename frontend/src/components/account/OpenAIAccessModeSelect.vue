@@ -6,6 +6,7 @@
       <option value="codex_engine">Codex-Engine</option>
     </select>
     <p class="input-hint">{{ t('admin.accounts.openai.accessModeHint') }}</p>
+    <p v-if="mode === 'codex_engine'" class="input-hint" data-testid="engine-models-sync-hint">{{ t('admin.accounts.openai.engineModelsSyncHint') }}</p>
   </div>
 </template>
 

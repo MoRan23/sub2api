@@ -56,6 +56,8 @@ func accountConfigurationExtraPatch(ctx context.Context, ids []int64, updates ma
 	filtered := service.StripRetiredCodexStateExtra(updates)
 	// Capacity observations are owned exclusively by the conditional sync writer.
 	delete(filtered, service.CodexEngineCapacitySyncExtraKey)
+	delete(filtered, service.CodexEngineModelsSyncExtraKey)
+	delete(filtered, codexEngineSourceRevisionKey)
 	delete(filtered, "openai_pinned_installation_id")
 	delete(filtered, "openai_installation_rotate_enabled")
 	for _, key := range []string{"openai_installation_pin_enabled", "enable_tls_fingerprint", "tls_fingerprint_profile_id", service.OpenAIDaybreakBlueEnabledKey, service.OpenAIDaybreakRedEnabledKey, service.OpenAIAPIKeyAutoAttributionEnabledExtraKey, service.OpenAIAttributionReplaceWhitelistEnabledExtraKey} {
@@ -111,7 +113,13 @@ func guardedAccountExtraExpression(expression string, credentialExpressions ...s
 	expression = "CASE WHEN " + daybreakEligible + " THEN (" + expression + ") ELSE (" + expression + ") - 'openai_daybreak_blue_enabled' - 'openai_daybreak_red_enabled' END"
 	expression = "CASE WHEN " + installationOwnerSQL + " THEN (" + expression + ") - 'openai_installation_rotate_enabled'" +
 		" ELSE (" + expression + ") - 'openai_installation_rotate_enabled' - 'openai_pinned_installation_id' - 'openai_installation_pin_enabled' END"
-	return guardedCodexEngineCapacityExtraExpression(expression)
+	proxy := "proxy_id"
+	if len(credentialExpressions) > 1 {
+		proxy = credentialExpressions[1]
+	}
+	expression = guardedCodexEngineSourceExpression(expression, credentials, proxy)
+	expression = guardedCodexEngineCapacityExtraExpression(expression)
+	return "CASE WHEN " + codexEngineModelOwnerSQL + " AND (" + expression + ") ->> 'openai_api_key_mode' = 'codex_engine' THEN (" + expression + ") ELSE (" + expression + ") - 'codex_engine_models_sync' END"
 }
 
 // SQL UPDATE evaluates these expressions against the locked, latest row, so an

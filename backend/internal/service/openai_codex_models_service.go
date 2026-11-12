@@ -275,7 +275,7 @@ func openAIConfiguredCodexModelIDs(accounts []Account) []string {
 	models := make([]string, 0)
 	for i := range accounts {
 		account := &accounts[i]
-		if account.Platform != PlatformOpenAI {
+		if account.Platform != PlatformOpenAI || hasEmptyEngineModelCatalog(account) {
 			continue
 		}
 		for modelID := range account.GetModelMapping() {

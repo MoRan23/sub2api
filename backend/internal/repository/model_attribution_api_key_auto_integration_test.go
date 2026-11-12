@@ -101,8 +101,14 @@ func TestAttributionAPIKeyOptOutPreservesActiveTasks(t *testing.T) {
 				j.Status = "passed"
 				attributionSuccessfulProbeEvidence(j, "")
 				require.NoError(t, r.Finish(ctx, j))
-				require.Equal(t, "high", j.Result.Action)
-				require.Equal(t, 1, j.Result.PassStreak)
+				if mode == "codex_engine" {
+					require.Equal(t, "record_only", j.Result.Action)
+					require.Equal(t, "engine_models_managed_by_upstream", j.Reason)
+					require.Zero(t, j.Result.PassStreak)
+				} else {
+					require.Equal(t, "high", j.Result.Action)
+					require.Equal(t, 1, j.Result.PassStreak)
+				}
 				_, err = integrationDB.ExecContext(ctx, `UPDATE model_attribution_state SET next_due_at=NOW()-interval '1 second' WHERE account_id=$1`, a.ID)
 				require.NoError(t, err)
 				jobs, err = r.Enqueue(ctx, nil, false)

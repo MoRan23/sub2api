@@ -65,7 +65,7 @@ func (r *accountRepository) ApplyCodexEngineCapacity(ctx context.Context, expect
 	}
 	// A proxy can change its endpoint or credentials without changing its ID.
 	// Match it under the same proxy-before-account lock order as proxy edits.
-	proxyMatches, err := lockAndMatchProbeProxyIdentity(ctx, client, expected)
+	proxyMatches, err := lockAndMatchCodexEngineProxyIdentity(ctx, client, expected)
 	if err != nil || !proxyMatches {
 		return false, err
 	}
@@ -77,6 +77,9 @@ func (r *accountRepository) ApplyCodexEngineCapacity(ctx context.Context, expect
 		return false, err
 	}
 	if current.Status != service.StatusActive || current.IsShadow() || !service.CodexEngineCapacityIdentityMatches(current, expected) {
+		return false, nil
+	}
+	if !sameEngineModelJSON(current.Extra[codexEngineSourceRevisionKey], expected.Extra[codexEngineSourceRevisionKey]) {
 		return false, nil
 	}
 	identity := service.CodexEngineCapacityIdentity(current)

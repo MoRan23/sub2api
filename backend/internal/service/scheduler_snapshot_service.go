@@ -9,6 +9,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
@@ -120,6 +121,8 @@ type schedulerActiveGroupIDLister interface {
 }
 
 type SchedulerSnapshotService struct {
+	modelCatalogInvalidator      atomic.Pointer[func(*int64, string)]
+	modelCatalogRevision         atomic.Pointer[string]
 	cache                        SchedulerCache
 	outboxRepo                   SchedulerOutboxRepository
 	accountRepo                  AccountRepository
@@ -144,6 +147,26 @@ type SchedulerSnapshotService struct {
 	fullRebuildRequested uint64
 	fullRebuildCompleted uint64
 	fullRebuildLastErr   error
+}
+
+// SetModelCatalogInvalidator connects local catalog caches to account outbox
+// changes. Atomic publication is safe even when startup has begun consuming events.
+func (s *SchedulerSnapshotService) SetModelCatalogInvalidator(fn func(*int64, string)) {
+	s.modelCatalogInvalidator.Store(&fn)
+}
+
+func (s *SchedulerSnapshotService) invalidateModelCatalogGroups(groupIDs []int64, platform string) {
+	if fn := s.modelCatalogInvalidator.Load(); fn != nil {
+		if len(groupIDs) == 0 {
+			(*fn)(nil, platform)
+			return
+		}
+		for _, id := range groupIDs {
+			(*fn)(&id, platform)
+		}
+		zero := int64(0)
+		(*fn)(&zero, platform)
+	}
 }
 
 func NewSchedulerSnapshotService(
@@ -378,6 +401,26 @@ func (s *SchedulerSnapshotService) runFullRebuildWorker(interval time.Duration) 
 	}
 }
 
+// The shared outbox watermark may already have been advanced by another
+// instance. Observe the existing metadata revision once per maintenance tick,
+// rather than adding Redis reads or credential hashing to model requests.
+func (s *SchedulerSnapshotService) refreshModelCatalogRevision(ctx context.Context) {
+	reader, ok := s.cache.(interface {
+		OpenAIModelCatalogRevision(context.Context) (string, error)
+	})
+	if !ok {
+		return
+	}
+	revision, err := reader.OpenAIModelCatalogRevision(ctx)
+	if err != nil {
+		return
+	}
+	previous := s.modelCatalogRevision.Swap(&revision)
+	if previous == nil || *previous != revision {
+		s.invalidateModelCatalogGroups(nil, PlatformOpenAI)
+	}
+}
+
 func (s *SchedulerSnapshotService) pollOutbox() {
 	if s.outboxRepo == nil || s.cache == nil {
 		return
@@ -385,6 +428,7 @@ func (s *SchedulerSnapshotService) pollOutbox() {
 	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
 	defer cancel()
 
+	s.refreshModelCatalogRevision(ctx)
 	watermark, err := s.cache.GetOutboxWatermark(ctx)
 	if err != nil {
 		logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] outbox watermark read failed: %v", err)
@@ -653,7 +697,11 @@ func (s *SchedulerSnapshotService) handleBulkAccountEvent(ctx context.Context, p
 		sort.Slice(platformGroupIDs, func(i, j int) bool { return platformGroupIDs[i] < platformGroupIDs[j] })
 		buckets = append(buckets, s.bucketsForPlatform(platform, platformGroupIDs, seen)...)
 	}
-	return s.rebuildBuckets(ctx, buckets, "account_bulk_change")
+	err = s.rebuildBuckets(ctx, buckets, "account_bulk_change")
+	if err == nil {
+		s.invalidateModelCatalogGroups(rebuildGroupIDs, "")
+	}
+	return err
 }
 
 func (s *SchedulerSnapshotService) handleAccountEvent(ctx context.Context, accountID *int64, payload map[string]any, seen map[batchSeenKey]struct{}) error {
@@ -677,6 +725,7 @@ func (s *SchedulerSnapshotService) handleAccountEvent(ctx context.Context, accou
 					return err
 				}
 			}
+			s.invalidateModelCatalogGroups(groupIDs, "")
 			return s.rebuildByGroupIDs(ctx, groupIDs, "account_miss", seen)
 		}
 		return err
@@ -689,7 +738,12 @@ func (s *SchedulerSnapshotService) handleAccountEvent(ctx context.Context, accou
 	if len(groupIDs) == 0 {
 		groupIDs = account.GroupIDs
 	}
-	return s.rebuildByAccount(ctx, account, groupIDs, "account_change", seen)
+	err = s.rebuildByAccount(ctx, account, groupIDs, "account_change", seen)
+	if err == nil {
+		s.invalidateModelCatalogGroups(account.GroupIDs, account.Platform)
+		s.invalidateModelCatalogGroups(groupIDs, account.Platform)
+	}
+	return err
 }
 
 func (s *SchedulerSnapshotService) handleGroupEvent(ctx context.Context, groupID *int64, seen map[batchSeenKey]struct{}) error {
@@ -701,7 +755,11 @@ func (s *SchedulerSnapshotService) handleGroupEvent(ctx context.Context, groupID
 			return nil
 		}
 	}
-	return s.reconcileGroupLifecycle(ctx, *groupID, seen)
+	err := s.reconcileGroupLifecycle(ctx, *groupID, seen)
+	if err == nil {
+		s.invalidateModelCatalogGroups([]int64{*groupID}, "")
+	}
+	return err
 }
 
 func (s *SchedulerSnapshotService) reconcileGroupLifecycle(ctx context.Context, groupID int64, seen map[batchSeenKey]struct{}) error {

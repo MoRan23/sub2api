@@ -1397,6 +1397,7 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		// 走网关报 no available accounts"。
 		"openai_passthrough",
 		service.OpenAIAPIKeyModeExtraKey,
+		service.CodexEngineModelsSyncExtraKey,
 		service.OpenAIAPIKeyAutoAttributionEnabledExtraKey,
 		service.OpenAIAttributionReplaceWhitelistEnabledExtraKey,
 		service.OpenAIDaybreakBlueEnabledKey,
@@ -1484,4 +1485,22 @@ func filterSchedulerUpstreamBillingProbe(value any) map[string]any {
 		filtered["data"] = filteredData
 	}
 	return filtered
+}
+
+// OpenAIModelCatalogRevision reuses scheduler metadata revisions. Last-used
+// updates do not advance these tokens, so normal traffic cannot churn catalogs.
+func (c *schedulerCache) OpenAIModelCatalogRevision(ctx context.Context) (string, error) {
+	values, err := c.rdb.MGet(ctx, schedulerAccountMetaRevisionKey, schedulerAccountMetaRevisionKeyForPlatform(service.PlatformOpenAI)).Result()
+	if err != nil {
+		return "", err
+	}
+	global, err := schedulerCacheOptionalString(values[0])
+	if err != nil {
+		return "", err
+	}
+	platform, err := schedulerCacheOptionalString(values[1])
+	if err != nil {
+		return "", err
+	}
+	return global + ":" + platform, nil
 }

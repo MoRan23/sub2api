@@ -233,6 +233,7 @@ type Account struct {
 	OllamaCloudUsage             *service.OllamaCloudUsageState `json:"ollama_cloud_usage,omitempty"`
 	OpenCodeGoUsage              *service.OpenCodeGoUsageState  `json:"opencode_go_usage,omitempty"`
 	CodexEngineCapacity          *CodexEngineCapacity           `json:"codex_engine_capacity,omitempty"`
+	CodexEngineModels            *CodexEngineModels             `json:"codex_engine_models,omitempty"`
 	ProxyID                      *int64                         `json:"proxy_id"`
 	ProxyFallbackOriginID        *int64                         `json:"proxy_fallback_origin_id"`
 	ProxyFallbackOriginName      *string                        `json:"proxy_fallback_origin_name,omitempty"`
@@ -362,6 +363,7 @@ type AccountListItem struct {
 	OllamaCloudUsage    *service.OllamaCloudUsageState `json:"ollama_cloud_usage,omitempty"`
 	OpenCodeGoUsage     *service.OpenCodeGoUsageState  `json:"opencode_go_usage,omitempty"`
 	CodexEngineCapacity *CodexEngineCapacity           `json:"codex_engine_capacity,omitempty"`
+	CodexEngineModels   *CodexEngineModels             `json:"codex_engine_models,omitempty"`
 
 	ProxyID                 *int64     `json:"proxy_id"`
 	ProxyFallbackOriginID   *int64     `json:"proxy_fallback_origin_id"`

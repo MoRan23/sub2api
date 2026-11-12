@@ -61,6 +61,11 @@ func TestAttributionManualDisabledOnlyRecords(t *testing.T) {
 				first := attributionRun(t, r, a.ID, "passed")
 				if schedule {
 					require.Equal(t, "awaiting_confirmation", first.Result.Action)
+				} else if mode == "codex_engine" {
+					require.Equal(t, "record_only", first.Result.Action)
+					require.Equal(t, "engine_models_managed_by_upstream", first.Reason)
+					require.Zero(t, first.Result.PassStreak)
+					return
 				} else {
 					require.Equal(t, "high", first.Result.Action, "first eligible whitelist result still applies immediately")
 				}

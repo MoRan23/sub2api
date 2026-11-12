@@ -702,10 +702,13 @@ func (r *attributionRepository) finishAttempt(ctx context.Context, j *service.At
 				s.Detector = j.Snapshot.Detector
 			}
 			applyAttributionOverrides(&s, j.Snapshot.Overrides)
+			// Engine catalogs are independently synchronized and probes bypass mappings.
+			// Catalog changes cannot invalidate scheduling recovery; all identity,
+			// policy and administrator scheduling fences still apply.
 			valid = authorizationValid && !modeChanged && !schedulingChanged && s.ConfigVersion == j.Snapshot.ConfigVersion &&
 				service.SameAttributionDetector(j.Snapshot.Detector, s.Detector) &&
 				service.AttributionPolicyDigest(j.Snapshot) == service.AttributionPolicyDigest(s) &&
-				j.Snapshot.MappingDigest == s.MappingDigest
+				(a.IsCodexEngine() || j.Snapshot.MappingDigest == s.MappingDigest)
 			// All accepted runs use the same identity representation for the
 			// consecutive-pass baseline, regardless of current group membership.
 			s.Authorization = j.Snapshot.Authorization
@@ -732,6 +735,10 @@ func (r *attributionRepository) finishAttempt(ctx context.Context, j *service.At
 			// A manual diagnostic may finish and retain its real verdict, but it
 			// cannot consume the first applicable result or gain a pass streak.
 			j.Result.Action, j.Reason = "record_only", reason
+		} else if a.IsCodexEngine() && j.Snapshot.EffectiveResultMode() == service.AttributionResultModeReplace {
+			// Engine owns its advertised models. Diagnostics retain the verdict but
+			// never consume first-application eligibility or change mappings/groups.
+			j.Result.Action, j.Reason = "record_only", "engine_models_managed_by_upstream"
 		} else if j.Snapshot.Version >= 3 && j.Snapshot.Daybreak != nil && *j.Snapshot.Daybreak != service.ReadDiagnosticDaybreakPreferences(a) {
 			j.Result.Action, j.Reason = "stale_policy", "daybreak_preferences_changed"
 		} else if issue := service.AttributionDaybreakIssue(j.Snapshot, j.Result); issue != "" {

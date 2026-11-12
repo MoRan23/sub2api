@@ -270,6 +270,7 @@ func AccountFromServiceShallow(a *service.Account) *Account {
 		OllamaCloudUsage:             ollamaCloudUsage,
 		OpenCodeGoUsage:              openCodeGoUsage,
 		CodexEngineCapacity:          codexEngineCapacityFromService(a),
+		CodexEngineModels:            codexEngineModelsFromService(a),
 		ProxyID:                      a.ProxyID,
 		ProxyFallbackOriginID:        a.ProxyFallbackOriginID,
 		ProxyFallbackOriginName:      a.ProxyFallbackOriginName,
@@ -435,7 +436,8 @@ func redactAccountManagedExtra(extra map[string]any) map[string]any {
 	redacted := make(map[string]any, len(extra))
 	for key, value := range extra {
 		switch key {
-		case service.OllamaCloudUsageSessionExtraKey,
+		case service.CodexEngineModelsSyncExtraKey, service.CodexEngineSourceRevisionExtraKey,
+			service.OllamaCloudUsageSessionExtraKey,
 			service.OllamaCloudUsageAutoRefreshExtraKey,
 			service.OllamaCloudUsageSnapshotExtraKey,
 			service.OpenCodeGoUsageAutoRefreshExtraKey,
@@ -483,6 +485,7 @@ func AccountListItemFromAccount(a *Account) *AccountListItem {
 		Credentials: a.Credentials, CredentialsStatus: a.CredentialsStatus, Extra: a.Extra,
 		OllamaCloudUsage: a.OllamaCloudUsage, OpenCodeGoUsage: a.OpenCodeGoUsage,
 		CodexEngineCapacity: a.CodexEngineCapacity,
+		CodexEngineModels:   a.CodexEngineModels,
 		ProxyID:             a.ProxyID, ProxyFallbackOriginID: a.ProxyFallbackOriginID, ProxyFallbackOriginName: a.ProxyFallbackOriginName,
 		Concurrency: a.Concurrency, LoadFactor: a.LoadFactor, Priority: a.Priority, RateMultiplier: a.RateMultiplier,
 		Status: a.Status, ErrorMessage: a.ErrorMessage, LastUsedAt: a.LastUsedAt, ExpiresAt: a.ExpiresAt,

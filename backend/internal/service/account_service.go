@@ -451,6 +451,11 @@ func (s *AccountService) Update(ctx context.Context, id int64, req UpdateAccount
 		}
 	}
 	ctx = withAccountConfigurationIntent(ctx, []int64{id}, attributionIntent, nil)
+	if req.Credentials != nil {
+		if _, explicit := (*req.Credentials)["model_mapping"]; explicit {
+			ctx = WithAccountModelMappingWriteIntent(ctx, []int64{id})
+		}
+	}
 	if err := s.accountRepo.Update(ctx, account); err != nil {
 		return nil, fmt.Errorf("update account: %w", err)
 	}
