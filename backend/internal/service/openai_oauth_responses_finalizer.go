@@ -52,6 +52,11 @@ func (s *OpenAIGatewayService) FinalizeOpenAIOAuthResponsesRequest(
 	if req == nil {
 		return body, errors.New("finalize openai OAuth Responses request: request is nil")
 	}
+	projectOpenAIGuardianHeader(c, account, req.Header)
+	options.Plan.WireProfile.GuardianRequestKind = openAIGuardianKindForAccount(c, account)
+	if options.Plan.WireProfile.GuardianRequestKind != "" {
+		options.FinalServiceTier = ""
+	}
 	freezeOpenAIDaybreakPolicyOnRequest(req, s.settingService)
 	requestKind := strings.TrimSpace(options.RequestKind)
 	if requestKind == "" {
@@ -113,6 +118,10 @@ func (s *OpenAIGatewayService) FinalizeOpenAIOAuthResponsesRequest(
 		ensureOpenAIOAuthResponsesClientIdentity(req.Header, finalPlan.ClientIdentity)
 	}
 	finalInputBody := body
+	finalInputBody, err = applyOpenAIGuardianBody(finalInputBody, finalPlan.WireProfile.GuardianRequestKind)
+	if err != nil {
+		return body, err
+	}
 	if account.UsesOpenAICodexProtocol() {
 		legacyCompact := isOpenAIResponsesCompactPath(c) || finalPlan.ProjectionMode == OpenAIOAuthIdentityProjectionCompact ||
 			strings.HasSuffix(strings.TrimRight(req.URL.Path, "/"), "/compact")

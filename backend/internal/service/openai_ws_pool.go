@@ -98,6 +98,7 @@ type openAIWSAcquireRequest struct {
 type openAIWSHandshakeCompatibilityKey struct {
 	betaFeatures   string
 	timingMetrics  string
+	guardian       string
 	identityDigest string
 	residency      string
 	transportScope openAIWSTransportScope
@@ -861,7 +862,7 @@ func (c *openAIWSConn) matchesHandshakeCompatibility(compatibility openAIWSHands
 	// pre-V2 mirror fields instead of dialing it through the pool.
 	return c.handshakeCompatibility == (openAIWSHandshakeCompatibilityKey{}) &&
 		c.betaFeatures == compatibility.betaFeatures &&
-		c.identityDigest == compatibility.identityDigest && compatibility.residency == "" && compatibility.timingMetrics == ""
+		c.identityDigest == compatibility.identityDigest && compatibility.residency == "" && compatibility.timingMetrics == "" && compatibility.guardian == ""
 }
 
 // A timing request is advisory and fixed at handshake. A continuation pinned to
@@ -2549,6 +2550,7 @@ func normalizeOpenAIWSHandshakeCompatibility(headers http.Header, identityDigest
 	return openAIWSHandshakeCompatibilityKey{
 		betaFeatures:   normalizeOpenAIWSBetaFeatures(headers),
 		timingMetrics:  openAITimingMetricsCompatibility(headers),
+		guardian:       openAIGuardianCompatibility(headers),
 		identityDigest: identityDigest,
 		residency:      normalizeOpenAIWSResidency(headers),
 	}

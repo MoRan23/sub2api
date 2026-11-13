@@ -323,6 +323,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 	// 账号级请求头覆写（仅 openai api_key 账号启用时生效；OAuth 路径 no-op）。
 	// 覆盖所有 WS 模式（ctx_pool/dedicated/passthrough）的握手头。
 	account.ApplyHeaderOverrides(headers)
+	projectOpenAIGuardianHeader(c, account, headers)
 	// Session-level beta features participate in WS pool compatibility, so
 	// finalize them before applying the identity plan and computing the digest.
 	applyOpenAICodexBetaFeatures(c, account, headers)
@@ -335,6 +336,9 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 			return nil, sessionResolution, fmt.Errorf("finalize openai oauth websocket wire plan: %w", finalizeErr)
 		}
 		sessionResolution.OutboundIdentityPlan = finalPlan
+		if finalPlan.WireProfile.GuardianRequestKind != "" {
+			routingServiceTier = ""
+		}
 		stripOpenAILegacyResponsesBeta(headers)
 		applyOpenAICodexWSRoutingHint(headers, account, finalPlan)
 	} else {
@@ -913,7 +917,7 @@ func openAIWSRawItemsHasPrefix(items []json.RawMessage, prefix []json.RawMessage
 
 func openAIWSRawItemsHasFunctionCallOutput(items []json.RawMessage) bool {
 	for _, item := range items {
-		if isCodexToolCallOutputItemType(gjson.GetBytes(item, "type").String()) {
+		if codexToolOutputRequiresCallContextRaw(parseRawJSONView(item)) {
 			return true
 		}
 	}
@@ -927,14 +931,15 @@ func openAIWSRawItemsHaveToolCallContextForOutputs(items []json.RawMessage) bool
 	contextCallIDs := make(map[string]struct{})
 	outputCallIDs := make(map[string]struct{})
 	for _, item := range items {
-		itemType := gjson.GetBytes(item, "type").String()
-		callID := strings.TrimSpace(gjson.GetBytes(item, "call_id").String())
+		parsed := parseRawJSONView(item)
+		itemType := parsed.Get("type").String()
+		callID := strings.TrimSpace(parsed.Get("call_id").String())
 		switch {
 		case isCodexToolCallContextItemType(itemType):
 			if callID != "" {
 				contextCallIDs[callID] = struct{}{}
 			}
-		case isCodexToolCallOutputItemType(itemType):
+		case codexToolOutputRequiresCallContextRaw(parsed):
 			if callID == "" {
 				return false
 			}
@@ -963,10 +968,11 @@ func sanitizeOpenAIWSHistoricalReplayToolCalls(
 	outputCallIDs := make(map[string]struct{})
 	collectOutputCallIDs := func(items []json.RawMessage) {
 		for _, item := range items {
-			if !isCodexToolCallOutputItemType(gjson.GetBytes(item, "type").String()) {
+			parsed := parseRawJSONView(item)
+			if !codexToolOutputRequiresCallContextRaw(parsed) {
 				continue
 			}
-			if callID := strings.TrimSpace(gjson.GetBytes(item, "call_id").String()); callID != "" {
+			if callID := strings.TrimSpace(parsed.Get("call_id").String()); callID != "" {
 				outputCallIDs[callID] = struct{}{}
 			}
 		}
@@ -996,15 +1002,15 @@ func openAIWSRawPayloadHasToolCallOutput(payload []byte) bool {
 		return false
 	}
 	if input.IsArray() {
-		for _, item := range input.Array() {
-			if isCodexToolCallOutputItemType(item.Get("type").String()) {
-				return true
-			}
-		}
-		return false
+		hasOutput := false
+		input.ForEach(func(_, item gjson.Result) bool {
+			hasOutput = codexToolOutputRequiresCallContextRaw(item)
+			return !hasOutput
+		})
+		return hasOutput
 	}
 	if input.Type == gjson.JSON {
-		return isCodexToolCallOutputItemType(input.Get("type").String())
+		return codexToolOutputRequiresCallContextRaw(input)
 	}
 	return false
 }

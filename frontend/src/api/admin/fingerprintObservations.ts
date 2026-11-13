@@ -115,6 +115,24 @@ export interface CodexPromptCacheKeyObservation {
   strategy: 'absent' | 'session' | 'override' | 'invalid'
 }
 
+export interface CodexGuardianFieldObservation {
+  status: 'missing' | 'valid' | 'invalid'
+  type: 'missing' | 'null' | 'boolean' | 'number' | 'array' | 'object' | 'string'
+  present: boolean
+}
+
+export interface CodexGuardianRequestObservation {
+  status: 'absent' | 'valid' | 'invalid'
+  kind?: 'reviewer' | 'classifier'
+  source: 'http_request' | 'ws_handshake'
+  applied: boolean
+  reason: 'not_requested' | 'invalid_marker' | 'non_codex_upstream' | 'guardian_contract'
+  service_tier?: string
+  routing_hint_present: boolean
+  credits: CodexGuardianFieldObservation & { value?: 'true' | 'false' }
+  parent_response: CodexGuardianFieldObservation
+}
+
 export interface CodexCompactionMetadata {
   trigger: string
   reason: string
@@ -208,6 +226,7 @@ export interface FingerprintObservationEntry {
   outbound_codex_residency_source?: 'request_headers' | 'ws_handshake'
   request_integrity?: RequestIntegrityObservation
   response_evidence?: OpenAIResponseEvidence
+  guardian_request?: CodexGuardianRequestObservation
   runtime_timing_metrics?: {
     status: 'absent' | 'valid' | 'invalid'
     enabled?: boolean

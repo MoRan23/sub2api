@@ -53,6 +53,7 @@ type openAIWSNativeControl struct {
 	done            chan struct{}
 	readErr         error
 	lease           *openAIWSConnLease
+	bridgeActive    bool
 	responseID      string
 	pendingAck      bool
 	interrupted     bool
@@ -207,6 +208,12 @@ func (c *openAIWSNativeControl) readerStopped(err error) {
 		c.readErr = err
 	}
 	c.stopIdleLocked()
+	if c.bridgeActive && c.turnCancel != nil {
+		// HTTP has no interrupt acknowledgement or discard-partial-items
+		// protocol. An actual downstream close cancels its physical request;
+		// it must not keep generating while we wait for another write to fail.
+		c.turnCancel()
+	}
 	if c.lease != nil && (!c.terminalSeen || c.pendingAck) {
 		c.retire = true
 		c.armDrainLocked()
@@ -257,8 +264,33 @@ func (c *openAIWSNativeControl) begin(ctx context.Context, lease *openAIWSConnLe
 	return c.turnCtx
 }
 
+type openAIWSHTTPBridgeControlKey struct{}
+
+func (c *openAIWSNativeControl) beginBridge(ctx context.Context) context.Context {
+	turnCtx := c.begin(ctx, nil)
+	c.mu.Lock()
+	c.bridgeActive = true
+	if c.readErr != nil {
+		c.turnCancel()
+	}
+	c.mu.Unlock()
+	c.start()
+	return context.WithValue(turnCtx, openAIWSHTTPBridgeControlKey{}, c)
+}
+
+func openAIWSHTTPBridgeReadError(ctx context.Context) error {
+	c, _ := ctx.Value(openAIWSHTTPBridgeControlKey{}).(*openAIWSNativeControl)
+	if c == nil {
+		return nil
+	}
+	c.mu.Lock()
+	defer c.mu.Unlock()
+	return c.readErr
+}
+
 func (c *openAIWSNativeControl) detachLocked() {
 	c.lease = nil
+	c.bridgeActive = false
 	if c.drainTimer != nil {
 		c.drainTimer.Stop()
 		c.drainTimer = nil

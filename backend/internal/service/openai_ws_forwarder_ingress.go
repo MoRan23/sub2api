@@ -549,32 +549,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		return clientConn.Write(writeCtx, coderws.MessageText, message)
 	}
 
-	readClientMessage := func() ([]byte, error) {
-		idleTimeout := s.openAIWSIngressInterTurnIdleTimeout()
-		msgType, payload, readErr := ReadOpenAIWSClientMessage(
-			ctx,
-			clientConn,
-			idleTimeout,
-			coderws.StatusNormalClosure,
-			"websocket idle timeout",
-		)
-		if readErr != nil {
-			var closeErr *OpenAIWSClientCloseError
-			if errors.As(readErr, &closeErr) && closeErr.StatusCode() == coderws.StatusNormalClosure {
-				logOpenAIWSModeInfo("ingress_ws_inter_turn_idle_timeout account_id=%d timeout_seconds=%d", account.ID, int(idleTimeout.Seconds()))
-			}
-			return nil, readErr
-		}
-		bodyObservation.Activate(bodyObservation.Begin(int64(len(payload))))
-		if msgType != coderws.MessageText && msgType != coderws.MessageBinary {
-			return nil, NewOpenAIWSClientCloseError(
-				coderws.StatusPolicyViolation,
-				fmt.Sprintf("unsupported websocket client message type: %s", msgType.String()),
-				nil,
-			)
-		}
-		return payload, nil
-	}
+	var readClientMessage func() ([]byte, error)
 
 	firstPayload, err := parseClientPayload(1, firstClientMessage)
 	if err != nil {
@@ -627,6 +602,18 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 	}
 	refreshIngressRouteState(firstPayload)
+	// One reader owns the downstream socket across both transports. Control
+	// frames must remain readable while an HTTP bridge request is in flight.
+	nativeControl = getOpenAIWSNativeControl(c, ctx, clientConn, s.openAIWSIngressInterTurnIdleTimeout(), s.openAIWSWriteTimeout(), writeClientMessage)
+	writeClientMessage = func(message []byte) error {
+		err := nativeControl.write(message)
+		if err == nil {
+			nativeControl.start()
+		}
+		return err
+	}
+	readClientMessage = func() ([]byte, error) { return nativeControl.next(ctx) }
+	defer func() { nativeControl.finishAttempt(returnErr) }()
 
 	if useHTTPBridge {
 		firstPayload.payloadRaw, firstPayload.timezoneState = s.prepareOpenAIHTTPBridgeProtocol(c, account, firstPayload.payloadRaw, true)
@@ -816,8 +803,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					return fmt.Errorf("resolve Grok websocket cache identity: %w", err)
 				}
 			}
+			bridgeTurnCtx := nativeControl.beginBridge(ctx)
 			result, bridgeErr := s.proxyOpenAIWSHTTPBridgeTurn(
-				ctx,
+				bridgeTurnCtx,
 				c,
 				account,
 				token,
@@ -832,6 +820,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				writeClientMessage,
 				bridgeIdentityPlan,
 			)
+			nativeControl.terminal()
+			nativeControl.detach()
 			if bridgeErr != nil && isOpenAIWSSessionPreempted(ctx) {
 				return errOpenAIWSSessionPreempted
 			}
@@ -845,6 +835,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				return nil
 			}
 			if bridgeErr != nil {
+				if isOpenAIWSClientDisconnectError(bridgeErr) {
+					return nil
+				}
 				var failoverErr *UpstreamFailoverError
 				if turn > 1 && errors.As(bridgeErr, &failoverErr) && failoverErr != nil {
 					_, retryTimezoneState, projected := bridgeTimezoneReplay.ProjectReplay(
@@ -924,16 +917,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			currentBridgePayload = nextPayload
 		}
 	}
-	nativeControl = getOpenAIWSNativeControl(c, ctx, clientConn, s.openAIWSIngressInterTurnIdleTimeout(), s.openAIWSWriteTimeout(), writeClientMessage)
-	writeClientMessage = func(message []byte) error {
-		err := nativeControl.write(message)
-		if err == nil {
-			nativeControl.start()
-		}
-		return err
-	}
-	readClientMessage = func() ([]byte, error) { return nativeControl.next(ctx) }
-	defer func() { nativeControl.finishAttempt(returnErr) }()
 	firstRoutingFields := gjson.GetManyBytes(firstPayload.payloadRaw, "model", "service_tier")
 	wsHeaders, wsSessionResolution, buildHdrErr := s.buildOpenAIWSHeadersWithBody(
 		ctx,

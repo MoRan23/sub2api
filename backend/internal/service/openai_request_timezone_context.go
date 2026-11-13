@@ -70,6 +70,7 @@ func (s *OpenAIGatewayService) freezeOpenAIRequestPolicy(ctx context.Context, c 
 	if ctx == nil {
 		ctx = context.Background()
 	}
+	ctx = withOpenAIGuardianPolicyContext(ctx, c)
 	if c != nil && c.Request != nil {
 		if policy, ok := openai.RequestPolicyFromContext(c.Request.Context()); ok {
 			return openai.WithRequestPolicy(ctx, policy)

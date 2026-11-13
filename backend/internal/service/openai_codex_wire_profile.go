@@ -22,7 +22,7 @@ import (
 const (
 	CodexWireProfileRevision             = "responses_metadata"
 	CodexWireProfileCommit               = "316795b"
-	CodexWireProfileCompatibilityVersion = "0.166.0"
+	CodexWireProfileCompatibilityVersion = "0.169.0"
 )
 
 type CodexTurnIDKind string
@@ -302,6 +302,7 @@ type CodexWireProfile struct {
 	HistoryIngestRequested     *bool
 	HistoryInitialization      CodexHistoryInitialization
 	GuardianRecordedItems      *bool
+	GuardianRequestKind        string // Frozen explicit request header, never inferred from metadata.
 	AnalyticsEnabled           *bool
 	SubagentHeader             string
 	SubagentKind               string
@@ -427,6 +428,7 @@ var codexWireReservedMetadataKeys = map[string]struct{}{
 	"subagent_kind": {}, "thread_source": {}, "turn_trigger": {}, "sandbox": {}, "sandbox_mode": {}, "auto_review_enabled": {},
 	"node_repl_auto_review_required": {}, "node_repl_disabled": {}, "workspaces": {},
 	"guardian_classifier_source_thread_id": {}, "guardian_recorded_items": {},
+	"guardian_credits_requested": {}, "parent_response_id": {},
 	"history_initialization": {}, "analytics_enabled": {}, "mcp_attribution": {},
 }
 
@@ -1327,8 +1329,14 @@ func FinalizeOpenAICodexWirePlan(plan OpenAIOAuthIdentityPlan, requestKind strin
 
 func FinalizeOpenAICodexWirePlanWithOptions(plan OpenAIOAuthIdentityPlan, options FinalizeOpenAICodexWirePlanOptions) (OpenAIOAuthIdentityPlan, error) {
 	plan = cloneOpenAIOAuthIdentityPlan(plan)
-	if strings.TrimSpace(options.FinalModel) != "" || strings.TrimSpace(options.FinalServiceTier) != "" {
+	if plan.WireProfile.GuardianRequestKind != "" {
+		options.FinalServiceTier = ""
+	}
+	if plan.WireProfile.GuardianRequestKind != "" || strings.TrimSpace(options.FinalModel) != "" || strings.TrimSpace(options.FinalServiceTier) != "" {
 		plan.WireProfile.RoutingHint = BuildOpenAICodexRoutingHint(options.FinalModel, options.FinalServiceTier)
+	}
+	if plan.WireProfile.GuardianRequestKind == "reviewer" {
+		plan.WireProfile.RoutingHint = ""
 	}
 	if !plan.TurnIdentityRequested {
 		return plan, nil
@@ -1457,8 +1465,11 @@ func FinalizeOpenAICodexWirePlanWithOptions(plan OpenAIOAuthIdentityPlan, option
 	if !profile.ToolNamespacesInfoAllowed {
 		profile.ToolNamespacesInfo = nil
 	}
-	if strings.TrimSpace(options.FinalModel) != "" || strings.TrimSpace(options.FinalServiceTier) != "" {
+	if profile.GuardianRequestKind != "" || strings.TrimSpace(options.FinalModel) != "" || strings.TrimSpace(options.FinalServiceTier) != "" {
 		profile.RoutingHint = BuildOpenAICodexRoutingHint(options.FinalModel, options.FinalServiceTier)
+	}
+	if profile.GuardianRequestKind == "reviewer" {
+		profile.RoutingHint = ""
 	}
 	profile = profile.withDefaults(metadataProfile)
 	if !profile.rootTurnIDPresent && plan.TurnIdentityEnabled &&

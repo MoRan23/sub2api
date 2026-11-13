@@ -38,6 +38,19 @@ async function openDetails() {
 afterEach(cleanup)
 
 describe('FingerprintObservationRequestDetails', () => {
+  it('only renders Guardian observations when details are expanded', async () => {
+    renderDetails({ guardian_request: {
+      status: 'valid', kind: 'reviewer', source: 'ws_handshake', applied: true,
+      reason: 'guardian_contract', routing_hint_present: false,
+      credits: { status: 'missing', type: 'missing', present: false },
+      parent_response: { status: 'valid', type: 'string', present: true },
+    } })
+    expect(screen.queryByTestId('guardian-request-details')).toBeNull()
+    await openDetails()
+    expect(screen.getByTestId('guardian-request-kind').textContent).toBe('reviewer')
+    expect(screen.getByTestId('guardian-service-tier').textContent).toBe('Not sent')
+  })
+
   it.each([
     [undefined, 'Not recorded'],
     [{ status: 'absent', source: 'http_request' }, 'Not provided'],

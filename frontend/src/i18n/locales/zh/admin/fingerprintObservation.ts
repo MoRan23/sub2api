@@ -174,6 +174,21 @@ export default {
           geo_unavailable: '尚未取得完整地域', ip_changed_geo_unavailable: '出口 IP 已改变，新 IP 的地域尚未确认', geo_invalid: '地域结果无效',
         },
       },
+      guardianRequest: {
+        title: 'Guardian 请求', notRecorded: '未记录', absent: '未提供', valid: '存在 · 格式有效', invalid: '无效值',
+        contract: 'Guardian 请求处理', applied: '已应用', notApplied: '未应用',
+        serviceTier: '最终服务档位', routingHint: '最终路由提示', present: '存在', notSent: '未发送',
+        sources: {
+          http_request: '读取最终 HTTP 请求头及正文。',
+          ws_handshake: '使用实际物理 WS 连接的握手标记及当前帧元数据。',
+        },
+        reasons: {
+          not_requested: '未提供 Guardian 请求标记',
+          invalid_marker: '标记未知或存在冲突，按普通请求规则处理',
+          non_codex_upstream: '当前上游不使用 OAuth Codex Guardian 请求规则',
+          guardian_contract: '官方 Guardian 规则省略服务档位；reviewer 同时省略路由提示',
+        },
+      },
       outboundMetadata: {
         title: '请求与工具元数据',
         sourceHint: '读取最终出站请求头、正文或 WS 帧中的实际字段；缺失字段不从入站内容补齐。',

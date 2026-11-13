@@ -201,6 +201,10 @@ func TestOpenAIWSNativeInterruptControlErrorsAndDisconnectDrain(t *testing.T) {
 	default:
 	}
 	_ = client.CloseNow()
+	// Assert the disconnect-before-terminal case, rather than racing the OS
+	// socket close against the synthetic upstream terminal. A fully delivered
+	// terminal followed by a client close is a clean, reusable connection.
+	requireNativeReaderStopped(t, contexts)
 	upstream.Send(`{"type":"response.completed","response":{"id":"resp_native_1","usage":{"input_tokens":7,"output_tokens":3}}}`)
 	select {
 	case err := <-done:
@@ -211,7 +215,6 @@ func TestOpenAIWSNativeInterruptControlErrorsAndDisconnectDrain(t *testing.T) {
 	result := <-settled
 	require.NoError(t, result.err)
 	require.Equal(t, 7, result.result.Usage.InputTokens)
-	requireNativeReaderStopped(t, contexts)
 	select {
 	case <-upstream.closed:
 	default:

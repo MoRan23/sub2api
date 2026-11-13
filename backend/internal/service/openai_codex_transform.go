@@ -1572,7 +1572,7 @@ func codexInputItemIDs(input []any) map[string]struct{} {
 		}
 		itemType := strings.TrimSpace(firstNonEmptyString(item["type"]))
 		id := strings.TrimSpace(firstNonEmptyString(item["id"]))
-		if id != "" && !shouldStripOpenAIResponsesInputItemID(itemType, id) {
+		if id != "" && (isCodexStandaloneFunctionOutput(item) || !shouldStripOpenAIResponsesInputItemID(itemType, id)) {
 			itemIDs[id] = struct{}{}
 		}
 	}
@@ -1605,6 +1605,12 @@ func filterCodexInputWithOptions(input []any, opts codexInputFilterOptions) []an
 			continue
 		}
 		typ, _ := m["type"].(string)
+		if isCodexStandaloneFunctionOutput(m) {
+			// Independent named context has an item ID, not a corresponding call.
+			// Retain its fields and shared immutable contents without copying.
+			filtered = append(filtered, m)
+			continue
+		}
 
 		// chatgpt.com codex (OAuth path) runs with store=false (forced by
 		// applyCodexOAuthTransform). Replaying a reasoning item with its rs_*

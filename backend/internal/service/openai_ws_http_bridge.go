@@ -505,6 +505,24 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	if writeClientMessage == nil {
 		return nil, errors.New("client websocket writer is nil")
 	}
+	// Reader cancellation also reaches a blocked header/body read. Direct callers
+	// without the shared reader still get a bounded cleanup after a failed write.
+	ctx, cancelRequest := context.WithCancel(ctx)
+	defer cancelRequest()
+	var disconnectTimer *time.Timer
+	defer func() {
+		if disconnectTimer != nil {
+			disconnectTimer.Stop()
+		}
+	}()
+	beginDisconnectCleanup := func() {
+		if disconnectTimer == nil {
+			disconnectTimer = time.AfterFunc(openAIWSNativeControlDrainTimeout, cancelRequest)
+		}
+	}
+	if readErr := openAIWSHTTPBridgeReadError(ctx); readErr != nil {
+		return nil, readErr
+	}
 	ctx = withOpenAIDaybreakInboundModel(ctx, originalModel)
 	telemetryTurnCtx, finishTelemetryTurn := context.WithCancel(ctx)
 	defer finishTelemetryTurn()
@@ -585,8 +603,10 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	}
 
 	buildUpstreamRequest := func(requestBody []byte) (*http.Request, error) {
-		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
-		defer releaseUpstreamCtx()
+		// The shared downstream reader owns this turn's lifetime. Unlike an HTTP
+		// usage drain, a closed WebSocket must cancel even an upstream request
+		// which has not returned its headers yet.
+		upstreamCtx := ctx
 		var upstreamReq *http.Request
 		var buildErr error
 		if account.Platform == PlatformGrok {
@@ -698,6 +718,9 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		upstreamReq = markOpenAIResponseEvidenceHTTPRequest(upstreamReq, c)
 		resp, err = s.doOpenAIUpstream(upstreamReq, proxyURL, account)
 		if err != nil {
+			if readErr := openAIWSHTTPBridgeReadError(ctx); readErr != nil {
+				return nil, readErr
+			}
 			if turn == 1 {
 				return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, true)
 			}
@@ -714,6 +737,9 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, openAIWSHTTPBridgeErrorBodyLimitBytes))
 		_ = resp.Body.Close()
+		if readErr := openAIWSHTTPBridgeReadError(ctx); readErr != nil {
+			return nil, readErr
+		}
 		cyberUsage := OpenAIUsage{}
 		parseOpenAIWSResponseUsageFromCompletedEvent(respBody, &cyberUsage)
 		if markOpenAICyberPolicyEvent(c, respBody, resp.StatusCode, &cyberUsage) {
@@ -908,6 +934,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			if err := writeClientMessage(message); err != nil {
 				if isOpenAIWSClientDisconnectError(err) {
 					clientDisconnected = true
+					beginDisconnectCleanup()
 					return nil
 				}
 				return fmt.Errorf("write synthesized websocket response.failed: %w", err)
@@ -918,6 +945,9 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		return nil
 	}
 	for scanner.Scan() {
+		if readErr := openAIWSHTTPBridgeReadError(ctx); readErr != nil {
+			return resultWithUsage(), readErr
+		}
 		line := scanner.Text()
 		if eventType, ok := extractOpenAISSEEventLine(line); ok {
 			pendingSSEEventType = eventType
@@ -1160,6 +1190,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 					if err := writeClientMessage(message); err != nil {
 						if isOpenAIWSClientDisconnectError(err) {
 							clientDisconnected = true
+							beginDisconnectCleanup()
 							closeStatus, closeReason := summarizeOpenAIWSReadCloseError(err)
 							logOpenAIWSModeInfo(
 								"ingress_ws_http_bridge_client_disconnected_drain account_id=%d turn=%d close_status=%s close_reason=%s",
@@ -1228,6 +1259,9 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			)
 			return resultWithUsage(), nil
 		}
+	}
+	if readErr := openAIWSHTTPBridgeReadError(ctx); readErr != nil {
+		return resultWithUsage(), readErr
 	}
 	if bareErrorPending {
 		if finalizeErr := finalizeBareError(); finalizeErr != nil {

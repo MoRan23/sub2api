@@ -106,6 +106,7 @@ type FingerprintObservationEntry struct {
 	ConversionCheck              *apicompat.ChatConversionCheck `json:"conversion_check,omitempty"`
 	ResponseEvidence             *CodexModelEvidence            `json:"response_evidence,omitempty"`
 	RuntimeTimingMetrics         *FingerprintTimingMetrics      `json:"runtime_timing_metrics,omitempty"`
+	GuardianRequest              *FingerprintGuardianRequest    `json:"guardian_request,omitempty"`
 	Daybreak                     *OpenAIDaybreakObservation     `json:"daybreak,omitempty"`
 
 	GuardianClassifierSourceThreadID string            `json:"guardian_classifier_source_thread_id,omitempty"`
@@ -704,6 +705,7 @@ func buildFingerprintObservationEntry(c *gin.Context, account *Account, pin inst
 		ClientReportedInstallationID: pin.ClientID,
 		OutboundInstallationID:       pin.OutboundID,
 		RuntimeTimingMetrics:         observeOpenAITimingMetrics(outbound, FingerprintObservationEventHTTP),
+		GuardianRequest:              observeOpenAIGuardianRequest(account, outbound, nil),
 	}
 	populateFingerprintObservationMetadata(&entry, outbound, body)
 	if !pin.Enabled {
@@ -1046,6 +1048,7 @@ func freezeFingerprintObservationWSHandshake(c *gin.Context, account *Account) f
 		entry.InboundEndpoint = base.InboundEndpoint
 		entry.EventKind = FingerprintObservationEventWSHandshake
 		entry.RuntimeTimingMetrics.Source = FingerprintObservationEventWSHandshake
+		entry.GuardianRequest.Source = FingerprintObservationEventWSHandshake
 		entry.TimezoneComparisonStatus = "not_applicable"
 		entry.OutboundCodexResidencySource = "ws_handshake"
 		populateFingerprintObservationOS(&entry, &routingPlan)
@@ -1070,6 +1073,7 @@ func (s *OpenAIGatewayService) recordFingerprintObservationWSHandshake(c *gin.Co
 	entry := buildFingerprintObservationEntry(c, account, pin, outbound, nil, identity, trusted, true)
 	entry.EventKind = FingerprintObservationEventWSHandshake
 	entry.RuntimeTimingMetrics.Source = FingerprintObservationEventWSHandshake
+	entry.GuardianRequest.Source = FingerprintObservationEventWSHandshake
 	entry.TimezoneComparisonStatus = "not_applicable"
 	entry.OutboundCodexResidencySource = "ws_handshake"
 	globalFingerprintObserver.record(entry)
@@ -1108,6 +1112,7 @@ func (s *OpenAIGatewayService) freezeFingerprintObservationWSFrame(c *gin.Contex
 	populateFingerprintObservationOS(&entry, plan)
 	entry.EventKind = FingerprintObservationEventWSFrame
 	entry.RuntimeTimingMetrics.Source = FingerprintObservationEventWSHandshake
+	entry.GuardianRequest.Source = FingerprintObservationEventWSHandshake
 	entry.Daybreak = observeOpenAIDaybreak(body, daybreakDecision...)
 	entry.RequestIntegrity = integrity
 	entry.ConversionCheck = GetOpenAIChatConversionCheck(c)

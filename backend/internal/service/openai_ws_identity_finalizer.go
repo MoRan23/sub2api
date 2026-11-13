@@ -32,6 +32,7 @@ func (s *OpenAIGatewayService) finalizeOpenAIOAuthWSWirePlan(
 	if !usesOpenAICodexIdentityProtocol(account) {
 		return plan, nil
 	}
+	plan.WireProfile.GuardianRequestKind = openAIGuardianKindForAccount(c, account)
 	model := strings.TrimSpace(options.FinalModel)
 	serviceTier := strings.TrimSpace(options.FinalServiceTier)
 	if len(payload) > 0 && (model == "" || serviceTier == "") {
@@ -62,6 +63,13 @@ func (s *OpenAIGatewayService) finalizeOpenAIOAuthWSWirePlan(
 		// caller-owned identity and metadata plan untouched.
 		plan.WireProfile.ToolNamespacesAllowed = modelCapabilities.UseResponsesLite
 		plan.WireProfile.ToolNamespacesInfoAllowed = false
+		if plan.WireProfile.GuardianRequestKind != "" {
+			serviceTier = ""
+			plan.WireProfile.RoutingHint = BuildOpenAICodexRoutingHint(model, serviceTier)
+			if plan.WireProfile.GuardianRequestKind == "reviewer" {
+				plan.WireProfile.RoutingHint = ""
+			}
+		}
 		SetOpenAIOAuthIdentityPlan(c, plan)
 		return plan, nil
 	}
@@ -182,6 +190,10 @@ func (s *OpenAIGatewayService) projectOpenAIOAuthWSFrame(
 	}
 	finalPayload := payload
 	var err error
+	finalPayload, err = applyOpenAIGuardianBody(finalPayload, plan.WireProfile.GuardianRequestKind)
+	if err != nil {
+		return payload, err
+	}
 	if account.UsesOpenAICodexProtocol() {
 		finalPayload, _, err = normalizeOpenAICodexStreamOptionsBody(finalPayload, plan.ProjectionMode == OpenAIOAuthIdentityProjectionCompact)
 		if err != nil {

@@ -333,6 +333,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 	responseID := ""
 	imageCount := 0
 	var imageOutputSizes []string
+	var physicalServiceTier *string
 	for {
 		actualModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
 		if actualModel == "" {
@@ -341,6 +342,9 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		SetOpsUpstreamModel(c, actualModel)
 		upstreamCtx, releaseUpstreamCtx := detachUpstreamContext(ctx)
 		upstreamReq, buildErr := s.buildUpstreamRequestOpenAIPassthroughWithIdentityPlan(upstreamCtx, c, account, body, token, retryIdentityPlan)
+		if buildErr == nil {
+			physicalServiceTier = extractOpenAIServiceTierFromBody(openAIUpstreamRequestBodySnapshot(upstreamReq, body))
+		}
 		releaseUpstreamCtx()
 		if buildErr != nil {
 			return nil, buildErr
@@ -500,7 +504,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 		break
 	}
 	defer func() { _ = resp.Body.Close() }()
-	serviceTier := extractOpenAIServiceTierFromBody(body)
+	serviceTier := physicalServiceTier
 	s.bindHTTPResponseAccount(ctx, c, account, responseID)
 
 	// 排除 spark 影子:其 codex_* 仅由 QueryUsage(/wham/usage bengalfox)更新(外审第7轮 P1)。

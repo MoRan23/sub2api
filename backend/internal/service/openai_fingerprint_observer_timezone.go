@@ -20,6 +20,20 @@ func cloneFingerprintObservationHeaders(headers http.Header) http.Header {
 	result := make(http.Header)
 	for name, values := range headers {
 		switch strings.ToLower(name) {
+		case openAIGuardianHeader:
+			result[name] = make([]string, len(values))
+			for i, value := range values {
+				if value != "reviewer" && value != "classifier" {
+					value = "invalid"
+				}
+				result[name][i] = value
+			}
+		case openAICodexRoutingHintHeader:
+			// Only presence is observed; never retain caller-supplied affinity text.
+			result[name] = make([]string, len(values))
+			for i := range values {
+				result[name][i] = "present"
+			}
 		case openAITimingMetricsHeader:
 			result[name] = make([]string, len(values))
 			for i, value := range values {
@@ -222,6 +236,10 @@ func cloneFingerprintEgressLocation(location *OpenAIEgressLocationSnapshot) *Ope
 
 func cloneFingerprintObservationEntry(entry FingerprintObservationEntry) FingerprintObservationEntry {
 	cloneFingerprintObservationMetadata(&entry)
+	if entry.GuardianRequest != nil {
+		copy := *entry.GuardianRequest
+		entry.GuardianRequest = &copy
+	}
 	if entry.RuntimeTimingMetrics != nil {
 		copy := *entry.RuntimeTimingMetrics
 		if copy.Enabled != nil {

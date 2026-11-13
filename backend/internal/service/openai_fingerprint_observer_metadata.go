@@ -234,6 +234,12 @@ func populateFingerprintObservationBodyMetadata(entry *FingerprintObservationEnt
 		entry.PromptCacheKey.Strategy = "invalid"
 		return
 	}
+	// The existing body-metadata view already owns these small raw fields. Reuse
+	// it instead of scanning the entire (possibly image-heavy) request again for
+	// each Guardian scalar.
+	if entry.GuardianRequest != nil {
+		populateOpenAIGuardianServiceTier(entry.GuardianRequest, parseRawJSONView(root["service_tier"]))
+	}
 	if raw, present := root["prompt_cache_key"]; present {
 		entry.PromptCacheKey.Present = true
 		var key string
@@ -253,6 +259,10 @@ func populateFingerprintObservationBodyMetadata(entry *FingerprintObservationEnt
 	if !valid {
 		entry.MCPAttribution.Type, entry.MCPAttribution.Status = "unavailable", fingerprintMetadataInvalid
 		return
+	}
+	if entry.GuardianRequest != nil {
+		entry.GuardianRequest.Credits = observeOpenAIGuardianField(parseRawJSONView(client["guardian_credits_requested"]), true)
+		entry.GuardianRequest.ParentResponse = observeOpenAIGuardianField(parseRawJSONView(client["parent_response_id"]), false)
 	}
 	raw, present = client["mcp_attribution"]
 	if !present {

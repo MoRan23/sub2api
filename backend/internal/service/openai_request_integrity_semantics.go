@@ -213,7 +213,7 @@ func canonicalizeRequestIntegrityCodex(body map[string]any, rules map[string]boo
 				}
 			}
 		}
-		if isCodexToolCallItemType(typ) {
+		if isCodexToolCallItemType(typ) && !isCodexStandaloneFunctionOutput(item) {
 			if id := firstNonEmptyString(item["call_id"], item["id"]); id != "" {
 				normalized := normalizeCodexCallIDForItemType(typ, id)
 				if item["call_id"] != normalized {

@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
+	"go.uber.org/zap"
 )
 
 func TestOpenAIHandleStreamingAwareError_JSONEscaping(t *testing.T) {
@@ -998,24 +999,11 @@ func TestOpenAIResponses_FunctionCallOutputHTTPGuidanceDoesNotSuggestPreviousRes
 
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	c.Request = httptest.NewRequest(http.MethodPost, "/openai/v1/responses", strings.NewReader(
-		`{"model":"gpt-5.1","stream":false,"input":[{"type":"function_call_output","output":"{}"}]}`,
-	))
-	c.Request.Header.Set("Content-Type", "application/json")
-
-	groupID := int64(2)
-	c.Set(string(middleware.ContextKeyAPIKey), &service.APIKey{
-		ID:      101,
-		GroupID: &groupID,
-		User:    &service.User{ID: 1},
-	})
-	c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{
-		UserID:      1,
-		Concurrency: 1,
-	})
-
-	h := newOpenAIHandlerForPreviousResponseIDValidation(t, nil)
-	h.Responses(c)
+	body := []byte(`{"model":"gpt-5.1","stream":false,"input":[{"type":"function_call_output","output":"{}"}]}`)
+	// Per-attempt validation runs after account selection. Exercise its HTTP
+	// guidance directly; an empty scheduler would reject before reaching it.
+	h := &OpenAIGatewayHandler{}
+	require.False(t, h.validateFunctionCallOutputRequest(c, body, zap.NewNop()))
 
 	require.Equal(t, http.StatusBadRequest, w.Code)
 	require.Contains(t, w.Body.String(), "Responses WebSocket v2")

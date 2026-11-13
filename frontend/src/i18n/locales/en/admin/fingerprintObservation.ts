@@ -175,6 +175,21 @@ export default {
           geo_unavailable: 'Complete location unavailable', ip_changed_geo_unavailable: 'Exit IP changed; the new IP location is unconfirmed', geo_invalid: 'Invalid location result',
         },
       },
+      guardianRequest: {
+        title: 'Guardian request', notRecorded: 'Not recorded', absent: 'Not provided', valid: 'Present · Valid format', invalid: 'Invalid value',
+        contract: 'Guardian request handling', applied: 'Applied', notApplied: 'Not applied',
+        serviceTier: 'Final service tier', routingHint: 'Final routing hint', present: 'Present', notSent: 'Not sent',
+        sources: {
+          http_request: 'Reads the final HTTP request header and body.',
+          ws_handshake: 'Uses the actual physical WS handshake marker and the current frame metadata.',
+        },
+        reasons: {
+          not_requested: 'No Guardian request marker was provided',
+          invalid_marker: 'The marker is unknown or conflicting; normal request rules apply',
+          non_codex_upstream: 'The selected upstream does not use the OAuth Codex Guardian contract',
+          guardian_contract: 'Official Guardian rules omit service tier; reviewer requests also omit routing hint',
+        },
+      },
       outboundMetadata: {
         title: 'Request and tool metadata',
         sourceHint: 'Reads actual fields from the final outbound headers, body, or WS frame. Missing fields are not filled from inbound content.',

@@ -2105,6 +2105,9 @@ func (e *OpenAIFastBlockedError) Error() string { return e.Message }
 //     发生重叠，admin 可通过规则顺序明确意图。因此采用 first-match 而
 //     非 BetaPolicy 那样的"block 覆盖 filter 覆盖 pass"语义。
 func (s *OpenAIGatewayService) evaluateOpenAIFastPolicy(ctx context.Context, account *Account, model, serviceTier string) (action, errMsg string) {
+	if openAIGuardianPolicyKind(ctx, account) != "" {
+		return BetaPolicyActionFilter, ""
+	}
 	if s == nil || s.settingService == nil {
 		return BetaPolicyActionPass, ""
 	}
@@ -2257,6 +2260,9 @@ func (s *OpenAIGatewayService) applyOpenAIFastPolicyToBody(ctx context.Context, 
 	if len(body) == 0 {
 		return body, nil
 	}
+	if kind := openAIGuardianPolicyKind(ctx, account); kind != "" {
+		return applyOpenAIGuardianBody(body, kind)
+	}
 	if openAIGroupForcesFast(ctx, account) {
 		updated, err := sjson.SetBytes(body, "service_tier", OpenAIFastTierPriority)
 		if err != nil {
@@ -2382,6 +2388,10 @@ func (s *OpenAIGatewayService) applyOpenAIFastPolicyToWSResponseCreate(
 	// upstream reject it rather than guessing at our layer.
 	if frameType != "response.create" {
 		return frame, nil, nil
+	}
+	if kind := openAIGuardianPolicyKind(ctx, account); kind != "" {
+		updated, err := applyOpenAIGuardianBody(frame, kind)
+		return updated, nil, err
 	}
 	if openAIGroupForcesFast(ctx, account) {
 		updated, err := sjson.SetBytes(frame, "service_tier", OpenAIFastTierPriority)

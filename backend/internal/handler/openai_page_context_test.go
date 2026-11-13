@@ -30,9 +30,10 @@ func TestNormalizeCodexPageContextFirstMessage(t *testing.T) {
 	h := &OpenAIGatewayHandler{}
 	w := httptest.NewRecorder()
 	c, _ := gin.CreateTestContext(w)
-	require.False(t, h.validateFunctionCallOutputRequest(c, body, zap.NewNop()))
-	require.Equal(t, 400, w.Code)
-	require.Contains(t, w.Body.String(), "function_call_output requires call_id")
+	// Codex 0.169 named standalone inputs are valid even before the legacy
+	// page-context projection; that projection remains supported below.
+	require.True(t, h.validateFunctionCallOutputRequest(c, body, zap.NewNop()))
+	require.False(t, c.Writer.Written())
 
 	got, changed := normalizeCodexPageContext(body)
 	require.True(t, changed)
@@ -65,6 +66,7 @@ func TestNormalizeCodexPageContextPreservesHistoryAndToolValidation(t *testing.T
 	}
 
 	badTool := pageContextItem("read_file", "result")
+	badTool["call_id"] = "" // An explicit invalid call ID is not standalone context.
 	body = pageContextRequest(t, pageContextItem("codex_apps_open_page", `{"page_id":null}`), badTool)
 	got, changed = normalizeCodexPageContext(body)
 	require.True(t, changed)

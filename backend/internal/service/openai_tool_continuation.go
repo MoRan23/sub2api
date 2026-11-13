@@ -76,7 +76,7 @@ func NeedsToolContinuation(reqBody map[string]any) bool {
 			continue
 		}
 		itemType, _ := itemMap["type"].(string)
-		if isCodexToolCallItemType(itemType) || itemType == "item_reference" {
+		if (isCodexToolCallItemType(itemType) && !isCodexStandaloneFunctionOutput(itemMap)) || itemType == "item_reference" {
 			return true
 		}
 	}
@@ -111,7 +111,7 @@ func AnalyzeToolContinuationSignals(reqBody map[string]any) ToolContinuationSign
 			if strings.TrimSpace(callID) != "" {
 				signals.HasToolCallContext = true
 			}
-		case isCodexToolCallOutputItemType(itemType):
+		case codexToolOutputRequiresCallContext(itemMap):
 			signals.HasFunctionCallOutput = true
 			callID, _ := itemMap["call_id"].(string)
 			callID = strings.TrimSpace(callID)
@@ -174,7 +174,7 @@ func ValidateFunctionCallOutputContextBytes(body []byte) FunctionCallOutputValid
 		}
 		itemType := item.Get("type").String()
 		switch {
-		case isCodexToolCallOutputItemType(itemType):
+		case codexToolOutputRequiresCallContextRaw(item):
 			result.HasFunctionCallOutput = true
 			callID := strings.TrimSpace(item.Get("call_id").String())
 			if callID == "" {
@@ -248,7 +248,7 @@ func AnalyzeToolCallOutputContextCoverageBytes(body []byte) ToolCallOutputContex
 		}
 		itemType := item.Get("type").String()
 		switch {
-		case isCodexToolCallOutputItemType(itemType):
+		case codexToolOutputRequiresCallContextRaw(item):
 			coverage.HasFunctionCallOutput = true
 			callID := strings.TrimSpace(item.Get("call_id").String())
 			if callID == "" {
@@ -322,7 +322,7 @@ func ValidateFunctionCallOutputContext(reqBody map[string]any) FunctionCallOutpu
 		}
 		itemType, _ := itemMap["type"].(string)
 		switch {
-		case isCodexToolCallOutputItemType(itemType):
+		case codexToolOutputRequiresCallContext(itemMap):
 			result.HasFunctionCallOutput = true
 		case isCodexToolCallContextItemType(itemType):
 			callID, _ := itemMap["call_id"].(string)
@@ -348,7 +348,7 @@ func ValidateFunctionCallOutputContext(reqBody map[string]any) FunctionCallOutpu
 		}
 		itemType, _ := itemMap["type"].(string)
 		switch {
-		case isCodexToolCallOutputItemType(itemType):
+		case codexToolOutputRequiresCallContext(itemMap):
 			callID, _ := itemMap["call_id"].(string)
 			callID = strings.TrimSpace(callID)
 			if callID == "" {

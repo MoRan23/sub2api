@@ -678,7 +678,12 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 
 	rawTier := requestView.ServiceTier
-	if openAIGroupForcesFast(ctx, account) {
+	if openAIGuardianPolicyKind(ctx, account) != "" {
+		rawTier = ""
+		if requestView.ServiceTier != "" {
+			markPatchDelete("service_tier")
+		}
+	} else if openAIGroupForcesFast(ctx, account) {
 		rawTier = OpenAIFastTierPriority
 		if requestView.ServiceTier != OpenAIFastTierPriority {
 			markPatchSet("service_tier", OpenAIFastTierPriority)
@@ -1266,7 +1271,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			resp.Body = newResponsesClientToolStreamBody(resp.Body, mapping, maxLineSize, s.cfg)
 		}
 
-		serviceTier := extractOpenAIServiceTierFromBody(body)
+		serviceTier := extractOpenAIServiceTierFromBody(openAIUpstreamRequestBodySnapshot(upstreamReq, body))
 		// 上游接受后只保留计费需要的标量，避免响应处理期间继续保活完整 input/tools map。
 		reqBody = nil
 
