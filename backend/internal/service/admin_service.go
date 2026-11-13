@@ -299,7 +299,9 @@ type CreateGroupInput struct {
 	AllowMessagesDispatch       bool
 	AllowLive                   bool
 	ForceOpenAIFast             bool
+	ForceOpenAIUltrafast        bool
 	FreeOpenAIFast              bool
+	FreeOpenAIUltrafast         bool
 	OpenAIDaybreakBlueEnabled   bool
 	OpenAIDaybreakRedEnabled    bool
 	DefaultMappedModel          string
@@ -386,7 +388,9 @@ type UpdateGroupInput struct {
 	AllowMessagesDispatch       *bool
 	AllowLive                   *bool
 	ForceOpenAIFast             *bool
+	ForceOpenAIUltrafast        *bool
 	FreeOpenAIFast              *bool
+	FreeOpenAIUltrafast         *bool
 	OpenAIDaybreakBlueEnabled   *bool
 	OpenAIDaybreakRedEnabled    *bool
 	DefaultMappedModel          *string

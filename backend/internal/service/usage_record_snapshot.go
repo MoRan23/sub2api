@@ -185,7 +185,7 @@ func (b *usageSnapshotBuilder) group(g *Group) *Group {
 		VideoPrice480P: b.float(g.VideoPrice480P), VideoPrice720P: b.float(g.VideoPrice720P), VideoPrice1080P: b.float(g.VideoPrice1080P),
 		WebSearchPricePerCall: b.float(g.WebSearchPricePerCall), SearchPricePer1k: b.float(g.SearchPricePer1k),
 		AudioRealtimePricePerMin: b.float(g.AudioRealtimePricePerMin), AudioTTSPricePerMillionChars: b.float(g.AudioTTSPricePerMillionChars), AudioSTTPricePerHour: b.float(g.AudioSTTPricePerHour),
-		LongContextPricingEnabled: g.LongContextPricingEnabled, FreeOpenAIFast: g.FreeOpenAIFast}
+		LongContextPricingEnabled: g.LongContextPricingEnabled, FreeOpenAIFast: g.FreeOpenAIFast, FreeOpenAIUltrafast: g.FreeOpenAIUltrafast}
 	if g.VideoModelPrices != nil {
 		out.VideoModelPrices = make(map[string]map[string]float64, len(g.VideoModelPrices))
 		for model, prices := range g.VideoModelPrices {

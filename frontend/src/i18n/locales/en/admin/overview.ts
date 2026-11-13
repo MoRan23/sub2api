@@ -1294,11 +1294,17 @@ export default {
         redHint: 'Red requires Blue. Original requests for GPT-6 Astra / GPT-6.1 Sol require both switches and use daybreak_blue. Original requests for GPT-6 Cyber use daybreak_red. Mapping another model to GPT-6 Cyber does not select Red.',
       },
       openaiFast: {
-        title: 'OpenAI Fast mode',
+        title: 'OpenAI Fast / Ultrafast',
         force: 'Force Fast (priority)',
-        hint: 'Forces service_tier=priority on OpenAI requests in this group. The global Fast/Flex policy can still filter or block it. New requests update immediately after saving; existing WebSocket sessions must reconnect.',
+        forceUltrafast: 'Force Ultrafast',
+        hint: 'Force options are mutually exclusive. Account overrides take precedence over the group. Global Fast/Flex and OAuth Guardian rules still apply last. Saving affects new requests; existing WebSocket sessions must reconnect.',
+        accountHint: 'Applies to the selected OpenAI business account, including API Key, Codex-Engine and shadow accounts. Account overrides take precedence over the group; disabling both follows the group or client. Global policy and OAuth Guardian rules still apply. Existing WebSocket sessions must reconnect.',
+        ultrafastHint: 'Forces Ultrafast only when the account’s real upstream catalog declares support for the final model. Otherwise retains the client tier without falling back to group Fast.',
         free: 'Free Fast',
-        freeHint: 'Fast requests in this group still use the priority tier, but customers are charged the equivalent Standard price.'
+        freeHint: 'Enabled by either the account or group: Fast still uses priority, while customers pay the equivalent Standard price. Upstream and account costs remain unchanged.',
+        freeUltrafast: 'Free Ultrafast',
+        freeUltrafastHint: 'Removes only the Ultrafast premium by charging the Standard price. Independent of Free Fast; both may be enabled. Does not change the outbound tier.',
+        applyField: 'Apply in bulk: {field}'
       },
       invalidRequestFallback: {
         title: 'Invalid Request Fallback Group',

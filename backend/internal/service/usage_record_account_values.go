@@ -5,13 +5,15 @@ package service
 // credentials/Extra maps or boxing their scalar values for each queued task.
 // Repository, forwarding and scheduling accounts leave the pointer nil.
 type usageAccountBillingValues struct {
-	planType    string
-	accessMode  string
-	longContext bool
-	cacheTTL    bool
-	cacheTarget string
-	quota       [6]float64 // total limit/used, daily limit/used, weekly limit/used
-	notify      [3]usageAccountNotifyValues
+	planType      string
+	accessMode    string
+	longContext   bool
+	freeFast      bool
+	freeUltrafast bool
+	cacheTTL      bool
+	cacheTarget   string
+	quota         [6]float64 // total limit/used, daily limit/used, weekly limit/used
+	notify        [3]usageAccountNotifyValues
 }
 
 type usageAccountNotifyValues struct {
@@ -73,6 +75,10 @@ func (v *usageAccountBillingValues) extraBool(key string) bool {
 	switch key {
 	case openAILongContextBillingEnabledKey:
 		return v.longContext
+	case FreeOpenAIFastExtraKey:
+		return v.freeFast
+	case FreeOpenAIUltrafastExtraKey:
+		return v.freeUltrafast
 	case "cache_ttl_override_enabled":
 		return v.cacheTTL
 	case "quota_notify_daily_enabled":
@@ -90,6 +96,7 @@ func (b *usageSnapshotBuilder) accountValues(a *Account) *usageAccountBillingVal
 	*values = usageAccountBillingValues{
 		planType: b.string(a.GetCredential("plan_type")), accessMode: b.string(a.GetExtraString(OpenAIAPIKeyModeExtraKey)),
 		longContext: a.IsOpenAILongContextBillingEnabled(), cacheTTL: a.IsCacheTTLOverrideEnabled(),
+		freeFast: a.IsFreeOpenAIFastEnabled(), freeUltrafast: a.IsFreeOpenAIUltrafastEnabled(),
 		cacheTarget: "5m",
 		quota:       [6]float64{a.GetQuotaLimit(), a.GetQuotaUsed(), a.GetQuotaDailyLimit(), a.GetQuotaDailyUsed(), a.GetQuotaWeeklyLimit(), a.GetQuotaWeeklyUsed()},
 		notify: [3]usageAccountNotifyValues{

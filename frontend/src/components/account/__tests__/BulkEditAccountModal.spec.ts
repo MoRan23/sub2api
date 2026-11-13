@@ -98,6 +98,74 @@ describe('BulkEditAccountModal', () => {
     } as any)
   })
 
+  it('leaves every Fast setting out of bulk updates until its field is selected', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth', 'apikey'] })
+    for (const key of ['force_openai_fast', 'force_openai_ultrafast', 'free_openai_fast', 'free_openai_ultrafast']) {
+      expect((wrapper.get(`[data-testid="bulk-account-apply-${key}"]`).element as HTMLInputElement).checked).toBe(false)
+      expect(wrapper.get(`[data-testid="bulk-account-${key.replace(/_/g, '-')}"]`).attributes('disabled')).toBeDefined()
+    }
+    await wrapper.get('#bulk-edit-status-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledTimes(1)
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], { status: 'active' })
+    wrapper.unmount()
+  })
+
+  it('applies free Fast and Ultrafast independently of the force pair', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['apikey'] })
+    await wrapper.get('[data-testid="bulk-account-apply-free_openai_fast"]').setValue(true)
+    await wrapper.get('[data-testid="bulk-account-free-openai-fast"]').trigger('click')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenLastCalledWith([1, 2], { extra: { free_openai_fast: true } })
+    await wrapper.get('[data-testid="bulk-account-apply-free_openai_ultrafast"]').setValue(true)
+    await wrapper.get('[data-testid="bulk-account-free-openai-ultrafast"]').trigger('click')
+    await wrapper.get('[data-testid="bulk-account-free-openai-fast"]').trigger('click')
+    expect(wrapper.get('[data-testid="bulk-account-free-openai-ultrafast"]').attributes('aria-checked')).toBe('true')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenLastCalledWith([1, 2], {
+      extra: { free_openai_fast: false, free_openai_ultrafast: true },
+    })
+    wrapper.unmount()
+  })
+
+  it('selects and submits the force pair together without selecting free settings', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth'] })
+    await wrapper.get('[data-testid="bulk-account-apply-force_openai_ultrafast"]').setValue(true)
+    expect((wrapper.get('[data-testid="bulk-account-apply-force_openai_fast"]').element as HTMLInputElement).checked).toBe(true)
+    await wrapper.get('[data-testid="bulk-account-force-openai-ultrafast"]').trigger('click')
+    await wrapper.get('[data-testid="bulk-account-force-openai-fast"]').trigger('click')
+    expect(wrapper.get('[data-testid="bulk-account-force-openai-ultrafast"]').attributes('aria-checked')).toBe('false')
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenLastCalledWith([1, 2], {
+      extra: { force_openai_fast: true, force_openai_ultrafast: false },
+    })
+    await wrapper.get('[data-testid="bulk-account-apply-force_openai_fast"]').setValue(false)
+    expect((wrapper.get('[data-testid="bulk-account-apply-force_openai_ultrafast"]').element as HTMLInputElement).checked).toBe(false)
+    await wrapper.get('#bulk-edit-status-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenLastCalledWith([1, 2], { status: 'active' })
+    wrapper.unmount()
+  })
+
+  it('drops pending Fast settings if the bulk target changes to mixed platforms', async () => {
+    const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['apikey'] })
+    await wrapper.get('[data-testid="bulk-account-apply-free_openai_ultrafast"]').setValue(true)
+    await wrapper.get('[data-testid="bulk-account-free-openai-ultrafast"]').trigger('click')
+    await wrapper.setProps({ selectedPlatforms: ['openai', 'anthropic'] })
+    expect(wrapper.find('[data-testid="bulk-account-free-openai-ultrafast"]').exists()).toBe(false)
+    await wrapper.get('#bulk-edit-status-enabled').setValue(true)
+    await wrapper.get('#bulk-edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledTimes(1)
+    expect(adminAPI.accounts.bulkUpdate).toHaveBeenCalledWith([1, 2], { status: 'active' })
+    wrapper.unmount()
+  })
+
   it('only changes attribution whitelist replacement after opting in', async () => {
     const wrapper = mountModal({ selectedPlatforms: ['openai'], selectedTypes: ['oauth', 'apikey'] })
     const enabled = wrapper.get('#bulk-edit-attribution-replace-whitelist-enabled')

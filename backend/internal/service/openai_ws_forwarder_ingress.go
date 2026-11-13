@@ -232,6 +232,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		payloadBytes             int
 		requestedReasoningEffort *string
 		timezoneState            *RequestTimezoneState
+		serviceTierPolicy        *FingerprintServiceTierPolicy
 	}
 	ingressSessionOriginalModel := ""
 
@@ -495,7 +496,8 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		// follow-up response.create frames may omit it and then reuse
 		// ingressSessionOriginalModel. We always write a concrete upstream model
 		// before evaluating policy, so whitelist / filter behavior remains stable.
-		policyApplied, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, upstreamModel, normalized)
+		policyCtx := withOpenAIServiceTierPolicyFrameContext(ctx)
+		policyApplied, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(policyCtx, account, upstreamModel, normalized)
 		if policyErr != nil {
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", policyErr)
 		}
@@ -539,6 +541,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			payloadBytes:             len(normalized),
 			requestedReasoningEffort: requestedReasoningEffort,
 			timezoneState:            timezoneState,
+			serviceTierPolicy:        snapshotOpenAIServiceTierPolicy(policyCtx, account),
 		}, nil
 	}
 
@@ -803,7 +806,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					return fmt.Errorf("resolve Grok websocket cache identity: %w", err)
 				}
 			}
-			bridgeTurnCtx := nativeControl.beginBridge(ctx)
+			bridgeTurnCtx := nativeControl.beginBridge(withOpenAIServiceTierPolicySnapshot(ctx, account, currentBridgePayload.serviceTierPolicy))
 			result, bridgeErr := s.proxyOpenAIWSHTTPBridgeTurn(
 				bridgeTurnCtx,
 				c,
@@ -1115,7 +1118,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	var rejectedFieldRetryState *openAIResponsesRejectedFieldRetryState
 	var telemetry *codexTelemetryWSTurn
 	defer func() { telemetry.finish(false) }()
-	sendAndRelay := func(turn int, lease *openAIWSConnLease, payload []byte, payloadBytes int, originalModel string, imageBillingModel string, imageSizeTier string, imageInputSize string, requestedReasoningEffort *string) (*OpenAIForwardResult, error) {
+	sendAndRelay := func(turn int, lease *openAIWSConnLease, payload []byte, payloadBytes int, originalModel string, imageBillingModel string, imageSizeTier string, imageInputSize string, requestedReasoningEffort *string, serviceTierPolicy *FingerprintServiceTierPolicy) (*OpenAIForwardResult, error) {
 		telemetry = nil
 		responseModelObserver := &upstreamResponseModelObserver{}
 		if lease == nil {
@@ -1197,7 +1200,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		responseEvidence := beginOpenAIResponseEvidence(c, gjson.GetBytes(payload, "model").String())
 		observeOpenAIResponseEvidenceHeaders(responseEvidence, lease.ClaimResponseEvidenceHeaders(), "connection")
 		timezoneState, _ := RequestTimezoneStateFromContext(c)
-		recordFrameObservation := s.freezeFingerprintObservationWSFrame(c, account, timezoneState, payload, lease.FingerprintObservationHeaders(), openAIWSObservationFramePlan(account, &pinnedIdentityPlan), daybreakDecision)
+		recordFrameObservation := s.freezeFingerprintObservationWSFrameWithTierPolicy(c, account, timezoneState, payload, lease.FingerprintObservationHeaders(), openAIWSObservationFramePlan(account, &pinnedIdentityPlan), serviceTierPolicy, daybreakDecision)
 		recordOpenAICodexGuardianSourceThread(pinnedIdentityPlan, nil, payload)
 		telemetry = s.beginCodexTelemetryWS(withCodexTelemetryGatewayContext(ctx, c, account, fmt.Sprintf("ws:%d", turn), &pinnedIdentityPlan), account, lease.FingerprintObservationHeaders(), baseAcquireReq.Headers, payload)
 		telemetryWriteStarted := time.Now()
@@ -1626,6 +1629,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	currentImageInputSize := firstPayload.imageInputSize
 	currentPayloadBytes := firstPayload.payloadBytes
 	currentRequestedReasoningEffort := firstPayload.requestedReasoningEffort
+	currentServiceTierPolicy := firstPayload.serviceTierPolicy
 	isStrictAffinityTurn := func(payload []byte) bool {
 		if !storeDisabled {
 			return false
@@ -2239,7 +2243,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			)
 		}
 
-		result, relayErr := sendAndRelay(turn, sessionLease, currentPayload, currentPayloadBytes, currentOriginalModel, currentImageBillingModel, currentImageSizeTier, currentImageInputSize, currentRequestedReasoningEffort)
+		result, relayErr := sendAndRelay(turn, sessionLease, currentPayload, currentPayloadBytes, currentOriginalModel, currentImageBillingModel, currentImageSizeTier, currentImageInputSize, currentRequestedReasoningEffort, currentServiceTierPolicy)
 		if relayErr != nil {
 			lastTurnClean = false
 			if isOpenAIWSSessionPreempted(ctx) {
@@ -2547,6 +2551,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		currentImageInputSize = nextPayload.imageInputSize
 		currentPayloadBytes = nextPayload.payloadBytes
 		currentRequestedReasoningEffort = nextPayload.requestedReasoningEffort
+		currentServiceTierPolicy = nextPayload.serviceTierPolicy
 		rejectedFieldRetryState = newOpenAIResponsesRejectedFieldRetryState(currentPayload)
 		storeDisabled = s.isOpenAIWSStoreDisabledInRequestRaw(currentPayload, account)
 		if !storeDisabled {

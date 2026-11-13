@@ -14,7 +14,7 @@ import (
 	"github.com/dgraph-io/ristretto"
 )
 
-const apiKeyAuthSnapshotVersion = 28 // v28: Daybreak/image billing, privacy gate and scoped RPM override
+const apiKeyAuthSnapshotVersion = 29 // v29: group Ultrafast request and user billing preferences
 
 type apiKeyAuthCacheConfig struct {
 	l1Size        int
@@ -427,7 +427,9 @@ func (s *APIKeyService) snapshotFromAPIKey(ctx context.Context, apiKey *APIKey) 
 			AllowMessagesDispatch:           apiKey.Group.AllowMessagesDispatch,
 			AllowLive:                       apiKey.Group.AllowLive,
 			ForceOpenAIFast:                 apiKey.Group.ForceOpenAIFast,
+			ForceOpenAIUltrafast:            apiKey.Group.ForceOpenAIUltrafast,
 			FreeOpenAIFast:                  apiKey.Group.FreeOpenAIFast,
+			FreeOpenAIUltrafast:             apiKey.Group.FreeOpenAIUltrafast,
 			OpenAIDaybreakBlueEnabled:       apiKey.Group.OpenAIDaybreakBlueEnabled,
 			OpenAIDaybreakRedEnabled:        apiKey.Group.OpenAIDaybreakRedEnabled,
 			DefaultMappedModel:              apiKey.Group.DefaultMappedModel,
@@ -539,7 +541,9 @@ func (s *APIKeyService) snapshotToAPIKey(key string, snapshot *APIKeyAuthSnapsho
 			AllowMessagesDispatch:           snapshot.Group.AllowMessagesDispatch,
 			AllowLive:                       snapshot.Group.AllowLive,
 			ForceOpenAIFast:                 snapshot.Group.ForceOpenAIFast,
+			ForceOpenAIUltrafast:            snapshot.Group.ForceOpenAIUltrafast,
 			FreeOpenAIFast:                  snapshot.Group.FreeOpenAIFast,
+			FreeOpenAIUltrafast:             snapshot.Group.FreeOpenAIUltrafast,
 			OpenAIDaybreakBlueEnabled:       snapshot.Group.OpenAIDaybreakBlueEnabled,
 			OpenAIDaybreakRedEnabled:        snapshot.Group.OpenAIDaybreakRedEnabled,
 			DefaultMappedModel:              snapshot.Group.DefaultMappedModel,

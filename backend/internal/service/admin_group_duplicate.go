@@ -148,7 +148,9 @@ func cloneGroupForDuplicate(source *Group, operationID string) *Group {
 		AllowMessagesDispatch:           source.AllowMessagesDispatch,
 		AllowLive:                       source.AllowLive,
 		ForceOpenAIFast:                 source.ForceOpenAIFast,
+		ForceOpenAIUltrafast:            source.ForceOpenAIUltrafast,
 		FreeOpenAIFast:                  source.FreeOpenAIFast,
+		FreeOpenAIUltrafast:             source.FreeOpenAIUltrafast,
 		// A copy requires an explicit administrator choice before using Daybreak.
 		OpenAIDaybreakBlueEnabled:   false,
 		OpenAIDaybreakRedEnabled:    false,

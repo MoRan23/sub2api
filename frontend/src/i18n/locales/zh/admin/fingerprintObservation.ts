@@ -131,6 +131,17 @@ export default {
     expandUnthreaded: '展开未归属线程的观测',
     collapseUnthreaded: '收起未归属线程的观测',
     request: {
+      serviceTierPolicy: {
+        title: 'Fast / Ultrafast 策略',
+        description: '展示策略请求与实际发送的 service_tier。',
+        source: '强制来源', requested: '客户端档位', forced: '强制档位', effective: '实际发送档位',
+        capability: '能力检查', absent: '未发送', none: '无',
+        sources: { account: '账号', group: '分组', none: '无' },
+        capabilities: {
+          supported: '目录明确支持', unsupported: '目录未声明支持',
+          unavailable: '目录不可用，保留原请求', not_required: '无需检查', guardian: 'Guardian 移除档位'
+        }
+      },
       daybreak: {
         title: 'Daybreak 出站字段',
         description: '取自本次出站尝试的最终正文，不代表上游已接收或启用 Daybreak。',

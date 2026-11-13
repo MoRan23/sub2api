@@ -91,6 +91,8 @@ const sourceGroup = {
   long_context_pricing_enabled: true,
   force_openai_fast: false,
   free_openai_fast: false,
+  force_openai_ultrafast: false,
+  free_openai_ultrafast: false,
   model_pricing: [],
   profit_control_enabled: false,
   profit_min_margin: 0,
@@ -269,6 +271,24 @@ describe("GroupsView gateway settings", () => {
     getUsageSummary.mockResolvedValue([]);
     getCapacitySummary.mockResolvedValue([]);
     getLiveCapability.mockResolvedValue({ supported: false });
+  });
+
+  it("saves mutually exclusive force tiers and independent free tiers", async () => {
+    const view = mountView();
+    await fireEvent.click(await view.findByRole("button", { name: "common.edit" }));
+    await fireEvent.click(view.getByTestId("edit-force-openai-fast"));
+    await fireEvent.click(view.getByTestId("edit-force-openai-ultrafast"));
+    expect(view.getByTestId("edit-force-openai-fast").getAttribute("aria-checked")).toBe("false");
+    await fireEvent.click(view.getByTestId("edit-free-openai-fast"));
+    await fireEvent.click(view.getByTestId("edit-free-openai-ultrafast"));
+    await fireEvent.click(view.getByRole("button", { name: "common.update" }));
+    await waitFor(() => expect(updateGroup).toHaveBeenCalled());
+    expect(updateGroup.mock.calls[0][1]).toMatchObject({
+      force_openai_fast: false,
+      force_openai_ultrafast: true,
+      free_openai_fast: true,
+      free_openai_ultrafast: true,
+    });
   });
 
   it("preserves consecutive child updates on the reactive edit config", async () => {

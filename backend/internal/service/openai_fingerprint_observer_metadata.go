@@ -240,6 +240,7 @@ func populateFingerprintObservationBodyMetadata(entry *FingerprintObservationEnt
 	if entry.GuardianRequest != nil {
 		populateOpenAIGuardianServiceTier(entry.GuardianRequest, parseRawJSONView(root["service_tier"]))
 	}
+	populateFingerprintServiceTierPolicy(entry.ServiceTierPolicy, parseRawJSONView(root["service_tier"]))
 	if raw, present := root["prompt_cache_key"]; present {
 		entry.PromptCacheKey.Present = true
 		var key string

@@ -133,6 +133,13 @@
         </div>
       </div>
 
+      <OpenAIServiceTierSettings
+        v-if="allOpenAIPassthroughCapable"
+        v-model="openAIServiceTierSettings"
+        v-model:selected-fields="serviceTierFields"
+        test-prefix="bulk-account"
+      />
+
       <!-- OpenAI API long-context billing -->
       <div
         v-if="allOpenAIPassthroughCapable"
@@ -1560,6 +1567,8 @@ import {
   getPresetMappingsByPlatform
 } from '@/composables/useModelWhitelist'
 import HeaderOverrideEditor from '@/components/account/HeaderOverrideEditor.vue'
+import OpenAIServiceTierSettings from '@/components/account/OpenAIServiceTierSettings.vue'
+import { readOpenAIServiceTierSettings, type OpenAIServiceTierKey } from '@/components/account/openaiServiceTierSettings'
 import {
   buildHeaderOverridesObject,
   isHeaderOverrideCapable,
@@ -1774,6 +1783,8 @@ const openaiPassthroughEnabled = ref(false)
 // Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
 const openAILongContextBillingEnabled = ref(false)
+const openAIServiceTierSettings = ref(readOpenAIServiceTierSettings())
+const serviceTierFields = ref<OpenAIServiceTierKey[]>([])
 const openAIImageSizeTiers = ref<OpenAIImageSizeTier[]>([...OPENAI_IMAGE_SIZE_TIERS])
 const openAIEndpointCapabilities = ref<OpenAIEndpointCapability[]>([
   'chat_completions',
@@ -2069,6 +2080,9 @@ const buildUpdatePayload = (): Record<string, unknown> | null => {
     const extra = ensureExtra()
     extra.openai_long_context_billing_enabled = openAILongContextBillingEnabled.value
   }
+  if (allOpenAIPassthroughCapable.value) {
+    for (const key of serviceTierFields.value) ensureExtra()[key] = openAIServiceTierSettings.value[key]
+  }
 
   if (enableOpenAIImageSizeTiers.value && allOpenAIPassthroughCapable.value) {
     // extra 按 JSONB 合并写入，不限档位用空列表覆盖旧值。
@@ -2260,6 +2274,7 @@ const handleSubmit = async () => {
   }
 
   const hasAnyFieldEnabled =
+    (allOpenAIPassthroughCapable.value && serviceTierFields.value.length > 0) ||
     enableBaseUrl.value ||
     enableOpenAIPassthrough.value ||
     enableOpenAIFlattenNamespaces.value ||
@@ -2454,6 +2469,8 @@ watch(
       openaiPassthroughEnabled.value = false
       openaiFlattenNamespacesEnabled.value = false
       openAILongContextBillingEnabled.value = false
+      openAIServiceTierSettings.value = readOpenAIServiceTierSettings()
+      serviceTierFields.value = []
       openAIImageSizeTiers.value = [...OPENAI_IMAGE_SIZE_TIERS]
       openAIEndpointCapabilities.value = ['chat_completions', 'embeddings']
       openAIResponsesMode.value = 'auto'

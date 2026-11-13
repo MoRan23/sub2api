@@ -118,6 +118,8 @@ type OpenAIModelsResponse struct {
 	convertedFromOpenAIModelList bool
 	NotModified                  bool
 	observedAt                   time.Time
+	serviceTierCatalog           *openAIServiceTierCatalog
+	catalogDegraded              bool
 }
 
 // BuildGroupConfiguredCodexModelsManifest builds a Codex catalog from configured
@@ -1635,6 +1637,9 @@ type openAIModelsRequest struct {
 	// Cached bodies have already been converted to their requested format.
 	standardModelsList bool
 	auxiliary          bool
+	// Capability consumers share the same source cache, returning its immutable
+	// index instead of cloning the potentially large manifest body.
+	capabilityOnly bool
 	// Directory-wide source failover has one budget, including detached refreshes.
 	refreshDeadline time.Time
 }
@@ -1744,6 +1749,10 @@ func (s *OpenAIGatewayService) FetchCodexModelsManifest(ctx context.Context, acc
 // Auxiliary capability discovery shares the catalog cache without interpreting
 // a discovery failure as an inference failure or changing account health.
 func (s *OpenAIGatewayService) fetchCodexModelsManifest(ctx context.Context, account *Account, clientVersion, ifNoneMatch string, auxiliary bool) (*OpenAIModelsResponse, error) {
+	return s.fetchCodexModelsManifestForPurpose(ctx, account, clientVersion, ifNoneMatch, auxiliary, false)
+}
+
+func (s *OpenAIGatewayService) fetchCodexModelsManifestForPurpose(ctx context.Context, account *Account, clientVersion, ifNoneMatch string, auxiliary, capabilityOnly bool) (*OpenAIModelsResponse, error) {
 	if account == nil {
 		return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_ACCOUNT_REQUIRED", "account is required")
 	}
@@ -1865,7 +1874,13 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifest(ctx context.Context, acc
 		accountConcurrency:  account.Concurrency,
 		useAPIKeyUpstream:   useAPIKeyUpstream,
 		auxiliary:           auxiliary,
+		capabilityOnly:      capabilityOnly,
 		refreshDeadline:     officialCatalogRefreshDeadline(ctx),
+	}
+	if capabilityOnly {
+		if deadline, ok := ctx.Deadline(); ok && (request.refreshDeadline.IsZero() || deadline.Before(request.refreshDeadline)) {
+			request.refreshDeadline = deadline
+		}
 	}
 	if !useAPIKeyUpstream {
 		scope, _ := codexnative.ScopeFromContext(WithOpenAINativeHTTPScope(ctx, credAccount, ""))
@@ -1973,11 +1988,11 @@ func (s *OpenAIGatewayService) fetchCachedOpenAIModels(ctx context.Context, requ
 	cacheKey := buildOpenAIModelsCacheKey(request)
 	manifest, state := s.openAIModelsCache.get(cacheKey, time.Now())
 	if state == openAIModelsCacheFresh {
-		return openAIModelsResponseForClient(manifest, ifNoneMatch), nil
+		return openAIModelsResponseForRequest(manifest, ifNoneMatch, request.capabilityOnly), nil
 	}
 	resultCh := s.refreshCachedOpenAIModels(cacheKey, request, fetch)
 	if state == openAIModelsCacheStale {
-		return openAIModelsResponseForClient(manifest, ifNoneMatch), nil
+		return openAIModelsResponseForRequest(manifest, ifNoneMatch, request.capabilityOnly), nil
 	}
 	select {
 	case <-ctx.Done():
@@ -1990,7 +2005,7 @@ func (s *OpenAIGatewayService) fetchCachedOpenAIModels(ctx context.Context, requ
 		if !ok || manifest == nil {
 			return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_REQUEST_FAILED", "invalid shared Codex models manifest result")
 		}
-		return openAIModelsResponseForClient(manifest, ifNoneMatch), nil
+		return openAIModelsResponseForRequest(manifest, ifNoneMatch, request.capabilityOnly), nil
 	}
 }
 
@@ -2017,6 +2032,7 @@ func (s *OpenAIGatewayService) refreshCachedOpenAIModels(cacheKey string, reques
 		}
 		if manifest.NotModified && cached != nil {
 			cached = cloneOpenAIModelsResponse(cached)
+			cached.catalogDegraded = cached.catalogDegraded || manifest.catalogDegraded
 			cached.observedAt = manifest.observedAt
 			if cached.observedAt.IsZero() {
 				cached.observedAt = s.openAIModelsCache.nextObservationTime(time.Now())
@@ -2120,7 +2136,8 @@ func (s *OpenAIGatewayService) fetchOpenAIModelsUpstream(ctx context.Context, re
 	defer func() { _ = resp.Body.Close() }()
 
 	if resp.StatusCode == http.StatusNotModified {
-		return &OpenAIModelsResponse{ETag: resp.Header.Get("ETag"), NotModified: true}, nil
+		return &OpenAIModelsResponse{ETag: resp.Header.Get("ETag"), NotModified: true,
+			catalogDegraded: strings.EqualFold(strings.TrimSpace(resp.Header.Get("X-Codex-Catalog-Degraded")), "true")}, nil
 	}
 	if resp.StatusCode < 200 || resp.StatusCode >= 300 {
 		body, _ := io.ReadAll(io.LimitReader(resp.Body, 2048))
@@ -2154,7 +2171,8 @@ func (s *OpenAIGatewayService) fetchOpenAIModelsUpstream(ctx context.Context, re
 		}
 	}
 	etag := resp.Header.Get("ETag")
-	return &OpenAIModelsResponse{Body: body, ETag: etag, upstreamETag: etag}, nil
+	return &OpenAIModelsResponse{Body: body, ETag: etag, upstreamETag: etag,
+		catalogDegraded: strings.EqualFold(strings.TrimSpace(resp.Header.Get("X-Codex-Catalog-Degraded")), "true")}, nil
 }
 
 func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Context, request openAIModelsRequest, ifNoneMatch string) (*OpenAIModelsResponse, error) {
@@ -2238,6 +2256,8 @@ func (s *OpenAIGatewayService) fetchCodexModelsManifestUpstream(ctx context.Cont
 		upstreamSourceBody:           append([]byte(nil), upstreamBody...),
 		convertedFromOpenAIModelList: convertedFromOpenAIModelList,
 		observedAt:                   observedAt,
+		serviceTierCatalog:           parseOpenAIServiceTierCatalog(upstreamBody),
+		catalogDegraded:              response.catalogDegraded,
 	}
 	if request.useAPIKeyUpstream && !bytes.Equal(body, upstreamBody) {
 		manifest.ETag = codexModelsManifestBodyETag(body)

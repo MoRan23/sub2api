@@ -474,6 +474,9 @@ func normalizeOpenAIInstallationPinUpdateExtra(account *Account, input *UpdateAc
 }
 
 func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]any) (*Account, error) {
+	if err := ValidateOpenAIAccountFastSettings(input.Platform, accountExtra); err != nil {
+		return nil, err
+	}
 	if err := ValidateOpenAIAttributionResultMode(input.Platform, input.Type, accountExtra); err != nil {
 		return nil, err
 	}
@@ -581,6 +584,9 @@ func buildAccountForCreate(input *CreateAccountInput, accountExtra map[string]an
 }
 
 func (s *adminServiceImpl) CreateAccount(ctx context.Context, input *CreateAccountInput) (*Account, error) {
+	if err := ValidateOpenAIAccountFastSettings(input.Platform, input.Extra); err != nil {
+		return nil, err
+	}
 	accountExtra, err := normalizeOpenAILongContextBillingExtra(input.Platform, input.Extra)
 	if err != nil {
 		return nil, err
@@ -784,6 +790,11 @@ func (s *adminServiceImpl) UpdateAccount(ctx context.Context, id int64, input *U
 				}
 			}
 		}
+		fastSettingsTarget := &Account{Platform: account.Platform, Extra: normalizedExtra}
+		if err := preserveOpenAIAccountFastSettings(account, fastSettingsTarget, input.Extra); err != nil {
+			return nil, err
+		}
+		normalizedExtra = fastSettingsTarget.Extra
 	}
 	previousProbeIdentity := upstreamBillingProbeIdentity(account)
 	previousOllamaUsageIdentity := ollamaCloudUsageIdentity(account)
@@ -1173,6 +1184,15 @@ func (s *adminServiceImpl) UpdateAccountExtra(ctx context.Context, id int64, upd
 			return err
 		}
 	}
+	if HasOpenAIAccountFastSettings(updates) {
+		account, err := s.accountRepo.GetByID(ctx, id)
+		if err != nil {
+			return err
+		}
+		if err := ValidateOpenAIAccountFastSettingsPatch(account, updates); err != nil {
+			return err
+		}
+	}
 	updates = StripRetiredCodexStateExtra(updates)
 	delete(updates, openAIPinnedInstallationIDKey)
 	delete(updates, openAIInstallationRotateEnabledKey)
@@ -1303,7 +1323,7 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	// 预取所有目标账号，供凭据守卫/代理守卫/混合渠道检查共用，避免多次 DB 查询。
 	var cachedTargets []*Account
 	_, updatingAccessMode := input.Extra[OpenAIAPIKeyModeExtraKey]
-	if HasOpenAIDaybreakSettings(input.Extra) || HasOpenAIAPIKeyAutoAttributionSetting(input.Extra) || HasOpenAIAttributionResultMode(input.Extra) || updatingAccessMode || len(input.Credentials) > 0 || input.OpenAIAuthModeChange || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil {
+	if HasOpenAIAccountFastSettings(input.Extra) || HasOpenAIDaybreakSettings(input.Extra) || HasOpenAIAPIKeyAutoAttributionSetting(input.Extra) || HasOpenAIAttributionResultMode(input.Extra) || updatingAccessMode || len(input.Credentials) > 0 || input.OpenAIAuthModeChange || input.ProxyID != nil || needMixedChannelCheck || openAISettings.any() || input.ProbeEnabled != nil || input.RateMultiplier != nil {
 		loaded, err := s.accountRepo.GetByIDs(ctx, input.AccountIDs)
 		if err != nil {
 			return nil, err
@@ -1314,6 +1334,13 @@ func (s *adminServiceImpl) BulkUpdateAccounts(ctx context.Context, input *BulkUp
 	for _, account := range cachedTargets {
 		if account != nil {
 			targetsByID[account.ID] = account
+		}
+	}
+	if HasOpenAIAccountFastSettings(input.Extra) {
+		for _, id := range input.AccountIDs {
+			if err := ValidateOpenAIAccountFastSettingsPatch(targetsByID[id], input.Extra); err != nil {
+				return nil, err
+			}
 		}
 	}
 	if input.OpenAIAuthModeChange {

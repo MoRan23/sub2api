@@ -1064,6 +1064,20 @@ func (_u *GroupUpdate) SetNillableForceOpenaiFast(v *bool) *GroupUpdate {
 	return _u
 }
 
+// SetForceOpenaiUltrafast sets the "force_openai_ultrafast" field.
+func (_u *GroupUpdate) SetForceOpenaiUltrafast(v bool) *GroupUpdate {
+	_u.mutation.SetForceOpenaiUltrafast(v)
+	return _u
+}
+
+// SetNillableForceOpenaiUltrafast sets the "force_openai_ultrafast" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableForceOpenaiUltrafast(v *bool) *GroupUpdate {
+	if v != nil {
+		_u.SetForceOpenaiUltrafast(*v)
+	}
+	return _u
+}
+
 // SetFreeOpenaiFast sets the "free_openai_fast" field.
 func (_u *GroupUpdate) SetFreeOpenaiFast(v bool) *GroupUpdate {
 	_u.mutation.SetFreeOpenaiFast(v)
@@ -1074,6 +1088,20 @@ func (_u *GroupUpdate) SetFreeOpenaiFast(v bool) *GroupUpdate {
 func (_u *GroupUpdate) SetNillableFreeOpenaiFast(v *bool) *GroupUpdate {
 	if v != nil {
 		_u.SetFreeOpenaiFast(*v)
+	}
+	return _u
+}
+
+// SetFreeOpenaiUltrafast sets the "free_openai_ultrafast" field.
+func (_u *GroupUpdate) SetFreeOpenaiUltrafast(v bool) *GroupUpdate {
+	_u.mutation.SetFreeOpenaiUltrafast(v)
+	return _u
+}
+
+// SetNillableFreeOpenaiUltrafast sets the "free_openai_ultrafast" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableFreeOpenaiUltrafast(v *bool) *GroupUpdate {
+	if v != nil {
+		_u.SetFreeOpenaiUltrafast(*v)
 	}
 	return _u
 }
@@ -1968,8 +1996,14 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.ForceOpenaiFast(); ok {
 		_spec.SetField(group.FieldForceOpenaiFast, field.TypeBool, value)
 	}
+	if value, ok := _u.mutation.ForceOpenaiUltrafast(); ok {
+		_spec.SetField(group.FieldForceOpenaiUltrafast, field.TypeBool, value)
+	}
 	if value, ok := _u.mutation.FreeOpenaiFast(); ok {
 		_spec.SetField(group.FieldFreeOpenaiFast, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.FreeOpenaiUltrafast(); ok {
+		_spec.SetField(group.FieldFreeOpenaiUltrafast, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.OpenaiDaybreakBlueEnabled(); ok {
 		_spec.SetField(group.FieldOpenaiDaybreakBlueEnabled, field.TypeBool, value)
@@ -3371,6 +3405,20 @@ func (_u *GroupUpdateOne) SetNillableForceOpenaiFast(v *bool) *GroupUpdateOne {
 	return _u
 }
 
+// SetForceOpenaiUltrafast sets the "force_openai_ultrafast" field.
+func (_u *GroupUpdateOne) SetForceOpenaiUltrafast(v bool) *GroupUpdateOne {
+	_u.mutation.SetForceOpenaiUltrafast(v)
+	return _u
+}
+
+// SetNillableForceOpenaiUltrafast sets the "force_openai_ultrafast" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableForceOpenaiUltrafast(v *bool) *GroupUpdateOne {
+	if v != nil {
+		_u.SetForceOpenaiUltrafast(*v)
+	}
+	return _u
+}
+
 // SetFreeOpenaiFast sets the "free_openai_fast" field.
 func (_u *GroupUpdateOne) SetFreeOpenaiFast(v bool) *GroupUpdateOne {
 	_u.mutation.SetFreeOpenaiFast(v)
@@ -3381,6 +3429,20 @@ func (_u *GroupUpdateOne) SetFreeOpenaiFast(v bool) *GroupUpdateOne {
 func (_u *GroupUpdateOne) SetNillableFreeOpenaiFast(v *bool) *GroupUpdateOne {
 	if v != nil {
 		_u.SetFreeOpenaiFast(*v)
+	}
+	return _u
+}
+
+// SetFreeOpenaiUltrafast sets the "free_openai_ultrafast" field.
+func (_u *GroupUpdateOne) SetFreeOpenaiUltrafast(v bool) *GroupUpdateOne {
+	_u.mutation.SetFreeOpenaiUltrafast(v)
+	return _u
+}
+
+// SetNillableFreeOpenaiUltrafast sets the "free_openai_ultrafast" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableFreeOpenaiUltrafast(v *bool) *GroupUpdateOne {
+	if v != nil {
+		_u.SetFreeOpenaiUltrafast(*v)
 	}
 	return _u
 }
@@ -4305,8 +4367,14 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	if value, ok := _u.mutation.ForceOpenaiFast(); ok {
 		_spec.SetField(group.FieldForceOpenaiFast, field.TypeBool, value)
 	}
+	if value, ok := _u.mutation.ForceOpenaiUltrafast(); ok {
+		_spec.SetField(group.FieldForceOpenaiUltrafast, field.TypeBool, value)
+	}
 	if value, ok := _u.mutation.FreeOpenaiFast(); ok {
 		_spec.SetField(group.FieldFreeOpenaiFast, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.FreeOpenaiUltrafast(); ok {
+		_spec.SetField(group.FieldFreeOpenaiUltrafast, field.TypeBool, value)
 	}
 	if value, ok := _u.mutation.OpenaiDaybreakBlueEnabled(); ok {
 		_spec.SetField(group.FieldOpenaiDaybreakBlueEnabled, field.TypeBool, value)

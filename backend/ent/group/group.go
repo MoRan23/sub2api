@@ -128,8 +128,12 @@ const (
 	FieldAllowLive = "allow_live"
 	// FieldForceOpenaiFast holds the string denoting the force_openai_fast field in the database.
 	FieldForceOpenaiFast = "force_openai_fast"
+	// FieldForceOpenaiUltrafast holds the string denoting the force_openai_ultrafast field in the database.
+	FieldForceOpenaiUltrafast = "force_openai_ultrafast"
 	// FieldFreeOpenaiFast holds the string denoting the free_openai_fast field in the database.
 	FieldFreeOpenaiFast = "free_openai_fast"
+	// FieldFreeOpenaiUltrafast holds the string denoting the free_openai_ultrafast field in the database.
+	FieldFreeOpenaiUltrafast = "free_openai_ultrafast"
 	// FieldOpenaiDaybreakBlueEnabled holds the string denoting the openai_daybreak_blue_enabled field in the database.
 	FieldOpenaiDaybreakBlueEnabled = "openai_daybreak_blue_enabled"
 	// FieldOpenaiDaybreakRedEnabled holds the string denoting the openai_daybreak_red_enabled field in the database.
@@ -291,7 +295,9 @@ var Columns = []string{
 	FieldAllowMessagesDispatch,
 	FieldAllowLive,
 	FieldForceOpenaiFast,
+	FieldForceOpenaiUltrafast,
 	FieldFreeOpenaiFast,
+	FieldFreeOpenaiUltrafast,
 	FieldOpenaiDaybreakBlueEnabled,
 	FieldOpenaiDaybreakRedEnabled,
 	FieldRequireOauthOnly,
@@ -424,8 +430,12 @@ var (
 	DefaultAllowLive bool
 	// DefaultForceOpenaiFast holds the default value on creation for the "force_openai_fast" field.
 	DefaultForceOpenaiFast bool
+	// DefaultForceOpenaiUltrafast holds the default value on creation for the "force_openai_ultrafast" field.
+	DefaultForceOpenaiUltrafast bool
 	// DefaultFreeOpenaiFast holds the default value on creation for the "free_openai_fast" field.
 	DefaultFreeOpenaiFast bool
+	// DefaultFreeOpenaiUltrafast holds the default value on creation for the "free_openai_ultrafast" field.
+	DefaultFreeOpenaiUltrafast bool
 	// DefaultOpenaiDaybreakBlueEnabled holds the default value on creation for the "openai_daybreak_blue_enabled" field.
 	DefaultOpenaiDaybreakBlueEnabled bool
 	// DefaultOpenaiDaybreakRedEnabled holds the default value on creation for the "openai_daybreak_red_enabled" field.
@@ -727,9 +737,19 @@ func ByForceOpenaiFast(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldForceOpenaiFast, opts...).ToFunc()
 }
 
+// ByForceOpenaiUltrafast orders the results by the force_openai_ultrafast field.
+func ByForceOpenaiUltrafast(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldForceOpenaiUltrafast, opts...).ToFunc()
+}
+
 // ByFreeOpenaiFast orders the results by the free_openai_fast field.
 func ByFreeOpenaiFast(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldFreeOpenaiFast, opts...).ToFunc()
+}
+
+// ByFreeOpenaiUltrafast orders the results by the free_openai_ultrafast field.
+func ByFreeOpenaiUltrafast(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldFreeOpenaiUltrafast, opts...).ToFunc()
 }
 
 // ByOpenaiDaybreakBlueEnabled orders the results by the openai_daybreak_blue_enabled field.

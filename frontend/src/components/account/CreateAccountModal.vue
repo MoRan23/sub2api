@@ -3504,6 +3504,13 @@
         </div>
       </div>
 
+      <OpenAIServiceTierSettings
+        v-if="form.platform === 'openai'"
+        v-model="openAIServiceTierSettings"
+        test-prefix="create-account"
+        @change="markServiceTierTouched"
+      />
+
       <!-- OpenAI API 长上下文计费开关 -->
       <div
         v-if="form.platform === 'openai' && !hideAccountLongContextBilling && (accountCategory === 'oauth-based' || accountCategory === 'apikey')"
@@ -4307,6 +4314,8 @@ import { applyExplicitCacheUpstreamCredentials, isOfficialGeminiBaseUrl } from '
 import OpenCodeGoProtocolRulesEditor from '@/components/account/OpenCodeGoProtocolRulesEditor.vue'
 import HeaderOverrideEditor from '@/components/account/HeaderOverrideEditor.vue'
 import { allSelectedGroupsEnableLongContextPricing } from '@/components/account/longContextBilling'
+import OpenAIServiceTierSettings from '@/components/account/OpenAIServiceTierSettings.vue'
+import { OPENAI_SERVICE_TIER_KEYS, readOpenAIServiceTierSettings, type OpenAIServiceTierKey } from '@/components/account/openaiServiceTierSettings'
 import {
   applyAntigravityProjectID,
   applyHeaderOverride,
@@ -4852,6 +4861,15 @@ const isOpenAIAPIKeyDaybreak = computed(() =>
 const openaiFlattenNamespacesEnabled = ref(false)
 const openAILongContextBillingEnabled = ref(false)
 const openAILongContextBillingTouched = ref(false)
+const openAIServiceTierSettings = ref(readOpenAIServiceTierSettings())
+const serviceTierTouched = new Set<OpenAIServiceTierKey>()
+function markServiceTierTouched(key: OpenAIServiceTierKey) {
+  serviceTierTouched.add(key)
+  if (key.startsWith('force_')) {
+    serviceTierTouched.add('force_openai_fast')
+    serviceTierTouched.add('force_openai_ultrafast')
+  }
+}
 // installation_id 固定（仅 OpenAI OAuth），服务端在创建时生成 UUID。
 const openAIInstallationPinEnabled = ref(true)
 const codexFingerprintNormalizationEnabled = ref(true)
@@ -5848,6 +5866,8 @@ const resetForm = () => {
   openaiFlattenNamespacesEnabled.value = false
   openAILongContextBillingEnabled.value = false
   openAILongContextBillingTouched.value = false
+  openAIServiceTierSettings.value = readOpenAIServiceTierSettings()
+  serviceTierTouched.clear()
   openAIInstallationPinEnabled.value = true
   openAICompactMode.value = 'auto'
   openAIResponsesMode.value = 'auto'
@@ -5955,6 +5975,7 @@ const buildOpenAIExtra = (base?: Record<string, unknown>): Record<string, unknow
     delete extra.openai_responses_flatten_namespaces
   }
   extra.openai_long_context_billing_enabled = openAILongContextBillingEnabled.value
+  Object.assign(extra, openAIServiceTierSettings.value)
 
   if (accountCategory.value === 'oauth-based' && codexCLIOnlyEnabled.value) {
     extra.codex_cli_only = true
@@ -6011,6 +6032,9 @@ const buildOpenAICodexImportExtra = (): Record<string, unknown> | undefined => {
   }
   if (!openAILongContextBillingTouched.value) {
     delete extra.openai_long_context_billing_enabled
+  }
+  for (const key of OPENAI_SERVICE_TIER_KEYS) {
+    if (!serviceTierTouched.has(key)) delete extra[key]
   }
   return Object.keys(extra).length > 0 ? extra : undefined
 }

@@ -132,6 +132,17 @@ export default {
     expandUnthreaded: 'Expand unthreaded observations',
     collapseUnthreaded: 'Collapse unthreaded observations',
     request: {
+      serviceTierPolicy: {
+        title: 'Fast / Ultrafast policy',
+        description: 'Compares the policy decision with the service_tier sent upstream.',
+        source: 'Force source', requested: 'Client tier', forced: 'Forced tier', effective: 'Outbound tier',
+        capability: 'Capability check', absent: 'Not sent', none: 'None',
+        sources: { account: 'Account', group: 'Group', none: 'None' },
+        capabilities: {
+          supported: 'Declared by the catalog', unsupported: 'Not declared by the catalog',
+          unavailable: 'Catalog unavailable; original request retained', not_required: 'Not required', guardian: 'Guardian removed the tier'
+        }
+      },
       daybreak: {
         title: 'Daybreak outbound field',
         description: 'Read from the final body of this outbound attempt; this does not confirm upstream receipt or activation of Daybreak.',

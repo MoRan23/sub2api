@@ -85,6 +85,7 @@ type codexEnginePricingSnapshot struct {
 	BaseRate                 float64                           `json:"base_rate"`
 	SearchPrice              float64                           `json:"search_price,omitempty"`
 	FreeFast                 bool                              `json:"free_fast"`
+	FreeUltrafast            bool                              `json:"free_ultrafast"`
 	LongContext              bool                              `json:"long_context"`
 	GroupLongContextPricing  bool                              `json:"group_long_context_pricing,omitempty"`
 	ImageCountBilling        bool                              `json:"image_count_billing,omitempty"`
@@ -198,8 +199,8 @@ func (s *OpenAIGatewayService) CaptureCodexEngineBillingSnapshot(ctx context.Con
 			f.RequestPayloadHash = strings.ToLower(digest)
 		}
 	}
+	f.FreeFast, f.FreeUltrafast = effectiveOpenAIFreeServiceTiers(key, a)
 	if key.Group != nil {
-		f.FreeFast = key.Group.FreeOpenAIFast && groupSupportsOpenAIFast(key.Group.Platform)
 		f.GroupLongContextPricing = key.Group.LongContextPricingEnabled
 		f.ImageCountBilling = key.Group.ImageCountBilling
 	}
@@ -478,7 +479,7 @@ func (s *OpenAIGatewayService) BuildCodexEngineBillingEvent(ctx context.Context,
 		if err != nil {
 			return nil, nil, err
 		}
-		if f.FreeFast && (normalizeBillingServiceTier(tier) == "priority" || normalizeBillingServiceTier(tier) == "fast") {
+		if openAIServiceTierBillsAtStandard(f.FreeFast, f.FreeUltrafast, tier) {
 			input.ServiceTier = ""
 			standard, e := calculate(input)
 			if e != nil {

@@ -40,6 +40,7 @@
       <OpenAIEgressLocationDetails v-if="observation.egress_location" :location="observation.egress_location" />
       <OpenAIResponseEvidenceDetails v-if="observation.response_evidence" :evidence="observation.response_evidence" />
       <CodexGuardianRequestDetails :observation="observation.guardian_request" />
+      <ServiceTierPolicyDetails :observation="observation.service_tier_policy" />
       <section :aria-label="t(`${daybreakPrefix}.title`)" class="min-w-0 rounded-lg border border-gray-200 p-3 dark:border-dark-700" data-testid="daybreak-details">
         <h3 class="font-semibold text-gray-800 dark:text-gray-200">{{ t(`${daybreakPrefix}.title`) }}</h3>
         <p class="mt-1 text-gray-500 dark:text-gray-400">{{ t(`${daybreakPrefix}.description`) }}</p>
@@ -210,6 +211,7 @@ import SearchLocationDetails from './SearchLocationDetails.vue'
 import CodexOutboundMetadataDetails from './CodexOutboundMetadataDetails.vue'
 import OpenAIEgressLocationDetails from './OpenAIEgressLocationDetails.vue'
 import CodexGuardianRequestDetails from './CodexGuardianRequestDetails.vue'
+import ServiceTierPolicyDetails from './ServiceTierPolicyDetails.vue'
 
 const props = defineProps<{ observation: FingerprintObservationEntry }>()
 const { t, te, locale } = useI18n()

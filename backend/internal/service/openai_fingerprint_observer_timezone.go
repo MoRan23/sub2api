@@ -240,6 +240,10 @@ func cloneFingerprintObservationEntry(entry FingerprintObservationEntry) Fingerp
 		copy := *entry.GuardianRequest
 		entry.GuardianRequest = &copy
 	}
+	if entry.ServiceTierPolicy != nil {
+		copy := *entry.ServiceTierPolicy
+		entry.ServiceTierPolicy = &copy
+	}
 	if entry.RuntimeTimingMetrics != nil {
 		copy := *entry.RuntimeTimingMetrics
 		if copy.Enabled != nil {

@@ -38,6 +38,34 @@ async function openDetails() {
 afterEach(cleanup)
 
 describe('FingerprintObservationRequestDetails', () => {
+  it('shows the forced tier separately from the actual outbound tier', async () => {
+    renderDetails({ service_tier_policy: {
+      source: 'account', requested_tier: 'flex', forced_tier: 'ultrafast', effective_tier: 'priority', capability: 'supported',
+    } })
+    expect(screen.queryByTestId('service-tier-policy-details')).toBeNull()
+    await openDetails()
+    expect(screen.getByTestId('tier-policy-requested').textContent).toBe('flex')
+    expect(screen.getByTestId('tier-policy-forced').textContent).toBe('ultrafast')
+    expect(screen.getByTestId('tier-policy-effective').textContent).toBe('priority')
+    expect(screen.getByTestId('tier-policy-source').textContent).toBe('Account')
+  })
+
+  it('keeps skipped Ultrafast and Guardian policy evidence distinct', async () => {
+    const { rerender } = renderDetails({ service_tier_policy: {
+      source: 'group', requested_tier: 'flex', forced_tier: 'ultrafast', effective_tier: 'flex', capability: 'unsupported',
+    } })
+    await openDetails()
+    expect(screen.getByTestId('tier-policy-capability').textContent).toBe('Not declared by the catalog')
+    expect(screen.getByTestId('tier-policy-effective').textContent).toBe('flex')
+    await rerender({ observation: { ...legacyEntry, service_tier_policy: {
+      source: 'none', requested_tier: 'ultrafast', capability: 'guardian',
+    } } })
+    expect(screen.getByTestId('tier-policy-capability').textContent).toBe('Guardian removed the tier')
+    expect(screen.getByTestId('tier-policy-effective').textContent).toBe('Not sent')
+    await rerender({ observation: { ...legacyEntry } })
+    expect(screen.queryByTestId('service-tier-policy-details')).toBeNull()
+  })
+
   it('only renders Guardian observations when details are expanded', async () => {
     renderDetails({ guardian_request: {
       status: 'valid', kind: 'reviewer', source: 'ws_handshake', applied: true,

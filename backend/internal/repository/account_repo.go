@@ -127,6 +127,9 @@ func createAccountRecord(ctx context.Context, client *dbent.Client, account *ser
 	if account == nil {
 		return service.ErrAccountNilInput
 	}
+	if err := service.ValidateOpenAIAccountFastSettings(account.Platform, account.Extra); err != nil {
+		return err
+	}
 	if err := service.ValidateOpenAIAPIKeyAutoAttribution(account.Platform, account.Type, account.Extra); err != nil {
 		return err
 	}
@@ -3031,6 +3034,15 @@ func (r *accountRepository) UpdateExtra(ctx context.Context, id int64, updates m
 			return err
 		}
 	}
+	if service.HasOpenAIAccountFastSettings(updates) {
+		current, err := lockAccountConfiguration(ctx, client, id)
+		if err != nil {
+			return err
+		}
+		if err := service.ValidateOpenAIAccountFastSettingsPatch(current, updates); err != nil {
+			return err
+		}
+	}
 	extraExpression := "COALESCE(extra, '{}'::jsonb) || $1::jsonb"
 	if clearProbeSnapshot {
 		extraExpression = "(" + extraExpression + ") - 'upstream_billing_probe'"
@@ -3803,6 +3815,19 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 			}
 		}
 	}
+	if service.HasOpenAIAccountFastSettings(updates.Extra) {
+		orderedIDs := uniquePositiveInt64s(ids)
+		sort.Slice(orderedIDs, func(i, j int) bool { return orderedIDs[i] < orderedIDs[j] })
+		for _, id := range orderedIDs {
+			current, err := lockAccountConfiguration(ctx, clientFromContext(ctx, r.client), id)
+			if err != nil {
+				return 0, err
+			}
+			if err := service.ValidateOpenAIAccountFastSettingsPatch(current, updates.Extra); err != nil {
+				return 0, err
+			}
+		}
+	}
 	_, authModeExplicit := updates.Credentials["auth_mode"]
 	_, legacyAuthModeExplicit := updates.Credentials["openai_auth_mode"]
 	if (authModeExplicit || legacyAuthModeExplicit) && r.client != nil {
@@ -3865,7 +3890,7 @@ func (r *accountRepository) BulkUpdate(ctx context.Context, ids []int64, updates
 		}
 	}
 	if rows > 0 && contextTx == nil {
-		shouldSync := service.HasOpenAIDaybreakSettings(updates.Extra) || service.HasOpenAIAPIKeyAutoAttributionSetting(updates.Extra)
+		shouldSync := service.HasOpenAIAccountFastSettings(updates.Extra) || service.HasOpenAIDaybreakSettings(updates.Extra) || service.HasOpenAIAPIKeyAutoAttributionSetting(updates.Extra)
 		if updates.Status != nil && (*updates.Status == service.StatusError || *updates.Status == service.StatusDisabled) {
 			shouldSync = true
 		}

@@ -60,7 +60,7 @@ func accountConfigurationExtraPatch(ctx context.Context, ids []int64, updates ma
 	delete(filtered, codexEngineSourceRevisionKey)
 	delete(filtered, "openai_pinned_installation_id")
 	delete(filtered, "openai_installation_rotate_enabled")
-	for _, key := range []string{"openai_installation_pin_enabled", "enable_tls_fingerprint", "tls_fingerprint_profile_id", service.OpenAIDaybreakBlueEnabledKey, service.OpenAIDaybreakRedEnabledKey, service.OpenAIAPIKeyAutoAttributionEnabledExtraKey, service.OpenAIAttributionReplaceWhitelistEnabledExtraKey} {
+	for _, key := range []string{"openai_installation_pin_enabled", "enable_tls_fingerprint", "tls_fingerprint_profile_id", service.OpenAIDaybreakBlueEnabledKey, service.OpenAIDaybreakRedEnabledKey, service.OpenAIAPIKeyAutoAttributionEnabledExtraKey, service.OpenAIAttributionReplaceWhitelistEnabledExtraKey, service.ForceOpenAIFastExtraKey, service.ForceOpenAIUltrafastExtraKey, service.FreeOpenAIFastExtraKey, service.FreeOpenAIUltrafastExtraKey} {
 		delete(filtered, key)
 		if len(ids) == 0 {
 			continue
@@ -102,6 +102,7 @@ func afterAccountConfigurationCommit(ctx context.Context, notify func()) {
 }
 
 func guardedAccountExtraExpression(expression string, credentialExpressions ...string) string {
+	expression = "CASE WHEN platform = 'openai' THEN (" + expression + ") ELSE (" + expression + ") - 'force_openai_fast' - 'force_openai_ultrafast' - 'free_openai_fast' - 'free_openai_ultrafast' END"
 	expression = "CASE WHEN platform = 'openai' AND type IN ('oauth','apikey') THEN (" + expression + ") ELSE (" + expression + ") - 'openai_attribution_replace_whitelist_enabled' END"
 	expression = "CASE WHEN platform = 'openai' AND type = 'apikey' THEN (" + expression + ") ELSE (" + expression + ") - 'openai_api_key_auto_attribution_enabled' END"
 	credentials := "credentials"

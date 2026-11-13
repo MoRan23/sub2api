@@ -1598,41 +1598,13 @@
           v-model:red="createForm.openai_daybreak_red_enabled"
           data-testid="create-daybreak-settings"
         />
-        <!-- OpenAI Fast 开关（OpenAI 与 Composite 平台） -->
-        <div
+        <OpenAIServiceTierSettings
           v-if="supportsGroupOpenAIFast(createForm.platform)"
-          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4"
-        >
-          <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-            {{ t("admin.groups.openaiFast.title") }}
-          </h4>
-          <div class="flex items-center justify-between gap-4">
-            <label class="text-sm text-gray-600 dark:text-gray-400">
-              {{ t("admin.groups.openaiFast.force") }}
-            </label>
-            <Toggle
-              data-testid="create-force-openai-fast"
-              :aria-label="t('admin.groups.openaiFast.force')"
-              v-model="createForm.force_openai_fast"
-            />
-          </div>
-          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            {{ t("admin.groups.openaiFast.hint") }}
-          </p>
-          <div class="flex items-center justify-between gap-4 mt-4">
-            <label class="text-sm text-gray-600 dark:text-gray-400">
-              {{ t("admin.groups.openaiFast.free") }}
-            </label>
-            <Toggle
-              data-testid="create-free-openai-fast"
-              :aria-label="t('admin.groups.openaiFast.free')"
-              v-model="createForm.free_openai_fast"
-            />
-          </div>
-          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            {{ t("admin.groups.openaiFast.freeHint") }}
-          </p>
-        </div>
+          :model-value="createForm"
+          scope="group"
+          test-prefix="create"
+          @update:model-value="Object.assign(createForm, $event)"
+        />
 
         <!-- Codex Live 开关（OpenAI 与 Composite 平台） -->
         <div
@@ -3277,41 +3249,13 @@
           v-model:red="editForm.openai_daybreak_red_enabled"
           data-testid="edit-daybreak-settings"
         />
-        <!-- OpenAI Fast 开关（OpenAI 与 Composite 平台） -->
-        <div
+        <OpenAIServiceTierSettings
           v-if="supportsGroupOpenAIFast(editForm.platform)"
-          class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4"
-        >
-          <h4 class="text-sm font-medium text-gray-700 dark:text-gray-300 mb-3">
-            {{ t("admin.groups.openaiFast.title") }}
-          </h4>
-          <div class="flex items-center justify-between gap-4">
-            <label class="text-sm text-gray-600 dark:text-gray-400">
-              {{ t("admin.groups.openaiFast.force") }}
-            </label>
-            <Toggle
-              data-testid="edit-force-openai-fast"
-              :aria-label="t('admin.groups.openaiFast.force')"
-              v-model="editForm.force_openai_fast"
-            />
-          </div>
-          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            {{ t("admin.groups.openaiFast.hint") }}
-          </p>
-          <div class="flex items-center justify-between gap-4 mt-4">
-            <label class="text-sm text-gray-600 dark:text-gray-400">
-              {{ t("admin.groups.openaiFast.free") }}
-            </label>
-            <Toggle
-              data-testid="edit-free-openai-fast"
-              :aria-label="t('admin.groups.openaiFast.free')"
-              v-model="editForm.free_openai_fast"
-            />
-          </div>
-          <p class="text-xs text-gray-500 dark:text-gray-400 mt-1">
-            {{ t("admin.groups.openaiFast.freeHint") }}
-          </p>
-        </div>
+          :model-value="editForm"
+          scope="group"
+          test-prefix="edit"
+          @update:model-value="Object.assign(editForm, $event)"
+        />
 
         <!-- Codex Live 开关（OpenAI 与 Composite 平台） -->
         <div
@@ -4374,6 +4318,7 @@ import GroupI18nField from "@/components/admin/group/GroupI18nField.vue";
 import GroupRateMultipliersModal from "@/components/admin/group/GroupRateMultipliersModal.vue";
 import GroupRPMOverridesModal from "@/components/admin/group/GroupRPMOverridesModal.vue";
 import GroupDaybreakSettings from "@/components/admin/group/GroupDaybreakSettings.vue";
+import OpenAIServiceTierSettings from "@/components/account/OpenAIServiceTierSettings.vue";
 import GroupCapacityBadge from "@/components/common/GroupCapacityBadge.vue";
 import ReasoningEffortPolicyFields from "@/components/admin/group/ReasoningEffortPolicyFields.vue";
 import CodexManifestAccountsField from "@/components/admin/group/CodexManifestAccountsField.vue";
@@ -5029,6 +4974,8 @@ const createForm = reactive({
   long_context_pricing_enabled: true,
   force_openai_fast: false,
   free_openai_fast: false,
+  force_openai_ultrafast: false,
+  free_openai_ultrafast: false,
   openai_daybreak_blue_enabled: false,
   openai_daybreak_red_enabled: false,
   model_pricing: [] as PricingFormEntry[],
@@ -5399,6 +5346,8 @@ const editForm = reactive({
   long_context_pricing_enabled: true,
   force_openai_fast: false,
   free_openai_fast: false,
+  force_openai_ultrafast: false,
+  free_openai_ultrafast: false,
   openai_daybreak_blue_enabled: false,
   openai_daybreak_red_enabled: false,
   model_pricing: [] as PricingFormEntry[],
@@ -5895,6 +5844,8 @@ const closeCreateModal = () => {
   createForm.video_model_prices = createVideoModelPricesForm();
   createForm.force_openai_fast = false;
   createForm.free_openai_fast = false;
+  createForm.force_openai_ultrafast = false;
+  createForm.free_openai_ultrafast = false;
   createForm.openai_daybreak_blue_enabled = false;
   createForm.openai_daybreak_red_enabled = false;
   createForm.web_search_price_per_call = null;
@@ -6029,6 +5980,8 @@ const handleCreateGroup = async () => {
         createForm.platform,
         createForm.free_openai_fast,
       ),
+      force_openai_ultrafast: normalizeGroupOpenAIFast(createForm.platform, createForm.force_openai_ultrafast),
+      free_openai_ultrafast: normalizeGroupOpenAIFast(createForm.platform, createForm.free_openai_ultrafast),
       daily_limit_usd: normalizeOptionalLimit(
         createForm.daily_limit_usd as number | string | null,
       ),
@@ -6174,6 +6127,8 @@ const handleEdit = async (group: AdminGroup) => {
     group.long_context_pricing_enabled ?? true;
   editForm.force_openai_fast = group.force_openai_fast ?? false;
   editForm.free_openai_fast = group.free_openai_fast ?? false;
+  editForm.force_openai_ultrafast = group.force_openai_ultrafast ?? false;
+  editForm.free_openai_ultrafast = group.free_openai_ultrafast ?? false;
   editForm.openai_daybreak_blue_enabled = group.openai_daybreak_blue_enabled ?? false;
   editForm.openai_daybreak_red_enabled = editForm.openai_daybreak_blue_enabled && (group.openai_daybreak_red_enabled ?? false);
   editForm.model_pricing = groupPricingFromAPI(group.model_pricing);
@@ -6311,6 +6266,8 @@ const closeEditModal = () => {
   editForm.long_context_pricing_enabled = true;
   editForm.force_openai_fast = false;
   editForm.free_openai_fast = false;
+  editForm.force_openai_ultrafast = false;
+  editForm.free_openai_ultrafast = false;
   editForm.openai_daybreak_blue_enabled = false;
   editForm.openai_daybreak_red_enabled = false;
   editForm.model_pricing = [];
@@ -6380,6 +6337,8 @@ const handleUpdateGroup = async () => {
         editForm.platform,
         editForm.free_openai_fast,
       ),
+      force_openai_ultrafast: normalizeGroupOpenAIFast(editForm.platform, editForm.force_openai_ultrafast),
+      free_openai_ultrafast: normalizeGroupOpenAIFast(editForm.platform, editForm.free_openai_ultrafast),
       daily_limit_usd: normalizeOptionalLimit(
         editForm.daily_limit_usd as number | string | null,
       ),

@@ -766,6 +766,20 @@ func (_c *GroupCreate) SetNillableForceOpenaiFast(v *bool) *GroupCreate {
 	return _c
 }
 
+// SetForceOpenaiUltrafast sets the "force_openai_ultrafast" field.
+func (_c *GroupCreate) SetForceOpenaiUltrafast(v bool) *GroupCreate {
+	_c.mutation.SetForceOpenaiUltrafast(v)
+	return _c
+}
+
+// SetNillableForceOpenaiUltrafast sets the "force_openai_ultrafast" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableForceOpenaiUltrafast(v *bool) *GroupCreate {
+	if v != nil {
+		_c.SetForceOpenaiUltrafast(*v)
+	}
+	return _c
+}
+
 // SetFreeOpenaiFast sets the "free_openai_fast" field.
 func (_c *GroupCreate) SetFreeOpenaiFast(v bool) *GroupCreate {
 	_c.mutation.SetFreeOpenaiFast(v)
@@ -776,6 +790,20 @@ func (_c *GroupCreate) SetFreeOpenaiFast(v bool) *GroupCreate {
 func (_c *GroupCreate) SetNillableFreeOpenaiFast(v *bool) *GroupCreate {
 	if v != nil {
 		_c.SetFreeOpenaiFast(*v)
+	}
+	return _c
+}
+
+// SetFreeOpenaiUltrafast sets the "free_openai_ultrafast" field.
+func (_c *GroupCreate) SetFreeOpenaiUltrafast(v bool) *GroupCreate {
+	_c.mutation.SetFreeOpenaiUltrafast(v)
+	return _c
+}
+
+// SetNillableFreeOpenaiUltrafast sets the "free_openai_ultrafast" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableFreeOpenaiUltrafast(v *bool) *GroupCreate {
+	if v != nil {
+		_c.SetFreeOpenaiUltrafast(*v)
 	}
 	return _c
 }
@@ -1243,9 +1271,17 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultForceOpenaiFast
 		_c.mutation.SetForceOpenaiFast(v)
 	}
+	if _, ok := _c.mutation.ForceOpenaiUltrafast(); !ok {
+		v := group.DefaultForceOpenaiUltrafast
+		_c.mutation.SetForceOpenaiUltrafast(v)
+	}
 	if _, ok := _c.mutation.FreeOpenaiFast(); !ok {
 		v := group.DefaultFreeOpenaiFast
 		_c.mutation.SetFreeOpenaiFast(v)
+	}
+	if _, ok := _c.mutation.FreeOpenaiUltrafast(); !ok {
+		v := group.DefaultFreeOpenaiUltrafast
+		_c.mutation.SetFreeOpenaiUltrafast(v)
 	}
 	if _, ok := _c.mutation.OpenaiDaybreakBlueEnabled(); !ok {
 		v := group.DefaultOpenaiDaybreakBlueEnabled
@@ -1466,8 +1502,14 @@ func (_c *GroupCreate) check() error {
 	if _, ok := _c.mutation.ForceOpenaiFast(); !ok {
 		return &ValidationError{Name: "force_openai_fast", err: errors.New(`ent: missing required field "Group.force_openai_fast"`)}
 	}
+	if _, ok := _c.mutation.ForceOpenaiUltrafast(); !ok {
+		return &ValidationError{Name: "force_openai_ultrafast", err: errors.New(`ent: missing required field "Group.force_openai_ultrafast"`)}
+	}
 	if _, ok := _c.mutation.FreeOpenaiFast(); !ok {
 		return &ValidationError{Name: "free_openai_fast", err: errors.New(`ent: missing required field "Group.free_openai_fast"`)}
+	}
+	if _, ok := _c.mutation.FreeOpenaiUltrafast(); !ok {
+		return &ValidationError{Name: "free_openai_ultrafast", err: errors.New(`ent: missing required field "Group.free_openai_ultrafast"`)}
 	}
 	if _, ok := _c.mutation.OpenaiDaybreakBlueEnabled(); !ok {
 		return &ValidationError{Name: "openai_daybreak_blue_enabled", err: errors.New(`ent: missing required field "Group.openai_daybreak_blue_enabled"`)}
@@ -1780,9 +1822,17 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 		_spec.SetField(group.FieldForceOpenaiFast, field.TypeBool, value)
 		_node.ForceOpenaiFast = value
 	}
+	if value, ok := _c.mutation.ForceOpenaiUltrafast(); ok {
+		_spec.SetField(group.FieldForceOpenaiUltrafast, field.TypeBool, value)
+		_node.ForceOpenaiUltrafast = value
+	}
 	if value, ok := _c.mutation.FreeOpenaiFast(); ok {
 		_spec.SetField(group.FieldFreeOpenaiFast, field.TypeBool, value)
 		_node.FreeOpenaiFast = value
+	}
+	if value, ok := _c.mutation.FreeOpenaiUltrafast(); ok {
+		_spec.SetField(group.FieldFreeOpenaiUltrafast, field.TypeBool, value)
+		_node.FreeOpenaiUltrafast = value
 	}
 	if value, ok := _c.mutation.OpenaiDaybreakBlueEnabled(); ok {
 		_spec.SetField(group.FieldOpenaiDaybreakBlueEnabled, field.TypeBool, value)
@@ -2930,6 +2980,18 @@ func (u *GroupUpsert) UpdateForceOpenaiFast() *GroupUpsert {
 	return u
 }
 
+// SetForceOpenaiUltrafast sets the "force_openai_ultrafast" field.
+func (u *GroupUpsert) SetForceOpenaiUltrafast(v bool) *GroupUpsert {
+	u.Set(group.FieldForceOpenaiUltrafast, v)
+	return u
+}
+
+// UpdateForceOpenaiUltrafast sets the "force_openai_ultrafast" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateForceOpenaiUltrafast() *GroupUpsert {
+	u.SetExcluded(group.FieldForceOpenaiUltrafast)
+	return u
+}
+
 // SetFreeOpenaiFast sets the "free_openai_fast" field.
 func (u *GroupUpsert) SetFreeOpenaiFast(v bool) *GroupUpsert {
 	u.Set(group.FieldFreeOpenaiFast, v)
@@ -2939,6 +3001,18 @@ func (u *GroupUpsert) SetFreeOpenaiFast(v bool) *GroupUpsert {
 // UpdateFreeOpenaiFast sets the "free_openai_fast" field to the value that was provided on create.
 func (u *GroupUpsert) UpdateFreeOpenaiFast() *GroupUpsert {
 	u.SetExcluded(group.FieldFreeOpenaiFast)
+	return u
+}
+
+// SetFreeOpenaiUltrafast sets the "free_openai_ultrafast" field.
+func (u *GroupUpsert) SetFreeOpenaiUltrafast(v bool) *GroupUpsert {
+	u.Set(group.FieldFreeOpenaiUltrafast, v)
+	return u
+}
+
+// UpdateFreeOpenaiUltrafast sets the "free_openai_ultrafast" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateFreeOpenaiUltrafast() *GroupUpsert {
+	u.SetExcluded(group.FieldFreeOpenaiUltrafast)
 	return u
 }
 
@@ -4273,6 +4347,20 @@ func (u *GroupUpsertOne) UpdateForceOpenaiFast() *GroupUpsertOne {
 	})
 }
 
+// SetForceOpenaiUltrafast sets the "force_openai_ultrafast" field.
+func (u *GroupUpsertOne) SetForceOpenaiUltrafast(v bool) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetForceOpenaiUltrafast(v)
+	})
+}
+
+// UpdateForceOpenaiUltrafast sets the "force_openai_ultrafast" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateForceOpenaiUltrafast() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateForceOpenaiUltrafast()
+	})
+}
+
 // SetFreeOpenaiFast sets the "free_openai_fast" field.
 func (u *GroupUpsertOne) SetFreeOpenaiFast(v bool) *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
@@ -4284,6 +4372,20 @@ func (u *GroupUpsertOne) SetFreeOpenaiFast(v bool) *GroupUpsertOne {
 func (u *GroupUpsertOne) UpdateFreeOpenaiFast() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateFreeOpenaiFast()
+	})
+}
+
+// SetFreeOpenaiUltrafast sets the "free_openai_ultrafast" field.
+func (u *GroupUpsertOne) SetFreeOpenaiUltrafast(v bool) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetFreeOpenaiUltrafast(v)
+	})
+}
+
+// UpdateFreeOpenaiUltrafast sets the "free_openai_ultrafast" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateFreeOpenaiUltrafast() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateFreeOpenaiUltrafast()
 	})
 }
 
@@ -5817,6 +5919,20 @@ func (u *GroupUpsertBulk) UpdateForceOpenaiFast() *GroupUpsertBulk {
 	})
 }
 
+// SetForceOpenaiUltrafast sets the "force_openai_ultrafast" field.
+func (u *GroupUpsertBulk) SetForceOpenaiUltrafast(v bool) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetForceOpenaiUltrafast(v)
+	})
+}
+
+// UpdateForceOpenaiUltrafast sets the "force_openai_ultrafast" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateForceOpenaiUltrafast() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateForceOpenaiUltrafast()
+	})
+}
+
 // SetFreeOpenaiFast sets the "free_openai_fast" field.
 func (u *GroupUpsertBulk) SetFreeOpenaiFast(v bool) *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
@@ -5828,6 +5944,20 @@ func (u *GroupUpsertBulk) SetFreeOpenaiFast(v bool) *GroupUpsertBulk {
 func (u *GroupUpsertBulk) UpdateFreeOpenaiFast() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.UpdateFreeOpenaiFast()
+	})
+}
+
+// SetFreeOpenaiUltrafast sets the "free_openai_ultrafast" field.
+func (u *GroupUpsertBulk) SetFreeOpenaiUltrafast(v bool) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetFreeOpenaiUltrafast(v)
+	})
+}
+
+// UpdateFreeOpenaiUltrafast sets the "free_openai_ultrafast" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateFreeOpenaiUltrafast() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateFreeOpenaiUltrafast()
 	})
 }
 

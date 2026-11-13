@@ -67,6 +67,10 @@ func TestMigrationsRunner_IsIdempotent_AndSchemaIsUpToDate(t *testing.T) {
 	requireColumn(t, tx, "groups", "allow_live", "boolean", 0, false)
 	requireColumn(t, tx, "groups", "force_openai_fast", "boolean", 0, false)
 	requireColumn(t, tx, "groups", "free_openai_fast", "boolean", 0, false)
+	requireColumn(t, tx, "groups", "force_openai_ultrafast", "boolean", 0, false)
+	requireColumn(t, tx, "groups", "free_openai_ultrafast", "boolean", 0, false)
+	requireColumnDefaultContains(t, tx, "groups", "force_openai_ultrafast", "false")
+	requireColumnDefaultContains(t, tx, "groups", "free_openai_ultrafast", "false")
 
 	// api_keys: key length should be 128
 	requireColumn(t, tx, "api_keys", "key", "character varying", 128, false)

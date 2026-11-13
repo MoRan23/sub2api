@@ -107,6 +107,7 @@ type FingerprintObservationEntry struct {
 	ResponseEvidence             *CodexModelEvidence            `json:"response_evidence,omitempty"`
 	RuntimeTimingMetrics         *FingerprintTimingMetrics      `json:"runtime_timing_metrics,omitempty"`
 	GuardianRequest              *FingerprintGuardianRequest    `json:"guardian_request,omitempty"`
+	ServiceTierPolicy            *FingerprintServiceTierPolicy  `json:"service_tier_policy,omitempty"`
 	Daybreak                     *OpenAIDaybreakObservation     `json:"daybreak,omitempty"`
 
 	GuardianClassifierSourceThreadID string            `json:"guardian_classifier_source_thread_id,omitempty"`
@@ -660,6 +661,11 @@ func (s *OpenAIGatewayService) recordFingerprintObservation(c *gin.Context, acco
 // schema path that carries server-owned identity in the body but not aliases
 // in the wire header set.
 func (s *OpenAIGatewayService) recordFingerprintObservationWithBody(c *gin.Context, account *Account, pin installationIDResolution, outbound http.Header, body []byte, daybreakDecision ...string) {
+	s.recordFingerprintObservationWithBodyAndTierPolicy(c, account, pin, outbound, body,
+		fingerprintServiceTierPolicyFromContext(c, account, len(body) > 0), daybreakDecision...)
+}
+
+func (s *OpenAIGatewayService) recordFingerprintObservationWithBodyAndTierPolicy(c *gin.Context, account *Account, pin installationIDResolution, outbound http.Header, body []byte, tierPolicy *FingerprintServiceTierPolicy, daybreakDecision ...string) {
 	evidence := beginOpenAIResponseEvidence(c, responseEvidenceModelFromBody(body))
 	state, _ := RequestTimezoneStateFromContext(c)
 	integrity := s.observeOpenAIRequestIntegrity(c, account, outbound, body, "http", state)
@@ -671,7 +677,7 @@ func (s *OpenAIGatewayService) recordFingerprintObservationWithBody(c *gin.Conte
 		hasTrustedIdentity = false
 		pin = installationIDResolution{}
 	}
-	entry := buildFingerprintObservationEntry(c, account, pin, outbound, body, trustedIdentity, hasTrustedIdentity, true)
+	entry := buildFingerprintObservationEntry(c, account, pin, outbound, body, trustedIdentity, hasTrustedIdentity, true, tierPolicy)
 	entry.EventKind = FingerprintObservationEventHTTP
 	entry.Daybreak = observeOpenAIDaybreak(body, daybreakDecision...)
 	entry.RequestIntegrity = integrity
@@ -690,8 +696,17 @@ func fingerprintObservationAccountEnabled(account *Account) bool {
 }
 
 func buildFingerprintObservationEntry(c *gin.Context, account *Account, pin installationIDResolution, outbound http.Header,
-	body []byte, trustedIdentity OpenAICodexTurnIdentity, hasTrustedIdentity, identityHeaders bool) FingerprintObservationEntry {
+	body []byte, trustedIdentity OpenAICodexTurnIdentity, hasTrustedIdentity, identityHeaders bool, tierPolicy ...*FingerprintServiceTierPolicy) FingerprintObservationEntry {
 	actor := fingerprintObservationActorFromContext(c)
+	var policy *FingerprintServiceTierPolicy
+	if len(tierPolicy) > 0 {
+		if tierPolicy[0] != nil && len(body) > 0 {
+			copy := *tierPolicy[0]
+			policy = &copy
+		}
+	} else {
+		policy = fingerprintServiceTierPolicyFromContext(c, account, len(body) > 0)
+	}
 	entry := FingerprintObservationEntry{
 		Timestamp:                    time.Now(),
 		UserID:                       actor.UserID,
@@ -706,6 +721,7 @@ func buildFingerprintObservationEntry(c *gin.Context, account *Account, pin inst
 		OutboundInstallationID:       pin.OutboundID,
 		RuntimeTimingMetrics:         observeOpenAITimingMetrics(outbound, FingerprintObservationEventHTTP),
 		GuardianRequest:              observeOpenAIGuardianRequest(account, outbound, nil),
+		ServiceTierPolicy:            policy,
 	}
 	populateFingerprintObservationMetadata(&entry, outbound, body)
 	if !pin.Enabled {
@@ -949,6 +965,11 @@ func (s *OpenAIGatewayService) recordFingerprintObservationFromContext(c *gin.Co
 }
 
 func (s *OpenAIGatewayService) recordFingerprintObservationFromContextWithBody(c *gin.Context, account *Account, outbound http.Header, body []byte, daybreakDecision ...string) {
+	s.recordFingerprintObservationFromContextWithBodyAndTierPolicy(c, account, outbound, body,
+		fingerprintServiceTierPolicyFromContext(c, account, len(body) > 0), daybreakDecision...)
+}
+
+func (s *OpenAIGatewayService) recordFingerprintObservationFromContextWithBodyAndTierPolicy(c *gin.Context, account *Account, outbound http.Header, body []byte, tierPolicy *FingerprintServiceTierPolicy, daybreakDecision ...string) {
 	if isOpenAICandyTestContext(c) {
 		return
 	}
@@ -956,7 +977,7 @@ func (s *OpenAIGatewayService) recordFingerprintObservationFromContextWithBody(c
 		return
 	}
 	pin := installationIDResolutionFromContext(c, account)
-	s.recordFingerprintObservationWithBody(c, account, pin, outbound, body, daybreakDecision...)
+	s.recordFingerprintObservationWithBodyAndTierPolicy(c, account, pin, outbound, body, tierPolicy, daybreakDecision...)
 }
 
 func fingerprintObservationTurnMetadataHeaderInstallationID(headers http.Header) string {
@@ -1092,6 +1113,13 @@ func (s *OpenAIGatewayService) recordFingerprintObservationWSFrame(c *gin.Contex
 // succeeds. The closure retains scalar diagnostics rather than the raw token.
 func (s *OpenAIGatewayService) freezeFingerprintObservationWSFrame(c *gin.Context, account *Account,
 	state *RequestTimezoneState, body []byte, handshakeHeaders http.Header, plan *OpenAIOAuthIdentityPlan, daybreakDecision ...string) func() {
+	return s.freezeFingerprintObservationWSFrameWithTierPolicy(c, account, state, body, handshakeHeaders, plan,
+		fingerprintServiceTierPolicyFromContext(c, account, len(body) > 0), daybreakDecision...)
+}
+
+func (s *OpenAIGatewayService) freezeFingerprintObservationWSFrameWithTierPolicy(c *gin.Context, account *Account,
+	state *RequestTimezoneState, body []byte, handshakeHeaders http.Header, plan *OpenAIOAuthIdentityPlan,
+	serviceTierPolicy *FingerprintServiceTierPolicy, daybreakDecision ...string) func() {
 	evidence := responseEvidenceFromContext(c)
 	if evidence == nil {
 		evidence = beginOpenAIResponseEvidence(c, responseEvidenceModelFromBody(body))
@@ -1108,7 +1136,7 @@ func (s *OpenAIGatewayService) freezeFingerprintObservationWSFrame(c *gin.Contex
 		trusted = plan.TurnIdentityEnabled && ValidateOpenAICodexTurnIdentity(identity) == nil
 		pin = installationIDResolution{Enabled: plan.InstallationEnabled, ClientID: plan.Capture.ClientInstallationID, OutboundID: plan.InstallationID}
 	}
-	entry := buildFingerprintObservationEntry(c, account, pin, handshakeHeaders, body, identity, trusted, false)
+	entry := buildFingerprintObservationEntry(c, account, pin, handshakeHeaders, body, identity, trusted, false, serviceTierPolicy)
 	populateFingerprintObservationOS(&entry, plan)
 	entry.EventKind = FingerprintObservationEventWSFrame
 	entry.RuntimeTimingMetrics.Source = FingerprintObservationEventWSHandshake

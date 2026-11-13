@@ -252,6 +252,78 @@ describe('CreateAccountModal OpenAI long-context billing', () => {
 
   afterEach(() => vi.useRealTimers())
 
+  it('defaults all four account Fast and Ultrafast settings to false when creating an API key', async () => {
+    const wrapper = await submitApiKeyAccount('openai')
+    const expected = {
+      force_openai_fast: false,
+      force_openai_ultrafast: false,
+      free_openai_fast: false,
+      free_openai_ultrafast: false,
+    }
+    for (const key of Object.keys(expected)) {
+      expect(wrapper.get(`[data-testid="create-account-${key.replace(/_/g, '-')}"]`).attributes('aria-checked')).toBe('false')
+    }
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    expect(createAccountMock.mock.calls[0]?.[0]?.extra).toMatchObject(expected)
+    wrapper.unmount()
+  })
+
+  it('saves independent free tiers and an exclusive forced tier for Codex-Engine accounts', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await selectButtonByText(wrapper, 'API Key')
+    await wrapper.get('[data-testid="openai-api-key-mode"]').setValue('codex_engine')
+    await wrapper.get('[data-testid="create-account-force-openai-fast"]').trigger('click')
+    await wrapper.get('[data-testid="create-account-free-openai-fast"]').trigger('click')
+    await wrapper.get('[data-testid="create-account-free-openai-ultrafast"]').trigger('click')
+    await wrapper.get('[data-testid="create-account-force-openai-ultrafast"]').trigger('click')
+    expect(wrapper.get('[data-testid="create-account-force-openai-fast"]').attributes('aria-checked')).toBe('false')
+    expect(wrapper.get('[data-testid="create-account-force-openai-ultrafast"]').attributes('aria-checked')).toBe('true')
+    expect(wrapper.get('[data-testid="create-account-free-openai-fast"]').attributes('aria-checked')).toBe('true')
+    expect(wrapper.get('[data-testid="create-account-free-openai-ultrafast"]').attributes('aria-checked')).toBe('true')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Engine tiers')
+    await wrapper.get('form#create-account-form input[type="password"]').setValue('engine-key')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(createAccountMock).toHaveBeenCalledTimes(1)
+    expect(createAccountMock.mock.calls[0]?.[0]?.extra).toMatchObject({
+      openai_api_key_mode: 'codex_engine',
+      force_openai_fast: false,
+      force_openai_ultrafast: true,
+      free_openai_fast: true,
+      free_openai_ultrafast: true,
+    })
+    wrapper.unmount()
+  })
+
+  it('omits untouched Fast settings when a Codex import may update an existing account', async () => {
+    const wrapper = await openCodexImportStep()
+    await wrapper.get('[data-testid="import-codex-session"]').trigger('click')
+    await flushPromises()
+    expect(importCodexSessionMock).toHaveBeenCalledTimes(1)
+    const extra = importCodexSessionMock.mock.calls[0]?.[0]?.extra ?? {}
+    for (const key of ['force_openai_fast', 'force_openai_ultrafast', 'free_openai_fast', 'free_openai_ultrafast']) {
+      expect(extra).not.toHaveProperty(key)
+    }
+    wrapper.unmount()
+  })
+
+  it('imports an explicitly selected force pair without overwriting untouched free preferences', async () => {
+    const wrapper = mountModal()
+    await selectButtonByText(wrapper, 'OpenAI')
+    await wrapper.get('[data-testid="create-account-force-openai-ultrafast"]').trigger('click')
+    await wrapper.get('form#create-account-form input[type="text"]').setValue('Codex tiers')
+    await wrapper.get('form#create-account-form').trigger('submit.prevent')
+    await wrapper.get('[data-testid="import-codex-session"]').trigger('click')
+    await flushPromises()
+    expect(importCodexSessionMock).toHaveBeenCalledTimes(1)
+    const extra = importCodexSessionMock.mock.calls[0]?.[0]?.extra
+    expect(extra).toMatchObject({ force_openai_fast: false, force_openai_ultrafast: true })
+    expect(extra).not.toHaveProperty('free_openai_fast')
+    expect(extra).not.toHaveProperty('free_openai_ultrafast')
+    wrapper.unmount()
+  })
+
   it('defaults ordinary API key automatic attribution to off', async () => {
     const wrapper = await submitApiKeyAccount('openai')
     expect(wrapper.get('[data-testid="openai-api-key-auto-attribution-toggle"]').attributes('aria-checked')).toBe('false')

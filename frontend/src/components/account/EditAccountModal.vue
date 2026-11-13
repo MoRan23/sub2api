@@ -2601,6 +2601,12 @@
         />
       </div>
 
+      <OpenAIServiceTierSettings
+        v-if="account?.platform === 'openai'"
+        v-model="openAIServiceTierSettings"
+        test-prefix="edit-account"
+      />
+
       <!-- OpenAI API 长上下文计费开关 -->
       <div
         v-if="account?.platform === 'openai' && !isSparkShadow && !hideAccountLongContextBilling && (account?.type === 'oauth' || account?.type === 'setup-token' || account?.type === 'apikey')"
@@ -3672,6 +3678,8 @@ import { createStableObjectKeyResolver } from '@/utils/stableObjectKey'
 import { supportsAccountQuota } from '@/utils/accountQuota'
 import { getAccountExpiryTimestamp } from '@/components/account/accountExpiry'
 import { allSelectedGroupsEnableLongContextPricing } from '@/components/account/longContextBilling'
+import OpenAIServiceTierSettings from '@/components/account/OpenAIServiceTierSettings.vue'
+import { OPENAI_SERVICE_TIER_KEYS, readOpenAIServiceTierSettings, openAIServiceTierSettingsPatch } from '@/components/account/openaiServiceTierSettings'
 import { VERTEX_LOCATION_OPTIONS } from '@/constants/account'
 import {
   OPENAI_WS_MODE_CTX_POOL,
@@ -4356,6 +4364,8 @@ const supportsOpenAIDaybreakSettings = computed(() => {
 // OpenAI Codex namespace 工具摊平兼容开关（仅 OAuth），缺省关闭即原样保留
 const openaiFlattenNamespacesEnabled = ref(false)
 const openAILongContextBillingEnabled = ref(false)
+const openAIServiceTierSettings = ref(readOpenAIServiceTierSettings())
+let initialOpenAIServiceTierSettings = readOpenAIServiceTierSettings()
 // installation_id 固定（仅 OpenAI OAuth）。UUID 由服务端生成。
 const openAIInstallationPinEnabled = ref(true)
 const openAIOSProfiles = ref<OpenAIOAuthOSProfilesData>()
@@ -4902,6 +4912,8 @@ const syncFormFromAccount = (newAccount: Account | null) => {
     (newAccount.platform === 'openai' && newAccount.type === 'apikey')) && extra?.openai_daybreak_blue_enabled === true
   openAIDaybreakRedEnabled.value = openAIDaybreakBlueEnabled.value && extra?.openai_daybreak_red_enabled === true
   openAILongContextBillingEnabled.value = false
+  openAIServiceTierSettings.value = readOpenAIServiceTierSettings(extra)
+  initialOpenAIServiceTierSettings = { ...openAIServiceTierSettings.value }
   // 固定默认 ON；随后按 extra 覆盖。
   openAIInstallationPinEnabled.value = true
   openAIOSProfiles.value = newAccount.openai_oauth_os_profiles
@@ -6753,6 +6765,7 @@ const handleSubmit = async () => {
     }
     if (updatePayload.extra) {
       const extra = updatePayload.extra as Record<string, unknown>
+      for (const key of OPENAI_SERVICE_TIER_KEYS) delete extra[key]
       delete extra.openai_pinned_installation_id
       delete extra.openai_installation_rotate_enabled
       delete extra.openai_installation_pin_enabled
@@ -6760,6 +6773,9 @@ const handleSubmit = async () => {
       delete extra.tls_fingerprint_profile_id
     }
     const protectedEdits: Record<string, unknown> = {}
+    if (props.account.platform === 'openai') {
+      Object.assign(protectedEdits, openAIServiceTierSettingsPatch(openAIServiceTierSettings.value, initialOpenAIServiceTierSettings))
+    }
     if (props.account.platform === 'openai' && props.account.type === 'oauth' && !isSparkShadow.value &&
       openAIInstallationPinEnabled.value !== protectedConfigInitial.value.installationPin) {
       protectedEdits.openai_installation_pin_enabled = openAIInstallationPinEnabled.value

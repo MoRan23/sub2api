@@ -134,19 +134,26 @@ func openAIUsagePricingAt(input *OpenAIRecordUsageInput) time.Time {
 	return timezone.Now()
 }
 
-func groupBillsOpenAIFastAtStandard(apiKey *APIKey, account *Account, serviceTier string) bool {
-	if apiKey == nil || apiKey.Group == nil || !apiKey.Group.FreeOpenAIFast {
-		return false
-	}
+// Free-tier preferences belong to the selected business account, including a
+// shadow. The credential/billing parent must not override those preferences.
+func effectiveOpenAIFreeServiceTiers(apiKey *APIKey, account *Account) (fast, ultrafast bool) {
 	if account == nil || !account.IsOpenAI() {
-		return false
+		return false, false
 	}
-	if !groupSupportsOpenAIFast(apiKey.Group.Platform) {
-		return false
+	fast, ultrafast = account.IsFreeOpenAIFastEnabled(), account.IsFreeOpenAIUltrafastEnabled()
+	if apiKey != nil && apiKey.Group != nil && groupSupportsOpenAIFast(apiKey.Group.Platform) {
+		fast = fast || apiKey.Group.FreeOpenAIFast
+		ultrafast = ultrafast || apiKey.Group.FreeOpenAIUltrafast
 	}
+	return fast, ultrafast
+}
+
+func openAIServiceTierBillsAtStandard(fast, ultrafast bool, serviceTier string) bool {
 	switch normalizeBillingServiceTier(serviceTier) {
 	case "priority", "fast":
-		return true
+		return fast
+	case "ultrafast":
+		return ultrafast
 	default:
 		return false
 	}
@@ -368,10 +375,11 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		}
 	}
 
-	// Free Fast changes only the customer charge. Keep priority TotalCost and
+	// Free acceleration changes only the customer charge. Keep actual TotalCost and
 	// service_tier for upstream accounting, but evaluate ActualCost once more at
 	// the Standard tier using the same channel, peak, and long-context policy.
-	if groupBillsOpenAIFastAtStandard(apiKey, billingAccount, serviceTier) {
+	freeFast, freeUltrafast := effectiveOpenAIFreeServiceTiers(apiKey, account)
+	if openAIServiceTierBillsAtStandard(freeFast, freeUltrafast, serviceTier) {
 		standardCost, standardErr := s.calculateOpenAIRecordUsageCost(
 			ctx,
 			result,

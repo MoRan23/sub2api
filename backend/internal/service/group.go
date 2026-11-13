@@ -106,10 +106,15 @@ type Group struct {
 	SortOrder int
 
 	// OpenAI Messages 调度配置（仅 openai 平台使用）
-	AllowMessagesDispatch     bool
-	AllowLive                 bool
-	ForceOpenAIFast           bool // 强制 OpenAI 网关请求使用 service_tier=priority
-	FreeOpenAIFast            bool // OpenAI Fast 请求按 Standard 价格向用户计费
+	AllowMessagesDispatch bool
+	AllowLive             bool
+	ForceOpenAIFast       bool // 强制 OpenAI 网关请求使用 service_tier=priority
+	FreeOpenAIFast        bool // OpenAI Fast 请求按 Standard 价格向用户计费
+	ForceOpenAIUltrafast  bool // 在真实模型能力允许时强制 service_tier=ultrafast
+	FreeOpenAIUltrafast   bool // OpenAI Ultrafast 请求按 Standard 价格向用户计费
+	// OpenAIServiceTierUpdate carries only explicit admin choices; persistence
+	// merges these against the latest row so omitted settings remain unchanged.
+	OpenAIServiceTierUpdate   *GroupOpenAIServiceTierUpdate `json:"-"`
 	OpenAIDaybreakBlueEnabled bool
 	OpenAIDaybreakRedEnabled  bool
 	// OpenAIDaybreakUpdate carries explicit admin choices to persistence so stale

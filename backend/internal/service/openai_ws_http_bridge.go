@@ -673,7 +673,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			setFingerprintObservationOutboundIdentity(c, identityPlan.TurnIdentity)
 		}
 		observationBody := openAIUpstreamRequestBodySnapshot(upstreamReq, requestBody)
-		s.recordFingerprintObservationFromContextWithBody(c, account, upstreamReq.Header, observationBody, openAIDaybreakDecisionFromRequest(upstreamReq))
+		s.recordFingerprintObservationFromContextWithBodyAndTierPolicy(c, account, upstreamReq.Header, observationBody, snapshotOpenAIServiceTierPolicy(ctx, account), openAIDaybreakDecisionFromRequest(upstreamReq))
 		return upstreamReq, nil
 	}
 	if account.Platform == PlatformGrok {

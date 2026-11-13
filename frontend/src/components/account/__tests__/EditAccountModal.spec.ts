@@ -436,6 +436,77 @@ describe('EditAccountModal', () => {
     })
   })
 
+  it('omits all untouched Fast preferences when saving an old account snapshot', async () => {
+    const account = buildAccount()
+    account.extra = {
+      force_openai_fast: true,
+      force_openai_ultrafast: false,
+      free_openai_fast: true,
+      free_openai_ultrafast: false,
+    }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    expect(wrapper.get('[data-testid="edit-account-force-openai-fast"]').attributes('aria-checked')).toBe('true')
+    expect(wrapper.get('[data-testid="edit-account-free-openai-fast"]').attributes('aria-checked')).toBe('true')
+    await wrapper.get('[data-tour="edit-account-form-name"]').setValue('Renamed only')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    const extra = updateAccountMock.mock.calls[0]?.[1]?.extra ?? {}
+    for (const key of Object.keys(account.extra)) {
+      expect(extra).not.toHaveProperty(key)
+    }
+    wrapper.unmount()
+  })
+
+  it.each(['generic', 'codex_engine', 'shadow'] as const)('submits the forced tier pair together for %s accounts', async (mode) => {
+    const account = mode === 'shadow' ? buildOpenAISparkShadowAccount() : buildAccount()
+    account.extra = {
+      ...account.extra,
+      ...(mode === 'shadow' ? {} : { openai_api_key_mode: mode }),
+      force_openai_fast: true,
+      force_openai_ultrafast: false,
+      free_openai_fast: true,
+      free_openai_ultrafast: true,
+    }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="edit-account-force-openai-ultrafast"]').trigger('click')
+    expect(wrapper.get('[data-testid="edit-account-force-openai-fast"]').attributes('aria-checked')).toBe('false')
+    expect(wrapper.get('[data-testid="edit-account-force-openai-ultrafast"]').attributes('aria-checked')).toBe('true')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
+    expect(extra).toMatchObject({ force_openai_fast: false, force_openai_ultrafast: true })
+    expect(extra).not.toHaveProperty('free_openai_fast')
+    expect(extra).not.toHaveProperty('free_openai_ultrafast')
+    wrapper.unmount()
+  })
+
+  it('changes a free tier independently and omits a reverted force selection', async () => {
+    const account = buildAccount()
+    account.extra = { force_openai_fast: true, free_openai_fast: true, free_openai_ultrafast: true }
+    updateAccountMock.mockReset().mockResolvedValue(account)
+    checkMixedChannelRiskMock.mockReset().mockResolvedValue({ has_risk: false })
+    const wrapper = mountModal(account)
+    await wrapper.get('[data-testid="edit-account-force-openai-ultrafast"]').trigger('click')
+    await wrapper.get('[data-testid="edit-account-force-openai-fast"]').trigger('click')
+    await wrapper.get('[data-testid="edit-account-free-openai-fast"]').trigger('click')
+    expect(wrapper.get('[data-testid="edit-account-free-openai-ultrafast"]').attributes('aria-checked')).toBe('true')
+    await wrapper.get('form#edit-account-form').trigger('submit.prevent')
+    await flushPromises()
+    expect(updateAccountMock).toHaveBeenCalledTimes(1)
+    const extra = updateAccountMock.mock.calls[0]?.[1]?.extra
+    expect(extra).toHaveProperty('free_openai_fast', false)
+    expect(extra).not.toHaveProperty('free_openai_ultrafast')
+    expect(extra).not.toHaveProperty('force_openai_fast')
+    expect(extra).not.toHaveProperty('force_openai_ultrafast')
+    wrapper.unmount()
+  })
+
   it.each(['active', 'error'] as const)('omits unchanged %s status when saving a name edit from an open account snapshot', async (status) => {
     const account = { ...buildOpenAIOAuthAccount(), status }
     // The server can independently pause this account while the form retains

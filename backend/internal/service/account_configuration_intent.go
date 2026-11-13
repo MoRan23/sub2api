@@ -27,7 +27,7 @@ func withAccountConfigurationIntent(ctx context.Context, ids []int64, extra map[
 	if len(credentials) > 0 {
 		_, intent.ModelMapping = credentials[0]["model_mapping"]
 	}
-	for _, key := range []string{openAIInstallationPinEnabledKey, "enable_tls_fingerprint", "tls_fingerprint_profile_id", OpenAIDaybreakBlueEnabledKey, OpenAIDaybreakRedEnabledKey, OpenAIAPIKeyAutoAttributionEnabledExtraKey, OpenAIAttributionReplaceWhitelistEnabledExtraKey} {
+	for _, key := range []string{openAIInstallationPinEnabledKey, "enable_tls_fingerprint", "tls_fingerprint_profile_id", OpenAIDaybreakBlueEnabledKey, OpenAIDaybreakRedEnabledKey, OpenAIAPIKeyAutoAttributionEnabledExtraKey, OpenAIAttributionReplaceWhitelistEnabledExtraKey, ForceOpenAIFastExtraKey, ForceOpenAIUltrafastExtraKey, FreeOpenAIFastExtraKey, FreeOpenAIUltrafastExtraKey} {
 		if value, exists := extra[key]; exists {
 			intent.Extra[key] = value
 		}
@@ -59,15 +59,15 @@ func AccountConfigurationIntentFromContext(ctx context.Context, id int64) Accoun
 }
 
 // PreserveAccountConfiguration must run with current loaded under the account
-// row lock. It preserves only managed identity/transport fields, not all extra.
+// row lock. It preserves managed administrator, identity and transport settings,
+// not arbitrary extra fields.
 func PreserveAccountConfiguration(current, target *Account, intent AccountConfigurationIntent) error {
+	if err := preserveOpenAIAccountFastSettings(current, target, intent.Extra); err != nil {
+		return err
+	}
 	target.OpenAIOAuthOSProfiles = CloneOpenAIOAuthOSProfiles(current.OpenAIOAuthOSProfiles)
 	if !IsOpenAIOAuthOSProfileOwner(target) {
 		target.OpenAIOAuthOSProfiles = nil
-	}
-	target.Extra = maps.Clone(target.Extra)
-	if target.Extra == nil {
-		target.Extra = make(map[string]any)
 	}
 	copyCurrent := func(key string) {
 		delete(target.Extra, key)

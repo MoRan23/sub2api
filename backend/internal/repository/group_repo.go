@@ -96,6 +96,11 @@ func createGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 		return err
 	}
 	groupIn.OpenAIDaybreakBlueEnabled, groupIn.OpenAIDaybreakRedEnabled = blue, red
+	groupIn.ForceOpenAIFast, groupIn.ForceOpenAIUltrafast, groupIn.FreeOpenAIFast, groupIn.FreeOpenAIUltrafast, err = service.ResolveGroupOpenAIServiceTier(
+		groupIn.Platform, groupIn.ForceOpenAIFast, groupIn.ForceOpenAIUltrafast, groupIn.FreeOpenAIFast, groupIn.FreeOpenAIUltrafast, nil)
+	if err != nil {
+		return err
+	}
 	modelPricing, err := json.Marshal(groupIn.ModelPricing)
 	if err != nil {
 		return fmt.Errorf("marshal group model pricing: %w", err)
@@ -146,7 +151,9 @@ func createGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 		SetAllowMessagesDispatch(groupIn.AllowMessagesDispatch).
 		SetAllowLive(groupIn.AllowLive).
 		SetForceOpenaiFast(groupIn.ForceOpenAIFast).
+		SetForceOpenaiUltrafast(groupIn.ForceOpenAIUltrafast).
 		SetFreeOpenaiFast(groupIn.FreeOpenAIFast).
+		SetFreeOpenaiUltrafast(groupIn.FreeOpenAIUltrafast).
 		SetOpenaiDaybreakBlueEnabled(groupIn.OpenAIDaybreakBlueEnabled).
 		SetOpenaiDaybreakRedEnabled(groupIn.OpenAIDaybreakRedEnabled).
 		SetRequireOauthOnly(groupIn.RequireOAuthOnly).
@@ -353,6 +360,11 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 	if err != nil {
 		return err
 	}
+	forceFast, forceUltrafast, freeFast, freeUltrafast, err := service.ResolveGroupOpenAIServiceTier(
+		groupIn.Platform, stored.ForceOpenaiFast, stored.ForceOpenaiUltrafast, stored.FreeOpenaiFast, stored.FreeOpenaiUltrafast, groupIn.OpenAIServiceTierUpdate)
+	if err != nil {
+		return err
+	}
 	modelPricing, err := json.Marshal(groupIn.ModelPricing)
 	if err != nil {
 		return fmt.Errorf("marshal group model pricing: %w", err)
@@ -392,8 +404,10 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		SetMcpXMLInject(groupIn.MCPXMLInject).
 		SetAllowMessagesDispatch(groupIn.AllowMessagesDispatch).
 		SetAllowLive(groupIn.AllowLive).
-		SetForceOpenaiFast(groupIn.ForceOpenAIFast).
-		SetFreeOpenaiFast(groupIn.FreeOpenAIFast).
+		SetForceOpenaiFast(forceFast).
+		SetForceOpenaiUltrafast(forceUltrafast).
+		SetFreeOpenaiFast(freeFast).
+		SetFreeOpenaiUltrafast(freeUltrafast).
 		SetOpenaiDaybreakBlueEnabled(blue).
 		SetOpenaiDaybreakRedEnabled(red).
 		SetRequireOauthOnly(groupIn.RequireOAuthOnly).
@@ -531,6 +545,9 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 	groupIn.OpenAIDaybreakBlueEnabled = blue
 	groupIn.OpenAIDaybreakRedEnabled = red
 	groupIn.OpenAIDaybreakUpdate = nil
+	groupIn.ForceOpenAIFast, groupIn.ForceOpenAIUltrafast = forceFast, forceUltrafast
+	groupIn.FreeOpenAIFast, groupIn.FreeOpenAIUltrafast = freeFast, freeUltrafast
+	groupIn.OpenAIServiceTierUpdate = nil
 	return nil
 }
 

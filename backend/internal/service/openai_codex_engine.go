@@ -386,6 +386,7 @@ func (s *OpenAIGatewayService) forwardCodexEngine(ctx context.Context, c *gin.Co
 	}
 	attempt := &codexEngineTransportAttempt{}
 	req = attempt.traceRequest(req)
+	s.recordFingerprintObservationFromContextWithBody(c, account, req.Header, openAIUpstreamRequestBodySnapshot(req, body), openAIDaybreakDecisionFromRequest(req))
 	resp, err := s.httpUpstream.Do(req, proxy, account.ID, account.Concurrency)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(start).Milliseconds())
 	if err != nil {

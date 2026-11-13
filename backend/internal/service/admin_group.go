@@ -369,7 +369,9 @@ func sanitizeGroupOpenAIFast(group *Group) {
 	if group == nil || !groupSupportsOpenAIFast(group.Platform) {
 		if group != nil {
 			group.ForceOpenAIFast = false
+			group.ForceOpenAIUltrafast = false
 			group.FreeOpenAIFast = false
+			group.FreeOpenAIUltrafast = false
 		}
 	}
 }
@@ -630,7 +632,9 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		AllowMessagesDispatch:           input.AllowMessagesDispatch,
 		AllowLive:                       input.AllowLive,
 		ForceOpenAIFast:                 input.ForceOpenAIFast,
+		ForceOpenAIUltrafast:            input.ForceOpenAIUltrafast,
 		FreeOpenAIFast:                  input.FreeOpenAIFast,
+		FreeOpenAIUltrafast:             input.FreeOpenAIUltrafast,
 		OpenAIDaybreakBlueEnabled:       input.OpenAIDaybreakBlueEnabled,
 		OpenAIDaybreakRedEnabled:        input.OpenAIDaybreakRedEnabled,
 		RequireOAuthOnly:                input.RequireOAuthOnly,
@@ -648,6 +652,9 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	}
 	sanitizeGroupMessagesDispatchFields(group)
 	sanitizeGroupOpenAIFast(group)
+	if _, _, _, _, err := ResolveGroupOpenAIServiceTier(group.Platform, group.ForceOpenAIFast, group.ForceOpenAIUltrafast, group.FreeOpenAIFast, group.FreeOpenAIUltrafast, nil); err != nil {
+		return nil, err
+	}
 	group.OpenAIDaybreakBlueEnabled, group.OpenAIDaybreakRedEnabled, err = ResolveGroupDaybreak(group.Platform, group.OpenAIDaybreakBlueEnabled, group.OpenAIDaybreakRedEnabled, nil)
 	if err != nil {
 		return nil, err
@@ -1033,11 +1040,16 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	if input.AllowLive != nil {
 		group.AllowLive = *input.AllowLive
 	}
-	if input.ForceOpenAIFast != nil {
-		group.ForceOpenAIFast = *input.ForceOpenAIFast
+	group.OpenAIServiceTierUpdate = &GroupOpenAIServiceTierUpdate{
+		ForceFast:      input.ForceOpenAIFast,
+		ForceUltrafast: input.ForceOpenAIUltrafast,
+		FreeFast:       input.FreeOpenAIFast,
+		FreeUltrafast:  input.FreeOpenAIUltrafast,
 	}
-	if input.FreeOpenAIFast != nil {
-		group.FreeOpenAIFast = *input.FreeOpenAIFast
+	group.ForceOpenAIFast, group.ForceOpenAIUltrafast, group.FreeOpenAIFast, group.FreeOpenAIUltrafast, err = ResolveGroupOpenAIServiceTier(
+		group.Platform, group.ForceOpenAIFast, group.ForceOpenAIUltrafast, group.FreeOpenAIFast, group.FreeOpenAIUltrafast, group.OpenAIServiceTierUpdate)
+	if err != nil {
+		return nil, err
 	}
 	group.OpenAIDaybreakUpdate = &GroupDaybreakUpdate{Blue: input.OpenAIDaybreakBlueEnabled, Red: input.OpenAIDaybreakRedEnabled}
 	group.OpenAIDaybreakBlueEnabled, group.OpenAIDaybreakRedEnabled, err = ResolveGroupDaybreak(group.Platform, group.OpenAIDaybreakBlueEnabled, group.OpenAIDaybreakRedEnabled, group.OpenAIDaybreakUpdate)

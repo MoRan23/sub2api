@@ -3344,19 +3344,14 @@ func TestOpenAIGatewayServiceRecordUsage_FreeOpenAIFastMissingPricingRecordsZero
 	require.Zero(t, usageRepo.lastLog.ActualCost)
 }
 
-func TestGroupBillsOpenAIFastAtStandardRequiresOpenAIAccount(t *testing.T) {
+func TestEffectiveOpenAIFreeServiceTiersRequiresOpenAIAccount(t *testing.T) {
 	apiKey := &APIKey{Group: &Group{Platform: PlatformComposite, FreeOpenAIFast: true}}
-
-	require.True(t, groupBillsOpenAIFastAtStandard(
-		apiKey,
-		&Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth},
-		"priority",
-	))
-	require.False(t, groupBillsOpenAIFastAtStandard(
-		apiKey,
-		&Account{Platform: PlatformGrok, Type: AccountTypeAPIKey},
-		"priority",
-	))
+	fast, ultrafast := effectiveOpenAIFreeServiceTiers(apiKey, &Account{Platform: PlatformOpenAI, Type: AccountTypeOAuth})
+	require.True(t, fast)
+	require.False(t, ultrafast)
+	fast, ultrafast = effectiveOpenAIFreeServiceTiers(apiKey, &Account{Platform: PlatformGrok, Type: AccountTypeAPIKey})
+	require.False(t, fast)
+	require.False(t, ultrafast)
 }
 
 func TestOpenAIGatewayServiceRecordUsage_ServiceTierNeverRaisedByUpstreamResponse(t *testing.T) {

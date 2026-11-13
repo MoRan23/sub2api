@@ -310,9 +310,19 @@ func ForceOpenaiFast(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldForceOpenaiFast, v))
 }
 
+// ForceOpenaiUltrafast applies equality check predicate on the "force_openai_ultrafast" field. It's identical to ForceOpenaiUltrafastEQ.
+func ForceOpenaiUltrafast(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldForceOpenaiUltrafast, v))
+}
+
 // FreeOpenaiFast applies equality check predicate on the "free_openai_fast" field. It's identical to FreeOpenaiFastEQ.
 func FreeOpenaiFast(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldFreeOpenaiFast, v))
+}
+
+// FreeOpenaiUltrafast applies equality check predicate on the "free_openai_ultrafast" field. It's identical to FreeOpenaiUltrafastEQ.
+func FreeOpenaiUltrafast(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldFreeOpenaiUltrafast, v))
 }
 
 // OpenaiDaybreakBlueEnabled applies equality check predicate on the "openai_daybreak_blue_enabled" field. It's identical to OpenaiDaybreakBlueEnabledEQ.
@@ -2390,6 +2400,16 @@ func ForceOpenaiFastNEQ(v bool) predicate.Group {
 	return predicate.Group(sql.FieldNEQ(FieldForceOpenaiFast, v))
 }
 
+// ForceOpenaiUltrafastEQ applies the EQ predicate on the "force_openai_ultrafast" field.
+func ForceOpenaiUltrafastEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldForceOpenaiUltrafast, v))
+}
+
+// ForceOpenaiUltrafastNEQ applies the NEQ predicate on the "force_openai_ultrafast" field.
+func ForceOpenaiUltrafastNEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldForceOpenaiUltrafast, v))
+}
+
 // FreeOpenaiFastEQ applies the EQ predicate on the "free_openai_fast" field.
 func FreeOpenaiFastEQ(v bool) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldFreeOpenaiFast, v))
@@ -2398,6 +2418,16 @@ func FreeOpenaiFastEQ(v bool) predicate.Group {
 // FreeOpenaiFastNEQ applies the NEQ predicate on the "free_openai_fast" field.
 func FreeOpenaiFastNEQ(v bool) predicate.Group {
 	return predicate.Group(sql.FieldNEQ(FieldFreeOpenaiFast, v))
+}
+
+// FreeOpenaiUltrafastEQ applies the EQ predicate on the "free_openai_ultrafast" field.
+func FreeOpenaiUltrafastEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldFreeOpenaiUltrafast, v))
+}
+
+// FreeOpenaiUltrafastNEQ applies the NEQ predicate on the "free_openai_ultrafast" field.
+func FreeOpenaiUltrafastNEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldFreeOpenaiUltrafast, v))
 }
 
 // OpenaiDaybreakBlueEnabledEQ applies the EQ predicate on the "openai_daybreak_blue_enabled" field.

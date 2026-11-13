@@ -1292,11 +1292,17 @@ export default {
         redHint: 'Red 依赖 Blue。原始请求为 GPT-6 Astra / GPT-6.1 Sol 时，需要同时开启 Blue 和 Red，字段值为 daybreak_blue；原始请求为 GPT-6 Cyber 时使用 daybreak_red。其他模型映射到 GPT-6 Cyber 不会因此选择 Red。',
       },
       openaiFast: {
-        title: 'OpenAI Fast 模式',
+        title: 'OpenAI Fast / Ultrafast',
         force: '强制使用 Fast（priority）',
-        hint: '开启后，此分组的 OpenAI 请求会强制写入 service_tier=priority；全局 Fast/Flex 策略仍可过滤或拦截。保存后新请求立即生效，已建立的 WebSocket 会话需重连。',
+        forceUltrafast: '强制使用 Ultrafast',
+        hint: '强制选项互斥，账号强制设置优先于分组。全局 Fast/Flex 策略和 OAuth Guardian 规则仍优先执行。保存后新请求生效，已建立的 WebSocket 会话需重连。',
+        accountHint: '适用于所选 OpenAI 业务账号，包括 API Key、Codex-Engine 和影子账号。账号强制设置优先于分组；均关闭时沿用分组或客户端选择。全局策略及 OAuth Guardian 规则仍优先。已建立的 WebSocket 会话需重连。',
+        ultrafastHint: '仅当账号真实上游目录明确声明最终模型支持 ultrafast 时强制；无法确认时保留客户端档位，不回退分组强制 Fast。',
         free: '免费 Fast',
-        freeHint: '该分组的 Fast 请求仍使用 priority 档位，但客户实际费用按同一请求的 Standard 价格计算。'
+        freeHint: '账号或分组任一开启即可：Fast 仍使用 priority，用户按同一请求的 Standard 价格付费，上游及账号成本照实记录。',
+        freeUltrafast: '免费 Ultrafast',
+        freeUltrafastHint: '仅免除 Ultrafast 的加速溢价，用户按 Standard 价格付费。与免费 Fast 独立，可同时开启；不改变发送档位。',
+        applyField: '批量修改：{field}'
       },
       invalidRequestFallback: {
         title: '无效请求兜底分组',

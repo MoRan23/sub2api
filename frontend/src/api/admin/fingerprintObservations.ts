@@ -133,6 +133,14 @@ export interface CodexGuardianRequestObservation {
   parent_response: CodexGuardianFieldObservation
 }
 
+export interface ServiceTierPolicyObservation {
+  source: 'account' | 'group' | 'none'
+  requested_tier?: string
+  forced_tier?: string
+  effective_tier?: string
+  capability: 'supported' | 'unsupported' | 'unavailable' | 'not_required' | 'guardian'
+}
+
 export interface CodexCompactionMetadata {
   trigger: string
   reason: string
@@ -227,6 +235,7 @@ export interface FingerprintObservationEntry {
   request_integrity?: RequestIntegrityObservation
   response_evidence?: OpenAIResponseEvidence
   guardian_request?: CodexGuardianRequestObservation
+  service_tier_policy?: ServiceTierPolicyObservation
   runtime_timing_metrics?: {
     status: 'absent' | 'valid' | 'invalid'
     enabled?: boolean

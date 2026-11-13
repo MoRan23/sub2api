@@ -858,7 +858,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		firstClientMessage = normalized
 	}
 	usageMeta := newOpenAIWSPassthroughUsageMeta(initialRequestModel, firstClientMessage)
-	updatedFirst, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, capturedSessionModel, firstClientMessage)
+	firstPolicyCtx := withOpenAIServiceTierPolicyFrameContext(ctx)
+	updatedFirst, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(firstPolicyCtx, account, capturedSessionModel, firstClientMessage)
 	if policyErr != nil {
 		return fmt.Errorf("apply openai fast policy on first ws frame: %w", policyErr)
 	}
@@ -880,6 +881,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, blocked.Message, blocked)
 	}
 	firstClientMessage = updatedFirst
+	// The initial write and the relay's client-to-upstream read/write loop own
+	// this frame snapshot. It is never read from the shared Gin session context.
+	currentFrameTierPolicy := snapshotOpenAIServiceTierPolicy(firstPolicyCtx, account)
 
 	// 在 policy filter 之后再提取 service_tier / reasoning_effort 用于
 	// usage 上报：filter 命中时 service_tier 已经从 firstClientMessage 中删除，
@@ -1151,7 +1155,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				if err != nil {
 					return payload, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to prepare websocket Daybreak policy", err)
 				}
-				pendingFrameObservation = s.freezeFingerprintObservationWSFrame(c, account, currentTimezoneState, updated, physicalObservationHeaders, openAIWSObservationFramePlan(account, &framePlan), decision)
+				pendingFrameObservation = s.freezeFingerprintObservationWSFrameWithTierPolicy(c, account, currentTimezoneState, updated, physicalObservationHeaders, openAIWSObservationFramePlan(account, &framePlan), nil, decision)
 				return updated, nil
 			}
 			if account.UsesOpenAICodexProtocol() {
@@ -1185,7 +1189,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			responseEvidenceMu.Lock()
 			responseEvidence = nextEvidence
 			responseEvidenceMu.Unlock()
-			pendingFrameObservation = s.freezeFingerprintObservationWSFrame(c, account, currentTimezoneState, payload, physicalObservationHeaders, openAIWSObservationFramePlan(account, &framePlan), daybreakDecision)
+			pendingFrameObservation = s.freezeFingerprintObservationWSFrameWithTierPolicy(c, account, currentTimezoneState, payload, physicalObservationHeaders, openAIWSObservationFramePlan(account, &framePlan), currentFrameTierPolicy, daybreakDecision)
 			recordOpenAICodexGuardianSourceThread(framePlan, nil, payload)
 			currentTelemetry().finish(false)
 			telemetryFrameNumber++
@@ -1394,7 +1398,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			if isResponseCreate && model != "" && model != strings.TrimSpace(gjson.GetBytes(payload, "model").String()) {
 				payload = s.ReplaceModelInBody(payload, model)
 			}
-			out, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, model, payload)
+			framePolicyCtx := withOpenAIServiceTierPolicyFrameContext(ctx)
+			out, blocked, policyErr := s.applyOpenAIFastPolicyToWSResponseCreate(framePolicyCtx, account, model, payload)
+			currentFrameTierPolicy = snapshotOpenAIServiceTierPolicy(framePolicyCtx, account)
 			// 多轮 passthrough usage：仅在成功（non-block / non-err）
 			// 的 response.create 帧上更新 usageMeta，使用
 			// filter 处理后的 payload，与首帧 policy-after-extract 语义

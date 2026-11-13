@@ -28,7 +28,7 @@ func validateScopedOpenAIOptions(raw json.RawMessage) error {
 				return invalid
 			}
 
-		case "openai_oauth_responses_websockets_v2_enabled", "openai_long_context_billing_enabled":
+		case "openai_oauth_responses_websockets_v2_enabled", "openai_long_context_billing_enabled", ForceOpenAIFastExtraKey, ForceOpenAIUltrafastExtraKey, FreeOpenAIFastExtraKey, FreeOpenAIUltrafastExtraKey:
 			if string(value) == "null" || json.Unmarshal(value, &flag) != nil {
 				return invalid
 			}
@@ -36,5 +36,9 @@ func validateScopedOpenAIOptions(raw json.RawMessage) error {
 			return invalid
 		}
 	}
-	return nil
+	var extra map[string]any
+	if err := json.Unmarshal(raw, &extra); err != nil {
+		return invalid
+	}
+	return ValidateOpenAIAccountFastSettings(PlatformOpenAI, extra)
 }

@@ -25,7 +25,7 @@ func usageBillingSnapshotTestGroup() *Group {
 		VideoModelPrices:      map[string]map[string]float64{"video": {"480p": 0.3, "720p": 0.5}},
 		WebSearchPricePerCall: p(0.02), SearchPricePer1k: p(5),
 		AudioRealtimePricePerMin: p(6), AudioTTSPricePerMillionChars: p(7), AudioSTTPricePerHour: p(8),
-		LongContextPricingEnabled: true, FreeOpenAIFast: true,
+		LongContextPricingEnabled: true, FreeOpenAIFast: true, FreeOpenAIUltrafast: true,
 		ModelPricing: []ChannelModelPricing{{
 			ID: 31, ChannelID: 32, Platform: PlatformOpenAI, BillingMode: BillingModeToken,
 			Models: []string{"gpt-4o", "gpt-4o-*"}, InputPrice: p(11), OutputPrice: p(12),
@@ -91,7 +91,7 @@ func usageBillingSnapshotTestMutateGroup(g *Group) {
 	g.PeakRateEnabled, g.PeakStart, g.PeakEnd = false, "01:00", "02:00"
 	g.ImageCountBilling, g.ImageRateIndependent, g.VideoRateIndependent = false, false, false
 	g.ImageRateMultiplier, g.VideoRateMultiplier = 999, 999
-	g.LongContextPricingEnabled, g.FreeOpenAIFast = false, false
+	g.LongContextPricingEnabled, g.FreeOpenAIFast, g.FreeOpenAIUltrafast = false, false, false
 	usageBillingSnapshotTestMutatePointers(g.ImagePrice1K, g.ImagePrice2K, g.ImagePrice4K,
 		g.VideoPrice480P, g.VideoPrice720P, g.VideoPrice1080P, g.WebSearchPricePerCall, g.SearchPricePer1k,
 		g.AudioRealtimePricePerMin, g.AudioTTSPricePerMillionChars, g.AudioSTTPricePerHour)
@@ -104,7 +104,7 @@ func usageBillingSnapshotTestMutateAuthGroup(g *APIKeyAuthGroupSnapshot) {
 	g.PeakRateEnabled, g.PeakStart, g.PeakEnd = false, "01:00", "02:00"
 	g.ImageCountBilling, g.ImageRateIndependent, g.VideoRateIndependent = false, false, false
 	g.ImageRateMultiplier, g.VideoRateMultiplier = 999, 999
-	g.LongContextPricingEnabled, g.FreeOpenAIFast = false, false
+	g.LongContextPricingEnabled, g.FreeOpenAIFast, g.FreeOpenAIUltrafast = false, false, false
 	usageBillingSnapshotTestMutatePointers(g.ImagePrice1K, g.ImagePrice2K, g.ImagePrice4K,
 		g.VideoPrice480P, g.VideoPrice720P, g.VideoPrice1080P, g.WebSearchPricePerCall, g.SearchPricePer1k,
 		g.AudioRealtimePricePerMin, g.AudioTTSPricePerMillionChars, g.AudioSTTPricePerHour)

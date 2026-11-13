@@ -36,7 +36,7 @@ func prepareAPIKeyAuthBillingSnapshot(snapshot *APIKeyAuthSnapshot) {
 		VideoPrice480P: cloneUsageBillingScalar(g.VideoPrice480P), VideoPrice720P: cloneUsageBillingScalar(g.VideoPrice720P), VideoPrice1080P: cloneUsageBillingScalar(g.VideoPrice1080P),
 		WebSearchPricePerCall: cloneUsageBillingScalar(g.WebSearchPricePerCall), SearchPricePer1k: cloneUsageBillingScalar(g.SearchPricePer1k),
 		AudioRealtimePricePerMin: cloneUsageBillingScalar(g.AudioRealtimePricePerMin), AudioTTSPricePerMillionChars: cloneUsageBillingScalar(g.AudioTTSPricePerMillionChars), AudioSTTPricePerHour: cloneUsageBillingScalar(g.AudioSTTPricePerHour),
-		LongContextPricingEnabled: g.LongContextPricingEnabled, FreeOpenAIFast: g.FreeOpenAIFast,
+		LongContextPricingEnabled: g.LongContextPricingEnabled, FreeOpenAIFast: g.FreeOpenAIFast, FreeOpenAIUltrafast: g.FreeOpenAIUltrafast,
 	}}
 	// L2 data goes through the same normalization as the public request Group.
 	// Clone its strings too, so the frozen projection owns its entire price graph.
