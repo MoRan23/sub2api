@@ -18,9 +18,11 @@ CBRN（核、生物、化学、放射性危害）和政府目标攻击是可选�
 
 匹配视图使用 Unicode NFKC，清除 U+200B、U+200C、U+200D、U+2060、U+FEFF，再跳过文件路径及带扩展名的文件名。过滤同时用于主题和意图，也用于自定义组合；请求正文、审核原文及破甲／其他关键词匹配行为不变。
 
-路径规则覆盖 Windows 盘符、UNC、Unix、相对路径和带英文引号／反引号的空格路径。HTTP(S) URL 只保留主机名供匹配，路径、查询参数等不参与组合检测；裸 `www.gov.cn/path` 按路径排除。政府预设的域名规则仅识别 `gov.cn`、`.gov.cn` 及其子域，不再包含其他国家或通用 `.gov` 后缀；政府机构名称规则仍单独存在。路径两侧文字不会拼接成一次正则命中。带空格的路径需要使用引号，例如 `"C:\\工作资料\\政府 攻击报告.txt"`。
+路径规则覆盖 Windows 盘符、UNC、Unix、相对路径和带英文引号／反引号的空格路径。HTTP(S) URL 只保留主机名供匹配，路径、查询参数等不参与组合检测；裸 `www.gov.cn/path` 按路径排除。政府预设只识别具体 `gov.cn` 或其子域的网址／主机名，不再将政府、政务等泛词或单独的 `.gov.cn` 后缀视为目标。路径两侧文字不会拼接成一次正则命中。带空格的路径需要使用引号，例如 `"C:\\工作资料\\政府 攻击报告.txt"`。
 
-路径与规范化视图按文本段惰性建立，同一请求的不同组合复用；保留可匹配区间而不为每条规则复制全文。正则的 `^`／`$` 作用于这些保留区间，匹配不能跨越排除范围。只有实际命中时才计算原文证据位置。新版预设只用于新增预设组，不覆盖已经保存的自定义规则或线上配置。
+路径与规范化视图按文本段惰性建立，同一请求的不同组合复用；保留可匹配区间而不为每条规则复制全文。正则的 `^`／`$` 作用于这些保留区间，匹配不能跨越排除范围。只有实际命中时才计算原文证据位置。加载和保存配置时，仅将主题列表完整等于旧政府预设的规则组更新为具体域名规则；识别依据规则内容，不依赖组名或 ID。保留其意图、启停、顺序和白名单，自定义主题列表不变。该兼容处理不增加请求解析或正文复制。
+
+例如，“政务系统攻击分析”不触发政府预设，“攻击 https://agency.gov.cn/”仍触发；请求携带的历史已包含具体目标时，最新用户输入的操作意图仍可与之组合。升级后的配置读取即返回新预设主题，下一次保存持久化；历史事件与违规次数不回写。
 
 ## 旧关键词迁移
 
@@ -68,7 +70,9 @@ The global exact user/API-key whitelist runs first and exempts all local keyword
 
 Rules accept literals or `regex:` Go/RE2 expressions. All groups share a 10,000-rule limit, with 200-character literals and 2,000-character regexes including the prefix. Enabled groups require valid nonempty sides; invalid and empty-matching patterns are rejected. Patterns compile at configuration activation. Only the combination matching view uses NFKC, zero-width removal and path exclusion; original request bytes and keyword matching stay unchanged.
 
-All combination topics and intents skip Windows/UNC/Unix/relative paths and filenames with extensions. Quote paths containing spaces. HTTP(S) URLs retain only the hostname; bare `www.gov.cn/path` is excluded as a path. The government domain preset now recognizes only `gov.cn`, `.gov.cn` and their subdomains. The separate government-organization rule remains. Excluded ranges form hard boundaries, so a single regex cannot bridge a removed path; `^`/`$` refer to the retained spans. Views are prepared lazily once per text segment and shared across policies; only actual matches project evidence back to the original text. Updated templates do not overwrite saved rules.
+All combination topics and intents skip Windows/UNC/Unix/relative paths and filenames with extensions. Quote paths containing spaces. HTTP(S) URLs retain only the hostname; bare `www.gov.cn/path` is excluded as a path. The government preset requires a concrete `gov.cn` or subdomain hostname: generic government terms and the `.gov.cn` suffix alone no longer count as a target. Excluded ranges form hard boundaries, so a single regex cannot bridge a removed path; `^`/`$` refer to the retained spans. Views are prepared lazily once per text segment and shared across policies; only actual matches project evidence back to the original text.
+
+Loading or saving configuration upgrades only topic lists exactly matching the legacy government preset, regardless of policy ID/name. Intent rules, activation, ordering and allowlists remain intact; custom topic lists are preserved. Configuration reads expose the upgraded rules, and the next save persists them. This does not add request parsing or body copies. A concrete target in supplied history can still combine with latest-user intent. Historical events and violation counts are unchanged.
 
 The optional per-group `migrate_keywords` field retires exact legacy literals when the enabled group is saved. Government's template declares `.gov` and `.gov.`. Matching is case-insensitive and trims outer whitespace; regexes and other literals remain. An emptied keyword list is disabled only after an actual removal. Disabling/deleting the group does not restore retired literals.
 

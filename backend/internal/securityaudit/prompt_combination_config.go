@@ -91,6 +91,7 @@ func normalizeCombinationPolicies(cfg *storageConfig) {
 		policy := &cfg.CombinationPolicies[i]
 		policy.ID, policy.Name = strings.TrimSpace(policy.ID), strings.TrimSpace(policy.Name)
 		policy.TopicRules = canonicalBlockedKeywords(policy.TopicRules)
+		policy.TopicRules = migrateLegacyGovernmentTopicRules(policy.TopicRules)
 		policy.IntentRules = canonicalBlockedKeywords(policy.IntentRules)
 		policy.MigrateKeywords = canonicalBlockedKeywords(policy.MigrateKeywords)
 		policy.KeywordWhitelistKeys = canonicalKeywordWhitelistKeys(policy.KeywordWhitelistKeys)

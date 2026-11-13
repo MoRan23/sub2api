@@ -1,15 +1,31 @@
 package securityaudit
 
+// Retain the exact former preset to upgrade saved copies without relying on a
+// policy's editable ID or name. Customized topic sets remain administrator-owned.
+const (
+	legacyGovernmentHostTopicRule   = `regex:(?i)(?:^|[^a-z0-9_.-])(?:(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*gov\.cn|\.gov\.cn)(?:$|[^a-z0-9_.-]|\.(?:$|[^a-z0-9_.-]))`
+	legacyGovernmentAgencyTopicRule = `regex:(?i)(?:政府|政务|政務|公安|警务|警務|法院|检察院|檢察院|税务|稅務|海关|海關|财政局|財政局|财政部|財政部|(?:^|[^a-z0-9_.])(?:government(?:al)?|public[\s-]+sector|(?:federal|state|local)[\s-]+(?:agenc(?:y|ies)|departments?)|police[\s-]+(?:departments?|agenc(?:y|ies)|stations?)|tax[\s-]+(?:authorit(?:y|ies)|agenc(?:y|ies)|offices?)|customs[\s-]+(?:authorit(?:y|ies)|agenc(?:y|ies))|(?:district|supreme|federal)[\s-]+courts?)(?:$|[^a-z0-9_.]))`
+)
+
 // Editable defaults, never an implicit activation. A topic alone is insufficient:
 // a separate operational-intent rule must match the latest user input.
 func defaultGovernmentTopicRules() []string {
 	return []string{
-		// Recognize gov.cn hosts, its root, and the explicitly named suffix.
+		// Require a concrete gov.cn host, including the root but not a bare suffix.
 		// Both boundaries reject appended domains such as gov.cn.evil.com; an
 		// optional final dot is sentence punctuation, not a further host label.
-		`regex:(?i)(?:^|[^a-z0-9_.-])(?:(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*gov\.cn|\.gov\.cn)(?:$|[^a-z0-9_.-]|\.(?:$|[^a-z0-9_.-]))`,
-		`regex:(?i)(?:政府|政务|政務|公安|警务|警務|法院|检察院|檢察院|税务|稅務|海关|海關|财政局|財政局|财政部|財政部|(?:^|[^a-z0-9_.])(?:government(?:al)?|public[\s-]+sector|(?:federal|state|local)[\s-]+(?:agenc(?:y|ies)|departments?)|police[\s-]+(?:departments?|agenc(?:y|ies)|stations?)|tax[\s-]+(?:authorit(?:y|ies)|agenc(?:y|ies)|offices?)|customs[\s-]+(?:authorit(?:y|ies)|agenc(?:y|ies))|(?:district|supreme|federal)[\s-]+courts?)(?:$|[^a-z0-9_.]))`,
+		`regex:(?i)(?:^|[^a-z0-9_.-])(?:[a-z0-9](?:[a-z0-9-]{0,61}[a-z0-9])?\.)*gov\.cn(?:$|[^a-z0-9_.-]|\.(?:$|[^a-z0-9_.-]))`,
 	}
+}
+
+// Called only while normalizing configuration, never on the request path.
+func migrateLegacyGovernmentTopicRules(topics []string) []string {
+	if len(topics) == 2 &&
+		((topics[0] == legacyGovernmentHostTopicRule && topics[1] == legacyGovernmentAgencyTopicRule) ||
+			(topics[1] == legacyGovernmentHostTopicRule && topics[0] == legacyGovernmentAgencyTopicRule)) {
+		return defaultGovernmentTopicRules()
+	}
+	return topics
 }
 
 func defaultGovernmentIntentRules() []string {

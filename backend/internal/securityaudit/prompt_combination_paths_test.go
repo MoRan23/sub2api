@@ -12,7 +12,10 @@ import (
 )
 
 func TestCombinationPathsReferenceCases(t *testing.T) {
-	rules, err := compileCombinedRules(append(defaultGovernmentTopicRules(), defaultGovernmentIntentRules()...), "invalid")
+	// Keep an explicit custom agency rule to exercise path filtering independently
+	// of the stricter government preset, which now requires a concrete hostname.
+	topics := append(defaultGovernmentTopicRules(), legacyGovernmentAgencyTopicRule)
+	rules, err := compileCombinedRules(append(topics, defaultGovernmentIntentRules()...), "invalid")
 	require.NoError(t, err)
 	for _, tc := range []struct {
 		text string
@@ -31,6 +34,7 @@ func TestCombinationPathsReferenceCases(t *testing.T) {
 		{`https://www.gov.cn/政府/攻击.html`, [3]bool{true, false, false}},
 		{`www.gov.cn`, [3]bool{true, false, false}},
 		{`gov.cn .gov.cn`, [3]bool{true, false, false}},
+		{`.gov.cn`, [3]bool{}},
 		{`www.gov.cn/path`, [3]bool{}},
 		{`www.gov.uk attack`, [3]bool{false, false, true}},
 		{`https://example.com/www.gov.cn/政府/攻击`, [3]bool{}},
@@ -268,12 +272,13 @@ func TestCombinationHTTPHostDoesNotMaterializeEscapedSuffix(t *testing.T) {
 func TestCombinationPathsChineseProseAdjacentToGovernmentHost(t *testing.T) {
 	matcher, err := newPromptCombinationMatcher(defaultGovernmentTopicRules(), defaultGovernmentIntentRules())
 	require.NoError(t, err)
-	for _, text := range []string{"请攻击www.gov.cn", "攻击 www.gov.cn网站", "请攻击www.gov.cn网站", "渗透.gov.cn网站", "请攻击ｗｗｗ．ｇｏｖ．ｃｎ网站"} {
+	for _, text := range []string{"请攻击www.gov.cn", "攻击 www.gov.cn网站", "请攻击www.gov.cn网站", "请攻击ｗｗｗ．ｇｏｖ．ｃｎ网站"} {
 		match, err := matcher.Match(cbrnTestRequest("responses", map[string]any{"input": text}))
 		require.NoError(t, err)
 		require.NotNil(t, match, text)
 	}
 	for _, text := range []string{
+		"渗透.gov.cn网站",
 		"请攻击www.gov.cn.evil", "攻击 www.gov.cn.备份", "攻击 gov.cn.备份", "攻击 政府工作报告.备份",
 		"请攻击www.gov.cn_/file", "攻击 /tmp/请访问www.gov.cn网站", `攻击 C:\请访问www.gov.cn网站`,
 		"请攻击www.gov.cn_evil", "请攻击www.gov.cn.evil网站", "攻击 gov.cn.政府报告",

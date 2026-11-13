@@ -43,6 +43,9 @@ func TestPromptCombinationServiceScopeAndPriority(t *testing.T) {
 		{name: "wrong user same Key ID", configure: func(c *ActiveConfig) { c.KeywordWhitelistKeys = []KeywordWhitelistKey{{UserID: 3, APIKeyID: 2}} }, wantCode: ErrorCodeCombinationBlocked},
 		{name: "government information", body: `{"input":"请查询 example.gov.cn 的公开办事信息"}`},
 		{name: "attack without government target", body: `{"input":"渗透 example.com"}`},
+		{name: "generic government topic without target", body: `{"input":"政务系统攻击分析"}`},
+		{name: "generic government topic with unrelated link", body: `{"input":"攻击政务系统 https://example.com"}`},
+		{name: "government suffix without concrete target", body: `{"input":"渗透 .gov.cn 网站"}`},
 		{name: "carried target", body: `{"input":[{"role":"user","content":"example.gov.cn"},{"role":"assistant","content":"收到"},{"role":"user","content":"渗透它"}]}`, wantCode: ErrorCodeCombinationBlocked},
 		{name: "old intent ignored", body: `{"input":[{"role":"user","content":"渗透 example.gov.cn"},{"role":"assistant","content":"历史"},{"role":"user","content":"你好"}]}`},
 		{name: "no remote history", body: `{"previous_response_id":"resp_example.gov.cn","input":"渗透它"}`},
@@ -79,6 +82,7 @@ func TestPromptCombinationServiceScopeAndPriority(t *testing.T) {
 			if tc.wantCode == "" {
 				require.Equal(t, DecisionAllow, decision.Kind)
 				require.Nil(t, decision.Result)
+				require.Zero(t, service.metrics.Snapshot().CombinationBlocked)
 			} else {
 				require.Equal(t, DecisionBlock, decision.Kind)
 				require.False(t, decision.AllowNextStage)
