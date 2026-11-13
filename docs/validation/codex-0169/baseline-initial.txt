@@ -1,0 +1,34 @@
+2026/11/13 09:36:37 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkCodex0169Compatibility/normalize/65536-16         	   12417	     38503 ns/op	1708.16 MB/s	    9730 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/normalize/65536-16         	   12549	     38235 ns/op	1720.13 MB/s	    9727 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/normalize/65536-16         	   12847	     37817 ns/op	1739.12 MB/s	    9727 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/65536-16       	    2358	    201297 ns/op	 326.73 MB/s	  158095 B/op	     190 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/65536-16       	    2620	    199412 ns/op	 329.82 MB/s	  158097 B/op	     190 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/65536-16       	    2682	    194553 ns/op	 338.05 MB/s	  158085 B/op	     190 allocs/op
+BenchmarkCodex0169Compatibility/normalize/1048576-16       	    1100	    484598 ns/op	2164.29 MB/s	    9728 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/normalize/1048576-16       	    1104	    433130 ns/op	2421.46 MB/s	    9713 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/normalize/1048576-16       	    1093	    435400 ns/op	2408.84 MB/s	    9723 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/1048576-16     	     183	   2609964 ns/op	 401.85 MB/s	 2125330 B/op	     192 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/1048576-16     	     175	   2661365 ns/op	 394.09 MB/s	 2125519 B/op	     193 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/1048576-16     	     174	   2757952 ns/op	 380.29 MB/s	 2125465 B/op	     192 allocs/op
+BenchmarkCodex0169Compatibility/normalize/8388608-16       	     139	   3430545 ns/op	2445.34 MB/s	    9778 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/normalize/8388608-16       	     132	   3548019 ns/op	2364.37 MB/s	    9782 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/normalize/8388608-16       	     136	   3467620 ns/op	2419.19 MB/s	    9738 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/8388608-16     	      24	  18983117 ns/op	 441.91 MB/s	16806900 B/op	     194 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/8388608-16     	      25	  19687528 ns/op	 426.10 MB/s	16806880 B/op	     194 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/8388608-16     	      21	  19396890 ns/op	 432.48 MB/s	16807604 B/op	     196 allocs/op
+BenchmarkOpenAIWSForwarderHotPath-16                       	    6697	     76807 ns/op	   33259 B/op	     847 allocs/op
+BenchmarkOpenAIWSForwarderHotPath-16                       	    6726	     79435 ns/op	   33260 B/op	     847 allocs/op
+BenchmarkOpenAIWSForwarderHotPath-16                       	    5742	     88827 ns/op	   33256 B/op	     847 allocs/op
+BenchmarkOpenAIWSEventEnvelopeParse-16                     	 1000000	       477.0 ns/op	     456 B/op	       4 allocs/op
+BenchmarkOpenAIWSEventEnvelopeParse-16                     	 1000000	       603.7 ns/op	     456 B/op	       4 allocs/op
+BenchmarkOpenAIWSEventEnvelopeParse-16                     	  857571	       596.1 ns/op	     456 B/op	       4 allocs/op
+BenchmarkOpenAIWSPoolAcquire-16                            	  152727	      3138 ns/op	     603 B/op	      10 allocs/op
+BenchmarkOpenAIWSPoolAcquire-16                            	  153409	      2952 ns/op	     606 B/op	      10 allocs/op
+BenchmarkOpenAIWSPoolAcquire-16                            	  158229	      2955 ns/op	     603 B/op	      10 allocs/op
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/service	18.992s
