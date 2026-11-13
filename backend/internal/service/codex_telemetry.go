@@ -62,6 +62,7 @@ type CodexTelemetryInput struct {
 	AgentName               string
 	SubagentKind            string
 	OpenAISubagent          string
+	GuardianRequest         string
 	Sandbox                 string
 	SandboxMode             string
 	ApprovalPolicy          string
@@ -212,6 +213,7 @@ type CodexTelemetryService struct {
 	lastRuntimeErrorLog  time.Time
 	runtimeFailures      codexTelemetryRuntimeFailures
 	runtimeWake          chan struct{}
+	connectStates        map[codexTelemetryConnectKey]*codexTelemetryConnectState
 }
 
 func NewCodexTelemetryService(upstream HTTPUpstream) *CodexTelemetryService {
@@ -296,6 +298,7 @@ func (s *CodexTelemetryService) resetLocked() {
 	s.threads = make(map[string]time.Time)
 	s.turns = make(map[string]*codexTelemetryTurn)
 	s.metrics.clear()
+	s.connectStates = nil
 	for _, attempt := range s.runtimeAttempts {
 		attempt.invalid = true
 		attempt.reservations = 0

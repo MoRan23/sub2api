@@ -83,8 +83,11 @@ type openAIWSAcquireRequest struct {
 	// HandshakeObserver owns only a frozen safe actor/identity snapshot. Keeping
 	// it with delayed prewarm requests records the dial at its actual time.
 	HandshakeObserver func(http.Header)
-	ProxyURL          string
-	PreferredConnID   string
+	// ConnectObserver freezes only telemetry scalars; a factory starts timing
+	// at a physical dial, never at pool selection or connection reuse.
+	ConnectObserver func() *CodexTelemetryConnectObserver
+	ProxyURL        string
+	PreferredConnID string
 	// ForceNewConn: 强制本次获取新连接（避免复用导致连接内续链状态互相污染）。
 	ForceNewConn bool
 	// ForcePreferredConn: 强制本次只使用 PreferredConnID，禁止漂移到其它连接。
@@ -2299,13 +2302,22 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 		}
 	}
 	ctx = withOpenAIWSTransportAccount(ctx, req.Account.ID)
+	var connectObserver *CodexTelemetryConnectObserver
+	if req.ConnectObserver != nil {
+		connectObserver = req.ConnectObserver()
+	}
 	conn, status, handshakeHeaders, err := p.clientDialer.Dial(ctx, req.WSURL, headers, req.ProxyURL)
 	if err != nil {
 		var handshakeErr *openAIWSHandshakeError
 		var responseBody []byte
+		observedHeaders := headers
 		if errors.As(err, &handshakeErr) && handshakeErr != nil {
 			responseBody = append([]byte(nil), handshakeErr.Body...)
+			if handshakeErr.ObservationHeaders != nil {
+				observedHeaders = handshakeErr.ObservationHeaders
+			}
 		}
+		connectObserver.FinishWithHeaders(false, observedHeaders)
 		return nil, &openAIWSDialError{
 			StatusCode:      status,
 			ResponseHeaders: cloneHeader(handshakeHeaders),
@@ -2314,6 +2326,7 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 		}
 	}
 	if conn == nil {
+		connectObserver.FinishWithHeaders(false, headers)
 		return nil, &openAIWSDialError{
 			StatusCode:      status,
 			ResponseHeaders: cloneHeader(handshakeHeaders),
@@ -2323,6 +2336,7 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 	id := p.nextConnID(req.Account.ID)
 	pooledConn := newOpenAIWSConn(id, req.Account.ID, conn, handshakeHeaders)
 	pooledConn.observationHeaders = openAIWSPhysicalObservationHeaders(conn, headers)
+	connectObserver.FinishWithHeaders(true, pooledConn.observationHeaders)
 	pooledConn.handshakeObserverInstalled = req.HandshakeObserver != nil
 	if req.HandshakeObserver != nil {
 		// Record every successful physical dial, including background prewarm

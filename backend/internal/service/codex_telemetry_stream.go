@@ -359,6 +359,7 @@ func codexTelemetryEventKind(kind string) string {
 		"response.created", "response.queued", "response.in_progress",
 		"response.completed", "response.failed", "response.incomplete",
 		"response.done", "response.cancelled", "response.canceled",
+		"response.interrupt.accepted", "response.interrupt.failed", "codex.rate_limits",
 		"response.output_item.added", "response.output_item.done",
 		"response.content_part.added", "response.content_part.done",
 		"response.output_text.delta", "response.output_text.done", "response.output_text.annotation.added",

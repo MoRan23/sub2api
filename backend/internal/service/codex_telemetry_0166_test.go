@@ -15,6 +15,7 @@ import (
 var telemetryCriticalPathDurations = []string{
 	"critical_path_duration_ms", "critical_path_inference_ms", "critical_path_auto_review_ms",
 	"critical_path_user_wait_ms", "critical_path_tools_ms", "critical_path_overhead_ms", "critical_path_unknown_ms",
+	"critical_path_sampling_ms", "critical_path_compaction_ms", "critical_path_auto_review_overhead_ms",
 }
 
 func requireTelemetryCriticalPathDisabled(t *testing.T, params map[string]json.RawMessage) {

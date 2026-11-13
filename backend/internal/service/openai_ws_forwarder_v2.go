@@ -249,6 +249,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		WSURL:                wsURL,
 		Headers:              wsHeaders,
 		HandshakeObserver:    freezeFingerprintObservationWSHandshake(c, account),
+		ConnectObserver:      s.prepareCodexTelemetryConnect(ctx, account, wsHeaders, wsURL, mappedModel),
 		IdentityDigest:       outboundIdentityPlan.SocketDigest,
 		HeadersFactory:       s.openAIWSHeadersFactory(ctx, account),
 		PreferredConnID:      preferredConnID,

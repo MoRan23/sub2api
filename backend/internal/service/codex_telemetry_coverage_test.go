@@ -19,22 +19,22 @@ func TestCodexTelemetryCoverageReportsClientOnlySignalsWithoutCollection(t *test
 		require.Equal(t, policy.enabled && (policy.simulation || policy.observation), result.EffectiveEnabled)
 		require.Empty(t, result.Items, "capability diagnostics are not telemetry events")
 		require.Equal(t, CodexTelemetryCounters{}, result.Counters)
-		require.Len(t, result.Coverage, 2)
+		require.Len(t, result.Coverage, 4)
 		require.Equal(t, CodexTelemetrySignalCoverage{
 			Signal: "skill_invocation", Type: "logs", Status: "unavailable",
 			EventNames: []string{"codex.skill_invocation"}, Reason: "client_skill_event_not_on_responses_wire",
-		}, result.Coverage[0])
-		require.Equal(t, "awaiting_source", result.Coverage[1].Status, "a recognized metric schema is not a collected sample")
-		require.Equal(t, "client_auth_storage_not_on_responses_wire", result.Coverage[1].Reason)
+		}, result.Coverage[2])
+		require.Equal(t, "awaiting_source", result.Coverage[3].Status, "a recognized metric schema is not a collected sample")
+		require.Equal(t, "client_auth_storage_not_on_responses_wire", result.Coverage[3].Reason)
 		encoded, err := json.Marshal(result.Coverage)
 		require.NoError(t, err)
 		require.NotContains(t, string(encoded), "user.account_id")
 		require.NotContains(t, string(encoded), "skill.name")
-		result.Coverage[0].EventNames[0] = "changed"
-		result.Coverage[1].Reason = "changed"
+		result.Coverage[2].EventNames[0] = "changed"
+		result.Coverage[3].Reason = "changed"
 		again := s.Observations(CodexTelemetryObservationQuery{})
-		require.Equal(t, "codex.skill_invocation", again.Coverage[0].EventNames[0])
-		require.Equal(t, "client_auth_storage_not_on_responses_wire", again.Coverage[1].Reason)
+		require.Equal(t, "codex.skill_invocation", again.Coverage[2].EventNames[0])
+		require.Equal(t, "client_auth_storage_not_on_responses_wire", again.Coverage[3].Reason)
 	}
 
 	t.Setenv("CODEX_TELEMETRY_ENABLED", "false")
@@ -42,7 +42,7 @@ func TestCodexTelemetryCoverageReportsClientOnlySignalsWithoutCollection(t *test
 	result := s.Observations(CodexTelemetryObservationQuery{})
 	require.False(t, result.EffectiveEnabled)
 	require.Equal(t, "CODEX_TELEMETRY_ENABLED", result.ForcedOffReason)
-	require.Len(t, result.Coverage, 2, "capabilities remain visible while collection is disabled")
+	require.Len(t, result.Coverage, 4, "capabilities remain visible while collection is disabled")
 }
 
 func TestCodexTelemetryClientOnlySignalsAreNeverInferredFromResponses(t *testing.T) {

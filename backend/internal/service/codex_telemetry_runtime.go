@@ -16,6 +16,7 @@ import (
 // begin reserves capacity for both itself and its eventual result, so a burst of
 // new requests cannot crowd completed attempts out of the bounded queue.
 type codexTelemetryMutation struct {
+	connect *codexTelemetryConnectMeasurement
 	attempt *CodexTelemetryAttempt
 	result  *CodexTelemetryResult
 	retry   bool
@@ -280,6 +281,10 @@ func (s *CodexTelemetryService) mutationLoop() {
 }
 
 func (s *CodexTelemetryService) applyRuntimeMutation(m codexTelemetryMutation) {
+	if m.connect != nil {
+		s.applyConnectMutation(*m.connect)
+		return
+	}
 	a := m.attempt
 	s.mu.Lock()
 	store, valid := s.store, !a.invalid && a.epoch == s.epoch && s.enabledLocked()

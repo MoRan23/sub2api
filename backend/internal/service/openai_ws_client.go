@@ -93,6 +93,8 @@ type coderOpenAIWSClientDialer struct {
 type openAIWSHandshakeError struct {
 	Body []byte
 	Err  error
+	// Sanitized final request headers only; redirects can change the wire identity.
+	ObservationHeaders http.Header
 }
 
 func (e *openAIWSHandshakeError) Error() string {
@@ -168,7 +170,11 @@ func (d *coderOpenAIWSClientDialer) Dial(
 			body, _ = io.ReadAll(io.LimitReader(resp.Body, 8<<10))
 			_ = resp.Body.Close()
 		}
-		return nil, status, respHeaders, &openAIWSHandshakeError{Body: body, Err: err}
+		actualHeaders := headers
+		if resp != nil && resp.Request != nil {
+			actualHeaders = resp.Request.Header
+		}
+		return nil, status, respHeaders, &openAIWSHandshakeError{Body: body, Err: err, ObservationHeaders: cloneFingerprintObservationHeaders(actualHeaders)}
 	}
 	// coder/websocket 默认单消息读取上限为 32KB，Codex WS 事件（如 rate_limits/大 delta）
 	// 可能超过该阈值，需显式提高上限，避免本地 read_fail(message too big)。

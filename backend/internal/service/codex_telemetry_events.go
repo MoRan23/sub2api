@@ -56,6 +56,9 @@ func codexAnalyticsFieldSources(profile codexTelemetryProfile, events []codexAna
 		profile.fieldSources = make(map[string]string)
 	}
 	for _, event := range events {
+		if _, present := event.EventParams["turn_trigger"]; present && profile.observationEnabled && profile.input.TurnTrigger != "" {
+			profile.fieldSources["turn_trigger"] = "observed"
+		}
 		switch event.EventType {
 		case "codex_turn_event":
 			for _, field := range []string{"multi_agent_version", "tools_change_count", "critical_path_status"} {
@@ -246,6 +249,7 @@ func codexTurnEventBase(profile codexTelemetryProfile, spec codexTurnSpec) map[s
 		for _, field := range [...]string{
 			"critical_path_duration_ms", "critical_path_inference_ms", "critical_path_auto_review_ms",
 			"critical_path_user_wait_ms", "critical_path_tools_ms", "critical_path_overhead_ms", "critical_path_unknown_ms",
+			"critical_path_sampling_ms", "critical_path_compaction_ms", "critical_path_auto_review_overhead_ms",
 		} {
 			params[field] = nil
 		}
@@ -272,11 +276,19 @@ func setCodexTurnUsage(params map[string]any, response gjson.Result) {
 }
 
 func codexHookEvent(profile codexTelemetryProfile, hookName string) codexAnalyticsEvent {
-	return newCodexAnalyticsEvent(profile, "codex_hook_run", map[string]any{
+	params := map[string]any{
 		"execution_mode": "sync", "handler_type": "mcp_tool", "hook_name": hookName,
 		"hook_source": "plugin", "model_slug": profile.model, "product_client_id": codexClientName(profile),
 		"status": "completed", "thread_id": profile.threadID, "turn_id": profile.turnID,
-	})
+	}
+	addCodexObservedTurnTrigger(profile, params)
+	return newCodexAnalyticsEvent(profile, "codex_hook_run", params)
+}
+
+func addCodexObservedTurnTrigger(profile codexTelemetryProfile, params map[string]any) {
+	if profile.observationEnabled && profile.input.TurnTrigger != "" {
+		params["turn_trigger"] = profile.input.TurnTrigger
+	}
 }
 
 func codexGuardianTarget(profile codexTelemetryProfile) (string, map[string]any) {
@@ -287,6 +299,7 @@ func codexGuardianTarget(profile codexTelemetryProfile) (string, map[string]any)
 }
 
 func codexGuardianReviewEvent(profile codexTelemetryProfile) codexAnalyticsEvent {
+	review := codexSimulatedGuardianReview()
 	completed := codexActivityCompletedAt(profile)
 	if codexSimulatesFileChange(profile) {
 		completed = completed.Add(-time.Duration(codexActivityDuration(profile, "file-duration", 500, 4000)) * time.Millisecond)
@@ -297,13 +310,13 @@ func codexGuardianReviewEvent(profile codexTelemetryProfile) codexAnalyticsEvent
 	duration := codexActivityDuration(profile, "guardian", 100, 800)
 	target, action := codexGuardianTarget(profile)
 	return newCodexAnalyticsEvent(profile, "codex_guardian_review", map[string]any{
-		"guardian_context_mode": nil,
+		"guardian_context_mode": codexOptionalString(review.contextMode),
 		"session_id":            profile.sessionID, "app_server_client": codexAppServerClient(profile), "runtime": codexRuntime(profile),
 		"thread_id": profile.threadID, "turn_id": profile.turnID, "review_id": codexActivityID(profile, "guardian-review"),
-		"target_item_id": target, "approval_request_source": "main_turn", "reviewed_action": action, "reviewed_action_truncated": false,
+		"target_item_id": target, "approval_request_source": "main_turn", "reviewed_action": action, "reviewed_action_truncated": review.truncated,
 		"decision": "approved", "terminal_status": "approved", "failure_reason": nil, "attempt_count": 1,
-		"risk_level": nil, "user_authorization": nil, "outcome": nil, "guardian_thread_id": codexActivityID(profile, "guardian-thread"),
-		"guardian_session_kind": "trunk_new", "guardian_model": "codex-auto-review", "guardian_reasoning_effort": nil,
+		"risk_level": codexOptionalString(review.risk), "user_authorization": codexOptionalString(review.authorization), "outcome": codexOptionalString(review.outcome), "guardian_thread_id": codexActivityID(profile, "guardian-thread"),
+		"guardian_session_kind": "trunk_new", "guardian_model": review.model, "guardian_reasoning_effort": codexOptionalString(review.effort),
 		"guardian_default_review_model_id": "codex-auto-review", "guardian_catalog_contains_auto_review": nil,
 		"guardian_review_model_overridden": false, "guardian_review_model_override": nil, "guardian_model_provider_id": "openai",
 		"had_prior_review_context": false, "review_timeout_ms": 20000, "tool_call_count": 0,
@@ -312,6 +325,17 @@ func codexGuardianReviewEvent(profile codexTelemetryProfile) codexAnalyticsEvent
 		"input_tokens": nil, "cached_input_tokens": nil, "cache_write_input_tokens": nil, "output_tokens": nil,
 		"reasoning_output_tokens": nil, "total_tokens": nil,
 	})
+}
+
+// One explicit virtual review supplies both analytics and metric labels. Empty
+// fields denote unknown values; they are not observations of the user's review.
+type codexGuardianReviewSummary struct {
+	contextMode, risk, authorization, outcome, model, effort string
+	truncated                                                bool
+}
+
+func codexSimulatedGuardianReview() codexGuardianReviewSummary {
+	return codexGuardianReviewSummary{model: "codex-auto-review"}
 }
 
 func codexDynamicToolEvent(profile codexTelemetryProfile, terminal []byte) codexAnalyticsEvent {
@@ -383,7 +407,7 @@ func codexToolEventBase(profile codexTelemetryProfile, spec codexToolSpec) map[s
 	if guardianCount > 0 {
 		approvalOutcome = "guardian_approved"
 	}
-	return map[string]any{
+	params := map[string]any{
 		"app_server_client": codexAppServerClient(profile), "cell_id": spec.itemID, "completed_at_ms": completed.UnixMilli(),
 		"duration_ms": spec.duration, "execution_duration_ms": spec.duration, "failure_kind": nil,
 		"final_approval_outcome": approvalOutcome, "guardian_review_count": guardianCount, "item_id": spec.itemID,
@@ -395,6 +419,8 @@ func codexToolEventBase(profile codexTelemetryProfile, spec codexToolSpec) map[s
 		"subagent_source": codexOptionalString(profile.input.SubagentKind), "subsequent_response_id": nil, "terminal_status": spec.status,
 		"thread_id": profile.threadID, "thread_source": firstNonEmptyString(profile.input.ThreadSource, "user"), "turn_id": profile.turnID, "user_review_count": 0,
 	}
+	addCodexObservedTurnTrigger(profile, params)
+	return params
 }
 
 func codexTerminalResponse(terminal []byte) gjson.Result {
@@ -419,6 +445,9 @@ func codexSimulatesGuardian(profile codexTelemetryProfile) bool {
 
 func codexSimulatesClientBehavior(profile codexTelemetryProfile) bool {
 	if !profile.simulationEnabled || codexTelemetryOSFamily(profile) == "" {
+		return false
+	}
+	if profile.input.GuardianRequest == "reviewer" || profile.input.GuardianRequest == "classifier" {
 		return false
 	}
 	for _, value := range []string{profile.input.ThreadSource, profile.input.SubagentKind, profile.input.OpenAISubagent} {

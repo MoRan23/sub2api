@@ -61,6 +61,8 @@ var codexMetricDescriptors = []codexMetricDescriptor{
 	{"codex.shell_snapshot", "sum", "", "app.version,auth_mode,failure_reason,model,originator,session_source,success,version"},
 	{"codex.startup.phase.duration_ms", "histogram", "ms", "app.version,auth_mode,model,originator,phase,service_name,session_source,status"},
 	{"codex.websocket.request", "sum", "", "app.version,auth_mode,model,originator,service_name,session_source,success"},
+	{"codex.websocket.connect", "sum", "", "app.version,auth_mode,model,originator,service_name,session_source,success"},
+	{"codex.websocket.connect.duration_ms", "histogram", "ms", "app.version,auth_mode,model,originator,service_name,session_source,success"},
 	{"codex.websocket.request.duration_ms", "histogram", "ms", "app.version,auth_mode,model,originator,service_name,session_source,success"},
 	{"codex.rollout_compression.materialize", "sum", "", "outcome"},
 	{"codex.websocket.event", "sum", "", "app.version,auth_mode,kind,model,originator,service_name,session_source,success"},
@@ -375,10 +377,19 @@ func (s *codexTelemetryMetricStore) record(profile codexTelemetryProfile, result
 			if descriptor.unit == "ms" {
 				value = float64(codexActivityDuration(profile, "guardian", 100, 800))
 			}
-			state.addWithSource(descriptor, value, profile, "completed", now, map[string]string{
+			review := codexSimulatedGuardianReview()
+			tags := map[string]string{
 				"decision": "approved", "terminal_status": "approved", "failure_reason": "none",
 				"approval_request_source": "main_turn", "action": action["type"].(string), "session_kind": "trunk_new", "had_prior_review_context": "false",
-			}, "simulated")
+				"context_mode": firstNonEmptyString(review.contextMode, "unknown"), "risk_level": firstNonEmptyString(review.risk, "none"),
+				"user_authorization": firstNonEmptyString(review.authorization, "none"), "outcome": firstNonEmptyString(review.outcome, "none"),
+				"guardian_model": review.model, "guardian_reasoning_effort": firstNonEmptyString(review.effort, "none"),
+				"reviewed_action_truncated": strconv.FormatBool(review.truncated),
+			}
+			if descriptor.kind == "sum" {
+				tags["context_changed"] = "false"
+			}
+			state.addWithSource(descriptor, value, profile, "completed", now, tags, "simulated")
 			continue
 		case "codex.turn.tool.call":
 			value = float64(boolInt(profile.dynamicTool) + boolInt(codexSimulatesFileChange(profile)))

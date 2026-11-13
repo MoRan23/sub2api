@@ -36,6 +36,7 @@ type codexTelemetryProfileSnapshot struct {
 	AgentName               string            `json:"agent_name"`
 	SubagentKind            string            `json:"subagent_kind"`
 	OpenAISubagent          string            `json:"openai_subagent"`
+	GuardianRequest         string            `json:"guardian_request,omitempty"`
 	Shell                   string            `json:"shell"`
 	Sandbox                 string            `json:"sandbox"`
 	SandboxMode             string            `json:"sandbox_mode"`
@@ -76,7 +77,7 @@ func marshalCodexTelemetryProfile(p codexTelemetryProfile) ([]byte, error) {
 		SessionID: p.sessionID, ThreadID: p.threadID, TurnID: p.turnID, RootTurnID: p.rootTurnID,
 		ParentThreadID: i.ParentThreadID, ParentTurnID: i.ParentTurnID, ForkedFromThreadID: i.ForkedFromThreadID,
 		ThreadSource: i.ThreadSource, TurnTrigger: i.TurnTrigger, AgentName: i.AgentName,
-		SubagentKind: i.SubagentKind, OpenAISubagent: i.OpenAISubagent, Shell: i.Shell,
+		SubagentKind: i.SubagentKind, OpenAISubagent: i.OpenAISubagent, GuardianRequest: i.GuardianRequest, Shell: i.Shell,
 		Sandbox: i.Sandbox, SandboxMode: i.SandboxMode, ApprovalPolicy: i.ApprovalPolicy,
 		ApprovalsReviewer: i.ApprovalsReviewer, AutoReviewEnabled: i.AutoReviewEnabled, GuardianV2Enabled: i.GuardianV2Enabled,
 		Model: p.model, Effort: p.effort, ServiceTier: p.serviceTier, Started: p.started, Ended: p.ended,
@@ -101,7 +102,7 @@ func unmarshalCodexTelemetryProfile(data []byte) (codexTelemetryProfile, error) 
 		SessionID: snap.SessionID, ThreadID: snap.ThreadID, TurnID: snap.TurnID, RootTurnID: snap.RootTurnID,
 		ParentThreadID: snap.ParentThreadID, ParentTurnID: snap.ParentTurnID, ForkedFromThreadID: snap.ForkedFromThreadID,
 		ThreadSource: snap.ThreadSource, TurnTrigger: snap.TurnTrigger, AgentName: snap.AgentName,
-		SubagentKind: snap.SubagentKind, OpenAISubagent: snap.OpenAISubagent, Shell: snap.Shell,
+		SubagentKind: snap.SubagentKind, OpenAISubagent: snap.OpenAISubagent, GuardianRequest: snap.GuardianRequest, Shell: snap.Shell,
 		Sandbox: snap.Sandbox, SandboxMode: snap.SandboxMode, ApprovalPolicy: snap.ApprovalPolicy,
 		ApprovalsReviewer: snap.ApprovalsReviewer, AutoReviewEnabled: snap.AutoReviewEnabled, GuardianV2Enabled: snap.GuardianV2Enabled,
 		Model: snap.Model, Effort: snap.Effort, ServiceTier: snap.ServiceTier, WebSocket: snap.Websocket, StartedAt: snap.Started,

@@ -960,6 +960,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		WSURL:             wsURL,
 		Headers:           wsHeaders,
 		HandshakeObserver: freezeFingerprintObservationWSHandshake(c, account),
+		ConnectObserver:   s.prepareCodexTelemetryConnect(ctx, account, wsHeaders, wsURL, strings.TrimSpace(gjson.GetBytes(firstPayload.payloadRaw, "model").String())),
 		IdentityDigest:    pinnedSocketDigest,
 		HeadersFactory:    s.openAIWSHeadersFactory(ctx, account),
 		ProxyURL:          OpenAIOutboundRouteForAccount(c, account).ProxyURL,
@@ -2535,6 +2536,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		// frozen policy, while old prewarms retain their own factory snapshot.
 		s.resetOpenAIWSResidencyHeaders(ctx, account, baseAcquireReq.Headers, wsSessionResolution.ResidencyBeforePolicy)
 		baseAcquireReq.HeadersFactory = s.openAIWSHeadersFactory(ctx, account)
+		baseAcquireReq.ConnectObserver = s.prepareCodexTelemetryConnect(ctx, account, baseAcquireReq.Headers, wsURL, strings.TrimSpace(gjson.GetBytes(nextPayload.payloadRaw, "model").String()))
 		currentPayload = nextPayload.payloadRaw
 		currentClientPayload = nextPayload.rawForHash
 		currentAccountIdentitySource = nextPayload.accountFailoverSourceRaw

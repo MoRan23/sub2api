@@ -197,8 +197,9 @@ func codexTelemetryInputFromWire(account *Account, headers http.Header, body []b
 		ForkedFromThreadID: codexTelemetryUUID(profile.TurnLineage.ForkedFromThreadID),
 		ThreadSource:       strings.Clone(profile.ThreadSource), TurnTrigger: strings.Clone(profile.TurnTrigger),
 		AgentName: strings.Clone(profile.AgentName), SubagentKind: strings.Clone(subagent), Sandbox: strings.Clone(profile.Sandbox), SandboxMode: strings.Clone(profile.SandboxMode),
-		OpenAISubagent: strings.Clone(firstNonEmptyString(codexTelemetryHeader(headers, "x-openai-subagent"), profile.SubagentHeader)),
-		ApprovalPolicy: strings.Clone(approval), ApprovalsReviewer: strings.Clone(reviewer), AutoReviewEnabled: review, GuardianV2Enabled: guardianV2,
+		OpenAISubagent:  strings.Clone(firstNonEmptyString(codexTelemetryHeader(headers, "x-openai-subagent"), profile.SubagentHeader)),
+		GuardianRequest: strings.Clone(openAIGuardianKind(headers)),
+		ApprovalPolicy:  strings.Clone(approval), ApprovalsReviewer: strings.Clone(reviewer), AutoReviewEnabled: review, GuardianV2Enabled: guardianV2,
 		Model: strings.Clone(gjson.GetBytes(body, "model").String()), Effort: strings.Clone(gjson.GetBytes(body, "reasoning.effort").String()),
 		ServiceTier: strings.Clone(gjson.GetBytes(body, "service_tier").String()), WebSocket: websocket, StartedAt: time.Now(),
 	}

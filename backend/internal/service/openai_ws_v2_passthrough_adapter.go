@@ -989,22 +989,37 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	var upstreamConn openAIWSClientConn
 	statusCode := 0
 	var handshakeHeaders http.Header
+	var physicalObservationHeaders http.Header
 	for {
 		headers, err = s.refreshOpenAIWSHeadersForDial(ctx, ctx, account, headers)
 		if err != nil {
 			return fmt.Errorf("refresh ws authentication headers: %w", err)
 		}
 		dialCtx, cancelDial := context.WithTimeout(ctx, s.openAIWSDialTimeout())
+		var connectObserver *CodexTelemetryConnectObserver
+		if start := s.prepareCodexTelemetryConnect(ctx, account, headers, wsURL, gjson.GetBytes(firstClientMessage, "model").String()); start != nil {
+			connectObserver = start()
+		}
 		upstreamConn, statusCode, handshakeHeaders, err = dialer.Dial(withOpenAIWSTransportAccount(dialCtx, account.ID), wsURL, headers, proxyURL)
+		if err == nil && upstreamConn == nil {
+			err = errors.New("openai ws dialer returned nil connection")
+		}
 		cancelDial()
 		if err == nil {
+			physicalObservationHeaders = openAIWSPhysicalObservationHeaders(upstreamConn, headers)
+			connectObserver.FinishWithHeaders(true, physicalObservationHeaders)
 			break
 		}
 		var handshakeErr *openAIWSHandshakeError
 		responseBody := []byte(nil)
+		observedHeaders := headers
 		if errors.As(err, &handshakeErr) && handshakeErr != nil {
 			responseBody = handshakeErr.Body
+			if handshakeErr.ObservationHeaders != nil {
+				observedHeaders = handshakeErr.ObservationHeaders
+			}
 		}
+		connectObserver.FinishWithHeaders(false, observedHeaders)
 		dialErr := &openAIWSDialError{StatusCode: statusCode, ResponseHeaders: cloneHeader(handshakeHeaders), ResponseBody: responseBody, Err: err}
 		observeOpenAIWSDialDiagnostics(c, account, dialErr)
 		if s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidWSDialError(dialErr) && !agentTaskRecoveryTried {
@@ -1030,7 +1045,6 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	defer func() {
 		_ = upstreamConn.Close()
 	}()
-	physicalObservationHeaders := openAIWSPhysicalObservationHeaders(upstreamConn, headers)
 	s.recordFingerprintObservationWSHandshake(c, account, physicalObservationHeaders)
 	logOpenAIWSV2Passthrough(
 		"relay_dial_ok account_id=%d status_code=%d upstream_request_id=%s",

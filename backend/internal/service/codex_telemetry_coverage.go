@@ -20,6 +20,16 @@ func codexTelemetrySignalCoverage() []CodexTelemetrySignalCoverage {
 	// coverage diagnostics. These capabilities do not change with policy toggles.
 	return []CodexTelemetrySignalCoverage{
 		{
+			Signal: "turn_critical_path", Type: "metrics", Status: "awaiting_source",
+			EventNames: []string{"codex.turn.critical_path.capture", "codex.turn.critical_path.duration_ms", "codex.turn.critical_path.component_ms"},
+			Reason:     "client_critical_path_not_on_responses_wire",
+		},
+		{
+			Signal: "tool_declaration_updates", Type: "metrics", Status: "awaiting_source",
+			EventNames: []string{"codex.tools.exec_entry_updates", "codex.tools.exec_update_bytes"},
+			Reason:     "client_tool_declaration_updates_not_on_responses_wire",
+		},
+		{
 			Signal: "skill_invocation", Type: "logs", Status: "unavailable",
 			EventNames: []string{"codex.skill_invocation"},
 			Reason:     "client_skill_event_not_on_responses_wire",
