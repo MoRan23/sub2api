@@ -62,6 +62,9 @@ func (h *OpenAIGatewayHandler) submitFrozenOpenAIUsageRecord(parent context.Cont
 		return
 	}
 	options = options.snapshot()
+	if record.Result != nil && record.Result.GrokSafetyRejection != nil {
+		options.mandatory = true
+	}
 	task := func(ctx context.Context) {
 		err := h.gatewayService.RecordUsage(ctx, record)
 		// Engine's ordinary RecordUsage call is a no-op; its durable ledger owns

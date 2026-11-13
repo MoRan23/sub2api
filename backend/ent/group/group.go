@@ -96,6 +96,10 @@ const (
 	FieldWebSearchPricePerCall = "web_search_price_per_call"
 	// FieldSearchPricePer1k holds the string denoting the search_price_per_1k field in the database.
 	FieldSearchPricePer1k = "search_price_per_1k"
+	// FieldGrokSafetyFeeEnabled holds the string denoting the grok_safety_fee_enabled field in the database.
+	FieldGrokSafetyFeeEnabled = "grok_safety_fee_enabled"
+	// FieldGrokSafetyFee holds the string denoting the grok_safety_fee field in the database.
+	FieldGrokSafetyFee = "grok_safety_fee"
 	// FieldAudioRealtimePricePerMin holds the string denoting the audio_realtime_price_per_min field in the database.
 	FieldAudioRealtimePricePerMin = "audio_realtime_price_per_min"
 	// FieldAudioTtsPricePerMillionChars holds the string denoting the audio_tts_price_per_million_chars field in the database.
@@ -279,6 +283,8 @@ var Columns = []string{
 	FieldVideoModelPrices,
 	FieldWebSearchPricePerCall,
 	FieldSearchPricePer1k,
+	FieldGrokSafetyFeeEnabled,
+	FieldGrokSafetyFee,
 	FieldAudioRealtimePricePerMin,
 	FieldAudioTtsPricePerMillionChars,
 	FieldAudioSttPricePerHour,
@@ -406,6 +412,10 @@ var (
 	DefaultVideoRateMultiplier float64
 	// SearchPricePer1kValidator is a validator for the "search_price_per_1k" field. It is called by the builders before save.
 	SearchPricePer1kValidator func(float64) error
+	// DefaultGrokSafetyFeeEnabled holds the default value on creation for the "grok_safety_fee_enabled" field.
+	DefaultGrokSafetyFeeEnabled bool
+	// GrokSafetyFeeValidator is a validator for the "grok_safety_fee" field. It is called by the builders before save.
+	GrokSafetyFeeValidator func(float64) error
 	// AudioRealtimePricePerMinValidator is a validator for the "audio_realtime_price_per_min" field. It is called by the builders before save.
 	AudioRealtimePricePerMinValidator func(float64) error
 	// AudioTtsPricePerMillionCharsValidator is a validator for the "audio_tts_price_per_million_chars" field. It is called by the builders before save.
@@ -670,6 +680,16 @@ func ByWebSearchPricePerCall(opts ...sql.OrderTermOption) OrderOption {
 // BySearchPricePer1k orders the results by the search_price_per_1k field.
 func BySearchPricePer1k(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldSearchPricePer1k, opts...).ToFunc()
+}
+
+// ByGrokSafetyFeeEnabled orders the results by the grok_safety_fee_enabled field.
+func ByGrokSafetyFeeEnabled(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldGrokSafetyFeeEnabled, opts...).ToFunc()
+}
+
+// ByGrokSafetyFee orders the results by the grok_safety_fee field.
+func ByGrokSafetyFee(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldGrokSafetyFee, opts...).ToFunc()
 }
 
 // ByAudioRealtimePricePerMin orders the results by the audio_realtime_price_per_min field.

@@ -653,8 +653,17 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 	requestID string,
 	body []byte,
 	contentType string,
-) (*OpenAIForwardResult, error) {
+) (result *OpenAIForwardResult, resultErr error) {
 	startTime := time.Now()
+	defer func() {
+		result, resultErr = FinalizeGrokSafetyRejection(ctx, result, resultErr)
+		if result != nil && result.GrokSafetyRejection != nil {
+			if result.Model == "" {
+				result.Model = gjson.GetBytes(body, "model").String()
+			}
+			result.Duration = time.Since(startTime)
+		}
+	}()
 	if account == nil {
 		return nil, fmt.Errorf("grok account is required")
 	}
@@ -730,6 +739,7 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 		proxyURL = account.Proxy.URL()
 	}
 	upstreamStart := time.Now()
+	upstreamReq = PrepareGrokSafetyRequest(upstreamReq)
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(upstreamStart).Milliseconds())
 	if err != nil {
@@ -738,16 +748,22 @@ func (s *OpenAIGatewayService) ForwardGrokMedia(
 	defer func() { _ = resp.Body.Close() }()
 
 	requestIDHeader := firstNonEmpty(resp.Header.Get("x-request-id"), resp.Header.Get("xai-request-id"))
+	ObserveGrokSafetyHTTPResponse(ctx, upstreamReq, resp)
 	requestModel := requestInfo.Model
 	if resp.StatusCode >= 400 {
 		return s.handleGrokMediaErrorResponse(ctx, resp, c, account, requestIDHeader, requestModel)
 	}
 
-	s.updateGrokUsageFromResponse(withGrokTeamRateLimitModel(ctx, requestModel), account, resp.Header, resp.StatusCode)
 	respBody, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
 	if err != nil {
 		return nil, err
 	}
+	ObserveGrokSafetyPayload(ctx, respBody, true)
+	if GrokSafetyRejected(ctx) {
+		writeGrokSafetyRejectionResponse(c, resp.StatusCode, respBody)
+		return &OpenAIForwardResult{Model: requestModel}, ErrGrokSafetyRejected
+	}
+	s.updateGrokUsageFromResponse(withGrokTeamRateLimitModel(ctx, requestModel), account, resp.Header, resp.StatusCode)
 	if endpoint == GrokMediaEndpointImagesGenerations || endpoint == GrokMediaEndpointImagesEdits {
 		if countOpenAIResponseImageOutputsFromJSONBytes(respBody) <= 0 {
 			setOpsUpstreamError(c, http.StatusBadGateway, "xAI upstream returned no image output", truncateString(string(respBody), 512))
@@ -1263,6 +1279,11 @@ func (s *OpenAIGatewayService) handleGrokMediaErrorResponse(
 	requestedModel string,
 ) (*OpenAIForwardResult, error) {
 	body := s.readUpstreamErrorBody(resp)
+	ObserveGrokSafetyPayload(ctx, body, true)
+	if GrokSafetyRejected(ctx) {
+		writeGrokSafetyRejectionResponse(c, resp.StatusCode, body)
+		return &OpenAIForwardResult{Model: requestedModel}, ErrGrokSafetyRejected
+	}
 	// Reconcile readiness before configurable passthrough branches can return;
 	// otherwise a Grok 429 can remain schedulable.
 	s.handleGrokAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, body)

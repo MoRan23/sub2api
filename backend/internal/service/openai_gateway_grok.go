@@ -39,7 +39,10 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 	originalModel string,
 	reqStream bool,
 	startTime time.Time,
-) (*OpenAIForwardResult, error) {
+) (forwardResult *OpenAIForwardResult, forwardErr error) {
+	defer func() {
+		forwardResult, forwardErr = finalizeGrokSafetyForward(ctx, account, body, forwardResult, forwardErr)
+	}()
 	if account.Type != AccountTypeOAuth && account.Type != AccountTypeAPIKey {
 		return nil, fmt.Errorf("grok account type %s is not supported by Responses forwarding", account.Type)
 	}
@@ -131,6 +134,10 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 		if resp.Body != nil {
 			_ = resp.Body.Close()
 		}
+		if IsGrokSafetyRejectionJSON(respBody) {
+			resp.Body = io.NopCloser(bytes.NewReader(respBody))
+			break
+		}
 		invalidEncryptedContent := isGrokInvalidEncryptedContentResponse(resp.StatusCode, respBody)
 		if !invalidEncryptedContent && !isGrokCompactionReplayDecodeError(resp.StatusCode, respBody) {
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
@@ -161,6 +168,9 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 	if resp.StatusCode >= 400 {
 		respBody := s.readUpstreamErrorBody(resp)
 		resp.Body = io.NopCloser(bytes.NewReader(respBody))
+		if IsGrokSafetyRejectionJSON(respBody) {
+			return s.writeGrokSafetyErrorResponse(ctx, c, resp, respBody)
+		}
 		upstreamMsg := sanitizeUpstreamErrorMessage(extractUpstreamErrorMessage(respBody))
 		if upstreamMsg == "" {
 			upstreamMsg = fmt.Sprintf("xAI upstream returned status %d", resp.StatusCode)
@@ -277,6 +287,9 @@ func (s *OpenAIGatewayService) forwardGrokResponses(
 }
 
 func isGrokInvalidEncryptedContentResponse(statusCode int, body []byte) bool {
+	if IsGrokSafetyRejectionJSON(body) {
+		return false
+	}
 	if statusCode != http.StatusBadRequest && statusCode != http.StatusUnprocessableEntity {
 		return false
 	}
@@ -1416,6 +1429,10 @@ func (s *OpenAIGatewayService) describeGrokComposerImage(
 
 	if resp.StatusCode >= 400 {
 		respBody := s.readUpstreamErrorBody(resp)
+		if IsGrokSafetyRejectionJSON(respBody) {
+			_, rejectErr := s.writeGrokSafetyErrorResponse(ctx, c, resp, respBody)
+			return "", OpenAIUsage{}, rejectErr
+		}
 		upstreamMsg := sanitizeUpstreamErrorMessage(extractUpstreamErrorMessage(respBody))
 		if upstreamMsg == "" {
 			upstreamMsg = fmt.Sprintf("xAI image bridge upstream returned status %d", resp.StatusCode)
@@ -2016,7 +2033,7 @@ func (s *OpenAIGatewayService) handleGrokAccountUpstreamError(ctx context.Contex
 	if s == nil || account == nil {
 		return
 	}
-	if isGrokContentPolicyRejection(statusCode, responseBody) {
+	if IsGrokSafetyRejectionJSON(responseBody) || GrokSafetyRejected(ctx) || isGrokContentPolicyRejection(statusCode, responseBody) {
 		return
 	}
 	now := time.Now()

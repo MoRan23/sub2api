@@ -409,6 +409,10 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 	}
 
 	platform := NormalizeGroupPlatform(input.Platform)
+	grokSafetyFeeEnabled, grokSafetyFee, err := ResolveGroupGrokSafetyFee(platform, input.GrokSafetyFeeEnabled, input.GrokSafetyFee, nil)
+	if err != nil {
+		return nil, err
+	}
 	// 固定账号 manifest 配置：账号绑定发生在创建之后，创建时无法校验成员关系，
 	// 拒绝开启并在创建后的编辑里配置。
 	if normalizeCodexModelsManifestConfig(platform, input.CodexModelsManifestConfig).Enabled {
@@ -620,6 +624,8 @@ func (s *adminServiceImpl) CreateGroup(ctx context.Context, input *CreateGroupIn
 		VideoModelPrices:                NormalizeVideoModelPrices(input.VideoModelPrices),
 		WebSearchPricePerCall:           webSearchPricePerCall,
 		SearchPricePer1k:                searchPricePer1k,
+		GrokSafetyFeeEnabled:            grokSafetyFeeEnabled,
+		GrokSafetyFee:                   grokSafetyFee,
 		AudioRealtimePricePerMin:        audioRealtimePricePerMin,
 		AudioTTSPricePerMillionChars:    audioTTSPricePerMillionChars,
 		AudioSTTPricePerHour:            audioSTTPricePerHour,
@@ -975,6 +981,11 @@ func (s *adminServiceImpl) UpdateGroup(ctx context.Context, id int64, input *Upd
 	}
 	if input.SearchPricePer1k != nil {
 		group.SearchPricePer1k = normalizePrice(input.SearchPricePer1k)
+	}
+	group.GrokSafetyFeeUpdate = &GroupGrokSafetyFeeUpdate{Enabled: input.GrokSafetyFeeEnabled, Fee: input.GrokSafetyFee}
+	group.GrokSafetyFeeEnabled, group.GrokSafetyFee, err = ResolveGroupGrokSafetyFee(group.Platform, group.GrokSafetyFeeEnabled, group.GrokSafetyFee, group.GrokSafetyFeeUpdate)
+	if err != nil {
+		return nil, err
 	}
 	if input.AudioRealtimePricePerMin != nil {
 		group.AudioRealtimePricePerMin = normalizePrice(input.AudioRealtimePricePerMin)

@@ -102,6 +102,7 @@ func ApplyLegacyRequestFields(requestType RequestType, fallbackStream bool, fall
 }
 
 type UsageLog struct {
+	GrokSafetyRejection *GrokSafetyRejection
 	ID        int64
 	UserID    int64
 	APIKeyID  int64

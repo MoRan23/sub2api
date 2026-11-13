@@ -664,7 +664,7 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		sendErrorEvent(code, message)
 		return resultWithUsage(), fmt.Errorf("stream read error: %w", scanErr), true
 	}
-	processSSELine := func(line string, queueDrained bool) {
+	processSSELineRaw := func(line string, queueDrained bool) {
 		if streamEarlyErr != nil {
 			return
 		}
@@ -1017,6 +1017,53 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 		}
 	}
 
+	processSSELine := processSSELineRaw
+	flushGrokFrame := func(bool) {}
+	if account != nil && account.IsGrok() {
+		// Inspect the complete event before any failure/failover side effects.
+		// Scanner event/line limits already bound these borrowed line references;
+		// Join allocates payload bytes only when the provider uses multiline data.
+		var parser openAICompatSSEFrameParser
+		var lines []string
+		flushGrokFrame = func(queueDrained bool) {
+			frame, ok := parser.Finish()
+			if ok {
+				payload := []byte(frame.Data)
+				ObserveGrokSafetyPayload(ctx, payload, false)
+				if IsGrokSafetyRejectionJSON(payload) {
+					if !clientDisconnected {
+						applyAttemptResponseHeaders()
+						for _, line := range lines {
+							_, _ = writePendingString(line + "\n")
+						}
+						if len(lines) == 0 || lines[len(lines)-1] != "" {
+							_, _ = writePendingString("\n")
+						}
+						_ = flushBuffered()
+					}
+					sawFailedEvent = true
+					terminalEventType = "response.failed"
+					streamEarlyErr = ErrGrokSafetyRejected
+				}
+			}
+			if streamEarlyErr == nil {
+				for _, line := range lines {
+					processSSELineRaw(line, queueDrained)
+				}
+			}
+			clear(lines)
+			lines = lines[:0]
+		}
+		processSSELine = func(line string, queueDrained bool) {
+			lines = append(lines, line)
+			if line == "" {
+				flushGrokFrame(queueDrained)
+				return
+			}
+			_, _ = parser.AddLine(line)
+		}
+	}
+
 	// 无超时/无 keepalive 的常见路径走同步扫描，减少 goroutine 与 channel 开销。
 	if streamInterval <= 0 && keepaliveInterval <= 0 && firstOutputTimeout <= 0 {
 		defer putSSEScannerBuf64K(scanBuf)
@@ -1031,6 +1078,10 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			if sawTerminalEvent && !eventInProgress && (!codexFailureTerminal || !sawBareError) {
 				return finalizeStream()
 			}
+		}
+		flushGrokFrame(true)
+		if streamEarlyErr != nil {
+			return resultWithUsage(), streamEarlyErr
 		}
 		if result, err, done := handleScanErr(documentScanner.Err()); done {
 			return result, err
@@ -1102,6 +1153,10 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				queueBudget.release(len(ev.line))
 			}
 			if !ok {
+				flushGrokFrame(true)
+				if streamEarlyErr != nil {
+					return resultWithUsage(), streamEarlyErr
+				}
 				if stageFirstOutput && eventInProgress {
 					// EOF dispatches the final SSE event even without a trailing blank
 					// line. Do not synthesize extra bytes on the downstream wire.
@@ -1290,7 +1345,8 @@ func (p *openAICompatSSEFrameParser) dispatch() (openAICompatSSEFrame, bool) {
 		Data:      strings.Join(p.dataLines, "\n"),
 	}
 	p.eventType = ""
-	p.dataLines = nil
+	clear(p.dataLines)
+	p.dataLines = p.dataLines[:0]
 	return frame, frame.Data != ""
 }
 
@@ -1845,6 +1901,13 @@ func (s *OpenAIGatewayService) handleNonStreamingResponse(ctx context.Context, r
 		return nil, err
 	}
 	observeCodexTelemetryHTTPBody(resp, body)
+	if account != nil && account.IsGrok() {
+		ObserveGrokSafetyPayload(ctx, body, true)
+		if IsGrokSafetyRejectionJSON(body) {
+			writeGrokSafetyRejectionResponse(c, resp.StatusCode, body)
+			return nil, ErrGrokSafetyRejected
+		}
+	}
 	observer := upstreamResponseModelObserverFromContext(c)
 	if observer == nil {
 		observer = beginUpstreamResponseModelObservation(c)
@@ -1967,6 +2030,22 @@ func bodyHasSSEFraming(body []byte) bool {
 
 func (s *OpenAIGatewayService) handleSSEToJSON(resp *http.Response, c *gin.Context, account *Account, body []byte, originalModel, mappedModel string) (*openaiNonStreamingResult, error) {
 	bodyText := string(body)
+	if account != nil && account.IsGrok() {
+		var rejection []byte
+		forEachOpenAISSEFrame(bodyText, func(_ string, data []byte) {
+			if rejection != nil {
+				return
+			}
+			ObserveGrokSafetyPayload(c.Request.Context(), data, false)
+			if IsGrokSafetyRejectionJSON(data) {
+				rejection = data
+			}
+		})
+		if rejection != nil {
+			writeGrokSafetyRejectionResponse(c, resp.StatusCode, rejection)
+			return nil, ErrGrokSafetyRejected
+		}
+	}
 	terminalType, terminalPayload, terminalOK := extractOpenAISSETerminalEvent(bodyText)
 	if terminalOK && (terminalType == "response.failed" || terminalType == "error") {
 		msg := extractOpenAISSEErrorMessage(terminalPayload)

@@ -1122,6 +1122,13 @@ export default {
         finalPricePreview: 'Final per-second price preview',
         notConfigured: 'Not configured'
       },
+      grokSafetyFee: {
+        title: 'Grok safety rejection fee',
+        description: 'Applies only when the Grok upstream explicitly returns safety_review_rejected; ordinary HTTP 403 responses or refusal text do not qualify.',
+        amount: 'Fixed fee per rejection (USD)',
+        placeholder: 'Empty or 0 means no charge',
+        hint: 'Disabled by default. Group, account and user multipliers do not apply to this fixed fee. Trusted token usage is billed separately under the existing rules.'
+      },
       explicitPricing: {
         title: 'Grok Search & Voice Pricing',
         description: 'Optional per-group prices for web_search (per 1k calls) and Voice realtime / TTS / STT (USD). Leave empty if unused.',

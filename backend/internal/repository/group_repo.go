@@ -96,6 +96,10 @@ func createGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 		return err
 	}
 	groupIn.OpenAIDaybreakBlueEnabled, groupIn.OpenAIDaybreakRedEnabled = blue, red
+	groupIn.GrokSafetyFeeEnabled, groupIn.GrokSafetyFee, err = service.ResolveGroupGrokSafetyFee(groupIn.Platform, groupIn.GrokSafetyFeeEnabled, groupIn.GrokSafetyFee, nil)
+	if err != nil {
+		return err
+	}
 	groupIn.ForceOpenAIFast, groupIn.ForceOpenAIUltrafast, groupIn.FreeOpenAIFast, groupIn.FreeOpenAIUltrafast, err = service.ResolveGroupOpenAIServiceTier(
 		groupIn.Platform, groupIn.ForceOpenAIFast, groupIn.ForceOpenAIUltrafast, groupIn.FreeOpenAIFast, groupIn.FreeOpenAIUltrafast, nil)
 	if err != nil {
@@ -137,6 +141,8 @@ func createGroupRecord(ctx context.Context, client *dbent.Client, groupIn *servi
 		SetVideoModelPrices(service.NormalizeVideoModelPrices(groupIn.VideoModelPrices)).
 		SetNillableWebSearchPricePerCall(groupIn.WebSearchPricePerCall).
 		SetNillableSearchPricePer1k(groupIn.SearchPricePer1k).
+		SetGrokSafetyFeeEnabled(groupIn.GrokSafetyFeeEnabled).
+		SetNillableGrokSafetyFee(groupIn.GrokSafetyFee).
 		SetNillableAudioRealtimePricePerMin(groupIn.AudioRealtimePricePerMin).
 		SetNillableAudioTtsPricePerMillionChars(groupIn.AudioTTSPricePerMillionChars).
 		SetNillableAudioSttPricePerHour(groupIn.AudioSTTPricePerHour).
@@ -365,6 +371,10 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 	if err != nil {
 		return err
 	}
+	grokSafetyFeeEnabled, grokSafetyFee, err := service.ResolveGroupGrokSafetyFee(groupIn.Platform, stored.GrokSafetyFeeEnabled, stored.GrokSafetyFee, groupIn.GrokSafetyFeeUpdate)
+	if err != nil {
+		return err
+	}
 	modelPricing, err := json.Marshal(groupIn.ModelPricing)
 	if err != nil {
 		return fmt.Errorf("marshal group model pricing: %w", err)
@@ -408,6 +418,7 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 		SetForceOpenaiUltrafast(forceUltrafast).
 		SetFreeOpenaiFast(freeFast).
 		SetFreeOpenaiUltrafast(freeUltrafast).
+		SetGrokSafetyFeeEnabled(grokSafetyFeeEnabled).
 		SetOpenaiDaybreakBlueEnabled(blue).
 		SetOpenaiDaybreakRedEnabled(red).
 		SetRequireOauthOnly(groupIn.RequireOAuthOnly).
@@ -484,6 +495,11 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 	} else {
 		builder = builder.ClearSearchPricePer1k()
 	}
+	if grokSafetyFee != nil {
+		builder = builder.SetGrokSafetyFee(*grokSafetyFee)
+	} else {
+		builder = builder.ClearGrokSafetyFee()
+	}
 	if groupIn.AudioRealtimePricePerMin != nil {
 		builder = builder.SetAudioRealtimePricePerMin(*groupIn.AudioRealtimePricePerMin)
 	} else {
@@ -548,6 +564,8 @@ func (r *groupRepository) Update(ctx context.Context, groupIn *service.Group) er
 	groupIn.ForceOpenAIFast, groupIn.ForceOpenAIUltrafast = forceFast, forceUltrafast
 	groupIn.FreeOpenAIFast, groupIn.FreeOpenAIUltrafast = freeFast, freeUltrafast
 	groupIn.OpenAIServiceTierUpdate = nil
+	groupIn.GrokSafetyFeeEnabled, groupIn.GrokSafetyFee = grokSafetyFeeEnabled, grokSafetyFee
+	groupIn.GrokSafetyFeeUpdate = nil
 	return nil
 }
 

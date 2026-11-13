@@ -43,7 +43,10 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 	body []byte,
 	promptCacheKey string,
 	defaultMappedModel string,
-) (*OpenAIForwardResult, error) {
+) (forwardResult *OpenAIForwardResult, forwardErr error) {
+	defer func() {
+		forwardResult, forwardErr = finalizeGrokSafetyForward(ctx, account, body, forwardResult, forwardErr)
+	}()
 	if account.IsCodexEngine() {
 		return s.forwardCodexEngine(ctx, c, account, body, "/v1/messages", defaultMappedModel)
 	}
@@ -555,8 +558,8 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 		// Prefer explicit decrypt errors; also strip once on any 400 when the
 		// outbound body still carries reasoning.encrypted_content (account
 		// switch often returns opaque "Upstream error: 400").
-		shouldStrip := isGrokInvalidEncryptedContentResponse(resp.StatusCode, respBody) ||
-			requestHasGrokEncryptedReasoning(responsesBody)
+		shouldStrip := !IsGrokSafetyRejectionJSON(respBody) && (isGrokInvalidEncryptedContentResponse(resp.StatusCode, respBody) ||
+			requestHasGrokEncryptedReasoning(responsesBody))
 		if !shouldStrip {
 			resp.Body = io.NopCloser(bytes.NewReader(respBody))
 			break
@@ -581,6 +584,9 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 	// 8. Handle error response with failover
 	if resp.StatusCode >= 400 {
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
+		if account != nil && account.IsGrok() && IsGrokSafetyRejectionJSON(respBody) {
+			return s.writeGrokSafetyErrorResponse(ctx, c, resp, respBody)
+		}
 		if !agentIdentityTaskRecoveryWasTried(ctx) && s.isAgentIdentityAccount(ctx, account) && isAgentIdentityTaskInvalidHTTPResponse(resp.StatusCode, respBody) {
 			expectedTaskID := account.GetCredential("task_id")
 			if err := s.recoverAgentIdentityTask(ctx, account, expectedTaskID); err != nil {
@@ -779,6 +785,9 @@ func (s *OpenAIGatewayService) handleAnthropicBufferedStreamingResponse(
 
 	if strings.TrimSpace(finalResponse.Status) == "failed" {
 		payload, _ := json.Marshal(gin.H{"type": "response.failed", "response": finalResponse})
+		if account != nil && account.IsGrok() && IsGrokSafetyRejectionJSON(payload) {
+			return s.writeGrokSafetyErrorResponse(c.Request.Context(), c, resp, payload)
+		}
 		if hit, code, msg := detectOpenAICyberPolicy(payload); hit {
 			MarkOpsCyberPolicy(c, CyberPolicyMark{
 				Code:           code,
@@ -1069,6 +1078,13 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 			if !ok {
 				if frame, ok := parser.Finish(); ok {
 					payload := openAICompatPayloadWithEventType(frame.Data, frame.EventType)
+					if account != nil && account.IsGrok() {
+						ObserveGrokSafetyPayload(c.Request.Context(), []byte(payload), false)
+						if IsGrokSafetyRejectionJSON([]byte(payload)) {
+							writeGrokSafetyRejectionResponse(c, resp.StatusCode, []byte(payload))
+							return nil, usage, acc, prior, ErrGrokSafetyRejected
+						}
+					}
 					observeCodexTelemetryHTTPPayload(resp, []byte(payload), frame.EventType)
 					var event apicompat.ResponsesStreamEvent
 					if err := json.Unmarshal([]byte(payload), &event); err == nil {
@@ -1111,6 +1127,13 @@ func (s *OpenAIGatewayService) readOpenAICompatBufferedTerminal(
 				continue
 			}
 			payload := openAICompatPayloadWithEventType(frame.Data, frame.EventType)
+			if account != nil && account.IsGrok() {
+				ObserveGrokSafetyPayload(c.Request.Context(), []byte(payload), false)
+				if IsGrokSafetyRejectionJSON([]byte(payload)) {
+					writeGrokSafetyRejectionResponse(c, resp.StatusCode, []byte(payload))
+					return nil, usage, acc, prior, ErrGrokSafetyRejected
+				}
+			}
 			observeCodexTelemetryHTTPPayload(resp, []byte(payload), frame.EventType)
 
 			var event apicompat.ResponsesStreamEvent
@@ -1229,6 +1252,19 @@ func (s *OpenAIGatewayService) handleAnthropicStreamingResponse(
 
 	// processDataLine handles a single "data: ..." SSE line from upstream.
 	processDataLine := func(payload string) bool {
+		if account != nil && account.IsGrok() {
+			ObserveGrokSafetyPayload(c.Request.Context(), []byte(payload), false)
+			if IsGrokSafetyRejectionJSON([]byte(payload)) {
+				if !clientDisconnected {
+					writeStreamHeaders()
+					_, _ = fmt.Fprintf(c.Writer, "event: error\ndata: %s\n\n", grokSafetyMessagesErrorPayload([]byte(payload)))
+					c.Writer.Flush()
+					clientDisconnected = true
+				}
+				streamNonFailoverErr = ErrGrokSafetyRejected
+				return true
+			}
+		}
 		observeCodexTelemetryHTTPPayload(resp, []byte(payload), "")
 		if firstChunk {
 			firstChunk = false

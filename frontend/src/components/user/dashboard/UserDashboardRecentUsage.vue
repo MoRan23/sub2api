@@ -19,6 +19,7 @@
             </div>
             <div>
               <p class="text-sm font-medium text-gray-900 dark:text-white">{{ log.model }}</p>
+              <p v-if="log.grok_safety_rejection" class="text-xs text-red-600 dark:text-red-400">{{ t('usage.grokSafetyRejection') }}</p>
               <p class="text-xs text-gray-500 dark:text-dark-400">{{ formatDateTime(log.created_at) }}</p>
             </div>
           </div>

@@ -291,6 +291,53 @@ describe("GroupsView gateway settings", () => {
     });
   });
 
+  it('creates Grok safety fees disabled by default and preserves eight decimal places', async () => {
+    const view = mountView();
+    await fireEvent.click(await view.findByRole('button', { name: 'admin.groups.createGroup' }));
+    const platformInput = view.container.querySelector('[data-tour="group-form-platform"]')!;
+    await fireEvent.update(platformInput, 'grok');
+    const enabled = view.getByTestId('create-grok-safety-fee-enabled') as HTMLInputElement;
+    expect(enabled.checked).toBe(false);
+    const fee = view.getByTestId('create-grok-safety-fee') as HTMLInputElement;
+    expect(fee.value).toBe('');
+    expect(fee.step).toBe('0.00000001');
+    await fireEvent.click(enabled);
+    await fireEvent.update(fee, '0.12345678');
+    await fireEvent.update(view.getByPlaceholderText('admin.groups.enterGroupName'), 'Grok safety');
+    await fireEvent.submit(view.container.querySelector('#create-group-form')!);
+    await waitFor(() => expect(createGroup).toHaveBeenCalledWith(expect.objectContaining({
+      platform: 'grok', grok_safety_fee_enabled: true, grok_safety_fee: 0.12345678,
+    })));
+  });
+
+  it('loads Grok safety fee and explicitly clears an empty amount', async () => {
+    listGroups.mockResolvedValueOnce({ items: [{ ...sourceGroup, platform: 'grok', grok_safety_fee_enabled: true, grok_safety_fee: 0.12345678 }], total: 1, page: 1, page_size: 20, pages: 1 });
+    const view = mountView();
+    await fireEvent.click(await view.findByRole('button', { name: 'common.edit' }));
+    expect((view.getByTestId('edit-grok-safety-fee-enabled') as HTMLInputElement).checked).toBe(true);
+    const fee = view.getByTestId('edit-grok-safety-fee') as HTMLInputElement;
+    expect(fee.value).toBe('0.12345678');
+    await fireEvent.update(fee, '');
+    await fireEvent.submit(view.container.querySelector('#edit-group-form')!);
+    await waitFor(() => expect(updateGroup).toHaveBeenCalledWith(42, expect.objectContaining({
+      grok_safety_fee_enabled: true, grok_safety_fee: -1,
+    })));
+  });
+
+  it('does not retain Grok fees after switching the creation platform', async () => {
+    const view = mountView();
+    await fireEvent.click(await view.findByRole('button', { name: 'admin.groups.createGroup' }));
+    const platformInput = view.container.querySelector('[data-tour="group-form-platform"]')!;
+    await fireEvent.update(platformInput, 'grok');
+    await fireEvent.click(view.getByTestId('create-grok-safety-fee-enabled'));
+    await fireEvent.update(view.getByTestId('create-grok-safety-fee'), '0.5');
+    await fireEvent.update(platformInput, 'composite');
+    expect(view.queryByTestId('create-grok-safety-fee')).toBeNull();
+    await fireEvent.update(platformInput, 'grok');
+    expect((view.getByTestId('create-grok-safety-fee-enabled') as HTMLInputElement).checked).toBe(false);
+    expect((view.getByTestId('create-grok-safety-fee') as HTMLInputElement).value).toBe('');
+  });
+
   it("preserves consecutive child updates on the reactive edit config", async () => {
     const view = mountView();
     await fireEvent.click(await view.findByRole("button", { name: "common.edit" }));

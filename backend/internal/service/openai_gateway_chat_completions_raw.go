@@ -71,7 +71,10 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletionsWithStartTime(
 	body []byte,
 	defaultMappedModel string,
 	startTime time.Time,
-) (*OpenAIForwardResult, error) {
+) (safetyResult *OpenAIForwardResult, safetyErr error) {
+	defer func() {
+		safetyResult, safetyErr = finalizeGrokSafetyForward(ctx, account, body, safetyResult, safetyErr)
+	}()
 
 	// 1. Parse minimal fields needed for routing/billing
 	originalModel := gjson.GetBytes(body, "model").String()
@@ -222,6 +225,9 @@ func (s *OpenAIGatewayService) forwardAsRawChatCompletionsWithStartTime(
 	// 7. Handle error response with failover
 	if resp.StatusCode >= 400 {
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
+		if account != nil && account.IsGrok() && IsGrokSafetyRejectionJSON(respBody) {
+			return s.writeGrokSafetyErrorResponse(ctx, c, resp, respBody)
+		}
 		if account.Platform == PlatformGrok {
 			kind := "http_error"
 			if s.shouldFailoverGrokUpstreamError(resp.StatusCode, respBody) {
@@ -324,12 +330,13 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	pendingLines := make([]string, 0, 8)
 	refusalDetector := newOpenAIChatSilentRefusalDetector(requestBodyLen)
 	var terminal openAIRawStreamTerminalState
+	var safetyParser openAICompatSSEFrameParser
 
 	writeLine := func(line string) {
 		if clientDisconnected {
 			return
 		}
-		if !clientOutputStarted && !refusalDetector.ShouldReleaseClientOutput() {
+		if !clientOutputStarted && !refusalDetector.ShouldReleaseClientOutput() && !GrokSafetyRejected(c.Request.Context()) {
 			pendingLines = append(pendingLines, line)
 			return
 		}
@@ -359,6 +366,11 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 
 	for scanner.Scan() {
 		line := scanner.Text()
+		if account != nil && account.IsGrok() {
+			if frame, ok := safetyParser.AddLine(line); ok {
+				ObserveGrokSafetyPayload(c.Request.Context(), []byte(frame.Data), false)
+			}
+		}
 		refusalDetector.ObserveSSELine(line)
 		if payload, ok := extractOpenAISSEDataLine(line); ok {
 			trimmedPayload := strings.TrimSpace(payload)
@@ -384,11 +396,28 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 			if !clientDisconnected && clientOutputStarted {
 				c.Writer.Flush()
 			}
+			if GrokSafetyRejected(c.Request.Context()) {
+				break
+			}
 			continue
 		}
 		if !clientDisconnected && clientOutputStarted {
 			c.Writer.Flush()
 		}
+	}
+	if account != nil && account.IsGrok() {
+		if frame, ok := safetyParser.Finish(); ok {
+			ObserveGrokSafetyPayload(c.Request.Context(), []byte(frame.Data), false)
+		}
+	}
+	if GrokSafetyRejected(c.Request.Context()) && !clientOutputStarted && !clientDisconnected {
+		writeStreamHeaders()
+		for _, pending := range pendingLines {
+			if _, err := c.Writer.WriteString(pending + "\n"); err != nil {
+				break
+			}
+		}
+		c.Writer.Flush()
 	}
 
 	resultWithUsage := func() *OpenAIForwardResult {
@@ -409,6 +438,9 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 			FirstTokenMs:                  firstTokenMs,
 		}
 	}
+	if GrokSafetyRejected(c.Request.Context()) {
+		return resultWithUsage(), ErrGrokSafetyRejected
+	}
 
 	scanErr := scanner.Err()
 	if scanErr != nil && !errors.Is(scanErr, context.Canceled) && !errors.Is(scanErr, context.DeadlineExceeded) {
@@ -427,7 +459,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	// 上游在任何终止信号之前结束：连接被 reset（scanErr != nil）或干净 EOF。
 	// 两者都不能再记成功——此前统一返回 nil error，把上游截断伪装成
 	// `HTTP 200 + usage 0/0`，客户端收到半截回答且 Ops 侧完全无感。
-	if !clientAborted && terminal.IsTruncated(clientOutputStarted) {
+	if !clientAborted && !GrokSafetyRejected(c.Request.Context()) && terminal.IsTruncated(clientOutputStarted) {
 		cause := scanErr
 		if cause == nil {
 			cause = ErrOpenAIUpstreamStreamTruncated
@@ -451,7 +483,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	}
 
 	if scanErr == nil && !clientDisconnected && !clientOutputStarted {
-		if refusalDetector.IsSilentRefusal() {
+		if !GrokSafetyRejected(c.Request.Context()) && refusalDetector.IsSilentRefusal() {
 			return nil, newOpenAISilentRefusalFailoverError(c, account, requestID)
 		}
 		if len(pendingLines) > 0 {
@@ -538,13 +570,19 @@ func (s *OpenAIGatewayService) bufferRawChatCompletions(
 		observer = beginUpstreamResponseModelObservation(c)
 	}
 	observer.ObserveOpenAI(respBody, strings.TrimSpace(gjson.GetBytes(respBody, "type").String()))
+	if account != nil && account.IsGrok() {
+		ObserveGrokSafetyPayload(c.Request.Context(), respBody, true)
+		if IsGrokSafetyRejectionJSON(respBody) {
+			return s.writeGrokSafetyErrorResponse(c.Request.Context(), c, resp, respBody)
+		}
+	}
 
 	var usage OpenAIUsage
 	if parsedUsage, ok := extractOpenAIUsageFromJSONBytes(respBody); ok {
 		usage = parsedUsage
 	}
 	responseModel := gjson.GetBytes(respBody, "model").String()
-	if requiresBillableGrokChatUsage(account, billingModel, upstreamModel, responseModel) && !hasBillableGrokChatUsage(usage) {
+	if !GrokSafetyRejected(c.Request.Context()) && requiresBillableGrokChatUsage(account, billingModel, upstreamModel, responseModel) && !hasBillableGrokChatUsage(usage) {
 		upstreamRequestID := firstNonEmpty(requestID, resp.Header.Get("xai-request-id"))
 		return nil, newGrokMissingUsageFailoverError(c, account, upstreamRequestID)
 	}

@@ -566,6 +566,34 @@ func (_c *GroupCreate) SetNillableSearchPricePer1k(v *float64) *GroupCreate {
 	return _c
 }
 
+// SetGrokSafetyFeeEnabled sets the "grok_safety_fee_enabled" field.
+func (_c *GroupCreate) SetGrokSafetyFeeEnabled(v bool) *GroupCreate {
+	_c.mutation.SetGrokSafetyFeeEnabled(v)
+	return _c
+}
+
+// SetNillableGrokSafetyFeeEnabled sets the "grok_safety_fee_enabled" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableGrokSafetyFeeEnabled(v *bool) *GroupCreate {
+	if v != nil {
+		_c.SetGrokSafetyFeeEnabled(*v)
+	}
+	return _c
+}
+
+// SetGrokSafetyFee sets the "grok_safety_fee" field.
+func (_c *GroupCreate) SetGrokSafetyFee(v float64) *GroupCreate {
+	_c.mutation.SetGrokSafetyFee(v)
+	return _c
+}
+
+// SetNillableGrokSafetyFee sets the "grok_safety_fee" field if the given value is not nil.
+func (_c *GroupCreate) SetNillableGrokSafetyFee(v *float64) *GroupCreate {
+	if v != nil {
+		_c.SetGrokSafetyFee(*v)
+	}
+	return _c
+}
+
 // SetAudioRealtimePricePerMin sets the "audio_realtime_price_per_min" field.
 func (_c *GroupCreate) SetAudioRealtimePricePerMin(v float64) *GroupCreate {
 	_c.mutation.SetAudioRealtimePricePerMin(v)
@@ -1235,6 +1263,10 @@ func (_c *GroupCreate) defaults() error {
 		v := group.DefaultVideoRateMultiplier
 		_c.mutation.SetVideoRateMultiplier(v)
 	}
+	if _, ok := _c.mutation.GrokSafetyFeeEnabled(); !ok {
+		v := group.DefaultGrokSafetyFeeEnabled
+		_c.mutation.SetGrokSafetyFeeEnabled(v)
+	}
 	if _, ok := _c.mutation.LongContextPricingEnabled(); !ok {
 		v := group.DefaultLongContextPricingEnabled
 		_c.mutation.SetLongContextPricingEnabled(v)
@@ -1458,6 +1490,14 @@ func (_c *GroupCreate) check() error {
 	if v, ok := _c.mutation.SearchPricePer1k(); ok {
 		if err := group.SearchPricePer1kValidator(v); err != nil {
 			return &ValidationError{Name: "search_price_per_1k", err: fmt.Errorf(`ent: validator failed for field "Group.search_price_per_1k": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.GrokSafetyFeeEnabled(); !ok {
+		return &ValidationError{Name: "grok_safety_fee_enabled", err: errors.New(`ent: missing required field "Group.grok_safety_fee_enabled"`)}
+	}
+	if v, ok := _c.mutation.GrokSafetyFee(); ok {
+		if err := group.GrokSafetyFeeValidator(v); err != nil {
+			return &ValidationError{Name: "grok_safety_fee", err: fmt.Errorf(`ent: validator failed for field "Group.grok_safety_fee": %w`, err)}
 		}
 	}
 	if v, ok := _c.mutation.AudioRealtimePricePerMin(); ok {
@@ -1757,6 +1797,14 @@ func (_c *GroupCreate) createSpec() (*Group, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.SearchPricePer1k(); ok {
 		_spec.SetField(group.FieldSearchPricePer1k, field.TypeFloat64, value)
 		_node.SearchPricePer1k = &value
+	}
+	if value, ok := _c.mutation.GrokSafetyFeeEnabled(); ok {
+		_spec.SetField(group.FieldGrokSafetyFeeEnabled, field.TypeBool, value)
+		_node.GrokSafetyFeeEnabled = value
+	}
+	if value, ok := _c.mutation.GrokSafetyFee(); ok {
+		_spec.SetField(group.FieldGrokSafetyFee, field.TypeFloat64, value)
+		_node.GrokSafetyFee = &value
 	}
 	if value, ok := _c.mutation.AudioRealtimePricePerMin(); ok {
 		_spec.SetField(group.FieldAudioRealtimePricePerMin, field.TypeFloat64, value)
@@ -2707,6 +2755,42 @@ func (u *GroupUpsert) AddSearchPricePer1k(v float64) *GroupUpsert {
 // ClearSearchPricePer1k clears the value of the "search_price_per_1k" field.
 func (u *GroupUpsert) ClearSearchPricePer1k() *GroupUpsert {
 	u.SetNull(group.FieldSearchPricePer1k)
+	return u
+}
+
+// SetGrokSafetyFeeEnabled sets the "grok_safety_fee_enabled" field.
+func (u *GroupUpsert) SetGrokSafetyFeeEnabled(v bool) *GroupUpsert {
+	u.Set(group.FieldGrokSafetyFeeEnabled, v)
+	return u
+}
+
+// UpdateGrokSafetyFeeEnabled sets the "grok_safety_fee_enabled" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateGrokSafetyFeeEnabled() *GroupUpsert {
+	u.SetExcluded(group.FieldGrokSafetyFeeEnabled)
+	return u
+}
+
+// SetGrokSafetyFee sets the "grok_safety_fee" field.
+func (u *GroupUpsert) SetGrokSafetyFee(v float64) *GroupUpsert {
+	u.Set(group.FieldGrokSafetyFee, v)
+	return u
+}
+
+// UpdateGrokSafetyFee sets the "grok_safety_fee" field to the value that was provided on create.
+func (u *GroupUpsert) UpdateGrokSafetyFee() *GroupUpsert {
+	u.SetExcluded(group.FieldGrokSafetyFee)
+	return u
+}
+
+// AddGrokSafetyFee adds v to the "grok_safety_fee" field.
+func (u *GroupUpsert) AddGrokSafetyFee(v float64) *GroupUpsert {
+	u.Add(group.FieldGrokSafetyFee, v)
+	return u
+}
+
+// ClearGrokSafetyFee clears the value of the "grok_safety_fee" field.
+func (u *GroupUpsert) ClearGrokSafetyFee() *GroupUpsert {
+	u.SetNull(group.FieldGrokSafetyFee)
 	return u
 }
 
@@ -4029,6 +4113,48 @@ func (u *GroupUpsertOne) UpdateSearchPricePer1k() *GroupUpsertOne {
 func (u *GroupUpsertOne) ClearSearchPricePer1k() *GroupUpsertOne {
 	return u.Update(func(s *GroupUpsert) {
 		s.ClearSearchPricePer1k()
+	})
+}
+
+// SetGrokSafetyFeeEnabled sets the "grok_safety_fee_enabled" field.
+func (u *GroupUpsertOne) SetGrokSafetyFeeEnabled(v bool) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetGrokSafetyFeeEnabled(v)
+	})
+}
+
+// UpdateGrokSafetyFeeEnabled sets the "grok_safety_fee_enabled" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateGrokSafetyFeeEnabled() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateGrokSafetyFeeEnabled()
+	})
+}
+
+// SetGrokSafetyFee sets the "grok_safety_fee" field.
+func (u *GroupUpsertOne) SetGrokSafetyFee(v float64) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetGrokSafetyFee(v)
+	})
+}
+
+// AddGrokSafetyFee adds v to the "grok_safety_fee" field.
+func (u *GroupUpsertOne) AddGrokSafetyFee(v float64) *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddGrokSafetyFee(v)
+	})
+}
+
+// UpdateGrokSafetyFee sets the "grok_safety_fee" field to the value that was provided on create.
+func (u *GroupUpsertOne) UpdateGrokSafetyFee() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateGrokSafetyFee()
+	})
+}
+
+// ClearGrokSafetyFee clears the value of the "grok_safety_fee" field.
+func (u *GroupUpsertOne) ClearGrokSafetyFee() *GroupUpsertOne {
+	return u.Update(func(s *GroupUpsert) {
+		s.ClearGrokSafetyFee()
 	})
 }
 
@@ -5601,6 +5727,48 @@ func (u *GroupUpsertBulk) UpdateSearchPricePer1k() *GroupUpsertBulk {
 func (u *GroupUpsertBulk) ClearSearchPricePer1k() *GroupUpsertBulk {
 	return u.Update(func(s *GroupUpsert) {
 		s.ClearSearchPricePer1k()
+	})
+}
+
+// SetGrokSafetyFeeEnabled sets the "grok_safety_fee_enabled" field.
+func (u *GroupUpsertBulk) SetGrokSafetyFeeEnabled(v bool) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetGrokSafetyFeeEnabled(v)
+	})
+}
+
+// UpdateGrokSafetyFeeEnabled sets the "grok_safety_fee_enabled" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateGrokSafetyFeeEnabled() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateGrokSafetyFeeEnabled()
+	})
+}
+
+// SetGrokSafetyFee sets the "grok_safety_fee" field.
+func (u *GroupUpsertBulk) SetGrokSafetyFee(v float64) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.SetGrokSafetyFee(v)
+	})
+}
+
+// AddGrokSafetyFee adds v to the "grok_safety_fee" field.
+func (u *GroupUpsertBulk) AddGrokSafetyFee(v float64) *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.AddGrokSafetyFee(v)
+	})
+}
+
+// UpdateGrokSafetyFee sets the "grok_safety_fee" field to the value that was provided on create.
+func (u *GroupUpsertBulk) UpdateGrokSafetyFee() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.UpdateGrokSafetyFee()
+	})
+}
+
+// ClearGrokSafetyFee clears the value of the "grok_safety_fee" field.
+func (u *GroupUpsertBulk) ClearGrokSafetyFee() *GroupUpsertBulk {
+	return u.Update(func(s *GroupUpsert) {
+		s.ClearGrokSafetyFee()
 	})
 }
 

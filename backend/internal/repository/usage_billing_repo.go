@@ -5,7 +5,9 @@ import (
 	"database/sql"
 	"errors"
 	"fmt"
+	"math"
 	"strings"
+	"time"
 
 	dbent "github.com/Wei-Shaw/sub2api/ent"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
@@ -33,6 +35,26 @@ func NewUsageBillingRepository(_ *dbent.Client, sqlDB *sql.DB) service.UsageBill
 }
 
 func (r *usageBillingRepository) Apply(ctx context.Context, cmd *service.UsageBillingCommand) (_ *service.UsageBillingApplyResult, err error) {
+	return r.apply(ctx, cmd, nil)
+}
+
+// ApplyWithUsageLog commits the dedup receipt, all quota/wallet mutations and the
+// rejection bill together. It never routes through the best-effort log batcher.
+func (r *usageBillingRepository) ApplyWithUsageLog(ctx context.Context, cmd *service.UsageBillingCommand, log *service.UsageLog) (*service.UsageBillingApplyResult, error) {
+	if cmd == nil || log == nil || log.GrokSafetyRejection == nil {
+		return nil, errors.New("atomic safety billing requires command and rejection usage")
+	}
+	evidence := log.GrokSafetyRejection
+	if evidence.Code != service.GrokSafetyRejectionCode || strings.TrimSpace(evidence.CallID) == "" || cmd.RequestID != "grok-safety:"+evidence.CallID || evidence.Fee < 0 || math.IsNaN(evidence.Fee) || math.IsInf(evidence.Fee, 0) {
+		return nil, errors.New("invalid safety billing evidence")
+	}
+	if strings.TrimSpace(cmd.RequestID) != strings.TrimSpace(log.RequestID) || cmd.APIKeyID != log.APIKeyID || cmd.UserID != log.UserID || cmd.AccountID != log.AccountID {
+		return nil, service.ErrUsageBillingRequestConflict
+	}
+	return r.apply(ctx, cmd, log)
+}
+
+func (r *usageBillingRepository) apply(ctx context.Context, cmd *service.UsageBillingCommand, usage *service.UsageLog) (_ *service.UsageBillingApplyResult, err error) {
 	if cmd == nil {
 		return &service.UsageBillingApplyResult{}, nil
 	}
@@ -66,6 +88,21 @@ func (r *usageBillingRepository) Apply(ctx context.Context, cmd *service.UsageBi
 	result := &service.UsageBillingApplyResult{Applied: true}
 	if err := r.applyUsageBillingEffects(ctx, tx, cmd, result); err != nil {
 		return nil, err
+	}
+	if usage != nil {
+		if cmd.PlatformQuotaCost > 0 {
+			if err := incrementEngineBillingPlatformQuota(ctx, tx, cmd.UserID, cmd.Platform, cmd.PlatformQuotaCost, time.Now()); err != nil {
+				return nil, err
+			}
+		}
+		inserted, err := (&usageLogRepository{}).createSingle(ctx, tx, usage)
+		if err != nil {
+			return nil, err
+		}
+		if !inserted {
+			// A pre-existing bill without this receipt must never be charged again.
+			return nil, service.ErrUsageBillingRequestConflict
+		}
 	}
 
 	if err := tx.Commit(); err != nil {

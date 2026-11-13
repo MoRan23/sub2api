@@ -145,6 +145,48 @@ const baseImageRow = {
 }
 
 describe('admin UsageTable tooltip', () => {
+  it.each([true, false])('shows safety refusal fees and guards administrator identifiers (admin=%s)', async showAccountBilling => {
+    const row = {
+      ...baseImageRow,
+      image_count: 0,
+      billing_mode: 'token',
+      total_cost: 1.05,
+      actual_cost: 2.05,
+      account_stats_cost: 3.05,
+      account_rate_multiplier: 2,
+      grok_safety_rejection: { code: 'safety_review_rejected', fee: 0.05, http_status: 400, upstream_request_id: 'admin-only-upstream', upstream_client_request_id: 'admin-only-client' },
+    }
+    const wrapper = mount(UsageTable, {
+      props: { data: [row], columns: [], showAccountBilling },
+      global: { stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } },
+    })
+    expect(wrapper.get('[data-testid="grok-safety-rejection"]').text()).toBe('usage.grokSafetyRejection')
+    const triggers = wrapper.findAll('.group.relative')
+    await triggers[triggers.length - 1].trigger('mouseenter')
+    const costs = wrapper.get('[data-testid="grok-safety-costs"]').text()
+    expect(costs).toContain('$2.00000000')
+    expect(costs).toContain('$0.05000000')
+    expect(costs).toContain('$2.05000000')
+    if (showAccountBilling) {
+      expect(wrapper.text()).toContain('admin-only-upstream')
+      expect(wrapper.text()).toContain('admin-only-client')
+      expect(wrapper.text()).toContain('$6.05000000')
+      expect(wrapper.text()).not.toContain('$6.10000000')
+    } else {
+      expect(wrapper.text()).not.toContain('admin-only-upstream')
+      expect(wrapper.text()).not.toContain('admin-only-client')
+      expect(wrapper.text()).not.toContain('Account billed')
+    }
+    wrapper.unmount()
+  })
+  it('shows a zero-token safety refusal as failed even when its fixed fee is disabled', () => {
+    const wrapper = mount(UsageTable, {
+      props: { data: [{ ...baseImageRow, input_tokens: 0, output_tokens: 0, total_cost: 0, actual_cost: 0, grok_safety_rejection: { code: 'safety_review_rejected', fee: 0, http_status: 200 } }], columns: [] },
+      global: { stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } },
+    })
+    expect(wrapper.find('[data-testid="grok-safety-rejection"]').exists()).toBe(true)
+    wrapper.unmount()
+  })
   it('shows the two OpenAI cache-write buckets without Anthropic lifetime labels', async () => {
     const row = { ...baseImageRow, image_count: 0, billing_mode: 'token', cache_creation_tokens: 2399, cache_creation_30m_tokens: 9, cache_creation_12h_tokens: 2390 }
     const wrapper = mount(UsageTable, {

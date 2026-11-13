@@ -199,6 +199,18 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	if result == nil {
 		return errors.New("openai usage result is nil")
 	}
+	if result.GrokSafetyRejection != nil {
+		if err := validateGrokSafetyBilling(input.Account, result.GrokSafetyRejection); err != nil {
+			return err
+		}
+		// Never carry successful tool/media units into a refusal's bill. The
+		// request-owned result may also be used by forwarding diagnostics.
+		owned := *result
+		evidence := *result.GrokSafetyRejection
+		owned.GrokSafetyRejection = &evidence
+		clearGrokSafetySuccessUnits(&owned)
+		result = &owned
+	}
 	if input.Account != nil && input.Account.IsCodexEngine() {
 		// Engine's standard usage describes the client's current context. Only
 		// the durable, confirmed billing-event path can charge Engine consumption.
@@ -216,7 +228,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	if err != nil {
 		return err
 	}
-	if !isGrokVideoUsageResult(result, nil) {
+	if result.GrokSafetyRejection == nil && !isGrokVideoUsageResult(result, nil) {
 		ApplyOpenAIImageBillingResolution(result)
 	}
 
@@ -299,8 +311,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		pricingAt,
 	)
 	requestedTierCostKnown := err == nil
+	tokenPricingUnavailable := err != nil
 	if err != nil {
-		if !isUsagePricingUnavailableError(err) {
+		if result.GrokSafetyRejection == nil && !isUsagePricingUnavailableError(err) {
 			return err
 		}
 		logger.L().With(
@@ -371,6 +384,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 					baselineBillingModel, responseModel, cost, responseCost)
 				billingModels = responseModels
 				cost = responseCost
+				tokenPricingUnavailable = false
 			}
 		}
 	}
@@ -395,7 +409,7 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 			modelLongContextExempt,
 			pricingAt,
 		)
-		if standardErr != nil && !isUsagePricingUnavailableError(standardErr) {
+		if standardErr != nil && result.GrokSafetyRejection == nil && !isUsagePricingUnavailableError(standardErr) {
 			return standardErr
 		}
 		// Missing pricing already fell back to a zero-cost log above; keep that
@@ -403,6 +417,12 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		if standardErr == nil && cost != nil && standardCost != nil {
 			cost.ActualCost = standardCost.ActualCost
 		}
+	}
+	if rejection := result.GrokSafetyRejection; rejection != nil {
+		rejection.TokenPricingUnavailable = tokenPricingUnavailable
+		cost.FixedFee = rejection.Fee
+		cost.TotalCost += rejection.Fee
+		cost.ActualCost += rejection.Fee
 	}
 
 	// Determine billing type
@@ -432,6 +452,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		)); stable != "" {
 			requestID = stable
 		}
+	}
+	if rejection := result.GrokSafetyRejection; rejection != nil {
+		requestID = "grok-safety:" + rejection.CallID
 	}
 
 	// 确定 RequestedModel（渠道映射前的原始模型）
@@ -489,8 +512,9 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		ImageSizeSource:          optionalTrimmedStringPtr(result.ImageSizeSource),
 		ImageSizeBreakdown:       imageSizeBreakdown,
 		NativeCompactionV2:       input.NativeCompactionV2,
+		GrokSafetyRejection:      result.GrokSafetyRejection,
 	}
-	isVideoUsage := isGrokVideoUsageResult(result, billingModels)
+	isVideoUsage := result.GrokSafetyRejection == nil && isGrokVideoUsageResult(result, billingModels)
 	if isVideoUsage {
 		usageLog.VideoCount = result.VideoCount
 		usageLog.VideoResolution = optionalTrimmedStringPtr(NormalizeVideoBillingResolutionOrDefault(result.VideoResolution))
@@ -572,7 +596,8 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 	}
 
 	simpleModeKeyRateLimitOnly := simpleModeKeyRateLimitBillingEnabled(s.cfg, apiKey)
-	if s.cfg != nil && s.cfg.RunMode == config.RunModeSimple && !simpleModeKeyRateLimitOnly {
+	simpleModeRecordOnly := s.cfg != nil && s.cfg.RunMode == config.RunModeSimple && !simpleModeKeyRateLimitOnly
+	if simpleModeRecordOnly && result.GrokSafetyRejection == nil {
 		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
 		logger.LegacyPrintf("service.openai_gateway", "[SIMPLE MODE] Usage recorded (not billed): user=%d, tokens=%d", usageLog.UserID, usageLog.TotalTokens())
 		s.deferredService.ScheduleLastUsedUpdate(account.ID)
@@ -598,8 +623,15 @@ func (s *OpenAIGatewayService) RecordUsage(ctx context.Context, input *OpenAIRec
 		APIKeyService:              input.APIKeyService,
 		Platform:                   quotaPlatform,
 		SimpleModeKeyRateLimitOnly: simpleModeKeyRateLimitOnly,
+		AtomicUsageLog:             result.GrokSafetyRejection != nil,
+		RecordOnly:                 simpleModeRecordOnly,
 	}, s.billingDeps(), s.usageBillingRepo)
 
+	if result.GrokSafetyRejection != nil {
+		// The durable rejection row is part of the debit transaction. In
+		// particular, a failed debit must not leave a zero-cost placeholder.
+		return billingErr
+	}
 	if billingErr != nil {
 		usageLog.ActualCost = 0
 		writeUsageLogBestEffort(ctx, s.usageLogRepo, usageLog, "service.openai_gateway")
@@ -669,6 +701,10 @@ func (s *OpenAIGatewayService) calculateOpenAIRecordUsageCost(
 	modelLongContextExempt bool,
 	pricingAt time.Time,
 ) (*CostBreakdown, error) {
+	if result != nil && result.GrokSafetyRejection != nil {
+		return s.calculateGrokSafetyTokenCost(ctx, result, apiKey, billingModels, multiplier, tokens,
+			serviceTier, longContextBillingGate, modelLongContextExempt, pricingAt)
+	}
 	billingModel := firstUsageBillingModel(billingModels)
 	if result != nil && result.WebSearchCalls > 0 {
 		// Codex alpha/search 网页搜索按次计费：上游不返回 usage/token 字段，单价只取

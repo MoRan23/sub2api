@@ -198,6 +198,9 @@ func grokContentPolicyClientMessage(responseBody []byte) string {
 // Free-usage / empty-output / billing bodies also failover even when the HTTP
 // status alone would not (e.g. 400 with free-usage-exhausted).
 func (s *OpenAIGatewayService) shouldFailoverGrokUpstreamError(statusCode int, responseBody []byte) bool {
+	if IsGrokSafetyRejectionJSON(responseBody) {
+		return false
+	}
 	if isGrokContentPolicyRejection(statusCode, responseBody) {
 		return false
 	}

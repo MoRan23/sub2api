@@ -799,4 +799,21 @@ describe('admin UsageView model audit export', () => {
 		expect(row.slice(4, 8)).toEqual(['gpt-5.6-sol', 'gpt-5.5', 'gpt-5.4', 'Yes'])
 		expect(saveAs).toHaveBeenCalledTimes(1)
 	})
+
+		it('exports safety refusal fees without multiplying the fixed fee in account cost', async () => {
+			exportList.mockResolvedValue({ items: [{ created_at: '2026-11-13T00:00:00Z', model: 'grok', total_cost: 0.15, actual_cost: 0.25, account_stats_cost: 0.35, rate_multiplier: 2, account_rate_multiplier: 3,
+				grok_safety_rejection: { code: 'safety_review_rejected', fee: 0.05, http_status: 400, upstream_client_request_id: 'admin-client-id' } }], total: 1, pages: 1 })
+			const wrapper = mountRouteFilteredUsageView()
+			vi.advanceTimersByTime(120)
+			await flushPromises()
+			await (wrapper.vm as any).exportToExcel()
+			const headers = aoaToSheet.mock.calls[0][0][0]
+			const row = sheetAddAoa.mock.calls[0][1][0]
+			expect(row[headers.indexOf('usage.accountBilled')]).toBe('0.950000')
+			expect(row[headers.indexOf('usage.result')]).toBe('usage.grokSafetyRejection')
+			expect(row[headers.indexOf('usage.grokSafetyTokenCost')]).toBe('0.20000000')
+			expect(row[headers.indexOf('usage.grokSafetyFee')]).toBe('0.05000000')
+			expect(row[headers.indexOf('usage.grokSafetyClientRequestId')]).toBe('admin-client-id')
+			wrapper.unmount()
+		})
 })

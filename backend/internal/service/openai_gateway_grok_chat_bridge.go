@@ -520,7 +520,10 @@ func (s *OpenAIGatewayService) forwardGrokChatCompletionsViaResponses(
 	body []byte,
 	promptCacheKey string,
 	defaultMappedModel string,
-) (*OpenAIForwardResult, error) {
+) (forwardResult *OpenAIForwardResult, forwardErr error) {
+	defer func() {
+		forwardResult, forwardErr = finalizeGrokSafetyForward(ctx, account, body, forwardResult, forwardErr)
+	}()
 	startTime := time.Now()
 
 	var chatReq apicompat.ChatCompletionsRequest
@@ -615,6 +618,9 @@ func (s *OpenAIGatewayService) forwardGrokChatCompletionsViaResponses(
 
 	if resp.StatusCode >= http.StatusBadRequest {
 		respBody, upstreamMsg := s.readOpenAIUpstreamError(resp)
+		if IsGrokSafetyRejectionJSON(respBody) {
+			return s.writeGrokSafetyErrorResponse(ctx, c, resp, respBody)
+		}
 		if upstreamMsg == "" {
 			upstreamMsg = fmt.Sprintf("xAI upstream returned status %d", resp.StatusCode)
 		}

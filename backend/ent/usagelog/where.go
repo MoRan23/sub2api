@@ -1005,6 +1005,16 @@ func BillingModeContainsFold(v string) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldContainsFold(FieldBillingMode, v))
 }
 
+// GrokSafetyRejectionIsNil applies the IsNil predicate on the "grok_safety_rejection" field.
+func GrokSafetyRejectionIsNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldIsNull(FieldGrokSafetyRejection))
+}
+
+// GrokSafetyRejectionNotNil applies the NotNil predicate on the "grok_safety_rejection" field.
+func GrokSafetyRejectionNotNil() predicate.UsageLog {
+	return predicate.UsageLog(sql.FieldNotNull(FieldGrokSafetyRejection))
+}
+
 // GroupIDEQ applies the EQ predicate on the "group_id" field.
 func GroupIDEQ(v int64) predicate.UsageLog {
 	return predicate.UsageLog(sql.FieldEQ(FieldGroupID, v))

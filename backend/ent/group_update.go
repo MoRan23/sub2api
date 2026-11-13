@@ -768,6 +768,47 @@ func (_u *GroupUpdate) ClearSearchPricePer1k() *GroupUpdate {
 	return _u
 }
 
+// SetGrokSafetyFeeEnabled sets the "grok_safety_fee_enabled" field.
+func (_u *GroupUpdate) SetGrokSafetyFeeEnabled(v bool) *GroupUpdate {
+	_u.mutation.SetGrokSafetyFeeEnabled(v)
+	return _u
+}
+
+// SetNillableGrokSafetyFeeEnabled sets the "grok_safety_fee_enabled" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableGrokSafetyFeeEnabled(v *bool) *GroupUpdate {
+	if v != nil {
+		_u.SetGrokSafetyFeeEnabled(*v)
+	}
+	return _u
+}
+
+// SetGrokSafetyFee sets the "grok_safety_fee" field.
+func (_u *GroupUpdate) SetGrokSafetyFee(v float64) *GroupUpdate {
+	_u.mutation.ResetGrokSafetyFee()
+	_u.mutation.SetGrokSafetyFee(v)
+	return _u
+}
+
+// SetNillableGrokSafetyFee sets the "grok_safety_fee" field if the given value is not nil.
+func (_u *GroupUpdate) SetNillableGrokSafetyFee(v *float64) *GroupUpdate {
+	if v != nil {
+		_u.SetGrokSafetyFee(*v)
+	}
+	return _u
+}
+
+// AddGrokSafetyFee adds value to the "grok_safety_fee" field.
+func (_u *GroupUpdate) AddGrokSafetyFee(v float64) *GroupUpdate {
+	_u.mutation.AddGrokSafetyFee(v)
+	return _u
+}
+
+// ClearGrokSafetyFee clears the value of the "grok_safety_fee" field.
+func (_u *GroupUpdate) ClearGrokSafetyFee() *GroupUpdate {
+	_u.mutation.ClearGrokSafetyFee()
+	return _u
+}
+
 // SetAudioRealtimePricePerMin sets the "audio_realtime_price_per_min" field.
 func (_u *GroupUpdate) SetAudioRealtimePricePerMin(v float64) *GroupUpdate {
 	_u.mutation.ResetAudioRealtimePricePerMin()
@@ -1635,6 +1676,11 @@ func (_u *GroupUpdate) check() error {
 			return &ValidationError{Name: "search_price_per_1k", err: fmt.Errorf(`ent: validator failed for field "Group.search_price_per_1k": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.GrokSafetyFee(); ok {
+		if err := group.GrokSafetyFeeValidator(v); err != nil {
+			return &ValidationError{Name: "grok_safety_fee", err: fmt.Errorf(`ent: validator failed for field "Group.grok_safety_fee": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.AudioRealtimePricePerMin(); ok {
 		if err := group.AudioRealtimePricePerMinValidator(v); err != nil {
 			return &ValidationError{Name: "audio_realtime_price_per_min", err: fmt.Errorf(`ent: validator failed for field "Group.audio_realtime_price_per_min": %w`, err)}
@@ -1898,6 +1944,18 @@ func (_u *GroupUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	}
 	if _u.mutation.SearchPricePer1kCleared() {
 		_spec.ClearField(group.FieldSearchPricePer1k, field.TypeFloat64)
+	}
+	if value, ok := _u.mutation.GrokSafetyFeeEnabled(); ok {
+		_spec.SetField(group.FieldGrokSafetyFeeEnabled, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.GrokSafetyFee(); ok {
+		_spec.SetField(group.FieldGrokSafetyFee, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedGrokSafetyFee(); ok {
+		_spec.AddField(group.FieldGrokSafetyFee, field.TypeFloat64, value)
+	}
+	if _u.mutation.GrokSafetyFeeCleared() {
+		_spec.ClearField(group.FieldGrokSafetyFee, field.TypeFloat64)
 	}
 	if value, ok := _u.mutation.AudioRealtimePricePerMin(); ok {
 		_spec.SetField(group.FieldAudioRealtimePricePerMin, field.TypeFloat64, value)
@@ -3109,6 +3167,47 @@ func (_u *GroupUpdateOne) ClearSearchPricePer1k() *GroupUpdateOne {
 	return _u
 }
 
+// SetGrokSafetyFeeEnabled sets the "grok_safety_fee_enabled" field.
+func (_u *GroupUpdateOne) SetGrokSafetyFeeEnabled(v bool) *GroupUpdateOne {
+	_u.mutation.SetGrokSafetyFeeEnabled(v)
+	return _u
+}
+
+// SetNillableGrokSafetyFeeEnabled sets the "grok_safety_fee_enabled" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableGrokSafetyFeeEnabled(v *bool) *GroupUpdateOne {
+	if v != nil {
+		_u.SetGrokSafetyFeeEnabled(*v)
+	}
+	return _u
+}
+
+// SetGrokSafetyFee sets the "grok_safety_fee" field.
+func (_u *GroupUpdateOne) SetGrokSafetyFee(v float64) *GroupUpdateOne {
+	_u.mutation.ResetGrokSafetyFee()
+	_u.mutation.SetGrokSafetyFee(v)
+	return _u
+}
+
+// SetNillableGrokSafetyFee sets the "grok_safety_fee" field if the given value is not nil.
+func (_u *GroupUpdateOne) SetNillableGrokSafetyFee(v *float64) *GroupUpdateOne {
+	if v != nil {
+		_u.SetGrokSafetyFee(*v)
+	}
+	return _u
+}
+
+// AddGrokSafetyFee adds value to the "grok_safety_fee" field.
+func (_u *GroupUpdateOne) AddGrokSafetyFee(v float64) *GroupUpdateOne {
+	_u.mutation.AddGrokSafetyFee(v)
+	return _u
+}
+
+// ClearGrokSafetyFee clears the value of the "grok_safety_fee" field.
+func (_u *GroupUpdateOne) ClearGrokSafetyFee() *GroupUpdateOne {
+	_u.mutation.ClearGrokSafetyFee()
+	return _u
+}
+
 // SetAudioRealtimePricePerMin sets the "audio_realtime_price_per_min" field.
 func (_u *GroupUpdateOne) SetAudioRealtimePricePerMin(v float64) *GroupUpdateOne {
 	_u.mutation.ResetAudioRealtimePricePerMin()
@@ -3989,6 +4088,11 @@ func (_u *GroupUpdateOne) check() error {
 			return &ValidationError{Name: "search_price_per_1k", err: fmt.Errorf(`ent: validator failed for field "Group.search_price_per_1k": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.GrokSafetyFee(); ok {
+		if err := group.GrokSafetyFeeValidator(v); err != nil {
+			return &ValidationError{Name: "grok_safety_fee", err: fmt.Errorf(`ent: validator failed for field "Group.grok_safety_fee": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.AudioRealtimePricePerMin(); ok {
 		if err := group.AudioRealtimePricePerMinValidator(v); err != nil {
 			return &ValidationError{Name: "audio_realtime_price_per_min", err: fmt.Errorf(`ent: validator failed for field "Group.audio_realtime_price_per_min": %w`, err)}
@@ -4269,6 +4373,18 @@ func (_u *GroupUpdateOne) sqlSave(ctx context.Context) (_node *Group, err error)
 	}
 	if _u.mutation.SearchPricePer1kCleared() {
 		_spec.ClearField(group.FieldSearchPricePer1k, field.TypeFloat64)
+	}
+	if value, ok := _u.mutation.GrokSafetyFeeEnabled(); ok {
+		_spec.SetField(group.FieldGrokSafetyFeeEnabled, field.TypeBool, value)
+	}
+	if value, ok := _u.mutation.GrokSafetyFee(); ok {
+		_spec.SetField(group.FieldGrokSafetyFee, field.TypeFloat64, value)
+	}
+	if value, ok := _u.mutation.AddedGrokSafetyFee(); ok {
+		_spec.AddField(group.FieldGrokSafetyFee, field.TypeFloat64, value)
+	}
+	if _u.mutation.GrokSafetyFeeCleared() {
+		_spec.ClearField(group.FieldGrokSafetyFee, field.TypeFloat64)
 	}
 	if value, ok := _u.mutation.AudioRealtimePricePerMin(); ok {
 		_spec.SetField(group.FieldAudioRealtimePricePerMin, field.TypeFloat64, value)

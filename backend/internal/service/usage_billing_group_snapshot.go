@@ -35,6 +35,7 @@ func prepareAPIKeyAuthBillingSnapshot(snapshot *APIKeyAuthSnapshot) {
 		VideoRateIndependent: g.VideoRateIndependent, VideoRateMultiplier: g.VideoRateMultiplier,
 		VideoPrice480P: cloneUsageBillingScalar(g.VideoPrice480P), VideoPrice720P: cloneUsageBillingScalar(g.VideoPrice720P), VideoPrice1080P: cloneUsageBillingScalar(g.VideoPrice1080P),
 		WebSearchPricePerCall: cloneUsageBillingScalar(g.WebSearchPricePerCall), SearchPricePer1k: cloneUsageBillingScalar(g.SearchPricePer1k),
+		GrokSafetyFeeEnabled: g.GrokSafetyFeeEnabled, GrokSafetyFee: cloneUsageBillingScalar(g.GrokSafetyFee),
 		AudioRealtimePricePerMin: cloneUsageBillingScalar(g.AudioRealtimePricePerMin), AudioTTSPricePerMillionChars: cloneUsageBillingScalar(g.AudioTTSPricePerMillionChars), AudioSTTPricePerHour: cloneUsageBillingScalar(g.AudioSTTPricePerHour),
 		LongContextPricingEnabled: g.LongContextPricingEnabled, FreeOpenAIFast: g.FreeOpenAIFast, FreeOpenAIUltrafast: g.FreeOpenAIUltrafast,
 	}}

@@ -42,6 +42,10 @@ type UsageBillingCommand struct {
 	APIKeyQuotaCost     float64
 	APIKeyRateLimitCost float64
 	AccountQuotaCost    float64
+	// Platform quota is committed with atomic usage records. Ordinary usage
+	// retains its existing Redis/flusher path when these fields are empty.
+	PlatformQuotaCost float64
+	Platform          string
 
 	// AccountQuotaHasDailyLimit / AccountQuotaHasWeeklyLimit 记录构造命令时账号是否设置了日/周上限，
 	// 只用于选择账号配额累加语句，不参与幂等指纹；实际累加哪些维度以数据库中的账号配置为准。
@@ -91,6 +95,7 @@ func (c *UsageBillingCommand) quantizeMonetaryFields() {
 	c.APIKeyQuotaCost = QuantizeUsageBillingAmount(c.APIKeyQuotaCost)
 	c.APIKeyRateLimitCost = QuantizeUsageBillingAmount(c.APIKeyRateLimitCost)
 	c.AccountQuotaCost = QuantizeUsageBillingAmount(c.AccountQuotaCost)
+	c.PlatformQuotaCost = QuantizeUsageBillingAmount(c.PlatformQuotaCost)
 }
 
 // QuantizeUsageBillingAmount 把金额舍入到 UsageBillingMonetaryScale 位小数，
@@ -136,6 +141,9 @@ func buildUsageBillingFingerprint(c *UsageBillingCommand) string {
 	)
 	if payloadHash := strings.TrimSpace(c.RequestPayloadHash); payloadHash != "" {
 		raw += "|" + payloadHash
+	}
+	if c.PlatformQuotaCost != 0 || c.Platform != "" {
+		raw += fmt.Sprintf("|platform:%s:%0.10f", c.Platform, c.PlatformQuotaCost)
 	}
 	sum := sha256.Sum256([]byte(raw))
 	return hex.EncodeToString(sum[:])
@@ -228,4 +236,11 @@ type UsageBillingRepository interface {
 	ReserveBatchImageBalance(ctx context.Context, cmd *BatchImageBalanceHoldCommand) (*BatchImageBalanceHoldResult, error)
 	CaptureBatchImageBalance(ctx context.Context, cmd *BatchImageBalanceHoldCommand) (*BatchImageBalanceHoldResult, error)
 	ReleaseBatchImageBalance(ctx context.Context, cmd *BatchImageBalanceHoldCommand) (*BatchImageBalanceHoldResult, error)
+}
+
+// AtomicUsageBillingRepository commits the durable billing identity, all debit
+// effects and the usage row together. Financial failure records must not fall
+// back to the best-effort usage batcher.
+type AtomicUsageBillingRepository interface {
+	ApplyWithUsageLog(context.Context, *UsageBillingCommand, *UsageLog) (*UsageBillingApplyResult, error)
 }

@@ -78,6 +78,7 @@ func (h *GatewayHandler) WebSearch(c *gin.Context) {
 	}
 
 	// Billing eligibility (same as other requests)
+	c.Request = c.Request.WithContext(service.WithGrokSafetyGroup(c.Request.Context(), apiKey.Group))
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
 		status, code, message, retryAfter := billingErrorDetails(err)
@@ -206,6 +207,18 @@ func (h *GatewayHandler) WebSearch(c *gin.Context) {
 			accountReleaseFunc = nil
 		}
 		account = nil
+	}
+	if account != nil && service.GrokSafetyRejected(c.Request.Context()) {
+		result, _ := service.FinalizeGrokSafetyRejection(c.Request.Context(), &service.OpenAIForwardResult{Model: searchModel}, err)
+		billingHandler := &OpenAIGatewayHandler{gatewayService: h.openAIGatewayService, usageRecordWorkerPool: h.usageRecordWorkerPool}
+		billingHandler.submitFrozenOpenAIUsageRecord(c.Request.Context(), &service.OpenAIRecordUsageInput{
+			Result: result, APIKey: apiKey, User: apiKey.User, Account: account, Subscription: subscription,
+			InboundEndpoint: GetInboundEndpoint(c), UpstreamEndpoint: GetUpstreamEndpoint(c, account.Platform),
+			UserAgent: c.GetHeader("User-Agent"), IPAddress: ip.GetClientIP(c), APIKeyService: h.apiKeyService,
+			QuotaPlatform: service.QuotaPlatform(c.Request.Context(), apiKey),
+		}, usageRecordTaskOptions{component: "handler.gateway.web_search", failureEvent: "gateway.web_search.record_usage_failed", mandatory: true})
+		service.WriteGrokSafetyRejectionResponse(c, result.GrokSafetyRejection.HTTPStatus, nil)
+		return
 	}
 	if err != nil || nativeResp == nil {
 		msg := "web search failed"
@@ -340,6 +353,9 @@ func (h *GatewayHandler) doGrokNativeWebSearch(ctx context.Context, c *gin.Conte
 
 	respBytes, err := h.gatewayService.DoGrokNativeResponsesJSON(ctx, account, bodyBytes)
 	if err != nil {
+		if rejection := service.GrokSafetyRejectionFromContext(ctx); rejection != nil {
+			service.WriteGrokSafetyRejectionResponse(c, rejection.HTTPStatus, respBytes)
+		}
 		return nil, "", err
 	}
 
@@ -361,6 +377,9 @@ func (h *GatewayHandler) doGrokNativeXSearch(ctx context.Context, c *gin.Context
 	}
 	respBytes, err := h.gatewayService.DoGrokNativeResponsesJSON(ctx, account, bodyBytes)
 	if err != nil {
+		if rejection := service.GrokSafetyRejectionFromContext(ctx); rejection != nil {
+			service.WriteGrokSafetyRejectionResponse(c, rejection.HTTPStatus, respBytes)
+		}
 		return nil, "", err
 	}
 	results := extractGrokWebSearchSources(respBytes, maxResults)

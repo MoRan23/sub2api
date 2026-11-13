@@ -22235,6 +22235,9 @@ type GroupMutation struct {
 	addweb_search_price_per_call            *float64
 	search_price_per_1k                     *float64
 	addsearch_price_per_1k                  *float64
+	grok_safety_fee_enabled                 *bool
+	grok_safety_fee                         *float64
+	addgrok_safety_fee                      *float64
 	audio_realtime_price_per_min            *float64
 	addaudio_realtime_price_per_min         *float64
 	audio_tts_price_per_million_chars       *float64
@@ -24443,6 +24446,112 @@ func (m *GroupMutation) ResetSearchPricePer1k() {
 	delete(m.clearedFields, group.FieldSearchPricePer1k)
 }
 
+// SetGrokSafetyFeeEnabled sets the "grok_safety_fee_enabled" field.
+func (m *GroupMutation) SetGrokSafetyFeeEnabled(b bool) {
+	m.grok_safety_fee_enabled = &b
+}
+
+// GrokSafetyFeeEnabled returns the value of the "grok_safety_fee_enabled" field in the mutation.
+func (m *GroupMutation) GrokSafetyFeeEnabled() (r bool, exists bool) {
+	v := m.grok_safety_fee_enabled
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldGrokSafetyFeeEnabled returns the old "grok_safety_fee_enabled" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldGrokSafetyFeeEnabled(ctx context.Context) (v bool, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldGrokSafetyFeeEnabled is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldGrokSafetyFeeEnabled requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldGrokSafetyFeeEnabled: %w", err)
+	}
+	return oldValue.GrokSafetyFeeEnabled, nil
+}
+
+// ResetGrokSafetyFeeEnabled resets all changes to the "grok_safety_fee_enabled" field.
+func (m *GroupMutation) ResetGrokSafetyFeeEnabled() {
+	m.grok_safety_fee_enabled = nil
+}
+
+// SetGrokSafetyFee sets the "grok_safety_fee" field.
+func (m *GroupMutation) SetGrokSafetyFee(f float64) {
+	m.grok_safety_fee = &f
+	m.addgrok_safety_fee = nil
+}
+
+// GrokSafetyFee returns the value of the "grok_safety_fee" field in the mutation.
+func (m *GroupMutation) GrokSafetyFee() (r float64, exists bool) {
+	v := m.grok_safety_fee
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldGrokSafetyFee returns the old "grok_safety_fee" field's value of the Group entity.
+// If the Group object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *GroupMutation) OldGrokSafetyFee(ctx context.Context) (v *float64, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldGrokSafetyFee is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldGrokSafetyFee requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldGrokSafetyFee: %w", err)
+	}
+	return oldValue.GrokSafetyFee, nil
+}
+
+// AddGrokSafetyFee adds f to the "grok_safety_fee" field.
+func (m *GroupMutation) AddGrokSafetyFee(f float64) {
+	if m.addgrok_safety_fee != nil {
+		*m.addgrok_safety_fee += f
+	} else {
+		m.addgrok_safety_fee = &f
+	}
+}
+
+// AddedGrokSafetyFee returns the value that was added to the "grok_safety_fee" field in this mutation.
+func (m *GroupMutation) AddedGrokSafetyFee() (r float64, exists bool) {
+	v := m.addgrok_safety_fee
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// ClearGrokSafetyFee clears the value of the "grok_safety_fee" field.
+func (m *GroupMutation) ClearGrokSafetyFee() {
+	m.grok_safety_fee = nil
+	m.addgrok_safety_fee = nil
+	m.clearedFields[group.FieldGrokSafetyFee] = struct{}{}
+}
+
+// GrokSafetyFeeCleared returns if the "grok_safety_fee" field was cleared in this mutation.
+func (m *GroupMutation) GrokSafetyFeeCleared() bool {
+	_, ok := m.clearedFields[group.FieldGrokSafetyFee]
+	return ok
+}
+
+// ResetGrokSafetyFee resets all changes to the "grok_safety_fee" field.
+func (m *GroupMutation) ResetGrokSafetyFee() {
+	m.grok_safety_fee = nil
+	m.addgrok_safety_fee = nil
+	delete(m.clearedFields, group.FieldGrokSafetyFee)
+}
+
 // SetAudioRealtimePricePerMin sets the "audio_realtime_price_per_min" field.
 func (m *GroupMutation) SetAudioRealtimePricePerMin(f float64) {
 	m.audio_realtime_price_per_min = &f
@@ -26347,7 +26456,7 @@ func (m *GroupMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *GroupMutation) Fields() []string {
-	fields := make([]string, 0, 74)
+	fields := make([]string, 0, 76)
 	if m.created_at != nil {
 		fields = append(fields, group.FieldCreatedAt)
 	}
@@ -26467,6 +26576,12 @@ func (m *GroupMutation) Fields() []string {
 	}
 	if m.search_price_per_1k != nil {
 		fields = append(fields, group.FieldSearchPricePer1k)
+	}
+	if m.grok_safety_fee_enabled != nil {
+		fields = append(fields, group.FieldGrokSafetyFeeEnabled)
+	}
+	if m.grok_safety_fee != nil {
+		fields = append(fields, group.FieldGrokSafetyFee)
 	}
 	if m.audio_realtime_price_per_min != nil {
 		fields = append(fields, group.FieldAudioRealtimePricePerMin)
@@ -26658,6 +26773,10 @@ func (m *GroupMutation) Field(name string) (ent.Value, bool) {
 		return m.WebSearchPricePerCall()
 	case group.FieldSearchPricePer1k:
 		return m.SearchPricePer1k()
+	case group.FieldGrokSafetyFeeEnabled:
+		return m.GrokSafetyFeeEnabled()
+	case group.FieldGrokSafetyFee:
+		return m.GrokSafetyFee()
 	case group.FieldAudioRealtimePricePerMin:
 		return m.AudioRealtimePricePerMin()
 	case group.FieldAudioTtsPricePerMillionChars:
@@ -26815,6 +26934,10 @@ func (m *GroupMutation) OldField(ctx context.Context, name string) (ent.Value, e
 		return m.OldWebSearchPricePerCall(ctx)
 	case group.FieldSearchPricePer1k:
 		return m.OldSearchPricePer1k(ctx)
+	case group.FieldGrokSafetyFeeEnabled:
+		return m.OldGrokSafetyFeeEnabled(ctx)
+	case group.FieldGrokSafetyFee:
+		return m.OldGrokSafetyFee(ctx)
 	case group.FieldAudioRealtimePricePerMin:
 		return m.OldAudioRealtimePricePerMin(ctx)
 	case group.FieldAudioTtsPricePerMillionChars:
@@ -27172,6 +27295,20 @@ func (m *GroupMutation) SetField(name string, value ent.Value) error {
 		}
 		m.SetSearchPricePer1k(v)
 		return nil
+	case group.FieldGrokSafetyFeeEnabled:
+		v, ok := value.(bool)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetGrokSafetyFeeEnabled(v)
+		return nil
+	case group.FieldGrokSafetyFee:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetGrokSafetyFee(v)
+		return nil
 	case group.FieldAudioRealtimePricePerMin:
 		v, ok := value.(float64)
 		if !ok {
@@ -27475,6 +27612,9 @@ func (m *GroupMutation) AddedFields() []string {
 	if m.addsearch_price_per_1k != nil {
 		fields = append(fields, group.FieldSearchPricePer1k)
 	}
+	if m.addgrok_safety_fee != nil {
+		fields = append(fields, group.FieldGrokSafetyFee)
+	}
 	if m.addaudio_realtime_price_per_min != nil {
 		fields = append(fields, group.FieldAudioRealtimePricePerMin)
 	}
@@ -27548,6 +27688,8 @@ func (m *GroupMutation) AddedField(name string) (ent.Value, bool) {
 		return m.AddedWebSearchPricePerCall()
 	case group.FieldSearchPricePer1k:
 		return m.AddedSearchPricePer1k()
+	case group.FieldGrokSafetyFee:
+		return m.AddedGrokSafetyFee()
 	case group.FieldAudioRealtimePricePerMin:
 		return m.AddedAudioRealtimePricePerMin()
 	case group.FieldAudioTtsPricePerMillionChars:
@@ -27708,6 +27850,13 @@ func (m *GroupMutation) AddField(name string, value ent.Value) error {
 		}
 		m.AddSearchPricePer1k(v)
 		return nil
+	case group.FieldGrokSafetyFee:
+		v, ok := value.(float64)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.AddGrokSafetyFee(v)
+		return nil
 	case group.FieldAudioRealtimePricePerMin:
 		v, ok := value.(float64)
 		if !ok {
@@ -27827,6 +27976,9 @@ func (m *GroupMutation) ClearedFields() []string {
 	if m.FieldCleared(group.FieldSearchPricePer1k) {
 		fields = append(fields, group.FieldSearchPricePer1k)
 	}
+	if m.FieldCleared(group.FieldGrokSafetyFee) {
+		fields = append(fields, group.FieldGrokSafetyFee)
+	}
 	if m.FieldCleared(group.FieldAudioRealtimePricePerMin) {
 		fields = append(fields, group.FieldAudioRealtimePricePerMin)
 	}
@@ -27909,6 +28061,9 @@ func (m *GroupMutation) ClearField(name string) error {
 		return nil
 	case group.FieldSearchPricePer1k:
 		m.ClearSearchPricePer1k()
+		return nil
+	case group.FieldGrokSafetyFee:
+		m.ClearGrokSafetyFee()
 		return nil
 	case group.FieldAudioRealtimePricePerMin:
 		m.ClearAudioRealtimePricePerMin()
@@ -28058,6 +28213,12 @@ func (m *GroupMutation) ResetField(name string) error {
 		return nil
 	case group.FieldSearchPricePer1k:
 		m.ResetSearchPricePer1k()
+		return nil
+	case group.FieldGrokSafetyFeeEnabled:
+		m.ResetGrokSafetyFeeEnabled()
+		return nil
+	case group.FieldGrokSafetyFee:
+		m.ResetGrokSafetyFee()
 		return nil
 	case group.FieldAudioRealtimePricePerMin:
 		m.ResetAudioRealtimePricePerMin()
@@ -48123,6 +48284,7 @@ type UsageLogMutation struct {
 	model_mapping_chain          *string
 	billing_tier                 *string
 	billing_mode                 *string
+	grok_safety_rejection        *map[string]interface{}
 	input_tokens                 *int
 	addinput_tokens              *int
 	output_tokens                *int
@@ -48884,6 +49046,55 @@ func (m *UsageLogMutation) BillingModeCleared() bool {
 func (m *UsageLogMutation) ResetBillingMode() {
 	m.billing_mode = nil
 	delete(m.clearedFields, usagelog.FieldBillingMode)
+}
+
+// SetGrokSafetyRejection sets the "grok_safety_rejection" field.
+func (m *UsageLogMutation) SetGrokSafetyRejection(value map[string]interface{}) {
+	m.grok_safety_rejection = &value
+}
+
+// GrokSafetyRejection returns the value of the "grok_safety_rejection" field in the mutation.
+func (m *UsageLogMutation) GrokSafetyRejection() (r map[string]interface{}, exists bool) {
+	v := m.grok_safety_rejection
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldGrokSafetyRejection returns the old "grok_safety_rejection" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldGrokSafetyRejection(ctx context.Context) (v map[string]interface{}, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldGrokSafetyRejection is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldGrokSafetyRejection requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldGrokSafetyRejection: %w", err)
+	}
+	return oldValue.GrokSafetyRejection, nil
+}
+
+// ClearGrokSafetyRejection clears the value of the "grok_safety_rejection" field.
+func (m *UsageLogMutation) ClearGrokSafetyRejection() {
+	m.grok_safety_rejection = nil
+	m.clearedFields[usagelog.FieldGrokSafetyRejection] = struct{}{}
+}
+
+// GrokSafetyRejectionCleared returns if the "grok_safety_rejection" field was cleared in this mutation.
+func (m *UsageLogMutation) GrokSafetyRejectionCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldGrokSafetyRejection]
+	return ok
+}
+
+// ResetGrokSafetyRejection resets all changes to the "grok_safety_rejection" field.
+func (m *UsageLogMutation) ResetGrokSafetyRejection() {
+	m.grok_safety_rejection = nil
+	delete(m.clearedFields, usagelog.FieldGrokSafetyRejection)
 }
 
 // SetGroupID sets the "group_id" field.
@@ -50977,7 +51188,7 @@ func (m *UsageLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogMutation) Fields() []string {
-	fields := make([]string, 0, 49)
+	fields := make([]string, 0, 50)
 	if m.user != nil {
 		fields = append(fields, usagelog.FieldUserID)
 	}
@@ -51016,6 +51227,9 @@ func (m *UsageLogMutation) Fields() []string {
 	}
 	if m.billing_mode != nil {
 		fields = append(fields, usagelog.FieldBillingMode)
+	}
+	if m.grok_safety_rejection != nil {
+		fields = append(fields, usagelog.FieldGrokSafetyRejection)
 	}
 	if m.group != nil {
 		fields = append(fields, usagelog.FieldGroupID)
@@ -51159,6 +51373,8 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.BillingTier()
 	case usagelog.FieldBillingMode:
 		return m.BillingMode()
+	case usagelog.FieldGrokSafetyRejection:
+		return m.GrokSafetyRejection()
 	case usagelog.FieldGroupID:
 		return m.GroupID()
 	case usagelog.FieldSubscriptionID:
@@ -51266,6 +51482,8 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldBillingTier(ctx)
 	case usagelog.FieldBillingMode:
 		return m.OldBillingMode(ctx)
+	case usagelog.FieldGrokSafetyRejection:
+		return m.OldGrokSafetyRejection(ctx)
 	case usagelog.FieldGroupID:
 		return m.OldGroupID(ctx)
 	case usagelog.FieldSubscriptionID:
@@ -51437,6 +51655,13 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetBillingMode(v)
+		return nil
+	case usagelog.FieldGrokSafetyRejection:
+		v, ok := value.(map[string]interface{})
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetGrokSafetyRejection(v)
 		return nil
 	case usagelog.FieldGroupID:
 		v, ok := value.(int64)
@@ -52023,6 +52248,9 @@ func (m *UsageLogMutation) ClearedFields() []string {
 	if m.FieldCleared(usagelog.FieldBillingMode) {
 		fields = append(fields, usagelog.FieldBillingMode)
 	}
+	if m.FieldCleared(usagelog.FieldGrokSafetyRejection) {
+		fields = append(fields, usagelog.FieldGrokSafetyRejection)
+	}
 	if m.FieldCleared(usagelog.FieldGroupID) {
 		fields = append(fields, usagelog.FieldGroupID)
 	}
@@ -52102,6 +52330,9 @@ func (m *UsageLogMutation) ClearField(name string) error {
 		return nil
 	case usagelog.FieldBillingMode:
 		m.ClearBillingMode()
+		return nil
+	case usagelog.FieldGrokSafetyRejection:
+		m.ClearGrokSafetyRejection()
 		return nil
 	case usagelog.FieldGroupID:
 		m.ClearGroupID()
@@ -52191,6 +52422,9 @@ func (m *UsageLogMutation) ResetField(name string) error {
 		return nil
 	case usagelog.FieldBillingMode:
 		m.ResetBillingMode()
+		return nil
+	case usagelog.FieldGrokSafetyRejection:
+		m.ResetGrokSafetyRejection()
 		return nil
 	case usagelog.FieldGroupID:
 		m.ResetGroupID()

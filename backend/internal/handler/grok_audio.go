@@ -33,6 +33,7 @@ func (h *OpenAIGatewayHandler) GrokRealtime(c *gin.Context) {
 	if !h.ensureResponsesDependencies(c, nil) {
 		return
 	}
+	c.Request = c.Request.WithContext(service.WithGrokSafetyGroup(c.Request.Context(), apiKey.Group))
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
 		status, code, message, retryAfter := billingErrorDetails(err)
@@ -108,6 +109,18 @@ func (h *OpenAIGatewayHandler) GrokRealtime(c *gin.Context) {
 		candidateUpstream, openErr := h.gatewayService.OpenGrokRealtime(probeCtx, account, token, model)
 		cancelProbe()
 		if openErr != nil {
+			if service.GrokSafetyRejected(c.Request.Context()) {
+				result, _ := service.FinalizeGrokSafetyRejection(c.Request.Context(), &service.OpenAIForwardResult{Model: model}, openErr)
+				h.recordGrokVoiceUsage(c, apiKey, account, subscription, "realtime", nil, result)
+				var body []byte
+				var dialErr *service.GrokRealtimeDialError
+				if errors.As(openErr, &dialErr) {
+					body = dialErr.Body
+				}
+				service.WriteGrokSafetyRejectionResponse(c, result.GrokSafetyRejection.HTTPStatus, body)
+				release()
+				return
+			}
 			reqLog.Warn("grok_realtime.pre_accept_failed", zap.Int64("account_id", account.ID), zap.Error(openErr))
 			statusCode := http.StatusBadGateway
 			var dialErr *service.GrokRealtimeDialError
@@ -143,6 +156,12 @@ func (h *OpenAIGatewayHandler) GrokRealtime(c *gin.Context) {
 	started := time.Now()
 	audioObserved, proxyErr := h.gatewayService.ProxyGrokRealtimeConn(c.Request.Context(), c, conn, upstream)
 	elapsed := time.Since(started)
+	if service.GrokSafetyRejected(c.Request.Context()) {
+		result, _ := service.FinalizeGrokSafetyRejection(c.Request.Context(), &service.OpenAIForwardResult{Model: model, Duration: elapsed}, proxyErr)
+		h.recordGrokVoiceUsage(c, apiKey, selection.Account, subscription, "realtime", nil, result)
+		_ = conn.Close(coderws.StatusPolicyViolation, "safety_review_rejected")
+		return
+	}
 	if proxyErr != nil {
 		reqLog.Info("grok_realtime.proxy_failed", zap.Error(proxyErr))
 		if !isExpectedGrokRealtimeClose(proxyErr) {
@@ -189,6 +208,9 @@ func (h *OpenAIGatewayHandler) GrokVoice(c *gin.Context, endpoint string) {
 	}
 	if !h.ensureResponsesDependencies(c, nil) {
 		return
+	}
+	if endpoint == "tts" || endpoint == "stt" {
+		c.Request = c.Request.WithContext(service.WithGrokSafetyGroup(c.Request.Context(), apiKey.Group))
 	}
 	subscription, _ := middleware2.GetSubscriptionFromContext(c)
 	if err := h.billingCacheService.CheckBillingEligibility(c.Request.Context(), apiKey.User, apiKey, apiKey.Group, subscription, service.QuotaPlatform(c.Request.Context(), apiKey)); err != nil {
@@ -297,7 +319,7 @@ func (h *OpenAIGatewayHandler) GrokVoice(c *gin.Context, endpoint string) {
 			defer release()
 			return h.gatewayService.ForwardGrokVoice(c.Request.Context(), c, account, endpoint, body, contentType)
 		}()
-		if forwardErr == nil {
+		if forwardErr == nil || (result != nil && result.GrokSafetyRejection != nil) {
 			h.recordGrokVoiceUsage(c, apiKey, account, subscription, endpoint, body, result)
 			return
 		}
@@ -328,14 +350,16 @@ func (h *OpenAIGatewayHandler) recordGrokVoiceUsage(
 	if h == nil || c == nil || apiKey == nil || account == nil || result == nil {
 		return
 	}
-	if result.AudioUsage == nil {
+	if result.AudioUsage == nil && result.GrokSafetyRejection == nil {
 		return
 	}
 	// Ensure forced durable request ids even if callers forget (realtime/tts/stt money path).
-	if mode := strings.TrimSpace(result.AudioUsage.Mode); mode == "realtime" {
-		result.RequestID = service.StableGrokRealtimeBillingRequestID(result.RequestID)
-	} else {
-		result.RequestID = service.StableGrokAudioBillingRequestID(result.RequestID)
+	if result.GrokSafetyRejection == nil {
+		if mode := strings.TrimSpace(result.AudioUsage.Mode); mode == "realtime" {
+			result.RequestID = service.StableGrokRealtimeBillingRequestID(result.RequestID)
+		} else {
+			result.RequestID = service.StableGrokAudioBillingRequestID(result.RequestID)
+		}
 	}
 	userAgent := c.GetHeader("User-Agent")
 	clientIP := ip.GetClientIP(c)

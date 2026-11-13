@@ -1376,12 +1376,18 @@ func (s *GatewayService) DoGrokNativeResponsesJSON(ctx context.Context, account 
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
+	upstreamReq = PrepareGrokSafetyRequest(upstreamReq)
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
 		return nil, &UpstreamFailoverError{StatusCode: http.StatusBadGateway, Reason: GatewayFailureReason("grok_search_transport")}
 	}
 	defer func() { _ = resp.Body.Close() }()
+	ObserveGrokSafetyHTTPResponse(ctx, upstreamReq, resp)
 	respBytes, readErr := io.ReadAll(io.LimitReader(resp.Body, 4<<20))
+	ObserveGrokSafetyPayload(ctx, respBytes, true)
+	if GrokSafetyRejected(ctx) {
+		return respBytes, ErrGrokSafetyRejected
+	}
 	if readErr != nil {
 		return nil, &UpstreamFailoverError{
 			StatusCode: http.StatusBadGateway,

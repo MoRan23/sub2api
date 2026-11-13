@@ -238,6 +238,7 @@ import Icon from '@/components/icons/Icon.vue'
 import UserErrorRequestsTable from '@/components/user/UserErrorRequestsTable.vue'
 import { getPersistedPageSize } from '@/composables/usePersistedPageSize'
 import { formatReasoningEffort } from '@/utils/format'
+import { grokSafetyFee, userTokenCost } from '@/utils/usagePricing'
 import { getBillingModeLabel, getDisplayBillingMode as resolveDisplayBillingMode } from '@/utils/billingMode'
 import { resolveUsageRequestType, requestTypeToLegacyStream } from '@/utils/usageRequestType'
 import type {
@@ -690,6 +691,9 @@ const exportToCSV = async () => {
       'Original Cost',
       'First Token (ms)',
       'Duration (ms)',
+      'Request Outcome',
+      'Token Cost (User Billed)',
+      'Fixed Safety Rejection Fee',
     ]
     const rows = allLogs.map((log) => [
       log.created_at,
@@ -709,6 +713,9 @@ const exportToCSV = async () => {
       log.total_cost.toFixed(8),
       log.first_token_ms ?? '',
       log.duration_ms ?? '',
+      log.grok_safety_rejection ? t('usage.grokSafetyRejection') : '',
+      log.grok_safety_rejection ? userTokenCost(log).toFixed(8) : '',
+      log.grok_safety_rejection ? grokSafetyFee(log).toFixed(8) : '',
     ].map(escapeCSVValue))
     const csvContent = [
       headers.map(escapeCSVValue).join(','),

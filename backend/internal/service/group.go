@@ -72,7 +72,12 @@ type Group struct {
 	WebSearchPricePerCall *float64
 
 	// 搜索工具显式定价（per 1k calls）。
-	SearchPricePer1k *float64
+	SearchPricePer1k     *float64
+	GrokSafetyFeeEnabled bool
+	GrokSafetyFee        *float64
+	// GrokSafetyFeeUpdate preserves only explicit administrator changes across
+	// stale whole-group writes. It is not persisted or included in API responses.
+	GrokSafetyFeeUpdate *GroupGrokSafetyFeeUpdate `json:"-"`
 	// Grok Voice 显式定价（分组级，不按文本 RateMultiplier）。
 	AudioRealtimePricePerMin     *float64
 	AudioTTSPricePerMillionChars *float64

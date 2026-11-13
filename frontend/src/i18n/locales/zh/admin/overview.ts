@@ -1119,6 +1119,13 @@ export default {
         finalPricePreview: '最终每秒价格预览',
         notConfigured: '未配置'
       },
+      grokSafetyFee: {
+        title: 'Grok 安全拒绝固定费',
+        description: '仅在 Grok 上游明确返回 safety_review_rejected 时收取；普通 403 或拒绝文本不适用。',
+        amount: '每次拒绝固定费用（USD）',
+        placeholder: '留空或 0 不收费',
+        hint: '默认关闭。固定费不参与分组、账号或用户倍率；有可信 token 用量时，token 费用另按现有规则计算。'
+      },
       explicitPricing: {
         title: 'Grok 搜索与 Voice 定价',
         description: '分组级 web_search（每千次）与 Voice realtime / TTS / STT 单价（USD）。留空表示未配置。',

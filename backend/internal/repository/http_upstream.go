@@ -29,6 +29,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/codexnative"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/groksafetyobserver"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httpsendobserver"
 	pkghttputil "github.com/Wei-Shaw/sub2api/internal/pkg/httputil"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
@@ -464,14 +465,15 @@ func httpClientWithGrokAccessDeniedFallback(client *http.Client) *http.Client {
 	return &clone
 }
 
-func (t *grokAccessDeniedFallbackTransport) RoundTrip(req *http.Request) (*http.Response, error) {
-	resp, err := t.base.RoundTrip(req)
+func (t *grokAccessDeniedFallbackTransport) RoundTrip(req *http.Request) (selected *http.Response, resultErr error) {
+	defer func() { groksafetyobserver.Select(selected) }()
+	resp, err := groksafetyobserver.RoundTrip(t.base, req)
 	if err != nil || !isGrokCLIAccessDeniedFallbackCandidate(req, resp) {
 		return resp, err
 	}
 
 	body, ok := bufferSmallResponseBody(resp, grokFallbackBodyLimit)
-	if !ok || !isGrokCLICompatibilityAccessDenied(body) {
+	if !ok || groksafetyobserver.Rejected(resp) || !isGrokCLICompatibilityAccessDenied(body) {
 		return resp, nil
 	}
 
@@ -479,12 +481,21 @@ func (t *grokAccessDeniedFallbackTransport) RoundTrip(req *http.Request) (*http.
 	if err != nil {
 		return resp, nil
 	}
-	fallbackResp, fallbackErr := t.base.RoundTrip(fallbackReq)
+	fallbackResp, fallbackErr := groksafetyobserver.RoundTrip(t.base, fallbackReq)
 	if fallbackErr != nil {
 		slog.Debug("grok_cli_access_denied_api_fallback_failed", "path", req.URL.EscapedPath(), "error", fallbackErr)
 		return resp, nil
 	}
 	if fallbackResp.StatusCode < http.StatusOK || fallbackResp.StatusCode >= http.StatusMultipleChoices {
+		// The compatibility probe is a distinct physical call. Its explicit
+		// refusal must remain the selected response instead of being discarded.
+		_, _ = bufferSmallResponseBody(fallbackResp, grokFallbackBodyLimit)
+		if groksafetyobserver.Rejected(fallbackResp) {
+			if resp.Body != nil {
+				_ = resp.Body.Close()
+			}
+			return fallbackResp, nil
+		}
 		if fallbackResp.Body != nil {
 			_ = fallbackResp.Body.Close()
 		}

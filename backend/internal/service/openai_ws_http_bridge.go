@@ -492,7 +492,15 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 	turn int,
 	writeClientMessage func([]byte) error,
 	identityPlans ...*OpenAIOAuthIdentityPlan,
-) (_ *OpenAIForwardResult, returnErr error) {
+) (forwardResult *OpenAIForwardResult, returnErr error) {
+	if c != nil && account != nil && account.IsGrok() {
+		if key := getAPIKeyFromContext(c); key != nil {
+			ctx = freshGrokSafetyGroup(ctx, key.Group)
+		}
+	}
+	defer func() {
+		forwardResult, returnErr = finalizeGrokSafetyForward(ctx, account, payload, forwardResult, returnErr)
+	}()
 	if s == nil {
 		return nil, errors.New("service is nil")
 	}
@@ -737,6 +745,17 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 
 		respBody, _ := io.ReadAll(io.LimitReader(resp.Body, openAIWSHTTPBridgeErrorBodyLimitBytes))
 		_ = resp.Body.Close()
+		if account.IsGrok() {
+			ObserveGrokSafetyPayload(ctx, respBody, true)
+			if IsGrokSafetyRejectionJSON(respBody) {
+				clientError, _ := sjson.SetBytes(respBody, "type", "error")
+				clientError, _ = sjson.SetBytes(clientError, "status", resp.StatusCode)
+				if writeClientMessage(clientError) == nil {
+					markOpenAIWSClientVisibleFailure(c, "error", clientError)
+				}
+				return nil, ErrGrokSafetyRejected
+			}
+		}
 		if readErr := openAIWSHTTPBridgeReadError(ctx); readErr != nil {
 			return nil, readErr
 		}
@@ -944,22 +963,50 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		markOpenAIWSClientVisibleFailure(c, "response.failed", clientMessage)
 		return nil
 	}
-	for scanner.Scan() {
+	var grokFrame openAICompatSSEFrame
+	var grokParser openAICompatSSEFrameParser
+	grokEOF := false
+	scanMessage := func() bool {
+		if !account.IsGrok() {
+			return scanner.Scan()
+		}
+		for scanner.Scan() {
+			if frame, ok := grokParser.AddLine(scanner.Text()); ok {
+				grokFrame = frame
+				return true
+			}
+		}
+		if !grokEOF {
+			grokEOF = true
+			if frame, ok := grokParser.Finish(); ok {
+				grokFrame = frame
+				return true
+			}
+		}
+		return false
+	}
+	for scanMessage() {
 		if readErr := openAIWSHTTPBridgeReadError(ctx); readErr != nil {
 			return resultWithUsage(), readErr
 		}
-		line := scanner.Text()
-		if eventType, ok := extractOpenAISSEEventLine(line); ok {
-			pendingSSEEventType = eventType
-			continue
-		}
-		if strings.TrimSpace(line) == "" {
-			pendingSSEEventType = ""
-			continue
-		}
-		data, ok := extractOpenAISSEDataLine(line)
-		if !ok {
-			continue
+		data := grokFrame.Data
+		if account.IsGrok() {
+			pendingSSEEventType = grokFrame.EventType
+		} else {
+			line := scanner.Text()
+			if eventType, ok := extractOpenAISSEEventLine(line); ok {
+				pendingSSEEventType = eventType
+				continue
+			}
+			if strings.TrimSpace(line) == "" {
+				pendingSSEEventType = ""
+				continue
+			}
+			var ok bool
+			data, ok = extractOpenAISSEDataLine(line)
+			if !ok {
+				continue
+			}
 		}
 		trimmedData := strings.TrimSpace(data)
 		if trimmedData == "" {
@@ -971,6 +1018,16 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		}
 
 		upstreamMessage := []byte(openAICompatPayloadWithEventType(trimmedData, pendingSSEEventType))
+		if account.IsGrok() {
+			ObserveGrokSafetyPayload(ctx, upstreamMessage, false)
+			if IsGrokSafetyRejectionJSON(upstreamMessage) {
+				upstreamTerminalEvent = "response.failed"
+				if !clientDisconnected && writeClientMessage(upstreamMessage) == nil {
+					markOpenAIWSClientVisibleFailure(c, "response.failed", upstreamMessage)
+				}
+				return resultWithUsage(), ErrGrokSafetyRejected
+			}
+		}
 		observeCodexTelemetryHTTPPayload(resp, upstreamMessage, pendingSSEEventType)
 		if normalized, changed := normalizeCompletedImageGenerationStatus(upstreamMessage); changed {
 			upstreamMessage = normalized

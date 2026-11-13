@@ -78,7 +78,7 @@ func newOpenAIWSUnsupportedModelSwitchError(model string) error {
 }
 
 func shouldReportOpenAIWSProxyAccountFailure(err error) bool {
-	return err != nil && !errors.Is(err, errOpenAIWSUnsupportedModelSwitch) && !service.IsOpenAIWSSessionPreemptedError(err) && !service.IsOpenAIWSInterruptCleanupError(err)
+	return err != nil && !errors.Is(err, service.ErrGrokSafetyRejected) && !errors.Is(err, errOpenAIWSUnsupportedModelSwitch) && !service.IsOpenAIWSSessionPreemptedError(err) && !service.IsOpenAIWSInterruptCleanupError(err)
 }
 
 // openAIWSIngressEndedByClient reports whether a finished ingress WebSocket turn
@@ -443,6 +443,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		h.errorResponse(c, http.StatusUnauthorized, "authentication_error", "Invalid API key")
 		return
 	}
+	c.Request = c.Request.WithContext(service.WithGrokSafetyGroup(c.Request.Context(), apiKey.Group))
 
 	subject, ok := middleware2.GetAuthSubjectFromContext(c)
 	if !ok {
@@ -915,6 +916,10 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 				NativeCompactionV2: service.IsOpenAINativeCompactionV2(c),
 			}, usageRecordTaskOptions{component: "handler.openai_gateway.responses", failureEvent: "openai.record_usage_failed", model: reqModel})
 		}
+		if result != nil && result.GrokSafetyRejection != nil {
+			submitResponsesUsage(result)
+			return
+		}
 		if service.GetOpsCyberPolicy(c) != nil {
 			// The refusal has already been delivered. Settle any complete usage
 			// once, without treating a policy decision as an account health signal
@@ -1319,6 +1324,7 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 		h.anthropicErrorResponse(c, http.StatusUnauthorized, "authentication_error", "Invalid API key")
 		return
 	}
+	c.Request = c.Request.WithContext(service.WithGrokSafetyGroup(c.Request.Context(), apiKey.Group))
 
 	subject, ok := middleware2.GetAuthSubjectFromContext(c)
 	if !ok {
@@ -1601,6 +1607,10 @@ func (h *OpenAIGatewayHandler) Messages(c *gin.Context) {
 				PricingAt:          pricingAt,
 				CyberBlocked:       cyberBlocked,
 			}, usageRecordTaskOptions{component: "handler.openai_gateway.messages", failureEvent: "openai_messages.record_usage_failed", model: reqModel})
+		}
+		if result != nil && result.GrokSafetyRejection != nil {
+			submitMessagesUsage(result)
+			return
 		}
 		if service.GetOpsCyberPolicy(c) != nil {
 			submitMessagesUsage(result)
@@ -3377,7 +3387,8 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					}
 					return
 				}
-				if turnErr != nil && !cyberMarked {
+				grokRejected := result != nil && result.GrokSafetyRejection != nil
+				if turnErr != nil && !cyberMarked && !grokRejected {
 					if result == nil || result.ImageCount <= 0 {
 						return
 					}
@@ -3397,7 +3408,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					zap.String("turn_upstream_model", turnUpstreamModel),
 					zap.String("billing_model", result.BillingModel),
 				)
-				if !cyberMarked {
+				if !cyberMarked && !grokRejected {
 					// 排除 spark 影子:其 codex_* 仅由 QueryUsage(/wham/usage bengalfox)更新(外审第7轮 P1)。
 					if account.Type == service.AccountTypeOAuth && !account.IsShadow() {
 						h.gatewayService.UpdateCodexUsageSnapshotFromHeaders(ctx, account.ID, result.ResponseHeaders)
@@ -3559,6 +3570,10 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				return
 			}
 
+			if errors.Is(err, service.ErrGrokSafetyRejected) {
+				closeOpenAIClientWS(wsConn, coderws.StatusPolicyViolation, service.GrokSafetyRejectionCode)
+				return
+			}
 			var closeErr *service.OpenAIWSClientCloseError
 			hasClientCloseErr := errors.As(err, &closeErr)
 			if openAIWSIngressEndedByClient(err) {

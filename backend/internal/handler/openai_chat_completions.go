@@ -30,6 +30,7 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 		h.errorResponse(c, http.StatusUnauthorized, "authentication_error", "Invalid API key")
 		return
 	}
+	c.Request = c.Request.WithContext(service.WithGrokSafetyGroup(c.Request.Context(), apiKey.Group))
 
 	subject, ok := middleware2.GetAuthSubjectFromContext(c)
 	if !ok {
@@ -331,6 +332,10 @@ func (h *OpenAIGatewayHandler) ChatCompletions(c *gin.Context) {
 				PricingAt:          pricingAt,
 				CyberBlocked:       cyberBlocked,
 			}, usageRecordTaskOptions{component: "handler.openai_gateway.chat_completions", failureEvent: "openai_chat_completions.record_usage_failed", model: reqModel})
+		}
+		if result != nil && result.GrokSafetyRejection != nil {
+			submitChatUsage(result)
+			return
 		}
 		if service.GetOpsCyberPolicy(c) != nil {
 			submitChatUsage(result)

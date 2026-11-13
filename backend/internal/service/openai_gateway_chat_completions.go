@@ -739,6 +739,9 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 
 	finalResponse, usage, acc, priorModels, err := s.readOpenAICompatBufferedTerminal(resp, c, account, "openai chat_completions buffered", requestID)
 	if err != nil {
+		if errors.Is(err, ErrGrokSafetyRejected) {
+			return nil, err
+		}
 		return nil, s.newOpenAICompatBufferedReadFailoverError(c, account, resp, requestID, err)
 	}
 
@@ -755,6 +758,9 @@ func (s *OpenAIGatewayService) handleChatBufferedStreamingResponse(
 	observer.ObserveServiceTier(finalResponse.ServiceTier, true)
 	if strings.TrimSpace(finalResponse.Status) == "failed" {
 		payload, _ := json.Marshal(gin.H{"type": "response.failed", "response": finalResponse})
+		if account != nil && account.IsGrok() && IsGrokSafetyRejectionJSON(payload) {
+			return s.writeGrokSafetyErrorResponse(c.Request.Context(), c, resp, payload)
+		}
 		// cyber_policy 致命不可重试：不 failover，以 Chat Completions 错误格式回写（F4），
 		// 标记供 handler 事后写风控/邮件/tokens=0 用量行。
 		if hit, code, msg := detectOpenAICyberPolicy(payload); hit {
@@ -961,6 +967,19 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	}
 
 	processDataLine := func(payload string) bool {
+		if account != nil && account.IsGrok() {
+			ObserveGrokSafetyPayload(c.Request.Context(), []byte(payload), false)
+			if IsGrokSafetyRejectionJSON([]byte(payload)) {
+				if !clientDisconnected {
+					writeStreamHeaders()
+					_, _ = fmt.Fprint(c.Writer, buildChatStreamErrorSSE(GrokSafetyRejectionCode, extractOpenAISSEErrorMessage([]byte(payload))))
+					c.Writer.Flush()
+					clientDisconnected = true
+				}
+				streamNonFailoverErr = ErrGrokSafetyRejected
+				return true
+			}
+		}
 		observeCodexTelemetryHTTPPayload(resp, []byte(payload), "")
 		if firstChunk {
 			firstChunk = false

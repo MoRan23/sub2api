@@ -4,6 +4,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"net/http"
 	"net/url"
@@ -31,7 +32,13 @@ var supportedGrokVoiceHTTPEndpoints = map[string]struct{}{
 // the custom-voices CRUD/audio subresources).
 // The response is intentionally passed through because TTS returns audio bytes
 // while STT returns JSON and xAI may add format-specific headers.
-func (s *OpenAIGatewayService) ForwardGrokVoice(ctx context.Context, c *gin.Context, account *Account, endpoint string, body []byte, contentType string) (*OpenAIForwardResult, error) {
+func (s *OpenAIGatewayService) ForwardGrokVoice(ctx context.Context, c *gin.Context, account *Account, endpoint string, body []byte, contentType string) (result *OpenAIForwardResult, resultErr error) {
+	defer func() {
+		result, resultErr = FinalizeGrokSafetyRejection(ctx, result, resultErr)
+		if result != nil && result.GrokSafetyRejection != nil && result.Model == "" {
+			result.Model = "grok-voice-" + endpoint
+		}
+	}()
 	if s == nil || account == nil {
 		return nil, fmt.Errorf("grok voice service/account is required")
 	}
@@ -93,18 +100,25 @@ func (s *OpenAIGatewayService) ForwardGrokVoice(ctx context.Context, c *gin.Cont
 		proxyURL = account.Proxy.URL()
 	}
 	started := time.Now()
+	req = PrepareGrokSafetyRequest(req)
 	resp, err := s.httpUpstream.Do(req, proxyURL, account.ID, account.Concurrency)
 	SetOpsLatencyMs(c, OpsUpstreamLatencyMsKey, time.Since(started).Milliseconds())
 	if err != nil {
 		return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, err, false)
 	}
 	defer func() { _ = resp.Body.Close() }()
+	ObserveGrokSafetyHTTPResponse(ctx, req, resp)
 	if resp.StatusCode >= 400 {
 		return s.handleGrokMediaErrorResponse(ctx, resp, c, account, resp.Header.Get("x-request-id"), endpoint)
 	}
 	data, err := ReadUpstreamResponseBody(resp.Body, s.cfg, c, openAITooLargeError)
 	if err != nil {
 		return nil, err
+	}
+	ObserveGrokSafetyPayload(ctx, data, true)
+	if GrokSafetyRejected(ctx) {
+		writeGrokSafetyRejectionResponse(c, resp.StatusCode, data)
+		return nil, ErrGrokSafetyRejected
 	}
 	writeGrokMediaResponse(c, resp, data, s.responseHeaderFilter)
 	audioUsage := estimateGrokVoiceAudioUsage(baseEndpoint, body, contentType, data, time.Since(started))
@@ -145,6 +159,7 @@ type GrokRealtimeUpstream struct{ conn openAIWSClientConn }
 type GrokRealtimeDialError struct {
 	StatusCode int
 	Err        error
+	Body       []byte
 }
 
 func (e *GrokRealtimeDialError) Error() string { return e.Err.Error() }
@@ -182,9 +197,16 @@ func (s *OpenAIGatewayService) OpenGrokRealtime(ctx context.Context, account *Ac
 	if account.ProxyID != nil && account.Proxy != nil {
 		proxyURL = account.Proxy.URL()
 	}
-	conn, status, _, err := s.getOpenAIWSPassthroughDialer().Dial(ctx, u.String(), headers, proxyURL)
+	conn, status, responseHeaders, err := s.getOpenAIWSPassthroughDialer().Dial(ctx, u.String(), headers, proxyURL)
+	StartGrokSafetyAttempt(ctx, status, responseHeaders)
 	if err != nil {
-		return nil, &GrokRealtimeDialError{StatusCode: status, Err: err}
+		var body []byte
+		var handshakeErr *openAIWSHandshakeError
+		if errors.As(err, &handshakeErr) {
+			body = handshakeErr.Body
+			ObserveGrokSafetyPayload(ctx, handshakeErr.Body, true)
+		}
+		return nil, &GrokRealtimeDialError{StatusCode: status, Err: err, Body: body}
 	}
 	return &GrokRealtimeUpstream{conn: conn}, nil
 }
@@ -192,6 +214,9 @@ func (s *OpenAIGatewayService) OpenGrokRealtime(ctx context.Context, account *Ac
 // HandleGrokRealtimeUpstreamError applies the shared Grok account policy to a
 // failed pre-accept WebSocket handshake.
 func (s *OpenAIGatewayService) HandleGrokRealtimeUpstreamError(ctx context.Context, account *Account, statusCode int, body []byte) {
+	if GrokSafetyRejected(ctx) {
+		return
+	}
 	if statusCode <= 0 {
 		statusCode = http.StatusBadGateway
 	}
@@ -217,11 +242,16 @@ func (s *OpenAIGatewayService) ProxyGrokRealtimeConn(ctx context.Context, c *gin
 				errCh <- readErr
 				return
 			}
+			ObserveGrokSafetyMessage(ctx, msg)
 			if grokRealtimeEventHasAudio(msg) {
 				audioObserved.Store(true)
 			}
 			if writeErr := client.Write(ctx, coderws.MessageText, msg); writeErr != nil {
 				errCh <- writeErr
+				return
+			}
+			if GrokSafetyRejected(ctx) {
+				errCh <- ErrGrokSafetyRejected
 				return
 			}
 		}
@@ -253,7 +283,20 @@ func (s *OpenAIGatewayService) ProxyGrokRealtimeConn(ctx context.Context, c *gin
 		}
 	}()
 
-	return awaitGrokRealtimeAudioObserved(errCh, &audioObserved)
+	firstErr := <-errCh
+	cancel()
+	_ = upstream.Close()
+	// Wait only for the already running reader to stop, never drain more usage.
+	timer := time.NewTimer(1200 * time.Millisecond)
+	defer timer.Stop()
+	select {
+	case <-errCh:
+	case <-timer.C:
+	}
+	if GrokSafetyRejected(ctx) {
+		return false, ErrGrokSafetyRejected
+	}
+	return audioObserved.Load(), firstErr
 }
 
 // ProbeGrokRealtime performs the upstream WebSocket handshake without sending

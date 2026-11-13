@@ -623,6 +623,8 @@ export interface Group {
   web_search_price_per_call: number | null
   // Grok Voice 显式定价（分组级）
   search_price_per_1k: number | null
+  grok_safety_fee_enabled?: boolean
+  grok_safety_fee?: number | null
   audio_realtime_price_per_min: number | null
   audio_tts_price_per_million_chars: number | null
   audio_stt_price_per_hour: number | null
@@ -857,6 +859,8 @@ export interface CreateGroupRequest {
   video_model_prices?: VideoModelPrices
   web_search_price_per_call?: number | null
   search_price_per_1k?: number | null
+  grok_safety_fee_enabled?: boolean
+  grok_safety_fee?: number | null
   audio_realtime_price_per_min?: number | null
   audio_tts_price_per_million_chars?: number | null
   audio_stt_price_per_hour?: number | null
@@ -931,6 +935,8 @@ export interface UpdateGroupRequest {
   video_model_prices?: VideoModelPrices
   web_search_price_per_call?: number | null
   search_price_per_1k?: number | null
+  grok_safety_fee_enabled?: boolean
+  grok_safety_fee?: number | null
   audio_realtime_price_per_min?: number | null
   audio_tts_price_per_million_chars?: number | null
   audio_stt_price_per_hour?: number | null
@@ -1927,6 +1933,18 @@ export type UsageRequestType = 'unknown' | 'sync' | 'stream' | 'ws_v2' | 'cyber'
 export type ImageSizeSource = 'output' | 'input' | 'default' | 'legacy'
 export type ImageSizeBreakdown = Record<string, number>
 
+export interface GrokSafetyRejection {
+  code: string
+  fee: number
+  http_status: number
+}
+
+export interface AdminGrokSafetyRejection extends GrokSafetyRejection {
+  call_id?: string
+  upstream_request_id?: string
+  upstream_client_request_id?: string
+}
+
 export interface UsageLog {
   id: number
   user_id: number
@@ -1957,6 +1975,7 @@ export interface UsageLog {
   cache_read_cost: number
   total_cost: number
   actual_cost: number
+  grok_safety_rejection?: GrokSafetyRejection | null
   rate_multiplier: number
   long_context_billing_applied: boolean
   billing_type: number
@@ -2004,6 +2023,7 @@ export interface UsageLogAccountSummary {
 }
 
 export interface AdminUsageLog extends UsageLog {
+  grok_safety_rejection?: AdminGrokSafetyRejection | null
   upstream_model?: string | null
   upstream_reasoning_effort?: string | null
   upstream_response_model?: string | null

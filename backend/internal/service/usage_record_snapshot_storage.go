@@ -41,7 +41,7 @@ func (b *usageSnapshotBuilder) init(storage *usageSnapshotStorage, stringBytes i
 	b.storage = storage
 	b.floats, b.ints, b.times = storage.floats[:], storage.ints[:], storage.times[:]
 	// The fixed portion covers Account, up to two Users, Group and Result.
-	floatCount, intCount, timeCount := 14, 1, 0
+	floatCount, intCount, timeCount := 15, 1, 0
 	if group != nil && frozenUsageBillingGroup(group) == nil {
 		for _, p := range group.ModelPricing {
 			floatCount += usageSnapshotFloatPointerCount(p.InputPrice, p.OutputPrice, p.CacheWritePrice, p.CacheWrite1hPrice, p.CacheWrite12hPrice,
@@ -257,7 +257,11 @@ func usageSnapshotOpenAIStringBytes(r *OpenAIForwardResult) int {
 	if r == nil {
 		return 0
 	}
-	return usageSnapshotStringBytes(r.RequestID, r.ResponseID, r.Model, r.BillingModel, r.UpstreamModel, r.UpstreamResponseModel,
+	n := 0
+	if rejection := r.GrokSafetyRejection; rejection != nil {
+		n = usageSnapshotStringBytes(rejection.CallID, rejection.Code, rejection.UpstreamRequestID, rejection.UpstreamClientRequestID)
+	}
+	return n + usageSnapshotStringBytes(r.RequestID, r.ResponseID, r.Model, r.BillingModel, r.UpstreamModel, r.UpstreamResponseModel,
 		r.UpstreamResponseServiceTier, r.UpstreamEndpoint, r.UpstreamTerminalEvent, r.ImageSize, r.ImageInputSize, r.ImageOutputSize, r.ImageSizeSource, r.VideoResolution) +
 		usageSnapshotStringPointerBytes(r.ReasoningEffort) + usageSnapshotStringPointerBytes(r.RequestedReasoningEffort) + usageSnapshotStringPointerBytes(r.ServiceTier) +
 		usageSnapshotMediaStringBytes(r.ImageOutputSizes, r.ImageSizeBreakdown, r.AudioUsage)

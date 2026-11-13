@@ -280,7 +280,9 @@ type CreateGroupInput struct {
 	// Codex alpha/search 网页搜索单次价格（USD/次，仅 openai 平台使用）；nil/负数按默认价 0.01 处理
 	WebSearchPricePerCall *float64
 	// 搜索工具单价 per 1k
-	SearchPricePer1k *float64
+	SearchPricePer1k     *float64
+	GrokSafetyFeeEnabled bool
+	GrokSafetyFee        *float64
 	// Grok Voice 显式定价（分组级）
 	AudioRealtimePricePerMin     *float64
 	AudioTTSPricePerMillionChars *float64
@@ -369,7 +371,9 @@ type UpdateGroupInput struct {
 	// Codex alpha/search 网页搜索单次价格（USD/次）；nil 表示不修改，负数表示清除回默认价 0.01
 	WebSearchPricePerCall *float64
 	// 搜索工具单价；nil 不修改，负数清除
-	SearchPricePer1k *float64
+	SearchPricePer1k     *float64
+	GrokSafetyFeeEnabled *bool
+	GrokSafetyFee        *float64
 	// Grok Voice 显式定价；nil 表示不修改，负数表示清除
 	AudioRealtimePricePerMin     *float64
 	AudioTTSPricePerMillionChars *float64

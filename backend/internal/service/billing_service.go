@@ -214,6 +214,7 @@ type CostBreakdown struct {
 	CacheReadCost             float64
 	TotalCost                 float64
 	ActualCost                float64 // 应用倍率后的实际费用
+	FixedFee                  float64 // Included in totals, never scaled by any multiplier.
 	BillingMode               string  // 计费模式（"token"/"per_request"/"image"），由 CalculateCostUnified 填充
 	LongContextBillingApplied bool
 }
@@ -228,8 +229,15 @@ func applyCostBreakdownMultiplier(cost *CostBreakdown, multiplier float64) {
 	cost.ImageOutputCost *= multiplier
 	cost.CacheCreationCost *= multiplier
 	cost.CacheReadCost *= multiplier
-	cost.TotalCost *= multiplier
-	cost.ActualCost *= multiplier
+	cost.TotalCost = (cost.TotalCost-cost.FixedFee)*multiplier + cost.FixedFee
+	cost.ActualCost = (cost.ActualCost-cost.FixedFee)*multiplier + cost.FixedFee
+}
+
+func accountUsageCost(cost *CostBreakdown, multiplier float64) float64 {
+	if cost == nil {
+		return 0
+	}
+	return (cost.TotalCost-cost.FixedFee)*multiplier + cost.FixedFee
 }
 
 func isClaudeFable51Model(model string) bool {

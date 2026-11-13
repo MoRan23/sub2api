@@ -90,10 +90,15 @@ type postUsageBillingParams struct {
 	// path that records only API-key 5h/1d/7d window usage. It must not trigger
 	// balance, subscription, account, platform, or lifetime-key-quota effects.
 	SimpleModeKeyRateLimitOnly bool
+	// AtomicUsageLog requires the usage record and debit to share one transaction.
+	AtomicUsageLog bool
+	// RecordOnly preserves Simple mode's no-charge policy while still deduplicating.
+	RecordOnly bool
 }
 
 var ErrSimpleModeKeyRateLimitBillingUnavailable = errors.New("simple mode api key rate-limit billing unavailable")
 var ErrCodexEngineUsageBillingUnavailable = errors.New("codex engine receipt billing requires transactional storage")
+var ErrAtomicUsageBillingUnavailable = errors.New("usage billing requires atomic usage-log storage")
 
 func simpleModeKeyRateLimitBillingEnabled(cfg *config.Config, apiKey *APIKey) bool {
 	return cfg != nil && cfg.RunMode == config.RunModeSimple && cfg.SimpleModeKeyRateLimitEnabled && apiKey != nil && apiKey.HasRateLimits()
@@ -133,11 +138,11 @@ func QuotaPlatform(ctx context.Context, apiKey *APIKey) string {
 }
 
 func (p *postUsageBillingParams) shouldDeductAPIKeyQuota() bool {
-	return p.Cost.ActualCost > 0 && p.APIKey.Quota > 0 && p.APIKeyService != nil
+	return p.Cost.ActualCost > 0 && p.APIKey.Quota > 0 && (p.APIKeyService != nil || p.AtomicUsageLog)
 }
 
 func (p *postUsageBillingParams) shouldUpdateRateLimits() bool {
-	return p.Cost.ActualCost > 0 && p.APIKey.HasRateLimits() && p.APIKeyService != nil
+	return p.Cost.ActualCost > 0 && p.APIKey.HasRateLimits() && (p.APIKeyService != nil || p.AtomicUsageLog)
 }
 
 func (p *postUsageBillingParams) shouldUpdateAccountQuota() bool {
@@ -190,7 +195,7 @@ func postUsageBilling(ctx context.Context, p *postUsageBillingParams, deps *bill
 	}
 
 	if p.shouldUpdateAccountQuota() {
-		accountCost := cost.TotalCost * p.AccountRateMultiplier
+		accountCost := accountUsageCost(cost, p.AccountRateMultiplier)
 		if err := deps.accountRepo.IncrementQuotaUsed(billingCtx, p.Account.ID, accountCost); err != nil {
 			slog.Error("increment account quota used failed", "account_id", p.Account.ID, "cost", accountCost, "error", err)
 		}
@@ -247,6 +252,7 @@ func resolveUsageBillingRequestID(ctx context.Context, upstreamRequestID string)
 func isForcedUsageBillingRequestID(requestID string) bool {
 	id := strings.TrimSpace(requestID)
 	return strings.HasPrefix(id, "web_search:") ||
+		strings.HasPrefix(id, "grok-safety:") ||
 		strings.HasPrefix(id, "grok-video:") ||
 		strings.HasPrefix(id, "grok_audio:") ||
 		strings.HasPrefix(id, "grok_realtime:") ||
@@ -329,6 +335,10 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 		}
 	}
 
+	if p.RecordOnly {
+		cmd.Normalize()
+		return cmd
+	}
 	if p.SimpleModeKeyRateLimitOnly {
 		if p.Cost.ActualCost > 0 && p.APIKey.HasRateLimits() {
 			cmd.APIKeyRateLimitCost = p.Cost.ActualCost
@@ -355,9 +365,12 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 		cmd.APIKeyRateLimitCost = p.Cost.ActualCost
 	}
 	if p.shouldUpdateAccountQuota() {
-		cmd.AccountQuotaCost = p.Cost.TotalCost * p.AccountRateMultiplier
+		cmd.AccountQuotaCost = accountUsageCost(p.Cost, p.AccountRateMultiplier)
 		cmd.AccountQuotaHasDailyLimit = p.Account.GetQuotaDailyLimit() > 0
 		cmd.AccountQuotaHasWeeklyLimit = p.Account.GetQuotaWeeklyLimit() > 0
+	}
+	if p.AtomicUsageLog && !p.IsSubscriptionBill && p.Platform != "" && p.Cost.ActualCost > 0 {
+		cmd.Platform, cmd.PlatformQuotaCost = p.Platform, p.Cost.ActualCost
 	}
 
 	cmd.Normalize()
@@ -366,11 +379,17 @@ func buildUsageBillingCommand(requestID string, usageLog *UsageLog, p *postUsage
 
 func applyUsageBilling(ctx context.Context, requestID string, usageLog *UsageLog, p *postUsageBillingParams, deps *billingDeps, repo UsageBillingRepository) (bool, error) {
 	if p == nil || deps == nil {
+		if p != nil && p.AtomicUsageLog {
+			return false, ErrAtomicUsageBillingUnavailable
+		}
 		return false, nil
 	}
 
 	cmd := buildUsageBillingCommand(requestID, usageLog, p)
 	if cmd == nil || cmd.RequestID == "" || repo == nil {
+		if p.AtomicUsageLog {
+			return false, ErrAtomicUsageBillingUnavailable
+		}
 		if p.engineUsageReceipt != nil {
 			return false, ErrCodexEngineUsageBillingUnavailable
 		}
@@ -386,7 +405,17 @@ func applyUsageBilling(ctx context.Context, requestID string, usageLog *UsageLog
 	billingCtx, cancel := detachedBillingContext(ctx)
 	defer cancel()
 
-	result, err := repo.Apply(billingCtx, cmd)
+	var result *UsageBillingApplyResult
+	var err error
+	if p.AtomicUsageLog {
+		atomicRepo, ok := repo.(AtomicUsageBillingRepository)
+		if !ok {
+			return false, ErrAtomicUsageBillingUnavailable
+		}
+		result, err = atomicRepo.ApplyWithUsageLog(billingCtx, cmd, usageLog)
+	} else {
+		result, err = repo.Apply(billingCtx, cmd)
+	}
 	if err != nil {
 		return false, err
 	}
@@ -408,6 +437,10 @@ func applyUsageBilling(ctx context.Context, requestID string, usageLog *UsageLog
 
 func finalizePostUsageBilling(ctx context.Context, p *postUsageBillingParams, deps *billingDeps, result *UsageBillingApplyResult) {
 	if p == nil || p.Cost == nil || deps == nil {
+		return
+	}
+	if p.RecordOnly {
+		deps.deferredService.ScheduleLastUsedUpdate(p.Account.ID)
 		return
 	}
 
@@ -452,7 +485,11 @@ func finalizePostUsageBilling(ctx context.Context, p *postUsageBillingParams, de
 	// charge. Without the batch flusher, persist inline with the usage task (in a
 	// worker or its synchronous overflow caller), without spawning detached work.
 	// Synchronous overflow remains backpressure, not a global DB concurrency cap.
-	if !p.IsSubscriptionBill && p.Platform != "" && p.Cost.ActualCost > 0 && p.User != nil && deps.userPlatformQuotaRepo != nil && deps.billingCacheService != nil {
+	if p.AtomicUsageLog && !p.IsSubscriptionBill && p.Platform != "" && p.Cost.ActualCost > 0 && p.User != nil && deps.billingCacheService != nil {
+		if err := deps.billingCacheService.RefreshUserPlatformQuotaEngineUsage(ctx, p.User.ID, p.Platform); err != nil {
+			slog.Warn("refresh atomic usage platform quota failed", "user_id", p.User.ID, "platform", p.Platform, "error", err)
+		}
+	} else if !p.IsSubscriptionBill && p.Platform != "" && p.Cost.ActualCost > 0 && p.User != nil && deps.userPlatformQuotaRepo != nil && deps.billingCacheService != nil {
 		if deps.billingCacheService.HasUserPlatformQuotaLimit(ctx, p.User.ID, p.Platform) {
 			deps.billingCacheService.IncrementUserPlatformQuotaUsage(p.User.ID, p.Platform, p.Cost.ActualCost)
 			if deps.cfg == nil || !deps.cfg.Database.UserPlatformQuotaFlusherEnabled {
@@ -576,7 +613,7 @@ func notifyAccountQuota(ctx context.Context, p *postUsageBillingParams, deps *bi
 		)
 		return
 	}
-	accountCost := p.Cost.TotalCost * p.AccountRateMultiplier
+	accountCost := accountUsageCost(p.Cost, p.AccountRateMultiplier)
 	var quotaState *AccountQuotaState
 	if result != nil {
 		quotaState = result.QuotaState

@@ -100,8 +100,18 @@ func (b *usageSnapshotBuilder) openAIResult(out *OpenAIForwardResult, r *OpenAIF
 		ImageSizeBreakdown: b.intMap(r.ImageSizeBreakdown), VideoCount: r.VideoCount,
 		VideoResolution: b.string(r.VideoResolution), VideoDurationSeconds: r.VideoDurationSeconds,
 		WebSearchCalls: r.WebSearchCalls, SearchCount: r.SearchCount, AudioUsage: b.audio(r.AudioUsage),
+		GrokSafetyRejection: b.grokSafetyRejection(r.GrokSafetyRejection),
 	}
 	return out
+}
+
+func (b *usageSnapshotBuilder) grokSafetyRejection(r *GrokSafetyRejection) *GrokSafetyRejection {
+	if r == nil {
+		return nil
+	}
+	return &GrokSafetyRejection{CallID: b.string(r.CallID), Code: b.string(r.Code), Fee: r.Fee,
+		HTTPStatus: r.HTTPStatus, UpstreamRequestID: b.string(r.UpstreamRequestID), UpstreamClientRequestID: b.string(r.UpstreamClientRequestID),
+		TokenPricingUnavailable: r.TokenPricingUnavailable}
 }
 
 func (b *usageSnapshotBuilder) apiKey(out *APIKey, k *APIKey, sourceUser, ownedUser *User) *APIKey {
@@ -184,6 +194,7 @@ func (b *usageSnapshotBuilder) group(g *Group) *Group {
 		VideoRateIndependent: g.VideoRateIndependent, VideoRateMultiplier: g.VideoRateMultiplier,
 		VideoPrice480P: b.float(g.VideoPrice480P), VideoPrice720P: b.float(g.VideoPrice720P), VideoPrice1080P: b.float(g.VideoPrice1080P),
 		WebSearchPricePerCall: b.float(g.WebSearchPricePerCall), SearchPricePer1k: b.float(g.SearchPricePer1k),
+		GrokSafetyFeeEnabled: g.GrokSafetyFeeEnabled, GrokSafetyFee: b.float(g.GrokSafetyFee),
 		AudioRealtimePricePerMin: b.float(g.AudioRealtimePricePerMin), AudioTTSPricePerMillionChars: b.float(g.AudioTTSPricePerMillionChars), AudioSTTPricePerHour: b.float(g.AudioSTTPricePerHour),
 		LongContextPricingEnabled: g.LongContextPricingEnabled, FreeOpenAIFast: g.FreeOpenAIFast, FreeOpenAIUltrafast: g.FreeOpenAIUltrafast}
 	if g.VideoModelPrices != nil {

@@ -169,6 +169,12 @@ func (_c *UsageLogCreate) SetNillableBillingMode(v *string) *UsageLogCreate {
 	return _c
 }
 
+// SetGrokSafetyRejection sets the "grok_safety_rejection" field.
+func (_c *UsageLogCreate) SetGrokSafetyRejection(v map[string]interface{}) *UsageLogCreate {
+	_c.mutation.SetGrokSafetyRejection(v)
+	return _c
+}
+
 // SetGroupID sets the "group_id" field.
 func (_c *UsageLogCreate) SetGroupID(v int64) *UsageLogCreate {
 	_c.mutation.SetGroupID(v)
@@ -1049,6 +1055,10 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 		_spec.SetField(usagelog.FieldBillingMode, field.TypeString, value)
 		_node.BillingMode = &value
 	}
+	if value, ok := _c.mutation.GrokSafetyRejection(); ok {
+		_spec.SetField(usagelog.FieldGrokSafetyRejection, field.TypeJSON, value)
+		_node.GrokSafetyRejection = value
+	}
 	if value, ok := _c.mutation.InputTokens(); ok {
 		_spec.SetField(usagelog.FieldInputTokens, field.TypeInt, value)
 		_node.InputTokens = value
@@ -1529,6 +1539,24 @@ func (u *UsageLogUpsert) UpdateBillingMode() *UsageLogUpsert {
 // ClearBillingMode clears the value of the "billing_mode" field.
 func (u *UsageLogUpsert) ClearBillingMode() *UsageLogUpsert {
 	u.SetNull(usagelog.FieldBillingMode)
+	return u
+}
+
+// SetGrokSafetyRejection sets the "grok_safety_rejection" field.
+func (u *UsageLogUpsert) SetGrokSafetyRejection(v map[string]interface{}) *UsageLogUpsert {
+	u.Set(usagelog.FieldGrokSafetyRejection, v)
+	return u
+}
+
+// UpdateGrokSafetyRejection sets the "grok_safety_rejection" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateGrokSafetyRejection() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldGrokSafetyRejection)
+	return u
+}
+
+// ClearGrokSafetyRejection clears the value of the "grok_safety_rejection" field.
+func (u *UsageLogUpsert) ClearGrokSafetyRejection() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldGrokSafetyRejection)
 	return u
 }
 
@@ -2455,6 +2483,27 @@ func (u *UsageLogUpsertOne) UpdateBillingMode() *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) ClearBillingMode() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearBillingMode()
+	})
+}
+
+// SetGrokSafetyRejection sets the "grok_safety_rejection" field.
+func (u *UsageLogUpsertOne) SetGrokSafetyRejection(v map[string]interface{}) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetGrokSafetyRejection(v)
+	})
+}
+
+// UpdateGrokSafetyRejection sets the "grok_safety_rejection" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateGrokSafetyRejection() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateGrokSafetyRejection()
+	})
+}
+
+// ClearGrokSafetyRejection clears the value of the "grok_safety_rejection" field.
+func (u *UsageLogUpsertOne) ClearGrokSafetyRejection() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearGrokSafetyRejection()
 	})
 }
 
@@ -3653,6 +3702,27 @@ func (u *UsageLogUpsertBulk) UpdateBillingMode() *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) ClearBillingMode() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.ClearBillingMode()
+	})
+}
+
+// SetGrokSafetyRejection sets the "grok_safety_rejection" field.
+func (u *UsageLogUpsertBulk) SetGrokSafetyRejection(v map[string]interface{}) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetGrokSafetyRejection(v)
+	})
+}
+
+// UpdateGrokSafetyRejection sets the "grok_safety_rejection" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateGrokSafetyRejection() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateGrokSafetyRejection()
+	})
+}
+
+// ClearGrokSafetyRejection clears the value of the "grok_safety_rejection" field.
+func (u *UsageLogUpsertBulk) ClearGrokSafetyRejection() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearGrokSafetyRejection()
 	})
 }
 

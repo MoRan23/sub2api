@@ -1592,6 +1592,15 @@
             </div>
           </div>
         </div>
+        <div v-if="createForm.platform === 'grok'" class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4">
+          <label class="flex items-start gap-2">
+            <input v-model="createForm.grok_safety_fee_enabled" type="checkbox" class="mt-0.5" data-testid="create-grok-safety-fee-enabled" />
+            <span><span class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.groups.grokSafetyFee.title') }}</span><span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.groups.grokSafetyFee.description') }}</span></span>
+          </label>
+          <label class="input-label mt-3">{{ t('admin.groups.grokSafetyFee.amount') }}</label>
+          <input v-model.number="createForm.grok_safety_fee" type="number" min="0" step="0.00000001" class="input" :placeholder="t('admin.groups.grokSafetyFee.placeholder')" data-testid="create-grok-safety-fee" />
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.groups.grokSafetyFee.hint') }}</p>
+        </div>
         <GroupDaybreakSettings
           v-if="supportsGroupOpenAIFast(createForm.platform)"
           v-model:blue="createForm.openai_daybreak_blue_enabled"
@@ -3242,6 +3251,15 @@
               />
             </div>
           </div>
+        </div>
+        <div v-if="editForm.platform === 'grok'" class="border-t border-gray-200 dark:border-dark-400 pt-4 mt-4">
+          <label class="flex items-start gap-2">
+            <input v-model="editForm.grok_safety_fee_enabled" type="checkbox" class="mt-0.5" data-testid="edit-grok-safety-fee-enabled" />
+            <span><span class="block text-sm font-medium text-gray-700 dark:text-gray-300">{{ t('admin.groups.grokSafetyFee.title') }}</span><span class="block text-xs text-gray-500 dark:text-gray-400">{{ t('admin.groups.grokSafetyFee.description') }}</span></span>
+          </label>
+          <label class="input-label mt-3">{{ t('admin.groups.grokSafetyFee.amount') }}</label>
+          <input v-model.number="editForm.grok_safety_fee" type="number" min="0" step="0.00000001" class="input" :placeholder="t('admin.groups.grokSafetyFee.placeholder')" data-testid="edit-grok-safety-fee" />
+          <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.groups.grokSafetyFee.hint') }}</p>
         </div>
         <GroupDaybreakSettings
           v-if="supportsGroupOpenAIFast(editForm.platform)"
@@ -5000,6 +5018,8 @@ const createForm = reactive({
   // Codex 网页搜索按次计费（仅 openai 平台使用）；null = 使用默认价 0.01
   web_search_price_per_call: null as number | null,
   search_price_per_1k: null as number | null,
+  grok_safety_fee_enabled: false,
+  grok_safety_fee: null as number | null,
   audio_realtime_price_per_min: null as number | null,
   audio_tts_price_per_million_chars: null as number | null,
   audio_stt_price_per_hour: null as number | null,
@@ -5372,6 +5392,8 @@ const editForm = reactive({
   // Codex 网页搜索按次计费（仅 openai 平台使用）；null = 使用默认价 0.01
   web_search_price_per_call: null as number | null,
   search_price_per_1k: null as number | null,
+  grok_safety_fee_enabled: false,
+  grok_safety_fee: null as number | null,
   audio_realtime_price_per_min: null as number | null,
   audio_tts_price_per_million_chars: null as number | null,
   audio_stt_price_per_hour: null as number | null,
@@ -5850,6 +5872,8 @@ const closeCreateModal = () => {
   createForm.openai_daybreak_red_enabled = false;
   createForm.web_search_price_per_call = null;
   createForm.search_price_per_1k = null;
+	createForm.grok_safety_fee_enabled = false;
+	createForm.grok_safety_fee = null;
   createForm.audio_realtime_price_per_min = null;
   createForm.audio_tts_price_per_million_chars = null;
   createForm.audio_stt_price_per_hour = null;
@@ -5968,6 +5992,8 @@ const handleCreateGroup = async () => {
     // 构建请求数据，包含模型路由配置
     const requestData = {
       ...createGroupForm,
+	  grok_safety_fee_enabled: createForm.platform === 'grok' && createForm.grok_safety_fee_enabled,
+	  grok_safety_fee: createForm.platform === 'grok' ? createForm.grok_safety_fee : null,
       openai_daybreak_blue_enabled:
         supportsGroupOpenAIFast(createForm.platform) && createForm.openai_daybreak_blue_enabled,
       openai_daybreak_red_enabled:
@@ -6059,6 +6085,7 @@ const handleCreateGroup = async () => {
     requestData.search_price_per_1k = emptyToNull(
       requestData.search_price_per_1k,
     );
+	requestData.grok_safety_fee = emptyToNull(requestData.grok_safety_fee);
     requestData.audio_realtime_price_per_min = emptyToNull(
       requestData.audio_realtime_price_per_min,
     );
@@ -6154,6 +6181,8 @@ const handleEdit = async (group: AdminGroup) => {
   );
   editForm.web_search_price_per_call = group.web_search_price_per_call ?? null;
   editForm.search_price_per_1k = group.search_price_per_1k ?? null;
+	editForm.grok_safety_fee_enabled = group.grok_safety_fee_enabled ?? false;
+	editForm.grok_safety_fee = group.grok_safety_fee ?? null;
   editForm.audio_realtime_price_per_min = group.audio_realtime_price_per_min ?? null;
   editForm.audio_tts_price_per_million_chars = group.audio_tts_price_per_million_chars ?? null;
   editForm.audio_stt_price_per_hour = group.audio_stt_price_per_hour ?? null;
@@ -6273,6 +6302,8 @@ const closeEditModal = () => {
   editForm.model_pricing = [];
   editForm.web_search_price_per_call = null;
   editForm.search_price_per_1k = null;
+	editForm.grok_safety_fee_enabled = false;
+	editForm.grok_safety_fee = null;
   editForm.audio_realtime_price_per_min = null;
   editForm.audio_tts_price_per_million_chars = null;
   editForm.audio_stt_price_per_hour = null;
@@ -6325,6 +6356,8 @@ const handleUpdateGroup = async () => {
     // 转换 fallback_group_id: null -> 0 (后端使用 0 表示清除)
     const payload = {
       ...editForm,
+	  grok_safety_fee_enabled: editForm.platform === 'grok' && editForm.grok_safety_fee_enabled,
+	  grok_safety_fee: editForm.platform === 'grok' ? editForm.grok_safety_fee : null,
       openai_daybreak_blue_enabled:
         supportsGroupOpenAIFast(editForm.platform) && editForm.openai_daybreak_blue_enabled,
       openai_daybreak_red_enabled:
@@ -6430,6 +6463,7 @@ const handleUpdateGroup = async () => {
     payload.search_price_per_1k = emptyPriceToClear(
       payload.search_price_per_1k,
     );
+	payload.grok_safety_fee = emptyPriceToClear(payload.grok_safety_fee);
     payload.audio_realtime_price_per_min = emptyPriceToClear(
       payload.audio_realtime_price_per_min,
     );
@@ -6772,6 +6806,10 @@ watch(
 watch(
   () => createForm.platform,
   (newVal) => {
+	if (newVal !== 'grok') {
+	  createForm.grok_safety_fee_enabled = false;
+	  createForm.grok_safety_fee = null;
+	}
     if (!["anthropic", "antigravity"].includes(newVal)) {
       createForm.fallback_group_id_on_invalid_request = null;
     }
@@ -6832,6 +6870,10 @@ watch(
 watch(
   () => editForm.platform,
   (newVal) => {
+	if (newVal !== 'grok') {
+	  editForm.grok_safety_fee_enabled = false;
+	  editForm.grok_safety_fee = null;
+	}
     if (!["anthropic", "antigravity"].includes(newVal)) {
       editForm.fallback_group_id_on_invalid_request = null;
     }

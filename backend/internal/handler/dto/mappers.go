@@ -224,6 +224,8 @@ func groupFromServiceBase(g *service.Group) Group {
 		VideoModelPrices:                g.VideoModelPrices,
 		WebSearchPricePerCall:           g.WebSearchPricePerCall,
 		SearchPricePer1k:                g.SearchPricePer1k,
+		GrokSafetyFeeEnabled:            g.GrokSafetyFeeEnabled,
+		GrokSafetyFee:                   g.GrokSafetyFee,
 		AudioRealtimePricePerMin:        g.AudioRealtimePricePerMin,
 		AudioTtsPricePerMillionChars:    g.AudioTTSPricePerMillionChars,
 		AudioSttPricePerHour:            g.AudioSTTPricePerHour,
@@ -723,6 +725,7 @@ func usageLogFromServiceUser(l *service.UsageLog) UsageLog {
 		requestedModel = l.Model
 	}
 	return UsageLog{
+		GrokSafetyRejection:       grokSafetyRejectionForUser(l.GrokSafetyRejection),
 		ID:                        l.ID,
 		UserID:                    l.UserID,
 		APIKeyID:                  l.APIKeyID,
@@ -800,6 +803,7 @@ func UsageLogFromServiceAdmin(l *service.UsageLog) *AdminUsageLog {
 	usageLog := usageLogFromServiceUser(l)
 	usageLog.UpstreamEndpoint = l.UpstreamEndpoint
 	return &AdminUsageLog{
+		GrokSafetyRejection:     l.GrokSafetyRejection,
 		UsageLog:                usageLog,
 		UpstreamModel:           l.UpstreamModel,
 		UpstreamReasoningEffort: adminUpstreamReasoningEffort(l),
@@ -814,6 +818,13 @@ func UsageLogFromServiceAdmin(l *service.UsageLog) *AdminUsageLog {
 		IPAddress:               l.IPAddress,
 		Account:                 AccountSummaryFromService(l.Account),
 	}
+}
+
+func grokSafetyRejectionForUser(rejection *service.GrokSafetyRejection) *GrokSafetyRejection {
+	if rejection == nil {
+		return nil
+	}
+	return &GrokSafetyRejection{Code: rejection.Code, Fee: rejection.Fee, HTTPStatus: rejection.HTTPStatus}
 }
 
 func userFacingReasoningEffort(l *service.UsageLog) *string {

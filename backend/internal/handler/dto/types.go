@@ -141,6 +141,8 @@ type Group struct {
 	// Codex alpha/search 网页搜索单次价格（USD/次）；null 表示使用默认价 0.01
 	WebSearchPricePerCall        *float64 `json:"web_search_price_per_call"`
 	SearchPricePer1k             *float64 `json:"search_price_per_1k"`
+	GrokSafetyFeeEnabled         bool     `json:"grok_safety_fee_enabled"`
+	GrokSafetyFee                *float64 `json:"grok_safety_fee"`
 	AudioRealtimePricePerMin     *float64 `json:"audio_realtime_price_per_min"`
 	AudioTtsPricePerMillionChars *float64 `json:"audio_tts_price_per_million_chars"`
 	AudioSttPricePerHour         *float64 `json:"audio_stt_price_per_hour"`
@@ -622,13 +624,22 @@ type BatchUpdateRedeemCodesRequest struct {
 }
 
 // UsageLog 是普通用户接口使用的 usage log DTO（不包含管理员字段）。
+// GrokSafetyRejection is the user-visible failure/fee summary. Upstream IDs are
+// deliberately absent; only the admin projection exposes them.
+type GrokSafetyRejection struct {
+	Code       string  `json:"code"`
+	Fee        float64 `json:"fee"`
+	HTTPStatus int     `json:"http_status"`
+}
+
 type UsageLog struct {
-	ID        int64  `json:"id"`
-	UserID    int64  `json:"user_id"`
-	APIKeyID  int64  `json:"api_key_id"`
-	AccountID int64  `json:"account_id"`
-	RequestID string `json:"request_id"`
-	Model     string `json:"model"`
+	GrokSafetyRejection *GrokSafetyRejection `json:"grok_safety_rejection,omitempty"`
+	ID                  int64                `json:"id"`
+	UserID              int64                `json:"user_id"`
+	APIKeyID            int64                `json:"api_key_id"`
+	AccountID           int64                `json:"account_id"`
+	RequestID           string               `json:"request_id"`
+	Model               string               `json:"model"`
 	// ServiceTier records the OpenAI service tier used for billing, e.g. "priority" / "flex".
 	ServiceTier *string `json:"service_tier,omitempty"`
 	// ReasoningEffort is the client-requested effort (mapping-hidden, like Model).
@@ -710,6 +721,7 @@ type UsageLog struct {
 // AdminUsageLog 是管理员接口使用的 usage log DTO（包含管理员字段）。
 type AdminUsageLog struct {
 	UsageLog
+	GrokSafetyRejection *service.GrokSafetyRejection `json:"grok_safety_rejection,omitempty"`
 
 	// UpstreamModel is the actual model sent to the upstream provider after mapping.
 	// Omitted when no mapping was applied (requested model was used as-is).

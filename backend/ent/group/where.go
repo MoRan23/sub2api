@@ -245,6 +245,16 @@ func SearchPricePer1k(v float64) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldSearchPricePer1k, v))
 }
 
+// GrokSafetyFeeEnabled applies equality check predicate on the "grok_safety_fee_enabled" field. It's identical to GrokSafetyFeeEnabledEQ.
+func GrokSafetyFeeEnabled(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldGrokSafetyFeeEnabled, v))
+}
+
+// GrokSafetyFee applies equality check predicate on the "grok_safety_fee" field. It's identical to GrokSafetyFeeEQ.
+func GrokSafetyFee(v float64) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldGrokSafetyFee, v))
+}
+
 // AudioRealtimePricePerMin applies equality check predicate on the "audio_realtime_price_per_min" field. It's identical to AudioRealtimePricePerMinEQ.
 func AudioRealtimePricePerMin(v float64) predicate.Group {
 	return predicate.Group(sql.FieldEQ(FieldAudioRealtimePricePerMin, v))
@@ -2018,6 +2028,66 @@ func SearchPricePer1kIsNil() predicate.Group {
 // SearchPricePer1kNotNil applies the NotNil predicate on the "search_price_per_1k" field.
 func SearchPricePer1kNotNil() predicate.Group {
 	return predicate.Group(sql.FieldNotNull(FieldSearchPricePer1k))
+}
+
+// GrokSafetyFeeEnabledEQ applies the EQ predicate on the "grok_safety_fee_enabled" field.
+func GrokSafetyFeeEnabledEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldGrokSafetyFeeEnabled, v))
+}
+
+// GrokSafetyFeeEnabledNEQ applies the NEQ predicate on the "grok_safety_fee_enabled" field.
+func GrokSafetyFeeEnabledNEQ(v bool) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldGrokSafetyFeeEnabled, v))
+}
+
+// GrokSafetyFeeEQ applies the EQ predicate on the "grok_safety_fee" field.
+func GrokSafetyFeeEQ(v float64) predicate.Group {
+	return predicate.Group(sql.FieldEQ(FieldGrokSafetyFee, v))
+}
+
+// GrokSafetyFeeNEQ applies the NEQ predicate on the "grok_safety_fee" field.
+func GrokSafetyFeeNEQ(v float64) predicate.Group {
+	return predicate.Group(sql.FieldNEQ(FieldGrokSafetyFee, v))
+}
+
+// GrokSafetyFeeIn applies the In predicate on the "grok_safety_fee" field.
+func GrokSafetyFeeIn(vs ...float64) predicate.Group {
+	return predicate.Group(sql.FieldIn(FieldGrokSafetyFee, vs...))
+}
+
+// GrokSafetyFeeNotIn applies the NotIn predicate on the "grok_safety_fee" field.
+func GrokSafetyFeeNotIn(vs ...float64) predicate.Group {
+	return predicate.Group(sql.FieldNotIn(FieldGrokSafetyFee, vs...))
+}
+
+// GrokSafetyFeeGT applies the GT predicate on the "grok_safety_fee" field.
+func GrokSafetyFeeGT(v float64) predicate.Group {
+	return predicate.Group(sql.FieldGT(FieldGrokSafetyFee, v))
+}
+
+// GrokSafetyFeeGTE applies the GTE predicate on the "grok_safety_fee" field.
+func GrokSafetyFeeGTE(v float64) predicate.Group {
+	return predicate.Group(sql.FieldGTE(FieldGrokSafetyFee, v))
+}
+
+// GrokSafetyFeeLT applies the LT predicate on the "grok_safety_fee" field.
+func GrokSafetyFeeLT(v float64) predicate.Group {
+	return predicate.Group(sql.FieldLT(FieldGrokSafetyFee, v))
+}
+
+// GrokSafetyFeeLTE applies the LTE predicate on the "grok_safety_fee" field.
+func GrokSafetyFeeLTE(v float64) predicate.Group {
+	return predicate.Group(sql.FieldLTE(FieldGrokSafetyFee, v))
+}
+
+// GrokSafetyFeeIsNil applies the IsNil predicate on the "grok_safety_fee" field.
+func GrokSafetyFeeIsNil() predicate.Group {
+	return predicate.Group(sql.FieldIsNull(FieldGrokSafetyFee))
+}
+
+// GrokSafetyFeeNotNil applies the NotNil predicate on the "grok_safety_fee" field.
+func GrokSafetyFeeNotNil() predicate.Group {
+	return predicate.Group(sql.FieldNotNull(FieldGrokSafetyFee))
 }
 
 // AudioRealtimePricePerMinEQ applies the EQ predicate on the "audio_realtime_price_per_min" field.

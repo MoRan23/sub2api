@@ -71,6 +71,7 @@
               </div>
             </div>
             <span v-else class="font-medium text-gray-900 dark:text-white">{{ row.model }}</span>
+            <div v-if="row.grok_safety_rejection" data-testid="grok-safety-rejection" class="text-xs font-medium text-red-600 dark:text-red-400">{{ t('usage.grokSafetyRejection') }}</div>
             <div
               v-if="row.upstream_model_mismatch === true && row.upstream_response_model"
               class="break-all pl-3 text-[11px]"
@@ -421,6 +422,18 @@
           <!-- Cost Breakdown -->
           <div class="mb-2 border-b border-gray-700 pb-1.5">
             <div class="text-xs font-semibold text-gray-300 mb-1">{{ t('usage.costDetails') }}</div>
+            <div v-if="tooltipData?.grok_safety_rejection" class="mb-2 space-y-1.5 border-b border-gray-700 pb-2" data-testid="grok-safety-costs">
+              <div class="font-medium text-red-300">{{ t('usage.grokSafetyRejection') }}</div>
+              <div class="flex items-center justify-between gap-4"><span class="text-gray-400">{{ t('usage.grokSafetyTokenCost') }}</span><span>${{ userTokenCost(tooltipData).toFixed(8) }}</span></div>
+              <div class="flex items-center justify-between gap-4"><span class="text-gray-400">{{ t('usage.grokSafetyFee') }}</span><span>${{ grokSafetyFee(tooltipData).toFixed(8) }}</span></div>
+              <div class="flex items-center justify-between gap-4"><span class="text-gray-400">{{ t('usage.grokSafetyTotal') }}</span><span>${{ tooltipData.actual_cost.toFixed(8) }}</span></div>
+              <div class="text-gray-400">{{ t('usage.grokSafetyFeeHint') }}</div>
+              <template v-if="showAccountBilling">
+                <div>{{ tooltipData.grok_safety_rejection.code }} · HTTP {{ tooltipData.grok_safety_rejection.http_status }}</div>
+                <div v-if="tooltipData.grok_safety_rejection.upstream_request_id" class="max-w-md whitespace-normal break-all" data-testid="grok-safety-upstream-id">{{ t('admin.usage.upstreamRequestId') }}: {{ tooltipData.grok_safety_rejection.upstream_request_id }}</div>
+                <div v-if="tooltipData.grok_safety_rejection.upstream_client_request_id" class="max-w-md whitespace-normal break-all" data-testid="grok-safety-client-id">{{ t('usage.grokSafetyClientRequestId') }}: {{ tooltipData.grok_safety_rejection.upstream_client_request_id }}</div>
+              </template>
+            </div>
             <div v-if="tooltipData && tooltipData.input_cost > 0" class="flex items-center justify-between gap-4">
               <span class="text-gray-400">{{ t('admin.usage.inputCost') }}</span>
               <span class="font-medium text-white">${{ tooltipData.input_cost.toFixed(8) }}</span>
@@ -529,11 +542,7 @@
             <div class="flex items-center justify-between gap-6">
               <span class="text-gray-400">{{ t('usage.accountBilled') }}</span>
               <span class="font-semibold text-green-400">
-                ${{ accountBilled({
-                  total_cost: tooltipData?.total_cost,
-                  account_stats_cost: tooltipData?.account_stats_cost,
-                  account_rate_multiplier: tooltipData?.account_rate_multiplier,
-                }).toFixed(8) }}
+                ${{ accountBilled(tooltipData).toFixed(8) }}
               </span>
             </div>
           </template>
@@ -550,7 +559,7 @@ import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { formatDateTime, formatReasoningEffort, reasoningEffortValuesEqual } from '@/utils/format'
 import { formatCacheTokens, formatMultiplier } from '@/utils/formatters'
-import { formatTokenPricePerMillion } from '@/utils/usagePricing'
+import { accountBilledCost as accountBilled, formatTokenPricePerMillion, grokSafetyFee, userTokenCost } from '@/utils/usagePricing'
 import { getUsageServiceTierLabel } from '@/utils/usageServiceTier'
 import { resolveUsageRequestType } from '@/utils/usageRequestType'
 import {
@@ -583,14 +592,6 @@ import {
   textInputTokens,
   hasImageInputCost,
 } from '@/utils/imageUsage'
-
-/** Compute the account-billed cost for display: (account_stats_cost ?? total_cost) * rate_multiplier */
-function accountBilled(row: { total_cost?: number | null; account_stats_cost?: number | null; account_rate_multiplier?: number | null }): number {
-  const base = row.account_stats_cost != null ? row.account_stats_cost : (row.total_cost ?? 0)
-  const result = base * (row.account_rate_multiplier ?? 1)
-  return Number.isNaN(result) ? 0 : result
-}
-
 
 import DataTable from '@/components/common/DataTable.vue'
 import EmptyState from '@/components/common/EmptyState.vue'

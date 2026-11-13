@@ -123,6 +123,9 @@ func tryCustomRules(
 		if pricing == nil {
 			continue // 规则匹配但模型不在规则定价中，继续下一条
 		}
+		if requestCount == 0 && pricing.BillingMode != "" && pricing.BillingMode != BillingModeToken {
+			continue // A refusal has no successful per-request/media units.
+		}
 		cost := calculateStatsCost(pricing, tokens, requestCount)
 		if cost != nil {
 			*cost *= reasoningEffortBillingMultiplier(reasoningEffort, pricing.ReasoningEffortMultipliers)
@@ -283,6 +286,12 @@ func applyAccountStatsCost(
 		model = requestedModel
 	}
 	requestCount := 1
+	fixedFee := 0.0
+	if usageLog != nil && usageLog.GrokSafetyRejection != nil {
+		requestCount = 0
+		fixedFee = usageLog.GrokSafetyRejection.Fee
+		totalCost -= fixedFee
+	}
 	if usageLog != nil && usageLog.ImageCount > 0 {
 		requestCount = usageLog.ImageCount
 	}
@@ -297,6 +306,9 @@ func applyAccountStatsCost(
 	usageLog.AccountStatsCost = resolveAccountStatsCost(
 		ctx, cs, bs, accountID, groupID, model, tokens, requestCount, totalCost, serviceTier, pricingAt, longContextPricingEnabled, reasoningEffort,
 	)
+	if usageLog.AccountStatsCost != nil {
+		*usageLog.AccountStatsCost += fixedFee
+	}
 }
 
 // accountStatsLongContextPricingEnabled 判断账号统计成本是否计入长上下文阶梯。
