@@ -47,6 +47,131 @@ func TestOpenAIGroupCatalogOfficialDescriptorsRemainComplete(t *testing.T) {
 	require.True(t, conditional.NotModified)
 }
 
+func TestOpenAIGroupCatalogDaybreakBlueFastIncludesMappedPublicModel(t *testing.T) {
+	group := &Group{ID: 1, Platform: PlatformOpenAI}
+	account := groupCatalogAccount(1, map[string]any{
+		"gpt-daybreak-blue-latest": "gpt-daybreak-blue-latest",
+		"gpt-5.6-sol":              "gpt-daybreak-blue-latest",
+		"gpt-6-sol":                "gpt-6-sol",
+	})
+	official := catalogFixture(`{"models":[{"slug":"gpt-daybreak-blue-latest","display_name":"Daybreak Blue","default_service_tier":null,"service_tiers":[],"additional_speed_tiers":[],"context_window":272000,"unknown":{"enabled":true}},{"slug":"gpt-6-sol","service_tiers":[],"additional_speed_tiers":[]}]}`)
+	original := string(official.Body)
+	empty := catalogFixture(`{"models":[]}`)
+	for _, catalogs := range [][2]*OpenAIModelsResponse{{official, official}, {empty, official}, {empty, empty}} {
+		response, _, err := buildOpenAIGroupModelsCatalog(group, []Account{account}, []Account{account}, nil, catalogs[0], catalogs[1], "", true, nil)
+		require.NoError(t, err)
+		models := decodeCodexManifestModels(t, response.Body)
+		require.Len(t, models, 3)
+		for _, model := range models {
+			if model["slug"] == "gpt-6-sol" {
+				if catalogs[1] == official {
+					require.Empty(t, model["additional_speed_tiers"])
+					require.Empty(t, model["service_tiers"])
+				}
+				continue
+			}
+			require.Equal(t, []any{"fast"}, model["additional_speed_tiers"])
+			require.Equal(t, []any{map[string]any{"id": "priority", "name": "Fast", "description": "1.5x speed, increased usage"}}, model["service_tiers"])
+			if catalogs[1] == official {
+				require.Contains(t, model, "default_service_tier")
+				require.Nil(t, model["default_service_tier"])
+				require.EqualValues(t, 272000, model["context_window"])
+				require.Equal(t, map[string]any{"enabled": true}, model["unknown"])
+			}
+			if model["slug"] == "gpt-5.6-sol" {
+				require.Equal(t, "gpt-5.6-sol", model["display_name"])
+			}
+		}
+		require.Equal(t, original, string(official.Body), "capability source must stay immutable")
+	}
+}
+
+func TestOpenAIGroupCatalogMappingPreservesNativePublicDescriptor(t *testing.T) {
+	const sol = `{"slug":"gpt-5.6-sol","display_name":"Official Sol","context_window":272000,"shell_type":"shell_command","service_tiers":[{"id":"priority","name":"Fast","description":"upstream Sol tier"}],"additional_speed_tiers":["fast"],"unknown":{"nested":[1,null]},"model_messages":{"instructions_template":"Sol instructions"},"supports_search_tool":false}`
+	const blue = `{"slug":"gpt-daybreak-blue-latest","display_name":"Daybreak Blue","context_window":999999,"service_tiers":[],"additional_speed_tiers":[],"model_messages":{"instructions_template":"Blue instructions"},"supports_search_tool":true}`
+	both := catalogFixture(`{"models":[` + sol + `,` + blue + `]}`)
+	onlyBlue := catalogFixture(`{"models":[` + blue + `]}`)
+	empty := catalogFixture(`{"models":[]}`)
+	group := &Group{ID: 1, Platform: PlatformOpenAI, ModelAllowlist: GroupModelAllowlist{Enabled: true, Models: []string{"gpt-5.6-sol"}}}
+	account := groupCatalogAccount(1, map[string]any{"gpt-5.6-sol": "gpt-daybreak-blue-latest"})
+	fixed := catalogFixture(`{"data":[{"id":"gpt-5.6-sol"}]}`)
+	fixed.upstreamSourceBody = both.Body
+	secondary := catalogFixture(`{"data":[{"id":"gpt-5.6-sol","context_window":42}]}`)
+	secondary.upstreamSourceBody = secondary.Body
+	var expected map[string]any
+	require.NoError(t, json.Unmarshal([]byte(sol), &expected))
+	expected["shell_type"] = "unified_exec"
+	for _, tc := range []struct {
+		name   string
+		live   *OpenAIModelsResponse
+		public *OpenAIModelsResponse
+		fixed  []pinnedOpenAIModelsResult
+	}{
+		{name: "live", live: both, public: onlyBlue},
+		{name: "public fallback", live: empty, public: both},
+		{name: "fixed source", live: onlyBlue, public: onlyBlue, fixed: []pinnedOpenAIModelsResult{{account: &account, response: fixed}}},
+		{name: "first fixed descriptor wins", live: onlyBlue, public: onlyBlue, fixed: []pinnedOpenAIModelsResult{{account: &account, response: fixed}, {account: &account, response: secondary}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			response, _, err := buildOpenAIGroupModelsCatalog(group, []Account{account}, []Account{account}, tc.fixed, tc.live, tc.public, "", true, nil)
+			require.NoError(t, err)
+			models := decodeCodexManifestModels(t, response.Body)
+			require.Len(t, models, 1)
+			require.Equal(t, expected, models[0])
+			require.Equal(t, "gpt-daybreak-blue-latest", account.GetModelMapping()["gpt-5.6-sol"])
+			require.Contains(t, string(both.Body), `"shell_type":"shell_command"`)
+		})
+	}
+}
+
+func TestOpenAIGroupCatalogMappedNativeStandardMetadata(t *testing.T) {
+	group := &Group{ID: 1, Platform: PlatformOpenAI}
+	account := groupCatalogAccount(1, map[string]any{"gpt-5.6-sol": "gpt-daybreak-blue-latest"})
+	source := []byte(`{"data":[{"id":"gpt-5.6-sol","display_name":"Account Sol","context_window":111111,"service_tiers":[],"additional_speed_tiers":[],"unknown":null,"shell_type":"shell_command"},{"id":"gpt-daybreak-blue-latest","context_window":999999}]}`)
+	projected, err := projectAccountModelsBody(source, &account, group, false)
+	require.NoError(t, err)
+	fixed := []pinnedOpenAIModelsResult{{account: &account, response: &OpenAIModelsResponse{Body: projected, upstreamSourceBody: source}}}
+	official := catalogFixture(`{"models":[{"slug":"gpt-5.6-sol","context_window":272000,"model_messages":{"instructions_template":"Sol instructions"}},{"slug":"gpt-daybreak-blue-latest","context_window":999999,"model_messages":{"instructions_template":"Blue instructions"}}]}`)
+	for _, tc := range []struct {
+		codex   bool
+		catalog *OpenAIModelsResponse
+	}{
+		{false, official},
+		{true, official},
+		{true, catalogFixture(`{"models":[]}`)},
+	} {
+		codex := tc.codex
+		response, _, err := buildOpenAIGroupModelsCatalog(group, []Account{account}, []Account{account}, fixed, tc.catalog, tc.catalog, "", codex, nil)
+		require.NoError(t, err)
+		var models []map[string]any
+		if codex {
+			models = decodeCodexManifestModels(t, response.Body)
+		} else {
+			var list struct {
+				Data []map[string]any `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal(response.Body, &list))
+			models = list.Data
+		}
+		require.Len(t, models, 1)
+		require.Equal(t, "Account Sol", models[0]["display_name"])
+		require.EqualValues(t, 111111, models[0]["context_window"])
+		require.Equal(t, []any{}, models[0]["service_tiers"])
+		require.Equal(t, []any{}, models[0]["additional_speed_tiers"])
+		require.Contains(t, models[0], "unknown")
+		require.Nil(t, models[0]["unknown"])
+		require.Equal(t, "unified_exec", models[0]["shell_type"])
+		if codex {
+			instructions := "Sol instructions"
+			if tc.catalog != official {
+				instructions = newConfiguredCodexModelDescriptor("gpt-5.6-sol").ModelMessages.InstructionsTemplate
+			}
+			require.Equal(t, instructions, models[0]["model_messages"].(map[string]any)["instructions_template"])
+		}
+	}
+	require.Contains(t, string(source), `"shell_type":"shell_command"`)
+}
+
 func TestOpenAIGroupCatalogCyberOverrideAndUnknownSynthesis(t *testing.T) {
 	group := &Group{ID: 1, Platform: PlatformOpenAI}
 	account := groupCatalogAccount(1, map[string]any{"6 Cyber": "gpt-6-cyber", "gpt-5.6-cyber": "gpt-5.6-cyber", "custom-provider-model": "custom-provider-model"})

@@ -210,6 +210,62 @@ func TestProjectAccountModelsPassthroughIgnoresStaleMappings(t *testing.T) {
 	require.JSONEq(t, string(body), string(projected))
 }
 
+func TestProjectAccountModelAliasesPrefersNativeDescriptor(t *testing.T) {
+	for _, format := range []struct {
+		field   string
+		idField string
+		codex   bool
+	}{
+		{field: "data", idField: "id"},
+		{field: "models", idField: "slug", codex: true},
+	} {
+		t.Run(format.field, func(t *testing.T) {
+			account := newCodexModelsAPIKeyTestAccount("https://models.example/v1")
+			account.Credentials["model_mapping"] = map[string]any{
+				"gpt-5.6-sol": "gpt-daybreak-blue-latest",
+				"sol-alias":   "gpt-daybreak-blue-latest",
+			}
+			group := &Group{Platform: PlatformOpenAI}
+			native := fmt.Sprintf(`{"%s":"gpt-5.6-sol","display_name":"Upstream Sol","context_window":272000,"service_tiers":[{"id":"priority","name":"Fast","description":"upstream sol tier"}],"unknown":{"source":"sol"},"explicit_null":null}`, format.idField)
+			target := fmt.Sprintf(`{"%s":"gpt-daybreak-blue-latest","display_name":"Daybreak Blue","context_window":123456,"service_tiers":[],"unknown":{"source":"blue"}}`, format.idField)
+			body := []byte(fmt.Sprintf(`{"catalog_version":"upstream","%s":[%s,%s]}`, format.field, native, target))
+			original := string(body)
+
+			projected, err := projectAccountModelAliases(body, account, group, format.codex)
+			require.NoError(t, err)
+			envelope, entries, err := modelCatalogEntries(projected, format.field)
+			require.NoError(t, err)
+			require.Len(t, entries, 2)
+			require.JSONEq(t, native, string(entries[0]), "a discovered public model keeps its complete upstream descriptor")
+			require.JSONEq(t, fmt.Sprintf(`{"%s":"sol-alias","display_name":"sol-alias","context_window":123456,"service_tiers":[],"unknown":{"source":"blue"}}`, format.idField), string(entries[1]), "an undiscovered alias still inherits its target")
+			require.JSONEq(t, `"upstream"`, string(envelope["catalog_version"]))
+			require.Equal(t, original, string(body), "shared upstream bytes remain unchanged")
+		})
+	}
+}
+
+func TestProjectAccountModelAliasesNativeDescriptorStillRequiresTarget(t *testing.T) {
+	for _, format := range []struct {
+		field   string
+		idField string
+		codex   bool
+	}{
+		{field: "data", idField: "id"},
+		{field: "models", idField: "slug", codex: true},
+	} {
+		t.Run(format.field, func(t *testing.T) {
+			account := newCodexModelsAPIKeyTestAccount("https://models.example/v1")
+			account.Credentials["model_mapping"] = map[string]any{"gpt-5.6-sol": "gpt-daybreak-blue-latest"}
+			group := &Group{Platform: PlatformOpenAI, ModelAllowlist: GroupModelAllowlist{Enabled: true, Models: []string{"gpt-5.6-sol"}}}
+			body := []byte(fmt.Sprintf(`{"%s":[{"%s":"gpt-5.6-sol","display_name":"Upstream Sol"}]}`, format.field, format.idField))
+
+			projected, err := projectAccountModelAliases(body, account, group, format.codex)
+			require.NoError(t, err)
+			require.JSONEq(t, fmt.Sprintf(`{"%s":[]}`, format.field), string(projected))
+		})
+	}
+}
+
 func TestFetchOpenAIModelsListEmptyAndMalformedResponses(t *testing.T) {
 	for _, body := range []string{`{"data":[]}`, `{"data":null}`, `{}`, `{"data":{}}`, `{"data":[{}]}`, `{"data":[null]}`} {
 		t.Run(body, func(t *testing.T) {

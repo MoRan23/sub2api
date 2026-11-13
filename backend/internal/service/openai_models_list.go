@@ -301,8 +301,10 @@ func projectAccountModelAliases(body []byte, account *Account, group *Group, cod
 			continue
 		}
 		seen[id] = struct{}{}
-		if id == target {
-			projected = append(projected, raw)
+		// The mapped target determines availability, while an upstream entry
+		// with the public name owns its descriptor when both are present.
+		if original, exists := byID[id]; exists {
+			projected = append(projected, original)
 			continue
 		}
 		var entry map[string]json.RawMessage

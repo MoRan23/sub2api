@@ -172,6 +172,38 @@ func buildOpenAIGroupModelsCatalog(group *Group, visible, accounts []Account, fi
 	}
 	officialByID := indexCodexCatalogModels(officialEntries)
 	publicByID := indexCodexCatalogModels(publicEntries)
+	// Keep complete fixed-source descriptors before their standard-list projection
+	// discards Codex fields. These are metadata only; membership is filtered below.
+	fixedByID := make(map[string]json.RawMessage)
+	fixedMetadata := make(map[string]map[string]json.RawMessage)
+	for _, result := range fixed {
+		if _, entries, sourceErr := modelCatalogEntries(result.response.upstreamSourceBody, "models"); sourceErr == nil {
+			for id, raw := range indexCodexCatalogModels(entries) {
+				if fixedByID[id] == nil && fixedMetadata[id] == nil {
+					fixedByID[id] = raw
+				}
+			}
+		} else if _, entries, listErr := modelCatalogEntries(result.response.upstreamSourceBody, "data"); listErr == nil {
+			for _, raw := range entries {
+				var fields map[string]json.RawMessage
+				if json.Unmarshal(raw, &fields) != nil {
+					continue
+				}
+				var id string
+				if json.Unmarshal(fields["id"], &id) != nil || strings.TrimSpace(id) == "" {
+					continue
+				}
+				// A standard ID-only entry provides membership, not a descriptor.
+				for _, key := range []string{"id", "object", "created", "owned_by", "slug"} {
+					delete(fields, key)
+				}
+				id = strings.TrimSpace(id)
+				if len(fields) != 0 && fixedMetadata[id] == nil && fixedByID[id] == nil {
+					fixedMetadata[id] = fields
+				}
+			}
+		}
+	}
 	ids := make([]string, 0, len(officialEntries))
 	standardEntries := make(map[string]json.RawMessage)
 	if fixed != nil {
@@ -253,18 +285,26 @@ func buildOpenAIGroupModelsCatalog(group *Group, visible, accounts []Account, fi
 	descriptors := make(map[string]json.RawMessage, len(ids))
 	for _, id := range ids {
 		target := openAIGroupCatalogMetadataTarget(group, accounts, id)
-		raw, overridden := codexUserModelDescriptorOverride(canonicalCyberDescriptorID(target))
-		if !overridden {
-			raw = lookupOfficialCodexCatalogModel(officialByID, target)
-			if raw == nil {
-				raw = lookupOfficialCodexCatalogModel(publicByID, target)
+		if fixedMetadata[id] != nil {
+			// Fill a partial native entry from its own official model, not the
+			// request's routing target. Explicit upstream fields are applied below.
+			target = id
+		}
+		raw, metadataID := selectOpenAIGroupCodexDescriptor(id, target, fixedByID, officialByID, publicByID)
+		if raw == nil && fixedMetadata[id] != nil {
+			// A native partial descriptor must not inherit mapped-target defaults
+			// even when both official catalogs are missing its public model.
+			raw, err = json.Marshal(newConfiguredCodexModelDescriptor(id))
+			if err != nil {
+				return nil, nil, err
 			}
+			metadataID = id
 		}
 		if raw == nil {
 			unknownIDs = append(unknownIDs, id)
 			continue
 		}
-		descriptors[id], err = projectOfficialCodexDescriptor(raw, id)
+		descriptors[id], err = projectOfficialCodexDescriptor(raw, id, metadataID, fixedMetadata[id])
 		if err != nil {
 			return nil, nil, err
 		}
@@ -279,7 +319,11 @@ func buildOpenAIGroupModelsCatalog(group *Group, visible, accounts []Account, fi
 			return nil, nil, decodeErr
 		}
 		for id, raw := range indexCodexCatalogModels(entries) {
-			descriptors[id], err = projectOfficialCodexDescriptor(raw, id)
+			metadataID := openAIGroupCatalogMetadataTarget(group, accounts, id)
+			if fixedMetadata[id] != nil {
+				metadataID = id
+			}
+			descriptors[id], err = projectOfficialCodexDescriptor(raw, id, metadataID, fixedMetadata[id])
 			if err != nil {
 				return nil, nil, err
 			}
@@ -363,7 +407,36 @@ func canonicalCyberDescriptorID(modelID string) string {
 	return canonical
 }
 
-func projectOfficialCodexDescriptor(raw json.RawMessage, publicID string) (json.RawMessage, error) {
+func selectOpenAIGroupCodexDescriptor(publicID, targetID string, fixed, official, public map[string]json.RawMessage) (json.RawMessage, string) {
+	// A routing mapping does not replace a known public model's description.
+	// Only aliases absent from the upstream catalog inherit their target's fields.
+	ids := [2]string{publicID, targetID}
+	for i, id := range ids {
+		if i != 0 && id == publicID {
+			continue
+		}
+		if raw, ok := codexUserModelDescriptorOverride(canonicalCyberDescriptorID(id)); ok {
+			return raw, id
+		}
+		if raw := lookupOfficialCodexCatalogModel(fixed, id); raw != nil {
+			return raw, id
+		}
+		if raw := lookupOfficialCodexCatalogModel(official, id); raw != nil {
+			return raw, id
+		}
+	}
+	for i, id := range ids {
+		if i != 0 && id == publicID {
+			continue
+		}
+		if raw := lookupOfficialCodexCatalogModel(public, id); raw != nil {
+			return raw, id
+		}
+	}
+	return nil, targetID
+}
+
+func projectOfficialCodexDescriptor(raw json.RawMessage, publicID, metadataID string, upstreamFields map[string]json.RawMessage) (json.RawMessage, error) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		return nil, err
@@ -371,9 +444,22 @@ func projectOfficialCodexDescriptor(raw json.RawMessage, publicID string) (json.
 	var sourceID string
 	_ = json.Unmarshal(fields["slug"], &sourceID)
 	fields["slug"], _ = json.Marshal(publicID)
-	fields["shell_type"] = json.RawMessage(`"unified_exec"`)
 	if sourceID != publicID {
 		fields["display_name"], _ = json.Marshal(publicID)
+	}
+	// Cyber attachments remain authoritative for their own public descriptors.
+	if _, overridden := codexUserModelDescriptorOverride(canonicalCyberDescriptorID(publicID)); !overridden && len(upstreamFields) > 0 {
+		for key, value := range upstreamFields {
+			fields[key] = value
+		}
+		sourceID = publicID
+	}
+	fields["shell_type"] = json.RawMessage(`"unified_exec"`)
+	// Add Fast to the client-facing Blue descriptor, including public aliases.
+	// Keep the raw upstream catalog unchanged for capability checks.
+	if sourceID == "gpt-daybreak-blue-latest" || publicID == "gpt-daybreak-blue-latest" || metadataID == "gpt-daybreak-blue-latest" {
+		fields["additional_speed_tiers"] = json.RawMessage(`["fast"]`)
+		fields["service_tiers"] = json.RawMessage(`[{"id":"priority","name":"Fast","description":"1.5x speed, increased usage"}]`)
 	}
 	return json.Marshal(fields)
 }
