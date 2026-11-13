@@ -1,7 +1,7 @@
 <template>
   <div class="space-y-4">
     <AttributionProbeModelField :model-value="modelValue.model" :group-id="groupId" @update:model-value="set('model', $event)" />
-    <AttributionExpectedModels :model-value="modelValue.expected_models || []" :candidates="candidates" @update:model-value="set('expected_models', $event || [])" />
+    <AttributionExpectedModels :model-value="modelValue.expected_models || []" :candidates="candidates" :candidates-loading="candidatesLoading" :candidates-error="candidatesError" @retry="emit('retry')" @update:model-value="set('expected_models', $event || [])" />
     <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('attribution.accountActions.modeHelp') }}</p>
     <div class="grid gap-4 xl:grid-cols-2">
       <AttributionTierFields ref="highFields" :model-value="modelValue" tier="high" :groups="groups" @update:model-value="emit('update:modelValue', $event)" />
@@ -17,8 +17,8 @@ import AttributionExpectedModels from './AttributionExpectedModels.vue'
 import AttributionProbeModelField from './AttributionProbeModelField.vue'
 import type { AttributionPolicy } from '@/api/admin/modelAttribution'
 import type { AdminGroup } from '@/types'
-const props = defineProps<{ modelValue: AttributionPolicy; candidates?: string[]; groupId?: number; groups?: AdminGroup[] }>()
-const emit = defineEmits<{ 'update:modelValue': [value: AttributionPolicy] }>()
+const props = defineProps<{ modelValue: AttributionPolicy; candidates?: string[]; groupId?: number; groups?: AdminGroup[]; candidatesLoading?: boolean; candidatesError?: boolean }>()
+const emit = defineEmits<{ 'update:modelValue': [value: AttributionPolicy]; retry: [] }>()
 const { t } = useI18n()
 const highFields = ref<InstanceType<typeof AttributionTierFields>>()
 const lowFields = ref<InstanceType<typeof AttributionTierFields>>()

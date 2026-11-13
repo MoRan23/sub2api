@@ -9,12 +9,12 @@
           <section class="space-y-4 rounded-xl border border-gray-200 bg-white p-5 dark:border-dark-600 dark:bg-dark-800">
             <div class="flex flex-wrap items-center justify-between gap-3"><h2 class="font-semibold">{{ t('attribution.global') }}</h2><label class="flex items-center gap-2 text-sm"><input v-model="config.enabled" type="checkbox" data-testid="attribution-enable" />{{ t('attribution.enabled') }}</label></div>
             <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('attribution.notice') }}</p>
-            <label class="block text-sm font-medium">{{ t('attribution.service') }}<input v-model="config.base_url" type="url" class="input mt-2 w-full" placeholder="http://lm-detector:8080" data-testid="attribution-url" @input="clearConnection" /></label>
-            <button type="button" class="btn btn-secondary btn-sm" :disabled="connecting || !config.base_url" @click="connect">{{ connecting ? t('attribution.loading') : t('attribution.connect') }}</button>
+            <label class="block text-sm font-medium">{{ t('attribution.service') }}<input v-model="config.base_url" type="url" class="input mt-2 w-full" placeholder="http://lm-detector:8080" data-testid="attribution-url" /></label>
+            <button type="button" class="btn btn-secondary btn-sm" :disabled="connecting || !validConnectionURL" data-testid="attribution-connect" @click="connect">{{ connecting ? t('attribution.loading') : t('attribution.connect') }}</button>
             <p v-if="candidates.length" class="break-all text-xs text-gray-500">{{ t('attribution.candidates') }}: {{ candidates.join(', ') }}</p>
-            <p class="text-xs" data-testid="detector-connection">{{ t(connected ? 'attribution.connected' : 'attribution.connectionUnchecked') }}</p>
+            <p class="text-xs" data-testid="detector-connection" aria-live="polite">{{ t(connecting ? 'attribution.loading' : connectionError ? 'attribution.expectedModelsUnavailable' : connected ? 'attribution.connected' : 'attribution.connectionUnchecked') }}</p>
             <p v-if="config.detector" class="break-all text-xs text-gray-500" data-testid="detector-version">{{ t('attribution.detectorObservedVersion') }}: {{ config.detector.revision.slice(0, 12) }} · {{ config.detector.bank_built_at }}</p>
-            <AttributionPolicyFields ref="defaultFields" v-model="config.default" :candidates="candidates" :groups="groups" />
+            <AttributionPolicyFields ref="defaultFields" v-model="config.default" :candidates="candidates" :groups="groups" :candidates-loading="connecting" :candidates-error="connectionError" @retry="connect" />
             <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('attribution.mappingHelp') }}</p>
             <div class="space-y-3 border-t border-gray-200 pt-4 dark:border-dark-600" data-testid="global-group-priority">
               <h3 class="text-sm font-medium">{{ t('attribution.priority.title') }}</h3>
@@ -36,7 +36,7 @@
             <label class="flex items-center gap-2 text-sm"><input v-model="config.new_account_tests.attribution" type="checkbox" data-testid="initial-attribution" />{{ t('attribution.newAccount.attribution') }}</label>
             <p v-if="config.new_account_tests.attribution && !config.enabled" class="text-xs text-amber-700 dark:text-amber-300">{{ t('attribution.newAccount.requiresEnabled') }}</p>
             <AttributionProbeModelField v-model="config.new_account_tests.attribution_model" oauth-only :label="t('attribution.newAccount.attributionModel')" input-test-id="initial-attribution-model" />
-            <AttributionExpectedModels v-model="config.new_account_tests.attribution_expected_models" :candidates="candidates" allow-inheritance data-testid="initial-expected-models" />
+            <AttributionExpectedModels v-model="config.new_account_tests.attribution_expected_models" :candidates="candidates" :candidates-loading="connecting" :candidates-error="connectionError" allow-inheritance data-testid="initial-expected-models" @retry="connect" />
             <label class="flex items-center gap-2 text-sm"><input v-model="config.new_account_tests.pelican" type="checkbox" data-testid="initial-pelican" />{{ t('attribution.newAccount.pelican') }}</label>
             <label class="block text-sm font-medium">{{ t('attribution.newAccount.pelicanModel') }}<input v-model="config.new_account_tests.pelican_model" class="input mt-2 w-full" placeholder="gpt-6.1-sol" maxlength="200" data-testid="initial-pelican-model" /></label>
             <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('attribution.newAccount.modelHelp') }}</p>
@@ -47,7 +47,7 @@
             <div v-for="override in config.groups" :key="override.group_id" class="space-y-4 rounded-lg border border-gray-200 p-4 dark:border-dark-600">
               <div class="flex flex-wrap items-center justify-between gap-3"><h3 class="text-sm font-medium">{{ groups.find(g => g.id === override.group_id)?.name || `#${override.group_id}` }}</h3><button type="button" class="text-xs text-red-600 dark:text-red-400" @click="config.groups = config.groups.filter(g => g !== override)">{{ t('attribution.remove') }}</button></div>
               <label class="flex items-center gap-2 text-sm"><input v-model="override.enabled" type="checkbox" />{{ override.enabled ? t('attribution.independent') : t('attribution.inherit') }}</label>
-              <AttributionPolicyFields v-if="override.enabled" ref="groupFields" :model-value="override" :candidates="candidates" :group-id="override.group_id" :groups="groups" @update:model-value="Object.assign(override, $event)" />
+              <AttributionPolicyFields v-if="override.enabled" ref="groupFields" :model-value="override" :candidates="candidates" :group-id="override.group_id" :groups="groups" :candidates-loading="connecting" :candidates-error="connectionError" @retry="connect" @update:model-value="Object.assign(override, $event)" />
             </div>
           </section>
           <div class="flex flex-wrap items-center gap-3"><button type="submit" class="btn btn-primary" data-testid="attribution-save">{{ saving ? t('attribution.loading') : t('attribution.save') }}</button><button type="button" class="btn btn-secondary" @click="load">{{ t('attribution.reload') }}</button><span class="text-xs text-gray-500">{{ t('attribution.version') }} {{ config.version }}</span></div>
@@ -58,7 +58,7 @@
   </AppLayout>
 </template>
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue'
+import { computed, onBeforeUnmount, onMounted, ref, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import AttributionPolicyFields from '@/components/admin/account/AttributionPolicyFields.vue'
@@ -80,11 +80,31 @@ const priorityGroup = ref(0)
 const saving = ref(false)
 const connecting = ref(false)
 const connected = ref(false)
+const connectionError = ref(false)
+const connectionURL = computed(() => config.value?.base_url.trim() || '')
+const validConnectionURL = computed(() => {
+  try { return ['http:', 'https:'].includes(new URL(connectionURL.value).protocol) }
+  catch { return false }
+})
+let disposed = false
+let loadGeneration = 0
+let loadController: AbortController | undefined
 let connectionGeneration = 0
-function clearConnection() {
-  connectionGeneration++; connected.value = false; candidates.value = []
-  if (config.value) config.value.detector = undefined
+let connectionController: AbortController | undefined
+function cancelConnection() {
+  connectionGeneration++
+  connectionController?.abort()
+  connectionController = undefined
+  connecting.value = false
 }
+// Changing the URL invalidates evidence, but does not query while the user types.
+watch(connectionURL, () => {
+  cancelConnection()
+  connected.value = false
+  connectionError.value = false
+  candidates.value = []
+  if (config.value) config.value.detector = undefined
+}, { flush: 'sync' })
 const error = ref('')
 const message = ref('')
 const availableGroups = computed(() => groups.value.filter(g => !config.value?.groups.some(o => o.group_id === g.id)))
@@ -101,10 +121,23 @@ function movePriority(index: number, delta: number) {
   ids.splice(index + delta, 0, id)
 }
 async function load() {
-  connectionGeneration++; connected.value = false; candidates.value = []
+  const request = ++loadGeneration
+  loadController?.abort()
+  const controller = new AbortController()
+  loadController = controller
+  cancelConnection()
   error.value = ''; message.value = ''
-  try { const [c, g] = await Promise.all([attributionAPI.config(), getAllIncludingInactive()]); config.value = { ...c, group_priority: c.group_priority || [] }; groups.value = g }
-  catch { error.value = t('attribution.error') }
+  try {
+    const [c, g] = await Promise.all([attributionAPI.config(controller.signal), getAllIncludingInactive()])
+    if (disposed || request !== loadGeneration) return
+    config.value = { ...c, group_priority: c.group_priority || [] }
+    // Keep saved metadata available even if the optional live check fails.
+    config.value.detector = c.detector
+    groups.value = g
+    void connect()
+  }
+  catch { if (!disposed && request === loadGeneration) error.value = t('attribution.error') }
+  finally { if (request === loadGeneration) loadController = undefined }
 }
 function addGroup() {
   if (!config.value || !newGroup.value) return
@@ -140,18 +173,27 @@ async function save() {
   finally { saving.value = false }
 }
 async function connect() {
-  if (!config.value) return
+  if (disposed || !config.value || !validConnectionURL.value || connecting.value) return
   const request = ++connectionGeneration
-  const base = config.value.base_url
-  connecting.value = true; error.value = ''; candidates.value = []
+  const base = connectionURL.value
+  const controller = new AbortController()
+  connectionController = controller
+  const current = () => !disposed && request === connectionGeneration && base === connectionURL.value
+  connecting.value = true; connectionError.value = false
   connected.value = false
   try {
-    const result = await attributionAPI.connection(base)
-    if (request !== connectionGeneration || base !== config.value?.base_url) return
+    const result = await attributionAPI.connection(base, controller.signal)
+    if (!current() || !config.value) return
     candidates.value = result.models; config.value.detector = result.detector; connected.value = true
   }
-  catch { if (request === connectionGeneration) { config.value.detector = undefined; error.value = t('attribution.reasons.detector_unavailable') } }
-  finally { connecting.value = false }
+  catch { if (current()) connectionError.value = true }
+  finally { if (current()) { connecting.value = false; connectionController = undefined } }
 }
 onMounted(load)
+onBeforeUnmount(() => {
+  disposed = true
+  loadGeneration++
+  loadController?.abort()
+  cancelConnection()
+})
 </script>

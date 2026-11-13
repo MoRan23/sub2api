@@ -55,10 +55,10 @@ export interface AttributionSummary { latest?: AttributionJob; active?: Attribut
 export interface AttributionPage { items: AttributionJob[]; total: number; page: number; page_size: number; queued: number; running: number; retry_wait?: number }
 const root = '/admin/model-attribution'
 export const attributionAPI = {
-  async config(): Promise<AttributionConfig> { return (await apiClient.get<AttributionConfig>(`${root}/config`)).data },
+  async config(signal?: AbortSignal): Promise<AttributionConfig> { return (await apiClient.get<AttributionConfig>(`${root}/config`, signal ? { signal } : undefined)).data },
   async save(config: AttributionConfig): Promise<AttributionConfig> { return (await apiClient.put<AttributionConfig>(`${root}/config`, config)).data },
   async models(base_url: string): Promise<string[]> { return (await apiClient.post<{ models: string[] }>(`${root}/models`, { base_url }, { timeout: 25000 })).data.models },
-  async connection(base_url: string): Promise<AttributionConnection> { return (await apiClient.post<AttributionConnection>(`${root}/models`, { base_url }, { timeout: 25000 })).data },
+  async connection(base_url: string, signal?: AbortSignal): Promise<AttributionConnection> { return (await apiClient.post<AttributionConnection>(`${root}/models`, { base_url }, { timeout: 25000, ...(signal ? { signal } : {}) })).data },
   async probeModels(account_ids: number[], signal?: AbortSignal): Promise<AttributionProbeModels> { return (await apiClient.post<AttributionProbeModels>(`${root}/probe-models`, { account_ids }, { timeout: 30000, signal })).data },
   async create(account_ids: number[], model?: string, expected_models?: string[] | null): Promise<AttributionJob[]> { return (await apiClient.post<{ items: AttributionJob[] }>(`${root}/jobs`, { account_ids, ...(model ? { model } : {}), ...(expected_models != null ? { expected_models } : {}) })).data.items },
   async history(account_id?: number, page = 1): Promise<AttributionPage> { return (await apiClient.get<AttributionPage>(`${root}/jobs`, { params: { account_id, page, page_size: 20 } })).data },

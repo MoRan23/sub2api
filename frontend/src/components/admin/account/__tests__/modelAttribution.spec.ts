@@ -1,6 +1,7 @@
 import { flushPromises, mount } from '@vue/test-utils'
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { defineComponent } from 'vue'
+import { createPinia } from 'pinia'
 import Select from '@/components/common/Select.vue'
 import AccountAttributionCell from '../AccountAttributionCell.vue'
 import AttributionHistory from '../AttributionHistory.vue'
@@ -27,6 +28,12 @@ function job(id = 1, status: AttributionJob['status'] = 'passed'): AttributionJo
   return { id, status, account_id: 42, account_name: 'Synthetic account', source: 'manual', snapshot: { config_version: 2, group_id: 0, policy: structuredClone(policy) }, result: { duration_ms: 1200, action: 'high', analysis: { prediction: 'gpt-6-astra', probability: 0.8, used_outputs: 3, results: [{ model: 'gpt-6-astra', probability: 0.8 }, { model: 'gpt-6-luna', probability: 0.2 }] } }, created_at: '2026-10-01T00:00:00Z', ...(status === 'running' ? {} : { finished_at: '2026-10-01T00:00:01Z' }) }
 }
 function page(items: AttributionJob[]): AttributionPage { return { items, total: items.length, page: 1, page_size: 20, queued: 0, running: 0 } }
+function deferred<T>() {
+  let resolve!: (value: T) => void
+  let reject!: (reason: unknown) => void
+  const promise = new Promise<T>((res, rej) => { resolve = res; reject = rej })
+  return { promise, resolve, reject }
+}
 const stubs = {
   AppLayout: defineComponent({ template: '<main><slot /></main>' }),
   ModelWhitelistSelector: defineComponent({ props: ['modelValue'], template: '<div data-testid="whitelist">{{ modelValue }}</div>' }),
@@ -676,7 +683,7 @@ describe('attribution configuration', () => {
     api.connection.mockResolvedValue({ models: ['gpt-6-astra', 'gpt-6.1-sol'], detector })
     api.save.mockImplementation(async (value: AttributionConfig) => ({ ...value, version: 2 }))
     const wrapper = mount(ModelAttributionView, { global: { stubs } }); await flushPromises()
-    await wrapper.findAll('button').find(b => b.text() === 'attribution.connect')!.trigger('click'); await flushPromises()
+    expect(api.connection).toHaveBeenCalledTimes(1)
     const policies = wrapper.findAllComponents(AttributionPolicyFields)
     expect(policies[0].props('candidates')).toEqual(['gpt-6-astra', 'gpt-6.1-sol'])
     policies[0].findComponent(AttributionExpectedModels).vm.$emit('update:modelValue', ['gpt-6-astra', 'gpt-6.1-sol'])
@@ -816,7 +823,7 @@ describe('attribution configuration', () => {
     expect(wrapper.get('[data-testid="detector-version"]').text()).toContain('attribution.detectorObservedVersion')
     await wrapper.get('form').trigger('submit'); await flushPromises()
     expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ enabled: true, detector }))
-    expect(api.connection).not.toHaveBeenCalled()
+    expect(api.connection).toHaveBeenCalledTimes(1)
     expect(wrapper.get('[data-testid="detector-version"]').text()).toContain('e9bd7c545bf7')
     expect(wrapper.text()).toContain('attribution.saved')
     wrapper.unmount()
@@ -826,10 +833,9 @@ describe('attribution configuration', () => {
     api.connection.mockRejectedValueOnce(new Error('temporarily unavailable'))
     api.save.mockImplementation(async (c: AttributionConfig) => ({ ...c, version: 2 }))
     const wrapper = mount(ModelAttributionView, { global: { stubs } }); await flushPromises()
-    await wrapper.findAll('button').find(b => b.text() === 'attribution.connect')!.trigger('click'); await flushPromises()
-    expect(wrapper.get('[role="alert"]').text()).toBe('attribution.reasons.detector_unavailable')
+    expect(wrapper.get('[data-testid="detector-connection"]').text()).toBe('attribution.expectedModelsUnavailable')
     await wrapper.get('form').trigger('submit'); await flushPromises()
-    expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ enabled: true, detector: undefined }))
+    expect(api.save).toHaveBeenCalledWith(expect.objectContaining({ enabled: true }))
     expect(wrapper.find('[role="alert"]').exists()).toBe(false)
     expect(wrapper.text()).toContain('attribution.saved')
     wrapper.unmount()
@@ -853,5 +859,139 @@ describe('attribution configuration', () => {
     expect(wrapper.find('[data-testid="detector-version"]').exists()).toBe(false)
     expect(wrapper.get('[data-testid="detector-connection"]').text()).toBe('attribution.connectionUnchecked')
     wrapper.unmount()
+  })
+  it('automatically fills real expected-model selectors from one configured detector check', async () => {
+    const c = config()
+    c.base_url = 'http://lm-detector:8080'
+    c.default.expected_models = ['previous-model']
+    c.groups = [{ ...structuredClone(policy), group_id: 10, enabled: true, expected_models: ['group-selected'] }]
+    c.new_account_tests.attribution_expected_models = ['initial-selected']
+    api.config.mockResolvedValue(c)
+    api.connection.mockResolvedValue({ models: ['candidate-a', 'candidate-b'], detector })
+    const wrapper = mount(ModelAttributionView, { global: { plugins: [createPinia()], stubs: { ...stubs, ModelWhitelistSelector: false } } })
+    await flushPromises()
+    expect(api.connection).toHaveBeenCalledTimes(1)
+    expect(api.connection).toHaveBeenCalledWith(c.base_url, expect.any(AbortSignal))
+    expect((wrapper.get('[data-testid="attribution-enable"]').element as HTMLInputElement).checked).toBe(false)
+    const expected = wrapper.findAllComponents(AttributionExpectedModels)
+    expect(expected).toHaveLength(3)
+    for (const field of expected) {
+      const selector = field.getComponent(ModelWhitelistSelector)
+      await selector.get('.cursor-pointer').trigger('click')
+      expect(selector.findAll('[data-testid="model-option"] .truncate').map(option => option.text())).toEqual(['candidate-a', 'candidate-b'])
+    }
+    expect(expected.map(field => field.props('modelValue'))).toEqual([['previous-model'], ['initial-selected'], ['group-selected']])
+    expect(api.probeModels).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+  it.each(['', 'not-a-url', 'ftp://lm-detector:8080'])('does not query an unconfigured or invalid detector URL: %s', async base_url => {
+    api.config.mockResolvedValue({ ...config(), base_url })
+    const wrapper = mount(ModelAttributionView, { global: { stubs } })
+    await flushPromises()
+    expect(api.connection).not.toHaveBeenCalled()
+    expect(wrapper.get('[data-testid="attribution-connect"]').attributes('disabled')).toBeDefined()
+    wrapper.unmount()
+  })
+  it('keeps candidates, selections and edits when refreshing the same detector fails, and supports retry', async () => {
+    const c = { ...config(), base_url: 'http://lm-detector:8080' }
+    c.default.expected_models = ['saved-model']
+    api.config.mockResolvedValue(c)
+    const wrapper = mount(ModelAttributionView, { global: { stubs } })
+    await flushPromises()
+    const fields = wrapper.getComponent(AttributionPolicyFields)
+    fields.getComponent(AttributionExpectedModels).vm.$emit('update:modelValue', ['edited-model'])
+    await flushPromises()
+    await fields.getComponent(AttributionProbeModelField).get('input').setValue('edited-probe')
+    api.connection.mockRejectedValueOnce(new Error('unavailable'))
+    await wrapper.get('[data-testid="attribution-connect"]').trigger('click')
+    await flushPromises()
+    expect(fields.props('candidates')).toEqual(['gpt-6-astra'])
+    expect(fields.props('modelValue')).toEqual(expect.objectContaining({ model: 'edited-probe', expected_models: ['edited-model'] }))
+    expect(wrapper.get('[data-testid="detector-version"]').text()).toContain(detector.revision.slice(0, 12))
+    expect(fields.get('[data-testid="expected-models-error"]').text()).toContain('attribution.expectedModelsUnavailable')
+    api.connection.mockResolvedValueOnce({ models: ['new-model'], detector })
+    await fields.get('[data-testid="expected-models-error"] button').trigger('click')
+    await flushPromises()
+    expect(fields.props('candidates')).toEqual(['new-model'])
+    expect(fields.props('modelValue').expected_models).toEqual(['edited-model'])
+    expect(fields.find('[data-testid="expected-models-error"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+  it.each(['resolve', 'reject'] as const)('isolates a stale detector %s and finally from a new URL request', async outcome => {
+    const first = deferred<{ models: string[]; detector: typeof detector }>()
+    const second = deferred<{ models: string[]; detector: typeof detector }>()
+    api.config.mockResolvedValue({ ...config(), base_url: 'http://first:8080' })
+    api.connection.mockReturnValueOnce(first.promise).mockReturnValueOnce(second.promise)
+    const wrapper = mount(ModelAttributionView, { global: { stubs } })
+    await flushPromises()
+    const firstSignal = api.connection.mock.calls[0][1] as AbortSignal
+    // A second invocation while automatic loading is pending shares that request.
+    wrapper.getComponent(AttributionPolicyFields).vm.$emit('retry')
+    await flushPromises()
+    expect(api.connection).toHaveBeenCalledTimes(1)
+    await wrapper.get('[data-testid="attribution-url"]').setValue('http://second:8080')
+    expect(firstSignal.aborted).toBe(true)
+    expect(api.connection).toHaveBeenCalledTimes(1)
+    expect(wrapper.getComponent(AttributionPolicyFields).props('candidates')).toEqual([])
+    await wrapper.get('[data-testid="attribution-connect"]').trigger('click')
+    if (outcome === 'resolve') first.resolve({ models: ['stale-model'], detector })
+    else first.reject(new Error('stale failure'))
+    await flushPromises()
+    expect(wrapper.get('[data-testid="attribution-connect"]').attributes('disabled')).toBeDefined()
+    expect(wrapper.get('[data-testid="detector-connection"]').text()).toBe('attribution.loading')
+    expect(wrapper.getComponent(AttributionPolicyFields).props('candidates')).toEqual([])
+    const latest = { ...detector, revision: 'new-detector-version' }
+    second.resolve({ models: ['current-model'], detector: latest })
+    await flushPromises()
+    expect(wrapper.getComponent(AttributionPolicyFields).props('candidates')).toEqual(['current-model'])
+    expect(wrapper.get('[data-testid="detector-version"]').text()).toContain(latest.revision.slice(0, 12))
+    expect(wrapper.get('[data-testid="attribution-connect"]').attributes('disabled')).toBeUndefined()
+    wrapper.unmount()
+  })
+  it.each(['resolve', 'reject'] as const)('ignores a superseded configuration %s before starting the automatic check', async outcome => {
+    const old = deferred<AttributionConfig>()
+    const current = deferred<AttributionConfig>()
+    const wrapper = mount(ModelAttributionView, { global: { stubs } })
+    await flushPromises()
+    api.config.mockReturnValueOnce(old.promise).mockReturnValueOnce(current.promise)
+    const reload = wrapper.findAll('button').find(button => button.text() === 'attribution.reload')!
+    await reload.trigger('click')
+    const oldSignal = api.config.mock.calls[1][0] as AbortSignal
+    await reload.trigger('click')
+    expect(oldSignal.aborted).toBe(true)
+    current.resolve({ ...config(), base_url: 'http://current:8080', version: 3 })
+    await flushPromises()
+    if (outcome === 'resolve') old.resolve({ ...config(), base_url: 'http://stale:8080', version: 2 })
+    else old.reject(new Error('stale configuration failure'))
+    await flushPromises()
+    expect(api.connection).toHaveBeenCalledTimes(1)
+    expect(api.connection).toHaveBeenCalledWith('http://current:8080', expect.any(AbortSignal))
+    expect((wrapper.get('[data-testid="attribution-url"]').element as HTMLInputElement).value).toBe('http://current:8080')
+    expect(wrapper.find('[role="alert"]').exists()).toBe(false)
+    wrapper.unmount()
+  })
+  it('aborts a pending configuration load when leaving the page without starting a late check', async () => {
+    const pending = deferred<AttributionConfig>()
+    api.config.mockReturnValueOnce(pending.promise)
+    const wrapper = mount(ModelAttributionView, { global: { stubs } })
+    const signal = api.config.mock.calls[0][0] as AbortSignal
+    wrapper.unmount()
+    expect(signal.aborted).toBe(true)
+    pending.resolve({ ...config(), base_url: 'http://lm-detector:8080' })
+    await flushPromises()
+    expect(api.connection).not.toHaveBeenCalled()
+  })
+  it('aborts the automatic check on unmount and ignores its late failure', async () => {
+    const pending = deferred<never>()
+    api.config.mockResolvedValue({ ...config(), base_url: 'http://lm-detector:8080' })
+    api.connection.mockReturnValueOnce(pending.promise)
+    const wrapper = mount(ModelAttributionView, { global: { stubs } })
+    await flushPromises()
+    const signal = api.connection.mock.calls[0][1] as AbortSignal
+    wrapper.unmount()
+    expect(signal.aborted).toBe(true)
+    pending.reject(new Error('late failure'))
+    await flushPromises()
+    expect(api.connection).toHaveBeenCalledTimes(1)
   })
 })

@@ -1,9 +1,20 @@
 import { describe, expect, it, vi } from 'vitest'
 const post = vi.hoisted(() => vi.fn().mockResolvedValue({ data: { items: [] } }))
-vi.mock('@/api/client', () => ({ apiClient: { post } }))
+const get = vi.hoisted(() => vi.fn())
+vi.mock('@/api/client', () => ({ apiClient: { post, get } }))
 import { attributionAPI } from '../modelAttribution'
 
 describe('attribution expected-model request', () => {
+  it('passes cancellation to configuration and detector catalog requests', async () => {
+    const signal = new AbortController().signal
+    get.mockResolvedValueOnce({ data: { base_url: 'http://detector:8080' } })
+    await attributionAPI.config(signal)
+    expect(get).toHaveBeenLastCalledWith('/admin/model-attribution/config', { signal })
+    const result = { models: ['candidate'], detector: { revision: 'current' } }
+    post.mockResolvedValueOnce({ data: result })
+    expect(await attributionAPI.connection('http://detector:8080', signal)).toEqual(result)
+    expect(post).toHaveBeenLastCalledWith('/admin/model-attribution/models', { base_url: 'http://detector:8080' }, { timeout: 25000, signal })
+  })
   it('submits a spaced probe model as one unchanged JSON field', async () => {
     await attributionAPI.create([1], '5.6 Cyber')
     expect(post).toHaveBeenLastCalledWith('/admin/model-attribution/jobs', { account_ids: [1], model: '5.6 Cyber' })
