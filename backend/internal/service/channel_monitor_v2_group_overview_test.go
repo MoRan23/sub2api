@@ -159,7 +159,7 @@ func TestChannelMonitorV2OverviewHistoricalCoverageAndRanges(t *testing.T) {
 			svc := NewChannelMonitorV2Service(r)
 			f, _ := svc.ParseFilter(rangeName, nil, nil, nil)
 			r.matrix.Coverage.AvailabilityReady = false
-			r.matrix.Coverage.AvailabilityVersion = ChannelMonitorV2AggregationVersion
+			r.matrix.Coverage.AvailabilityVersion = ChannelMonitorV2AvailabilitySchemaVersion
 			r.matrix.Coverage.AvailabilityStart = f.Start.Add(f.Bucket)
 			out, err := svc.GetGroupOverview(context.Background(), f, []Group{{ID: 1, Status: StatusActive, Platform: PlatformOpenAI}}, nil)
 			require.NoError(t, err)

@@ -71,9 +71,8 @@ func TestChannelMonitorV2LatencyPrecisionBoundariesAndRollupsIntegration(t *test
 		want[expectedBucket{model, "duration", tc.duration}] = 1
 	}
 	for run := 0; run < 2; run++ {
-		// Include one minute of the following day: a range wholly inside one
-		// daily bucket deliberately leaves that coarse rollup untouched.
-		require.NoError(t, repo.RecomputeRange(context.Background(), start, start.Add(24*time.Hour+time.Minute)))
+		// A complete aligned day rebuilds every rollup tier, including 1d.
+		require.NoError(t, repo.RecomputeRange(context.Background(), start, start.Add(24*time.Hour)))
 		for _, seconds := range []int{0, 300, 3600, 43200, 86400} {
 			table := "channel_monitor_v2_latency_histograms_1m"
 			where := ""

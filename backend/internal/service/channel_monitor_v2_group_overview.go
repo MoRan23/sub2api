@@ -177,7 +177,7 @@ func (s *ChannelMonitorV2Service) GetGroupOverview(ctx context.Context, filter C
 		item.Buckets = make([]ChannelMonitorV2OverviewBucket, 0, int(filter.End.Sub(filter.Start)/filter.Bucket))
 		for at := filter.Start; at.Before(filter.End); at = at.Add(filter.Bucket) {
 			m := bucketMetrics[at.Unix()]
-			ready := out.Coverage.AvailabilityReady || (out.Coverage.AvailabilityVersion >= ChannelMonitorV2AggregationVersion && !out.Coverage.AvailabilityStart.IsZero() && !at.Before(out.Coverage.AvailabilityStart))
+			ready := out.Coverage.AvailabilityReady || (out.Coverage.AvailabilityVersion >= ChannelMonitorV2AvailabilitySchemaVersion && !out.Coverage.AvailabilityStart.IsZero() && !at.Before(out.Coverage.AvailabilityStart))
 			bucket := ChannelMonitorV2OverviewBucket{BucketStart: at, State: channelMonitorV2OverviewState(m, monitored, ready, cfg.HealthThresholds)}
 			if monitored && ready {
 				bucket.AvailabilityRate = m.AvailabilityRate

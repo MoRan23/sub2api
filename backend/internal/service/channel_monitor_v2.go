@@ -12,8 +12,11 @@ import (
 const (
 	ChannelMonitorV2OtherModel      = "__other__"
 	ChannelMonitorV2TaxonomyVersion = 1
-	// AggregationVersion separates legacy paid-only facts from final-outcome facts.
-	ChannelMonitorV2AggregationVersion = 2
+	// Version 3 replays retained history with the finer TTFT histogram buckets.
+	ChannelMonitorV2AggregationVersion = 3
+	// Availability did not change with TTFT precision; version 2 facts and
+	// coverage stay usable while the precision backfill advances independently.
+	ChannelMonitorV2AvailabilitySchemaVersion = 2
 )
 
 var (

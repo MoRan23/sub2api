@@ -54,7 +54,9 @@ OpenAI／Composite 分组卡片展示当前生效的探针模型：启用分组�
 
 回退应用时可保留新增字段和索引。统计口径升级期间应统一运行新版本，避免旧聚合进程重新写入旧口径；若曾回退并运行旧聚合进程，再升级后应重新执行对应统计版本回填。
 
-首 Token 分桶细化无需迁移或重置可用率统计版本。正常实时聚合会重算最近 10 分钟，新请求及已重算区间使用细桶；未重算的旧历史仍保留原桶精度，混合窗口继续按样本上界统计。更长历史按现有回填及保留规则逐步更新，不为这次精度调整额外启动全量回填。回退旧程序可读取细桶，后续重算区间会恢复旧精度。
+首 Token 分桶细化使用聚合版本 3，独立保留可用率口径版本 2，无需数据库迁移。升级后后台先重算最近 2 小时，覆盖默认 90 分钟窗口，再按已有自适应批次向更早历史推进；每轮仍优先刷新最近 10 分钟。回填进度与聚合结果一起提交，重启后继续，不在页面请求中扫描原始日志。版本 2 已完成的可用率覆盖保持有效；尚未重算的较长窗口仍可能混有旧的粗桶，随回填逐步更新。
+
+升级时统一切换聚合进程，避免旧进程再次写入版本 2 的粗桶。回退旧程序可读取细桶；旧程序重新聚合后会写回旧版本，下次升级由版本检查重新启动精度回填。
 
 此次仅细化 TTFT，总耗时分桶不变。每个维度最多 13,682 个 TTFT 上界，数据库只存非空桶，不预分配全部桶；页面仍读取已有汇总表，查询次数不变，非空桶行数和汇总读取量会随样本分布增加。超过 600 秒仍沿用原溢出桶 `2147483647ms`，不赋予该桶细精度。
 
@@ -84,7 +86,7 @@ Each aggregation cycle updates recent requests first. Historical backfill failur
 
 Forward migrations extend aggregation and bounded history lookup. Versioned backfill runs in bounded background batches within available source-log coverage, never within a page request. Deploy aggregators consistently during the statistics transition. Additive database fields and indexes may remain on application rollback; running an old aggregator requires a statistics rebuild when upgrading again.
 
-The finer TTFT buckets require no migration or availability-version reset. Normal live aggregation rewrites the latest ten minutes; new and recomputed intervals gain finer precision while older intervals keep their previous bounds. Mixed windows remain upper-bound estimates, with existing backfill and retention rules handling older data. No additional full-history rebuild is started. An older application can read the fine buckets and returns to coarse precision where it recomputes data. Duration buckets remain unchanged. TTFT has at most 13,682 bounds per dimension, storing only occupied buckets without preallocating the full set; query count stays unchanged, although histogram rows and rollup reads may increase. Values above 600s retain the previous overflow bound of 2147483647ms without a finer-precision guarantee.
+Finer TTFT uses aggregation version 3 while keeping availability semantics at version 2; no database migration is required. On upgrade, the background worker first rebuilds the latest two hours to cover the default 90-minute view, then walks older source-covered history in the existing adaptive batches. Every subsequent cycle still prioritizes the latest ten minutes. Cursor and facts commit together and resume after restart; page requests never scan source logs to rebuild history. Existing version-2 availability coverage stays usable, while longer windows may temporarily contain coarse historical bounds until their batches finish. Switch all aggregator processes together; an old application can read fine bounds but writes its older version when recomputing, triggering a fresh precision backfill on the next upgrade. Duration buckets remain unchanged. TTFT has at most 13,682 bounds per dimension, storing only occupied buckets without preallocating the full set; query count stays unchanged, although histogram rows and rollup reads may increase. Values above 600s retain the previous overflow bound of 2147483647ms without a finer-precision guarantee.
 
 The attribution-summary update requires no migration and reuses index 286. One batch query reads distinct accounts and generates twenty states per group; a second bounded batch preserves legacy `latest/recent` fields. New clients use `enabled/probe_model/as_of/summary_state/history`. The configured model is projected as a scalar in the existing batch query, with no per-group query. Retention keeps the latest 100 jobs plus effective results from the last 215 minutes and each API Key's last effective result before that window. Already-pruned history is not reconstructed; rolling back to an older cleaner can reduce available history on a later upgrade.
 
@@ -209,3 +211,26 @@ pnpm exec eslint src/features/channel-monitor-v2/GroupOverviewCard.vue src/featu
 ```
 
 The refinement retains source milliseconds through ten seconds and uses the documented coarser steps above that range. Cards and detailed views now display seconds with three decimal places. Targeted Go unit/race checks, backend compilation, eight isolated PostgreSQL tests, 56 related frontend tests, three i18n checks, type checking, production build and targeted lint passed. Compared with the preceding implementation, the same local fixture produced 10.2% more occupied buckets and 6.2% higher mean aggregate-query time (69.248ms to 73.536ms); these measurements exclude index writes. Existing historical bounds remain until normal reaggregation. No production changes, deployment, migration, full-history rebuild or remote CI were performed.
+
+## 旧粗桶升级回填 / Coarse-history precision upgrade (2026-11-14)
+
+部署细桶后仍显示 `3.000s / 8.000s / 15.000s` 的原因是：聚合版本未变化，已有安装继续从旧历史游标回填，只刷新最近 10 分钟。默认 90 分钟窗口中的旧粗桶仍可能占多数，三位小数格式无法恢复已经被旧桶舍去的精度。
+
+本轮只读采样确认新分钟聚合已保存毫秒边界；同一 90 分钟窗口中，Pro特价的 212 个聚合样本有 147 个位于旧粗桶边界，Pro稳定为 423 个中的 311 个。修复通过版本升级驱动有界后台回填，重新从原始毫秒值生成直方图；不通过补小数或插值生成精度。历史原始记录已经清理的区间继续保留原有汇总。
+
+The deployed fine-bin writer was working, but unchanged aggregation versioning left most of a 90-minute view in legacy buckets while only the latest ten minutes refreshed. Read-only sampling found 147 of 212 samples in one group and 311 of 423 in another at legacy coarse bounds. The fix starts a bounded versioned background rebuild from retained source milliseconds, instead of inventing decimal precision by formatting or interpolation. Historical summaries outside retained source coverage remain intact.
+
+本次同时修复部分回填先删除粗汇总却跳过重建、整日回填误跳过以及旧游标导致分钟数据过早清理的问题。只在精度升级时通过索引读取现存源日志边界，成功后冻结到水位；单个源表为空仍可回填另一表，两表均空时保留原汇总。版本 2 的可用率在版本 3 精度回填期间继续有效。
+
+验证使用 Go 1.27.3、`GOEXPERIMENT=greenteagc,jsonv2`：所有 `TestChannelMonitorV2` 定向单元及 service/repository race 通过，后端 `go build ./...` 通过。隔离 PostgreSQL 18.1／Redis 8.4 环境实际运行 13 项顶层集成测试，全部通过（20.728s，无跳过）：4 项升级专项、4 项细桶回归、5 项原有概览／迁移回归。测试确认 `8000ms → 7432ms` 的旧桶恢复、样本数不丢失、可用率连续、失败事务回滚、公开 worker 生命周期重启续算、超过分钟表保留期的分批日汇总、单空源和双空源、原始日志清理边界保护。本次没有前端修改，未重复执行前端检查。生产只读排查；未部署，远端 CI 未执行。
+
+The upgrade also fixes rollups deleted before a skipped rebuild, whole-day backfills incorrectly skipped, and minute facts pruned using a stale completed cursor. Indexed retained-source checks run only during the precision upgrade and persist with its successful watermark. One empty source still permits rebuilding the other; two empty sources preserve existing summaries. Version-2 availability remains valid during the version-3 precision rebuild. Targeted unit/race checks, backend compilation, and all 13 isolated database tests passed, including real rollback/restart and `8000ms → 7432ms` recovery without losing samples. No frontend code changed, so frontend checks were not repeated. Production inspection was read-only; no deployment or remote CI was performed.
+
+复现命令 / Reproduce from `backend` (integration requires local Docker):
+
+```sh
+GOEXPERIMENT=greenteagc,jsonv2 go test -tags unit ./internal/service ./internal/repository -run TestChannelMonitorV2 -count=1
+GOEXPERIMENT=greenteagc,jsonv2 go test -race -tags unit ./internal/service ./internal/repository -run TestChannelMonitorV2 -count=1
+GOEXPERIMENT=greenteagc,jsonv2 go build ./...
+GOEXPERIMENT=greenteagc,jsonv2 go test -tags integration ./internal/repository -run 'TestChannelMonitorV2(PrecisionUpgrade|LatencyPrecision|Overview(AggregationOutcomes|AvailabilityErrorClassification|CompositeHistogramAndScope|RecoveredAcrossChunks|MigrationUpgrade)Integration)' -count=1 -v
+```

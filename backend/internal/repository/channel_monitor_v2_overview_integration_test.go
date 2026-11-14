@@ -99,7 +99,7 @@ func TestChannelMonitorV2OverviewAggregationOutcomesIntegration(t *testing.T) {
 			require.Equal(t, tc.errors, errors)
 			require.Equal(t, tc.input, input)
 			require.Equal(t, tc.ttft, ttft)
-			require.EqualValues(t, 2, version)
+			require.EqualValues(t, service.ChannelMonitorV2AggregationVersion, version)
 			var rollSuccess, rollErrors int64
 			require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT SUM(success_requests),SUM(availability_error_requests) FROM channel_monitor_v2_metrics_rollup WHERE group_id=$1 AND model=$2 AND bucket_seconds=300`, f.group, tc.model).Scan(&rollSuccess, &rollErrors))
 			require.Equal(t, success, rollSuccess)
@@ -368,7 +368,7 @@ func TestChannelMonitorV2OverviewMigrationUpgradeIntegration(t *testing.T) {
 			require.NoError(t, repo.RecomputeRange(ctx, start, start.Add(time.Minute)))
 			wm, err := repo.GetAggregationWatermark(ctx)
 			require.NoError(t, err)
-			require.Equal(t, 2, wm.AggregationVersion, "an empty source must not permanently prevent upgrading availability")
+			require.Equal(t, service.ChannelMonitorV2AggregationVersion, wm.AggregationVersion, "an empty source must not permanently prevent upgrading availability")
 			require.False(t, wm.AvailabilityCoverageStart.After(start))
 			cfg, err := repo.GetConfig(ctx)
 			require.NoError(t, err)

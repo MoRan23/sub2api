@@ -1031,11 +1031,23 @@ func (r *channelMonitorV2Repository) GetAggregationWatermark(ctx context.Context
 	err := r.db.QueryRowContext(ctx, `
 		SELECT usage_coverage_start, error_coverage_start, data_through, last_successful_at, backfill_cursor,
 		       aggregation_version, availability_coverage_start,
-		       COALESCE(availability_source_start, GREATEST(
+		       CASE WHEN aggregation_version >= 2 AND aggregation_version < 3 THEN (SELECT GREATEST(
+		           availability_source_start,
+		           date_trunc('minute', NOW()) - INTERVAL '90 days',
+		           CASE WHEN retained.usage_start IS NULL AND retained.error_start IS NULL
+		             THEN date_trunc('minute', NOW())
+		             ELSE GREATEST(
+		               date_trunc('minute', COALESCE(retained.usage_start, availability_source_start, availability_epoch_at)),
+		               date_trunc('minute', COALESCE(retained.error_start, availability_source_start, availability_epoch_at))
+		             ) END
+		       ) FROM (SELECT
+		         (SELECT created_at FROM usage_logs ORDER BY created_at LIMIT 1) AS usage_start,
+		         (SELECT created_at FROM ops_error_logs ORDER BY created_at LIMIT 1) AS error_start
+		       ) retained) ELSE COALESCE(availability_source_start, GREATEST(
 		           date_trunc('minute', NOW()) - INTERVAL '90 days',
 		           date_trunc('minute', COALESCE((SELECT created_at FROM usage_logs ORDER BY created_at LIMIT 1), availability_epoch_at)),
 		           date_trunc('minute', COALESCE((SELECT created_at FROM ops_error_logs ORDER BY created_at LIMIT 1), availability_epoch_at))
-		       ))
+		       )) END
 		FROM channel_monitor_v2_watermarks WHERE id = 1`).Scan(&usageStart, &errorStart, &dataThrough, &computed, &backfill, &version, &availabilityStart, &sourceStart)
 	if err == sql.ErrNoRows {
 		return &service.ChannelMonitorV2AggregationWatermark{}, nil
@@ -1116,7 +1128,7 @@ func (r *channelMonitorV2Repository) loadCoverage(ctx context.Context, filter se
 	return &service.ChannelMonitorV2Coverage{
 		AvailabilityVersion:   wm.AggregationVersion,
 		AvailabilityStart:     wm.AvailabilityCoverageStart,
-		AvailabilityReady:     wm.AggregationVersion >= service.ChannelMonitorV2AggregationVersion && channelMonitorV2HistoryCoverageComplete(wm.AvailabilityCoverageStart, filter.Start),
+		AvailabilityReady:     wm.AggregationVersion >= service.ChannelMonitorV2AvailabilitySchemaVersion && channelMonitorV2HistoryCoverageComplete(wm.AvailabilityCoverageStart, filter.Start),
 		RequestedStart:        filter.Start,
 		RequestedEnd:          filter.End,
 		CoverageStart:         coverageStart,
@@ -1356,7 +1368,7 @@ func newMetricAccumulator() *metricAccumulator {
 }
 func (a *metricAccumulator) addFact(f channelMonitorV2Fact) {
 	a.availabilityErrors += f.AvailabilityErrors
-	if f.AvailabilityVersion < service.ChannelMonitorV2AggregationVersion {
+	if f.AvailabilityVersion < service.ChannelMonitorV2AvailabilitySchemaVersion {
 		a.availabilityUnknown = true
 	}
 	a.success += f.Success

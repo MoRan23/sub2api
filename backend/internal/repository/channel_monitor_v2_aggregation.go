@@ -5,6 +5,8 @@ import (
 	"database/sql"
 	"fmt"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
 // Platform is derived from group/account (usage_logs has no provider column on upstream schema).
@@ -138,9 +140,6 @@ func (r *channelMonitorV2Repository) RecomputeRange(ctx context.Context, start, 
 	if start.Before(maxCutoff) {
 		start = maxCutoff
 	}
-	if !start.Before(end) {
-		return nil
-	}
 	watermark, err := r.GetAggregationWatermark(ctx)
 	if err != nil {
 		return err
@@ -149,6 +148,16 @@ func (r *channelMonitorV2Repository) RecomputeRange(ctx context.Context, start, 
 		start = watermark.AvailabilitySourceStart
 	}
 	if !start.Before(end) {
+		if watermark.AggregationVersion >= service.ChannelMonitorV2AvailabilitySchemaVersion && watermark.AggregationVersion < service.ChannelMonitorV2AggregationVersion && !watermark.AvailabilitySourceStart.Before(now) {
+			// Empty retained sources cannot reconstruct old aggregates. Commit the
+			// precision epoch without rewriting facts or claiming newer data, so
+			// subsequent rounds can aggregate new writes instead of reseeding forever.
+			_, err = r.db.ExecContext(ctx, `UPDATE channel_monitor_v2_watermarks
+SET aggregation_version = 3, backfill_cursor = $1,
+    availability_source_start = GREATEST(availability_source_start, $1), updated_at = NOW()
+WHERE id = 1 AND aggregation_version >= 2 AND aggregation_version < 3`, watermark.AvailabilitySourceStart)
+			return err
+		}
 		return nil
 	}
 	tx, err := r.db.BeginTx(ctx, &sql.TxOptions{Isolation: sql.LevelReadCommitted})
@@ -161,12 +170,9 @@ func (r *channelMonitorV2Repository) RecomputeRange(ctx context.Context, start, 
 		}
 	}()
 
-	// Idempotent window rewrite: drop existing facts/rollups in [start,end) then re-insert.
+	// Rewrite minute facts only. Rollups use their own complete-bucket bounds
+	// below; deleting them here would remove coarse buckets skipped this round.
 	for _, table := range []string{
-		"channel_monitor_v2_latency_histograms_rollup",
-		"channel_monitor_v2_error_metrics_rollup",
-		"channel_monitor_v2_user_metrics_rollup",
-		"channel_monitor_v2_metrics_rollup",
 		"channel_monitor_v2_latency_histograms_1m",
 		"channel_monitor_v2_error_metrics_1m",
 		"channel_monitor_v2_user_metrics_1m",
@@ -189,15 +195,27 @@ func (r *channelMonitorV2Repository) RecomputeRange(ctx context.Context, start, 
 	if _, err = tx.ExecContext(ctx, channelMonitorV2ErrorAggregationSQL, start, end); err != nil {
 		return fmt.Errorf("aggregate channel monitor v2 errors: %w", err)
 	}
-	if err = r.recomputeFixedRollups(ctx, tx, start, end, watermark.AvailabilitySourceStart); err != nil {
-		return err
+	// Minute facts before the precision cursor may already have been pruned.
+	// Keep old coarse buckets until every minute in them has been reconstructed;
+	// availability coverage remains broader and is not a fine-fact coverage claim.
+	rollupSourceStart := start
+	continuous := watermark.AggregationVersion >= service.ChannelMonitorV2AggregationVersion && !watermark.BackfillCursor.IsZero() && !watermark.DataThrough.IsZero() && !start.After(watermark.DataThrough) && !end.Before(watermark.BackfillCursor)
+	if continuous && watermark.BackfillCursor.Before(rollupSourceStart) {
+		rollupSourceStart = watermark.BackfillCursor
 	}
-	// Drop rows past per-tier TTL (1m short, coarse rollups long). Safe after rollup
-	// so a backfill chunk can build 1d rollups from temporary 1m rows then discard 1m.
-	if err = r.pruneChannelMonitorV2Retention(ctx, tx, now); err != nil {
+	if watermark.AvailabilitySourceStart.After(rollupSourceStart) {
+		rollupSourceStart = watermark.AvailabilitySourceStart
+	}
+	refreshingRecent := continuous && !start.Before(watermark.BackfillCursor)
+	if err = r.recomputeFixedRollups(ctx, tx, start, end, rollupSourceStart, refreshingRecent); err != nil {
 		return err
 	}
 	if _, err = tx.ExecContext(ctx, channelMonitorV2WatermarkSQL, start, end, watermark.AvailabilitySourceStart); err != nil {
+		return err
+	}
+	// Prune after publishing the transaction's cursor so a version upgrade keeps
+	// all reconstructed minute facts until the new historical pass is complete.
+	if err = r.pruneChannelMonitorV2Retention(ctx, tx, now); err != nil {
 		return err
 	}
 	if err = tx.Commit(); err != nil {
@@ -228,7 +246,7 @@ SELECT date_trunc('minute', ul.created_at), %s, COALESCE(ul.group_id, 0), %s,
        COALESCE(SUM(ul.input_tokens), 0), COALESCE(SUM(ul.output_tokens), 0),
        COALESCE(SUM(ul.cache_creation_tokens), 0), COALESCE(SUM(ul.cache_read_tokens), 0),
        COALESCE(SUM(ul.first_token_ms), 0), COUNT(ul.first_token_ms),
-       COALESCE(SUM(ul.duration_ms), 0), COUNT(ul.duration_ms), NOW(), 0, 2
+	       COALESCE(SUM(ul.duration_ms), 0), COUNT(ul.duration_ms), NOW(), 0, 3
 FROM accepted_usage ul
 LEFT JOIN groups g ON g.id = ul.group_id
 LEFT JOIN accounts a ON a.id = ul.account_id
@@ -247,7 +265,7 @@ SELECT date_trunc('minute', ul.created_at), %s, COALESCE(ul.group_id, 0), %s, ul
        COALESCE(SUM(ul.input_tokens), 0), COALESCE(SUM(ul.output_tokens), 0),
        COALESCE(SUM(ul.cache_creation_tokens), 0), COALESCE(SUM(ul.cache_read_tokens), 0),
        COALESCE(SUM(ul.first_token_ms), 0), COUNT(ul.first_token_ms),
-       COALESCE(SUM(ul.duration_ms), 0), COUNT(ul.duration_ms), NOW(), 0, 2
+	       COALESCE(SUM(ul.duration_ms), 0), COUNT(ul.duration_ms), NOW(), 0, 3
 FROM accepted_usage ul
 LEFT JOIN groups g ON g.id = ul.group_id
 LEFT JOIN accounts a ON a.id = ul.account_id
@@ -387,17 +405,17 @@ WITH dedup AS (
   FROM classified
 ), metric_rows AS (
   INSERT INTO channel_monitor_v2_metrics_1m (bucket_start, platform, group_id, model, error_requests, upstream_affected_requests, upstream_attempt_count, computed_at, availability_error_requests, aggregation_version)
-  SELECT bucket_start, platform, group_id, model, COUNT(*), COUNT(*) FILTER (WHERE upstream_affected), SUM(upstream_attempts), NOW(), COUNT(*) FILTER (WHERE availability_error), 2
+  SELECT bucket_start, platform, group_id, model, COUNT(*), COUNT(*) FILTER (WHERE upstream_affected), SUM(upstream_attempts), NOW(), COUNT(*) FILTER (WHERE availability_error), 3
   FROM availability GROUP BY 1,2,3,4
   ON CONFLICT (bucket_start, platform, group_id, model) DO UPDATE SET
     error_requests = EXCLUDED.error_requests, upstream_affected_requests = EXCLUDED.upstream_affected_requests,
     upstream_attempt_count = EXCLUDED.upstream_attempt_count, computed_at = NOW(),
-    availability_error_requests = EXCLUDED.availability_error_requests, aggregation_version = 2
+    availability_error_requests = EXCLUDED.availability_error_requests, aggregation_version = 3
 ), user_rows AS (
   INSERT INTO channel_monitor_v2_user_metrics_1m (bucket_start, platform, group_id, model, user_id, error_requests, computed_at, availability_error_requests, aggregation_version)
-  SELECT bucket_start, platform, group_id, model, user_id, COUNT(*), NOW(), COUNT(*) FILTER (WHERE availability_error), 2
+  SELECT bucket_start, platform, group_id, model, user_id, COUNT(*), NOW(), COUNT(*) FILTER (WHERE availability_error), 3
   FROM availability WHERE user_id IS NOT NULL GROUP BY 1,2,3,4,5
-  ON CONFLICT (bucket_start, platform, group_id, model, user_id) DO UPDATE SET error_requests = EXCLUDED.error_requests, computed_at = NOW(), availability_error_requests = EXCLUDED.availability_error_requests, aggregation_version = 2
+  ON CONFLICT (bucket_start, platform, group_id, model, user_id) DO UPDATE SET error_requests = EXCLUDED.error_requests, computed_at = NOW(), availability_error_requests = EXCLUDED.availability_error_requests, aggregation_version = 3
 )
 INSERT INTO channel_monitor_v2_error_metrics_1m (bucket_start, platform, group_id, model, error_category, taxonomy_version, error_requests)
 SELECT bucket_start, platform, group_id, model, category, 1, COUNT(*) FROM classified GROUP BY 1,2,3,4,5
@@ -417,7 +435,7 @@ VALUES (
   1,
   $1,
   $1,
-  $2, NOW(), $1, NOW(), 2, $1, $3
+  $2, NOW(), $1, NOW(), 3, $1, $3
 )
 ON CONFLICT (id) DO UPDATE SET
   usage_coverage_start = GREATEST(
@@ -431,26 +449,29 @@ ON CONFLICT (id) DO UPDATE SET
   data_through = GREATEST(COALESCE(channel_monitor_v2_watermarks.data_through, EXCLUDED.data_through), EXCLUDED.data_through),
   last_successful_at = NOW(),
   backfill_cursor = CASE
-    WHEN channel_monitor_v2_watermarks.aggregation_version < 2 OR EXCLUDED.usage_coverage_start > channel_monitor_v2_watermarks.data_through THEN EXCLUDED.backfill_cursor
-    WHEN EXCLUDED.data_through >= channel_monitor_v2_watermarks.availability_coverage_start THEN LEAST(COALESCE(channel_monitor_v2_watermarks.backfill_cursor, EXCLUDED.backfill_cursor), EXCLUDED.backfill_cursor)
+    WHEN channel_monitor_v2_watermarks.aggregation_version < 3 OR EXCLUDED.usage_coverage_start > channel_monitor_v2_watermarks.data_through THEN EXCLUDED.backfill_cursor
+    WHEN channel_monitor_v2_watermarks.backfill_cursor IS NULL OR EXCLUDED.data_through >= channel_monitor_v2_watermarks.backfill_cursor THEN LEAST(COALESCE(channel_monitor_v2_watermarks.backfill_cursor, EXCLUDED.backfill_cursor), EXCLUDED.backfill_cursor)
     ELSE channel_monitor_v2_watermarks.backfill_cursor END,
   availability_coverage_start = CASE
     WHEN channel_monitor_v2_watermarks.aggregation_version < 2 OR EXCLUDED.usage_coverage_start > channel_monitor_v2_watermarks.data_through THEN EXCLUDED.availability_coverage_start
     WHEN EXCLUDED.data_through >= channel_monitor_v2_watermarks.availability_coverage_start THEN LEAST(COALESCE(channel_monitor_v2_watermarks.availability_coverage_start, EXCLUDED.availability_coverage_start), EXCLUDED.availability_coverage_start)
     ELSE channel_monitor_v2_watermarks.availability_coverage_start END,
-  availability_source_start = COALESCE(channel_monitor_v2_watermarks.availability_source_start, EXCLUDED.availability_source_start),
-  aggregation_version = 2,
+  availability_source_start = CASE
+    WHEN channel_monitor_v2_watermarks.aggregation_version >= 2 AND channel_monitor_v2_watermarks.aggregation_version < 3
+      THEN GREATEST(channel_monitor_v2_watermarks.availability_source_start, EXCLUDED.availability_source_start)
+    ELSE COALESCE(channel_monitor_v2_watermarks.availability_source_start, EXCLUDED.availability_source_start) END,
+  aggregation_version = 3,
   updated_at = NOW()`
 
 var channelMonitorV2FixedRollupSeconds = []int{300, 3600, 43200, 86400}
 
-func (r *channelMonitorV2Repository) recomputeFixedRollups(ctx context.Context, tx *sql.Tx, start, end, sourceStart time.Time) error {
+func (r *channelMonitorV2Repository) recomputeFixedRollups(ctx context.Context, tx *sql.Tx, start, end, sourceStart time.Time, refreshingRecent bool) error {
 	for _, seconds := range channelMonitorV2FixedRollupSeconds {
 		// Coarse buckets are immutable between boundaries during the normal
 		// trailing refresh. Historical backfills and boundary-crossing windows
 		// still rebuild them; this avoids repeatedly regrouping the full current
 		// day/user table every few minutes.
-		if seconds >= 43200 && sameFixedRollupBucket(start, end, seconds) {
+		if refreshingRecent && seconds >= 43200 && end.Sub(start) < time.Duration(seconds)*time.Second && sameFixedRollupBucket(start, end, seconds) {
 			continue
 		}
 		interval := fmt.Sprintf("%d seconds", seconds)

@@ -309,3 +309,90 @@ func TestChannelMonitorV2AggregatorLoopGatesAndWakeups(t *testing.T) {
 	s.Stop()
 	require.False(t, s.wait(time.Hour), "stop wakes immediately")
 }
+
+func TestChannelMonitorV2AggregatorPrecisionUpgradeSeedsOnceAndResumesDurably(t *testing.T) {
+	s, repo, clock := newAggregatorClockFixture(t, 60)
+	now := clock.at
+	oldCoverage := now.Add(-30 * 24 * time.Hour)
+	repo.watermark.AggregationVersion = ChannelMonitorV2AvailabilitySchemaVersion
+	repo.watermark.BackfillCursor = oldCoverage
+	repo.watermark.AvailabilityCoverageStart = oldCoverage
+	type interval struct{ start, end time.Time }
+	var ranges []interval
+	failHistory := false
+	repo.recompute = func(_ context.Context, start, end time.Time) error {
+		ranges = append(ranges, interval{start, end})
+		if failHistory && end.Sub(start) != channelMonitorV2RecentOverlap {
+			return context.DeadlineExceeded
+		}
+		if repo.watermark.AggregationVersion < ChannelMonitorV2AggregationVersion || start.Before(repo.watermark.BackfillCursor) {
+			repo.watermark.BackfillCursor = start
+		}
+		repo.watermark.AggregationVersion = ChannelMonitorV2AggregationVersion
+		return nil
+	}
+
+	s.runOnce()
+	require.Equal(t, []interval{{now.Add(-2 * time.Hour), now}}, ranges, "version 2 needs a fresh bounded precision seed despite its old completed cursor")
+	require.Equal(t, 3, repo.watermark.AggregationVersion)
+	require.Equal(t, now.Add(-2*time.Hour), repo.watermark.BackfillCursor)
+	require.Equal(t, oldCoverage, repo.watermark.AvailabilityCoverageStart)
+
+	// A newly started instance reads the committed version and cursor, instead
+	// of repeating the seed. A failed historical chunk leaves that cursor intact.
+	resume := NewChannelMonitorV2Aggregator(repo, nil, nil)
+	resume.now = clock.now
+	failHistory = true
+	clock.add(time.Minute)
+	resume.runOnce()
+	require.Len(t, ranges, 3)
+	require.Equal(t, interval{clock.at.Add(-10 * time.Minute), clock.at}, ranges[1])
+	require.Equal(t, now.Add(-2*time.Hour), ranges[2].end)
+	require.Equal(t, now.Add(-2*time.Hour), repo.watermark.BackfillCursor)
+
+	restarted := NewChannelMonitorV2Aggregator(repo, nil, nil)
+	restarted.now = clock.now
+	failHistory = false
+	clock.add(time.Minute)
+	restarted.runOnce()
+	require.Len(t, ranges, 5)
+	require.Equal(t, interval{clock.at.Add(-10 * time.Minute), clock.at}, ranges[3])
+	require.Equal(t, ranges[2], ranges[4], "restart retries the uncommitted historical interval")
+	require.Equal(t, ranges[4].start, repo.watermark.BackfillCursor)
+}
+
+func TestChannelMonitorV2AggregatorPrecisionUpgradeSeedFailureAndSourceFloor(t *testing.T) {
+	for _, sourceAge := range []time.Duration{-time.Minute, 0, 30 * time.Minute, 10 * 24 * time.Hour} {
+		t.Run(sourceAge.String(), func(t *testing.T) {
+			s, repo, clock := newAggregatorClockFixture(t, 60)
+			now := clock.at
+			repo.watermark.AggregationVersion = ChannelMonitorV2AvailabilitySchemaVersion
+			repo.watermark.AvailabilitySourceStart = now.Add(-sourceAge)
+			wantStart := now.Add(-channelMonitorV2BootstrapFirst)
+			if repo.watermark.AvailabilitySourceStart.After(wantStart) {
+				wantStart = repo.watermark.AvailabilitySourceStart
+			}
+			calls := 0
+			repo.recompute = func(_ context.Context, start, end time.Time) error {
+				calls++
+				require.Equal(t, wantStart, start)
+				require.Equal(t, now, end)
+				if calls == 1 {
+					return context.DeadlineExceeded
+				}
+				repo.watermark.AggregationVersion = ChannelMonitorV2AggregationVersion
+				repo.watermark.BackfillCursor = start
+				return nil
+			}
+			s.runOnce()
+			require.False(t, s.hasAggregated)
+			require.Equal(t, 2, repo.watermark.AggregationVersion, "failed seed must leave the durable version unchanged")
+			restarted := NewChannelMonitorV2Aggregator(repo, nil, nil)
+			restarted.now = clock.now
+			restarted.runOnce()
+			require.Equal(t, 2, calls)
+			require.True(t, restarted.hasAggregated)
+			require.Equal(t, wantStart, restarted.backfillAt)
+		})
+	}
+}
