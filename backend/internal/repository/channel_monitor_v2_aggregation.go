@@ -183,7 +183,7 @@ func (r *channelMonitorV2Repository) RecomputeRange(ctx context.Context, start, 
 	if _, err = tx.ExecContext(ctx, fmt.Sprintf(channelMonitorV2UserMetricsSQL, channelMonitorV2PlatformSQL, channelMonitorV2ModelSQL), start, end); err != nil {
 		return fmt.Errorf("aggregate channel monitor v2 users: %w", err)
 	}
-	if _, err = tx.ExecContext(ctx, fmt.Sprintf(channelMonitorV2HistogramSQL, channelMonitorV2PlatformSQL, channelMonitorV2ModelSQL, channelMonitorV2HistogramBoundSQL("latency.value_ms")), start, end); err != nil {
+	if _, err = tx.ExecContext(ctx, fmt.Sprintf(channelMonitorV2HistogramSQL, channelMonitorV2PlatformSQL, channelMonitorV2ModelSQL, channelMonitorV2MetricHistogramBoundSQL("latency.metric", "latency.value_ms")), start, end); err != nil {
 		return fmt.Errorf("aggregate channel monitor v2 histograms: %w", err)
 	}
 	if _, err = tx.ExecContext(ctx, channelMonitorV2ErrorAggregationSQL, start, end); err != nil {
@@ -268,6 +268,27 @@ CROSS JOIN LATERAL (VALUES ('ttft'::text, ul.first_token_ms), ('duration'::text,
 WHERE ul.created_at >= $1 AND ul.created_at < $2
   AND audience.user_id IS NOT NULL AND latency.value_ms IS NOT NULL AND latency.value_ms >= 0
 GROUP BY 1, 2, 3, 4, 5, 6, 7`
+
+func channelMonitorV2MetricHistogramBoundSQL(metric, column string) string {
+	return "CASE WHEN " + metric + " = 'ttft' THEN " + channelMonitorV2TTFTHistogramBoundSQL(column) +
+		" ELSE " + channelMonitorV2HistogramBoundSQL(column) + " END"
+}
+
+// TTFT uses bounded, finer upper-bound buckets. Integer division rounds upward
+// without floating-point error; cast before adding so even int32 inputs are safe.
+// Existing coarse histogram rows remain valid upper bounds during incremental
+// refresh/backfill, and duration retains its original bucket scheme below.
+func channelMonitorV2TTFTHistogramBoundSQL(column string) string {
+	value := "CAST(" + column + " AS bigint)"
+	return `CASE
+WHEN ` + column + ` = 0 THEN 0
+WHEN ` + column + ` <= 1000 THEN ((` + value + ` + 49) / 50) * 50
+WHEN ` + column + ` <= 30000 THEN ((` + value + ` + 99) / 100) * 100
+WHEN ` + column + ` <= 60000 THEN ((` + value + ` + 249) / 250) * 250
+WHEN ` + column + ` <= 120000 THEN ((` + value + ` + 999) / 1000) * 1000
+WHEN ` + column + ` <= 600000 THEN ((` + value + ` + 4999) / 5000) * 5000
+ELSE 2147483647 END`
+}
 
 func channelMonitorV2HistogramBoundSQL(column string) string {
 	return `CASE

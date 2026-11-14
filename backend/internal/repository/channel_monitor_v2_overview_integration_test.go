@@ -174,7 +174,7 @@ func TestChannelMonitorV2OverviewCompositeHistogramAndScopeIntegration(t *testin
 	require.EqualValues(t, 3, row.Metrics.SuccessRequests)
 	require.EqualValues(t, 3, row.Metrics.TTFT.SampleCount)
 	require.NotNil(t, row.Metrics.TTFT.P50Ms)
-	require.EqualValues(t, 10000, *row.Metrics.TTFT.P50Ms, "merge histogram counts, never average platform percentiles")
+	require.EqualValues(t, 9000, *row.Metrics.TTFT.P50Ms, "merge histogram counts with finer TTFT bounds, never average platform percentiles")
 	require.InDelta(t, .5, row.Metrics.CacheRate, 1e-9)
 	require.NotNil(t, row.Metrics.AvailabilityRate)
 	require.EqualValues(t, 1, row.Metrics.AvailabilityErrorRequests)
