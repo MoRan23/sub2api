@@ -114,7 +114,7 @@ describe('group overview', () => {
     expect(rebuilding.attributes('title')).toContain('统计更新中')
     expect(rebuilding.attributes('title')).not.toContain('暂无数据')
 
-    const legend = wrapper.get('footer')
+    const legend = wrapper.get('[data-testid="overview-legend"]')
     for (const [state, label, height, appearance] of [
       ['healthy', '正常', 'h-6', 'bg-emerald-500'],
       ['warning', '波动', 'h-3', 'bg-amber-400'],

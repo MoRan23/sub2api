@@ -38,6 +38,12 @@
       </div>
     </section>
 
+    <div v-if="data?.items.length" class="flex flex-wrap gap-4 text-xs text-gray-500 dark:text-gray-400" data-testid="overview-legend">
+      <span v-for="(classes, state) in legendClasses" :key="state" class="flex items-center gap-1.5" :data-legend-state="state">
+        <span class="flex h-6 w-3 items-end" aria-hidden="true"><span class="w-full rounded-[3px]" :class="classes" /></span>{{ t(`channelMonitorV2.overview.states.${state}`) }}
+      </span>
+    </div>
+
     <div v-if="error" class="card p-6 text-center" role="alert">
       <p class="text-sm text-red-600 dark:text-red-400">{{ error }}</p>
       <button type="button" class="btn btn-secondary mt-4" :disabled="refreshing" @click="load">{{ t('common.retry') }}</button>
@@ -60,13 +66,6 @@
       </div>
     </section>
 
-    <footer v-if="data?.items.length" class="space-y-2 text-xs text-gray-500 dark:text-gray-400">
-      <div class="flex flex-wrap gap-4">
-        <span v-for="(classes, state) in legendClasses" :key="state" class="flex items-center gap-1.5" :data-legend-state="state">
-          <span class="flex h-6 w-3 items-end" aria-hidden="true"><span class="w-full rounded-[3px]" :class="classes" /></span>{{ t(`channelMonitorV2.overview.states.${state}`) }}
-        </span>
-      </div>
-    </footer>
   </div>
 </template>
 
