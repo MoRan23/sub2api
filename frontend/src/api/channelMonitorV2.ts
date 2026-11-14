@@ -15,6 +15,8 @@ export interface GroupAttributionSummary {
   // Optional during rolling upgrades; missing aggregate data is displayed as no_data.
   summary_state?: GroupAttributionSummaryState
   enabled?: boolean
+  /** Current effective group probe configuration, independent of historical checks. */
+  probe_model?: string
   as_of?: string
   history?: GroupAttributionHistoryBucket[]
   /** Legacy individual results, retained for compatibility with older consumers. */

@@ -149,6 +149,7 @@ describe('group overview', () => {
   it('renders server summary and aggregate history independently of legacy checks and request availability', async () => {
     const item = card()
     item.state = 'insufficient'
+    item.attribution.probe_model = '5.6 Cyber'
     item.attribution.summary_state = 'passed'
     item.attribution.history = attributionHistory().map((bucket, index) => ({
       ...bucket, state: (['passed', 'mismatch', 'failed', 'no_data'] as const)[index % 4]!,
@@ -179,12 +180,12 @@ describe('group overview', () => {
     expect(title).toContain(time(item.attribution.history[0]!.bucket_start))
     expect(title).toContain(time(item.attribution.history[0]!.bucket_end))
     expect(title).toContain('通过')
-    expect(title).toContain('OAuth：最近 15 分钟内全部有效检测')
-    expect(title).toContain('API Key（含 Engine）：每账号不限时的最新有效检测')
+    expect(title).toBe(`${time(item.attribution.history[0]!.bucket_start)} – ${time(item.attribution.history[0]!.bucket_end)}\n通过`)
+    expect(wrapper.get('[data-testid="attribution-probe-model"]').text()).toBe('探针模型：5.6 Cyber')
     expect(wrapper.get('[data-testid="attribution-through"]').text()).toBe(`更新至 ${time(asOf)}`)
     expect(wrapper.get('[data-testid="attribution-through"]').text()).not.toContain(time(item.attribution.latest!.finished_at))
-    expect(wrapper.text()).toContain('与上方时间范围无关')
-    expect(wrapper.text()).toContain('组内调度开启账号')
+    expect(wrapper.text()).toContain('最近 200 分钟')
+    expect(wrapper.html()).not.toMatch(/OAuth|API Key|Engine|调度开启|15 分钟|每格 10 分钟|仅显示你有权限/)
   })
 
   it.each([
@@ -229,6 +230,7 @@ describe('group overview', () => {
     expect(cells).toHaveLength(20)
     expect(cells.every(cell => cell.attributes('data-result') === 'no_data' && cell.classes().includes('bg-gray-300'))).toBe(true)
     expect(wrapper.html()).not.toContain('legacy-model')
+    expect(wrapper.find('[data-testid="attribution-probe-model"]').exists()).toBe(false)
   })
 
   it('pads missing aggregate intervals with gray and preserves the supplied chronological states', async () => {
@@ -253,9 +255,7 @@ describe('group overview', () => {
     wrapper = await mountView(); await flushPromises()
     const history = wrapper.findAll('.attribution-cell').map(cell => ({ state: cell.attributes('data-result'), title: cell.attributes('title') }))
     expect(history).toHaveLength(20)
-    expect(wrapper.text()).toContain('200')
-    expect(wrapper.text()).toContain('10')
-    expect(wrapper.text()).toContain('15')
+    expect(wrapper.text()).toContain('最近 200 分钟')
     await wrapper.get('[data-range="30d"]').trigger('click'); await flushPromises()
     expect(wrapper.get('[data-range="30d"]').attributes('aria-pressed')).toBe('true')
     expect(wrapper.findAll('.attribution-cell').map(cell => ({ state: cell.attributes('data-result'), title: cell.attributes('title') }))).toEqual(history)

@@ -84,7 +84,18 @@ func (r *channelMonitorV2Repository) getGroupAttributionHistoryAt(ctx context.Co
 // This avoids rescanning account job histories for each group or each bucket.
 const channelMonitorV2GroupAttributionOverviewSQL = `
 WITH requested_groups AS MATERIALIZED (
- SELECT DISTINCT unnest($1::bigint[]) AS group_id
+ SELECT DISTINCT requested.group_id, g.platform
+ FROM unnest($1::bigint[]) requested(group_id)
+ LEFT JOIN groups g ON g.id = requested.group_id
+), configuration AS MATERIALIZED (
+ SELECT COALESCE(config->'enabled' = 'true'::jsonb, FALSE) AS enabled,
+        COALESCE(config #>> '{default,model}', '` + service.AttributionDefaultModel + `') AS probe_model,
+        CASE WHEN jsonb_typeof(config->'groups') = 'array' THEN config->'groups' ELSE '[]'::jsonb END AS policies
+ FROM model_attribution_config WHERE id = 1
+), group_probe_models AS MATERIALIZED (
+ SELECT (p.policy->>'group_id')::bigint AS group_id, COALESCE(p.policy->>'model', '') AS probe_model
+ FROM configuration c CROSS JOIN LATERAL jsonb_array_elements(c.policies) p(policy)
+ WHERE p.policy->'enabled' = 'true'::jsonb
 ), members AS MATERIALIZED (
  SELECT ag.group_id, a.id AS account_id, a.type,
         a.platform = 'openai' AND a.parent_account_id IS NULL AND (
@@ -151,11 +162,15 @@ WITH requested_groups AS MATERIALIZED (
  SELECT group_id, BOOL_OR(auto_eligible) AS enabled FROM members GROUP BY group_id
 )
 SELECT g.group_id,
-       COALESCE((SELECT config->'enabled' = 'true'::jsonb FROM model_attribution_config WHERE id = 1), FALSE)
-        AND COALESCE(e.enabled, FALSE) AS enabled,
+       COALESCE(c.enabled, FALSE) AND COALESCE(e.enabled, FALSE) AS enabled,
        b.sample,
-       CASE s.priority WHEN 3 THEN 'passed' WHEN 2 THEN 'mismatch' WHEN 1 THEN 'failed' ELSE 'no_data' END AS state
+       CASE s.priority WHEN 3 THEN 'passed' WHEN 2 THEN 'mismatch' WHEN 1 THEN 'failed' ELSE 'no_data' END AS state,
+       CASE WHEN g.platform IS NULL OR g.platform NOT IN ('openai', 'composite') THEN ''
+            WHEN p.group_id IS NOT NULL THEN p.probe_model
+            ELSE COALESCE(c.probe_model, '` + service.AttributionDefaultModel + `') END AS probe_model
 FROM requested_groups g CROSS JOIN generate_series(1, 20) b(sample)
+LEFT JOIN configuration c ON TRUE
+LEFT JOIN group_probe_models p ON p.group_id = g.group_id
 LEFT JOIN group_samples s ON s.group_id = g.group_id AND s.sample = b.sample
 LEFT JOIN group_enabled e ON e.group_id = g.group_id
 ORDER BY g.group_id, b.sample`
@@ -178,7 +193,8 @@ func (r *channelMonitorV2Repository) GetGroupAttributionOverview(ctx context.Con
 		var enabled bool
 		var sample int
 		var state string
-		if err := rows.Scan(&groupID, &enabled, &sample, &state); err != nil {
+		var probeModel string
+		if err := rows.Scan(&groupID, &enabled, &sample, &state, &probeModel); err != nil {
 			return nil, fmt.Errorf("scan group attribution overview: %w", err)
 		}
 		item, exists := out[groupID]
@@ -186,6 +202,9 @@ func (r *channelMonitorV2Repository) GetGroupAttributionOverview(ctx context.Con
 			return nil, fmt.Errorf("invalid group attribution sample")
 		}
 		item.Enabled = enabled
+		// Match ResolveAttributionPolicy for this card's group: an enabled group
+		// policy overrides the default, independently of historical job models.
+		item.ProbeModel = probeModel
 		item.History[sample-1].State = state
 		if sample == len(item.History) {
 			item.SummaryState = state

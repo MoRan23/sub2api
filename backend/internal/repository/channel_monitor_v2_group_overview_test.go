@@ -77,7 +77,7 @@ func TestChannelMonitorV2GroupAttributionOverviewBatchProjection(t *testing.T) {
 	defer db.Close()
 	asOf := time.Date(2026, 11, 14, 12, 34, 56, 0, time.UTC)
 	ids := []int64{1, 2, 3}
-	rows := sqlmock.NewRows([]string{"group_id", "enabled", "sample", "state"})
+	rows := sqlmock.NewRows([]string{"group_id", "enabled", "sample", "state", "probe_model"})
 	for _, id := range ids {
 		for sample := 1; sample <= 20; sample++ {
 			state := "no_data"
@@ -87,7 +87,7 @@ func TestChannelMonitorV2GroupAttributionOverviewBatchProjection(t *testing.T) {
 					state = "failed"
 				}
 			}
-			rows.AddRow(id, id == 1, sample, state)
+			rows.AddRow(id, id == 1, sample, state, "configured probe model")
 		}
 	}
 	mock.ExpectQuery(regexp.QuoteMeta(channelMonitorV2GroupAttributionOverviewSQL)).WithArgs(pq.Array(ids), asOf).WillReturnRows(rows).RowsWillBeClosed()
@@ -104,11 +104,13 @@ func TestChannelMonitorV2GroupAttributionOverviewBatchProjection(t *testing.T) {
 		require.Equal(t, asOf.Add(-200*time.Minute), attr.History[0].BucketStart)
 		require.Equal(t, asOf, attr.History[19].BucketEnd)
 		require.Equal(t, attr.History[19].State, attr.SummaryState)
+		require.Equal(t, "configured probe model", attr.ProbeModel)
 	}
 	require.True(t, got[1].Enabled)
 	require.Equal(t, "passed", got[1].History[9].State)
 	require.Equal(t, "failed", got[1].SummaryState)
 	require.Equal(t, "cancelled", got[1].Latest.Status, "legacy display rows never override the summary")
+	require.Equal(t, "model", got[1].Latest.ProbeModel, "historical models are separate from current configuration")
 	require.False(t, got[2].Enabled)
 	require.Equal(t, "no_data", got[2].SummaryState)
 	require.NotNil(t, got[2].Recent)
@@ -130,18 +132,18 @@ func TestChannelMonitorV2GroupAttributionOverviewReadErrors(t *testing.T) {
 			require.NoError(t, err)
 			defer db.Close()
 			expect := mock.ExpectQuery(regexp.QuoteMeta(channelMonitorV2GroupAttributionOverviewSQL))
-			rows := sqlmock.NewRows([]string{"group_id", "enabled", "sample", "state"})
+			rows := sqlmock.NewRows([]string{"group_id", "enabled", "sample", "state", "probe_model"})
 			switch kind {
 			case "query":
 				expect.WillReturnError(context.DeadlineExceeded)
 			case "scan":
-				expect.WillReturnRows(rows.AddRow(1, "invalid-bool", 1, "passed"))
+				expect.WillReturnRows(rows.AddRow(1, "invalid-bool", 1, "passed", "probe"))
 			case "iterate":
-				expect.WillReturnRows(rows.AddRow(1, true, 1, "passed").RowError(0, errors.New("row failed")))
+				expect.WillReturnRows(rows.AddRow(1, true, 1, "passed", "probe").RowError(0, errors.New("row failed")))
 			case "sample":
-				expect.WillReturnRows(rows.AddRow(1, true, 21, "passed"))
+				expect.WillReturnRows(rows.AddRow(1, true, 21, "passed", "probe"))
 			case "group":
-				expect.WillReturnRows(rows.AddRow(99, true, 1, "passed"))
+				expect.WillReturnRows(rows.AddRow(99, true, 1, "passed", "probe"))
 			case "legacy":
 				expect.WillReturnRows(rows)
 				mock.ExpectQuery(regexp.QuoteMeta(channelMonitorV2GroupAttributionSQL)).WillReturnError(context.DeadlineExceeded)

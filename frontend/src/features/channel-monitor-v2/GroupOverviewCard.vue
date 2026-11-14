@@ -60,8 +60,9 @@
           {{ attributionSummaryText }}
         </span>
       </div>
-      <p class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">{{ t('channelMonitorV2.overview.attributionHint') }}</p>
-      <p class="mt-1 text-[10px] leading-relaxed text-gray-500 dark:text-gray-400">{{ t('channelMonitorV2.overview.attributionPolicy') }}</p>
+      <p v-if="item.attribution?.probe_model" class="mt-1 break-words text-[11px] text-gray-500 dark:text-gray-400" data-testid="attribution-probe-model">
+        {{ t('channelMonitorV2.overview.probeModel', { model: item.attribution.probe_model }) }}
+      </p>
       <div class="mt-3 flex h-6 items-end gap-1" :aria-label="t('channelMonitorV2.overview.attributionHistory')">
         <button
           v-for="(bucket, index) in attributionHistory"
@@ -78,7 +79,6 @@
         <span>{{ t('channelMonitorV2.overview.attributionPast') }}</span><span>{{ t('channelMonitorV2.overview.now') }}</span>
       </div>
       <p v-if="item.attribution?.as_of" class="mt-2 text-right text-[10px] text-gray-400 dark:text-gray-500" data-testid="attribution-through">{{ t('channelMonitorV2.updatedTo', { time: formatTime(item.attribution.as_of) }) }}</p>
-      <p class="mt-2 text-[10px] leading-relaxed text-gray-500 dark:text-gray-400">{{ t('channelMonitorV2.overview.attributionLegend') }}</p>
     </div>
   </article>
 </template>
@@ -135,7 +135,7 @@ function bucketTooltip(bucket: GroupOverviewCard['buckets'][number]) {
   return `${formatTime(bucket.bucket_start)}${end}\n${stateText(bucket.state)} · ${t('channelMonitorV2.overview.availability')} ${percent(bucket.availability_rate)}`
 }
 function attributionTooltip(bucket: GroupAttributionHistoryBucket) {
-  return `${formatTime(bucket.bucket_start)} – ${formatTime(bucket.bucket_end)}\n${attributionText(bucket.state)}\n${t('channelMonitorV2.overview.attributionPolicy')}`
+  return `${formatTime(bucket.bucket_start)} – ${formatTime(bucket.bucket_end)}\n${attributionText(bucket.state)}`
 }
 function metricClass(state: GroupOverviewState) {
   if (state === 'healthy') return 'text-emerald-700 dark:text-emerald-400'

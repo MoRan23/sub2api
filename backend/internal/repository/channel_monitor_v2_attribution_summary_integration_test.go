@@ -221,6 +221,78 @@ func TestChannelMonitorV2OverviewAttributionTemporalBucketsIntegration(t *testin
 	}
 }
 
+func TestChannelMonitorV2OverviewAttributionConfiguredProbeModelIntegration(t *testing.T) {
+	f := newAttributionOverviewFixture(t)
+	independent, disabled, inherited, emptyIndependent := f.group(), f.group(), f.group(), f.group()
+	composite, anthropic, gemini := f.group(), f.group(), f.group()
+	for group, platform := range map[int64]string{composite: "composite", anthropic: "anthropic", gemini: "gemini"} {
+		_, err := integrationDB.Exec(`UPDATE groups SET platform=$2 WHERE id=$1`, group, platform)
+		require.NoError(t, err)
+	}
+	sharedAccount := f.account(independent, "apikey", `{"openai_api_key_auto_attribution_enabled":true}`)
+	f.bind(sharedAccount, disabled)
+	f.job(sharedAccount, "passed", f.now.Add(-time.Hour))
+	config := service.DefaultAttributionConfig()
+	config.Enabled = true
+	config.Default.Model = "configured-default"
+	config.Groups = []service.AttributionGroupPolicy{
+		{GroupID: independent, Enabled: true, AttributionPolicy: service.AttributionPolicy{Model: "configured-independent"}},
+		{GroupID: disabled, Enabled: false, AttributionPolicy: service.AttributionPolicy{Model: "disabled-override"}},
+		{GroupID: emptyIndependent, Enabled: true, AttributionPolicy: service.AttributionPolicy{Model: "configured-empty"}},
+		{GroupID: anthropic, Enabled: true, AttributionPolicy: service.AttributionPolicy{Model: "unused-anthropic-probe"}},
+		{GroupID: gemini, Enabled: true, AttributionPolicy: service.AttributionPolicy{Model: "unused-gemini-probe"}},
+	}
+	save := func() {
+		encoded, err := json.Marshal(config)
+		require.NoError(t, err)
+		_, err = integrationDB.Exec(`UPDATE model_attribution_config SET config=$1 WHERE id=1`, encoded)
+		require.NoError(t, err)
+	}
+	save()
+	groups := []int64{independent, disabled, inherited, emptyIndependent, composite, anthropic, gemini}
+	wantModels := map[int64]string{
+		independent:      "configured-independent",
+		disabled:         "configured-default",
+		inherited:        "configured-default",
+		emptyIndependent: "configured-empty",
+		composite:        "configured-default",
+		anthropic:        "",
+		gemini:           "",
+	}
+	before := f.read(groups...)
+	for _, group := range groups {
+		require.Equal(t, wantModels[group], before[group].ProbeModel)
+	}
+	for _, group := range []int64{independent, disabled} {
+		require.NotNil(t, before[group].Latest)
+		require.Equal(t, "probe-model", before[group].Latest.ProbeModel, "historical probe model remains independent of current group configuration")
+	}
+	for _, group := range []int64{inherited, emptyIndependent, composite, anthropic, gemini} {
+		require.Nil(t, before[group].Latest)
+		require.Empty(t, before[group].Recent)
+		require.Equal(t, "no_data", before[group].SummaryState)
+	}
+	config.Enabled = false
+	save()
+	for group, row := range f.read(groups...) {
+		require.False(t, row.Enabled)
+		require.Equal(t, wantModels[group], row.ProbeModel, "global opt-out retains the configured probe model")
+		require.Equal(t, before[group].History, row.History)
+	}
+	config.Default.Model = "updated-default"
+	config.Groups[0].Model = "updated-independent"
+	save()
+	updated := f.read(groups...)
+	require.Equal(t, "updated-independent", updated[independent].ProbeModel)
+	require.Equal(t, "updated-default", updated[disabled].ProbeModel)
+	require.Equal(t, "updated-default", updated[inherited].ProbeModel)
+	require.Equal(t, "configured-empty", updated[emptyIndependent].ProbeModel)
+	require.Equal(t, "updated-default", updated[composite].ProbeModel)
+	require.Empty(t, updated[anthropic].ProbeModel)
+	require.Empty(t, updated[gemini].ProbeModel)
+	require.Equal(t, "probe-model", updated[independent].Latest.ProbeModel)
+}
+
 func TestChannelMonitorV2OverviewAttributionMembershipAndEnabledIntegration(t *testing.T) {
 	f := newAttributionOverviewFixture(t)
 	main, shared, shadowGroup, deletedGroup, mixedGroup := f.group(), f.group(), f.group(), f.group(), f.group()

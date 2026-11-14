@@ -5,7 +5,6 @@
         <div class="flex flex-wrap items-start justify-between gap-3">
           <div class="min-w-0">
             <h1 class="page-title">{{ t('channelMonitorV2.title') }}</h1>
-            <p class="mt-2 text-sm text-gray-500 dark:text-gray-400">{{ t('channelMonitorV2.overview.description') }}</p>
             <p v-if="data?.coverage.data_through" class="mt-2 text-xs text-gray-500 dark:text-gray-400">
               {{ t('channelMonitorV2.updatedTo', { time: formatTime(data.coverage.data_through) }) }}
             </p>
@@ -67,7 +66,6 @@
           <span class="h-2 w-2 rounded-full" :class="legendClasses[state]" />{{ t(`channelMonitorV2.overview.states.${state}`) }}
         </span>
       </div>
-      <p>{{ t('channelMonitorV2.overview.metricsNote') }}</p>
     </footer>
   </div>
 </template>

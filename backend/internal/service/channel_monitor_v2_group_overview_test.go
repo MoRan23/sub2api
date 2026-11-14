@@ -233,8 +233,9 @@ func TestChannelMonitorV2OverviewAttributionProjectsAuthoritativeSummary(t *test
 	now := time.Date(2026, 11, 14, 12, 34, 56, 0, time.UTC)
 	attr := NewChannelMonitorV2OverviewAttribution(now)
 	attr.Enabled = false
+	attr.ProbeModel = "currently configured probe"
 	attr.SummaryState, attr.History[19].State = "passed", "passed"
-	attr.Recent = []ChannelMonitorV2AttributionEntry{{Status: "failed", FinishedAt: now}}
+	attr.Recent = []ChannelMonitorV2AttributionEntry{{Status: "failed", ProbeModel: "historical probe", FinishedAt: now}}
 	attr.Latest = &attr.Recent[0]
 	r.attributions = map[int64]ChannelMonitorV2OverviewAttribution{1: attr}
 	svc := NewChannelMonitorV2Service(r)
@@ -246,7 +247,7 @@ func TestChannelMonitorV2OverviewAttributionProjectsAuthoritativeSummary(t *test
 	require.Equal(t, attr, out.Items[0].Attribution)
 	encoded, err := json.Marshal(out.Items[0].Attribution)
 	require.NoError(t, err)
-	for _, field := range []string{`"enabled":false`, `"summary_state":"passed"`, `"as_of":`, `"history":`, `"bucket_end":`, `"latest":`, `"recent":`} {
+	for _, field := range []string{`"enabled":false`, `"probe_model":"currently configured probe"`, `"summary_state":"passed"`, `"as_of":`, `"history":`, `"bucket_end":`, `"latest":`, `"recent":`} {
 		require.Contains(t, string(encoded), field)
 	}
 }

@@ -53,6 +53,7 @@ type ChannelMonitorV2OverviewAttribution struct {
 	Latest       *ChannelMonitorV2AttributionEntry   `json:"latest"`
 	Recent       []ChannelMonitorV2AttributionEntry  `json:"recent"`
 	Enabled      bool                                `json:"enabled"`
+	ProbeModel   string                              `json:"probe_model"`
 	AsOf         time.Time                           `json:"as_of"`
 	SummaryState string                              `json:"summary_state"`
 	History      []ChannelMonitorV2AttributionBucket `json:"history"`

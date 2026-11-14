@@ -28,7 +28,9 @@
 
 历史展示最近 **200 分钟、20 格、每格 10 分钟**，每格在结束时刻应用相同规则。最后一格与当前摘要使用同一服务端统计时间；API Key 在窗口之前的有效结果也可延续到窗口内，直至被后续有效结果替换。历史无结果统一显示灰色，不用当前开关推算历史是否开启。
 
-该区域不触发模型请求，也不随上方真实请求时间窗口裁剪。账号换组后按当前归属展示；影子账号只使用自己的记录。关闭调度后，该账号退出摘要及历史统计；再次开启后恢复参与。悬停只公开时间范围、汇总状态和判定口径，不公开账号身份、测试回答或内部错误。
+该区域不触发模型请求，也不随上方真实请求时间窗口裁剪。账号换组后按当前归属展示；影子账号只使用自己的记录。关闭调度后，该账号退出摘要及历史统计；再次开启后恢复参与。用户页面保留状态、最近 200 分钟历史及更新时间，悬停只显示时间范围和汇总状态；账号类型、调度和判定口径留在本文档，不在卡片重复解释。
+
+OpenAI／Composite 分组卡片展示当前生效的探针模型：启用分组独立策略时取组内模型，否则取全局模型。该字段来自当前配置，不根据历史检测结果推算；其他平台或尚未配置模型时不显示。配置变化将在页面下次刷新时生效。
 
 平台图标和标签使用统一品牌色：Anthropic 橙、OpenAI 绿、Gemini 蓝、Grok 中性、Antigravity 紫、Composite 青；检测状态颜色独立使用绿、黄、红、灰，兼容明暗主题。
 
@@ -44,7 +46,7 @@
 
 历史重建只覆盖仍有原始用量及错误记录的区间。不要为了显示完整历史而关闭日志保留策略或把缺失失败记录推算成成功。
 
-每次概览请求重新验证权限；统计读取已有聚合表。检测汇总按唯一账号批量读取时间窗口及 API Key 窗前锚点，再生成每组固定 20 格，不逐卡或逐格查询，也不加载完整任务快照。兼容的 `latest/recent` 通过另一条有界批量查询返回；页面只使用新增的 `enabled/as_of/summary_state/history`。
+每次概览请求重新验证权限；统计读取已有聚合表。检测汇总按唯一账号批量读取时间窗口及 API Key 窗前锚点，再生成每组固定 20 格，不逐卡或逐格查询，也不加载完整任务快照。兼容的 `latest/recent` 通过另一条有界批量查询返回；页面使用 `enabled/probe_model/as_of/summary_state/history`。`probe_model` 在现有批量查询中解析配置，只返回模型名，不增加逐组查询。
 
 本次 200 分钟汇总无需新迁移，复用索引 286。清理保留原有最近 100 条任务，并额外保护最近 215 分钟的有效结果及每个 API Key 在窗口前的最后一条有效结果。旧清理策略已经删除的历史不会补造。回退旧应用后，其清理任务可能删除新历史条所需记录；重新升级时只能展示实际保留的数据。
 
@@ -58,13 +60,15 @@ Cards show active monitored groups the authenticated user may use. Exhausted bal
 
 - **Cache rate:** cached input tokens divided by ordinary input, cache writes, and cache reads. Cache-write TTL details are already included in the write total.
 - **Availability:** successful requests divided by successes plus service-side failures. Explicit user-side access, balance, parameter, safety, and cancellation failures are excluded; upstream authentication, upstream quota, capacity, transport, timeout, and server failures remain included.
-- **First-token P50:** a histogram-based estimate. The tooltip identifies its approximation.
+- **First-token P50:** a histogram-based estimate, described briefly as the estimated median wait for the first token.
 
 Zero-cost successes are included. Final failed requests with partial usage are not also counted as successes, while recovered retry attempts remain successful. Billing is unchanged. Health colors use availability only, with existing error thresholds and minimum samples. Missing or rebuilding data is not presented as 100% availability.
 
 The traffic windows contain 18, 24, 14, and 30 buckets for 90 minutes, 24 hours, 7 days, and 30 days. Attribution uses only current, nondeleted group members with scheduling enabled. OAuth contributes all effective results from the previous 15 minutes; API Key and Engine accounts contribute their latest effective result regardless of age or the automatic-test switch. Cancelled, skipped, and unfinished jobs are ignored. Any pass wins; otherwise a mismatch wins; failures/errors alone are red; no effective result is gray. Only the current empty summary distinguishes disabled testing from no recent effective tests.
 
-Attribution history independently covers 200 minutes in 20 ten-minute buckets. Each bucket evaluates the same rules at its end; the last bucket equals the current server-time summary. API Key results before the window remain effective until superseded. Historical empty buckets do not infer past configuration. Membership and scheduling are evaluated using current accounts, and shadows do not inherit their credential owner's history. Tooltips expose aggregate time, state, and rules only. No additional model probes are started.
+Attribution history independently covers 200 minutes in 20 ten-minute buckets. Each bucket evaluates the same rules at its end; the last bucket equals the current server-time summary. API Key results before the window remain effective until superseded. Historical empty buckets do not infer past configuration. Membership and scheduling are evaluated using current accounts, and shadows do not inherit their credential owner's history. Cards show status, the history window and update time; tooltips show only the interval and aggregate state. Account-type and aggregation details stay in this documentation. No additional model probes are started.
+
+OpenAI and Composite cards also show the currently configured probe model: the group's enabled independent policy takes precedence, otherwise the global default applies. This comes from current configuration, never from historical checks. Other platforms or unconfigured models omit the label. The next page refresh picks up configuration changes.
 
 Platform icons and labels reuse shared colors in both themes: orange Anthropic, green OpenAI, blue Gemini, neutral Grok, purple Antigravity, and cyan Composite. Result colors remain independent.
 
@@ -72,7 +76,7 @@ Polling follows the configured 60/300-second interval, pauses while hidden, and 
 
 Forward migrations extend aggregation and bounded history lookup. Versioned backfill runs in bounded background batches within available source-log coverage, never within a page request. Deploy aggregators consistently during the statistics transition. Additive database fields and indexes may remain on application rollback; running an old aggregator requires a statistics rebuild when upgrading again.
 
-The attribution-summary update requires no migration and reuses index 286. One batch query reads distinct accounts and generates twenty states per group; a second bounded batch preserves legacy `latest/recent` fields. New clients use `enabled/as_of/summary_state/history`. Retention keeps the latest 100 jobs plus effective results from the last 215 minutes and each API Key's last effective result before that window. Already-pruned history is not reconstructed; rolling back to an older cleaner can reduce available history on a later upgrade.
+The attribution-summary update requires no migration and reuses index 286. One batch query reads distinct accounts and generates twenty states per group; a second bounded batch preserves legacy `latest/recent` fields. New clients use `enabled/probe_model/as_of/summary_state/history`. The configured model is projected as a scalar in the existing batch query, with no per-group query. Retention keeps the latest 100 jobs plus effective results from the last 215 minutes and each API Key's last effective result before that window. Already-pruned history is not reconstructed; rolling back to an older cleaner can reduce available history on a later upgrade.
 
 ## 初版验证记录 / Initial implementation validation (2026-11-14)
 
@@ -122,3 +126,9 @@ GOEXPERIMENT=greenteagc,jsonv2 go test -tags integration ./internal/repository -
 ```
 
 The update passed targeted Go unit/race tests, the complete isolated overview integration suite (including six new top-level tests), 55 frontend tests, three i18n checks, type checking, the production build, and targeted lint. Scheduling-disabled accounts are excluded from current, historical, legacy, and enabled-state projections without deleting their history or changing attribution execution. The 50-group fixture used two batch queries, with 1,000 summary rows in 10.227 ms and the legacy-history query in 2.791 ms. No production models, configuration, or deployment were involved. Remote CI was not run for this update.
+
+## 文案与配置探针展示验证 / Simplified cards and configured probe (2026-11-14)
+
+本次移除用户页权限及聚合实现说明，新增当前配置的探针模型。Go 定向单测、后端编译、22 项前端相关测试、类型检查、生产构建及定向 lint 均通过。隔离 PostgreSQL 18.1／Redis 8.4 的 8 项归因概览集成测试全部通过，覆盖独立策略、全局继承、配置更新、空组、全局关闭、历史隔离及非 OpenAI 平台；50 组批量查询仍返回固定 1,000 行，执行计划采样为 5.347 ms。构建保留既有 Browserslist、模块分包和大 chunk 提示。本次无数据库迁移、生产修改或部署，未执行远端 CI。
+
+Targeted Go tests, backend compilation, 22 related frontend tests, type checking, the production build and targeted lint passed. Eight isolated PostgreSQL/Redis attribution overview tests passed, including configured probe inheritance and updates independent of historical results. The 50-group query still returned 1,000 rows (5.347 ms in the local plan sample). Existing build warnings remain. No migration, production changes, deployment or remote CI were performed.
