@@ -51,6 +51,38 @@ func TestChannelMonitorV2MatrixDimensionKey(t *testing.T) {
 	require.Equal(t, channelMonitorV2MatrixKey{platform: "openai", model: service.ChannelMonitorV2OtherModel}, key)
 	key = channelMonitorV2MatrixDimensionKey(service.ChannelMonitorV2GroupByPlatform, cfg, "openai", 7, "gpt-5")
 	require.Equal(t, channelMonitorV2MatrixKey{platform: "openai"}, key)
+	for _, platform := range []string{"openai", "anthropic", "composite"} {
+		require.Equal(t, channelMonitorV2MatrixKey{groupID: 7}, channelMonitorV2MatrixDimensionKey(service.ChannelMonitorV2GroupByGroup, cfg, platform, 7, "anything"))
+	}
+}
+
+func TestChannelMonitorV2AvailabilityIndependentOfIgnoredErrorsAndLegacyUnknown(t *testing.T) {
+	acc := newMetricAccumulator()
+	acc.addFact(channelMonitorV2Fact{Success: 8, Errors: 5, AvailabilityErrors: 2, AvailabilityVersion: service.ChannelMonitorV2AggregationVersion})
+	metric := acc.metric(1, false)
+	require.Equal(t, int64(10), metric.AvailabilitySampleCount)
+	require.NotNil(t, metric.AvailabilityRate)
+	require.InDelta(t, 0.8, *metric.AvailabilityRate, 0.00001)
+	applyIgnoredErrors(&metric, 5)
+	require.Zero(t, metric.ErrorRate)
+	require.InDelta(t, 0.8, *metric.AvailabilityRate, 0.00001)
+	require.Nil(t, newMetricAccumulator().metric(1, false).AvailabilityRate)
+	acc.addFact(channelMonitorV2Fact{Success: 1, AvailabilityVersion: 1})
+	require.Nil(t, acc.metric(1, false).AvailabilityRate)
+}
+
+func TestChannelMonitorV2UnroutedCompositeOnlyIncludedInScopedGroupProjection(t *testing.T) {
+	cfg := service.ChannelMonitorV2Config{Platforms: []service.ChannelMonitorV2PlatformConfig{{Platform: "openai", Enabled: true}}}
+	filter := service.ChannelMonitorV2Filter{AllowedGroupIDs: []int64{7}, RestrictGroups: true}
+	where, _ := channelMonitorV2Where(filter, cfg, "m")
+	require.NotContains(t, where, "m.platform = 'composite'")
+	filter.IncludeUnroutedComposite = true
+	where, _ = channelMonitorV2Where(filter, cfg, "m")
+	require.Contains(t, where, "(m.platform = ANY($3) OR m.platform = 'composite')")
+	require.Contains(t, where, "m.group_id = ANY($4)")
+	filter.AllowedGroupIDs = nil
+	where, _ = channelMonitorV2Where(filter, cfg, "m")
+	require.Contains(t, where, "FALSE")
 }
 
 func TestChannelMonitorV2HistogramPercentilesAreMergedFromCounts(t *testing.T) {
@@ -304,14 +336,18 @@ func TestChannelMonitorV2ErrorAggregationResolvesCompositePlatform(t *testing.T)
 	require.NotContains(t, query, "nullif(trim(a.platform))")
 }
 
-func TestChannelMonitorV2UsageSuccessExcludesCyberBillingRows(t *testing.T) {
-	for _, query := range []string{channelMonitorV2UsageMetricsSQL, channelMonitorV2UserMetricsSQL} {
+func TestChannelMonitorV2UsageSuccessUsesAcceptedOutcomeNotPayment(t *testing.T) {
+	for _, query := range []string{channelMonitorV2UsageMetricsSQL, channelMonitorV2UserMetricsSQL, channelMonitorV2HistogramSQL} {
 		require.Contains(t, query, "COALESCE(ul.request_type, 0) NOT IN (4, 6)")
-		require.Contains(t, query, "ul.actual_cost > 0")
+		require.NotContains(t, query, "ul.actual_cost > 0")
+		require.Contains(t, query, "ul.grok_safety_rejection IS NULL")
+		require.Contains(t, query, "current_error.api_key_id = ul.api_key_id")
+		require.Contains(t, query, "COALESCE(current_error.group_id, 0) = COALESCE(ul.group_id, 0)")
+		require.Contains(t, query, "terminal_error.status_code")
+		require.Contains(t, query, "FROM accepted_usage ul")
 	}
 	require.Contains(t, channelMonitorV2PlatformSQL, "g.platform = 'composite'")
 	require.Contains(t, channelMonitorV2PlatformSQL, "a.platform")
-	require.Contains(t, channelMonitorV2HistogramSQL, "ul.actual_cost > 0")
 }
 
 func TestChannelMonitorV2RatesUseCoveredWindow(t *testing.T) {

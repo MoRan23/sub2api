@@ -55,6 +55,7 @@ type ChannelMonitorV2Aggregator struct {
 	// backfillAt is the earliest minute already recomputed (mirrors DB cursor).
 	// Zero means "not yet loaded from durable watermark this process".
 	backfillAt       time.Time
+	backfillFloor    time.Time
 	backfillChunk    time.Duration
 	backfillFailures int
 	// nextWaitFloor is applied after runOnce when failures require backoff.
@@ -238,12 +239,16 @@ func (s *ChannelMonitorV2Aggregator) runOnce() {
 
 	s.mu.Lock()
 	cursor := s.backfillAt
+	backfillFloor := s.backfillFloor
 	hasData := s.hasAggregated
 	s.mu.Unlock()
 
 	// Phase 1 (first upgrade / empty): seed the default 90m UI window quickly.
 	if !hasData || cursor.IsZero() {
 		start := now.Add(-channelMonitorV2BootstrapFirst)
+		if backfillFloor.After(start) {
+			start = backfillFloor
+		}
 		started := time.Now()
 		if err := s.repo.RecomputeRange(ctx, start, now); err != nil {
 			logger.LegacyPrintf("service.channel_monitor_v2", "[ChannelMonitorV2] bootstrap recent aggregation failed: %v", err)
@@ -259,10 +264,22 @@ func (s *ChannelMonitorV2Aggregator) runOnce() {
 		logger.LegacyPrintf("service.channel_monitor_v2", "[ChannelMonitorV2] overlap aggregation failed: %v", err)
 		return
 	}
+	// A downtime gap can restart the versioned backfill. Read its durable cursor
+	// rather than extending availability across an uncomputed interval.
+	if err := s.ensureCursor(ctx, now); err != nil {
+		return
+	}
+	s.mu.Lock()
+	cursor = s.backfillAt
+	backfillFloor = s.backfillFloor
+	s.mu.Unlock()
 
 	// Phase 2: walk history backward at most one chunk per tick until retention max (90d).
 	// Product UI (30d) fills first; remaining 30–90d continues silently.
 	retentionCutoff := now.Add(-channelMonitorV2RetentionMax)
+	if backfillFloor.After(retentionCutoff) {
+		retentionCutoff = backfillFloor
+	}
 	if !cursor.After(retentionCutoff) {
 		return
 	}
@@ -381,22 +398,20 @@ func (s *ChannelMonitorV2Aggregator) recordBackfillFailure(now, end time.Time) {
 // ensureCursor restores durable backfill_cursor after process restart so progress
 // and historical walk continue instead of re-seeding only the last 2h.
 func (s *ChannelMonitorV2Aggregator) ensureCursor(ctx context.Context, now time.Time) error {
-	s.mu.Lock()
-	loaded := s.cursorLoaded
-	s.mu.Unlock()
-	if loaded {
-		return nil
-	}
 	wm, err := s.repo.GetAggregationWatermark(ctx)
 	if err != nil {
 		return err
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
-	if s.cursorLoaded {
-		return nil
-	}
 	if wm != nil {
+		s.backfillFloor = wm.AvailabilitySourceStart
+		if wm.AggregationVersion < ChannelMonitorV2AggregationVersion {
+			s.backfillAt = time.Time{}
+			s.hasAggregated = false
+			s.cursorLoaded = true
+			return nil
+		}
 		if !wm.BackfillCursor.IsZero() {
 			s.backfillAt = wm.BackfillCursor.UTC().Truncate(time.Minute)
 		}

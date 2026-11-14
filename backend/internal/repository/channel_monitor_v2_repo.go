@@ -100,6 +100,8 @@ func (r *channelMonitorV2Repository) UpdateConfig(ctx context.Context, cfg servi
 }
 
 type channelMonitorV2Fact struct {
+	AvailabilityErrors                                  int64
+	AvailabilityVersion                                 int
 	BucketStart, Platform, GroupName, Model             string
 	GroupID                                             int64
 	Success, Errors, UpstreamAffected, UpstreamAttempts int64
@@ -366,6 +368,7 @@ type channelMonitorV2MatrixAccumulator struct {
 }
 
 func (r *channelMonitorV2Repository) GetMatrix(ctx context.Context, filter service.ChannelMonitorV2Filter, cfg service.ChannelMonitorV2Config, groupBy service.ChannelMonitorV2GroupBy, admin bool) (*service.ChannelMonitorV2Matrix, error) {
+	filter.IncludeUnroutedComposite = groupBy == service.ChannelMonitorV2GroupByGroup
 	if channelMonitorV2RestrictedGroupScopeEmpty(filter, cfg) {
 		return &service.ChannelMonitorV2Matrix{GroupBy: groupBy, Items: []service.ChannelMonitorV2MatrixRow{}}, nil
 	}
@@ -387,7 +390,7 @@ func (r *channelMonitorV2Repository) GetMatrix(ctx context.Context, filter servi
 	// Empty config group list means all groups — load active groups so matrix seed
 	// can materialize real platform/group rows (not bare platform placeholders).
 	if len(seedGroupIDs) == 0 && !filter.RestrictGroups &&
-		(groupBy == service.ChannelMonitorV2GroupByPlatformGroup || groupBy == service.ChannelMonitorV2GroupByPlatformGroupModel) {
+		(groupBy == service.ChannelMonitorV2GroupByGroup || groupBy == service.ChannelMonitorV2GroupByPlatformGroup || groupBy == service.ChannelMonitorV2GroupByPlatformGroupModel) {
 		allIDs, loadErr := r.listActiveGroupIDs(ctx)
 		if loadErr != nil {
 			return nil, loadErr
@@ -404,7 +407,7 @@ func (r *channelMonitorV2Repository) GetMatrix(ctx context.Context, filter servi
 			continue
 		}
 		// platform_group dimensions require a real group; skip group_id=0 traffic rows.
-		if (groupBy == service.ChannelMonitorV2GroupByPlatformGroup || groupBy == service.ChannelMonitorV2GroupByPlatformGroupModel) &&
+		if (groupBy == service.ChannelMonitorV2GroupByGroup || groupBy == service.ChannelMonitorV2GroupByPlatformGroup || groupBy == service.ChannelMonitorV2GroupByPlatformGroupModel) &&
 			fact.GroupID <= 0 {
 			continue
 		}
@@ -429,7 +432,7 @@ func (r *channelMonitorV2Repository) GetMatrix(ctx context.Context, filter servi
 		if !channelMonitorV2ModelSelected(filter, cfg, histogram.Platform, histogram.Model) {
 			continue
 		}
-		if (groupBy == service.ChannelMonitorV2GroupByPlatformGroup || groupBy == service.ChannelMonitorV2GroupByPlatformGroupModel) &&
+		if (groupBy == service.ChannelMonitorV2GroupByGroup || groupBy == service.ChannelMonitorV2GroupByPlatformGroup || groupBy == service.ChannelMonitorV2GroupByPlatformGroupModel) &&
 			histogram.GroupID <= 0 {
 			continue
 		}
@@ -452,7 +455,7 @@ func (r *channelMonitorV2Repository) GetMatrix(ctx context.Context, filter servi
 	}
 	for key, acc := range accs {
 		// platform_group views only emit rows with a real group_id.
-		if (groupBy == service.ChannelMonitorV2GroupByPlatformGroup || groupBy == service.ChannelMonitorV2GroupByPlatformGroupModel) &&
+		if (groupBy == service.ChannelMonitorV2GroupByGroup || groupBy == service.ChannelMonitorV2GroupByPlatformGroup || groupBy == service.ChannelMonitorV2GroupByPlatformGroupModel) &&
 			key.groupID <= 0 {
 			continue
 		}
@@ -497,7 +500,10 @@ func (r *channelMonitorV2Repository) GetMatrix(ctx context.Context, filter servi
 
 func channelMonitorV2MatrixDimensionKey(groupBy service.ChannelMonitorV2GroupBy, cfg service.ChannelMonitorV2Config, platform string, groupID int64, model string) channelMonitorV2MatrixKey {
 	key := channelMonitorV2MatrixKey{platform: platform}
-	if groupBy == service.ChannelMonitorV2GroupByPlatformGroup || groupBy == service.ChannelMonitorV2GroupByPlatformGroupModel {
+	if groupBy == service.ChannelMonitorV2GroupByGroup {
+		return channelMonitorV2MatrixKey{groupID: groupID}
+	}
+	if groupBy == service.ChannelMonitorV2GroupByGroup || groupBy == service.ChannelMonitorV2GroupByPlatformGroup || groupBy == service.ChannelMonitorV2GroupByPlatformGroupModel {
 		key.groupID = groupID
 	}
 	if groupBy == service.ChannelMonitorV2GroupByPlatformModel || groupBy == service.ChannelMonitorV2GroupByPlatformGroupModel {
@@ -508,6 +514,12 @@ func channelMonitorV2MatrixDimensionKey(groupBy service.ChannelMonitorV2GroupBy,
 
 func seedChannelMonitorV2MatrixAccumulators(filter service.ChannelMonitorV2Filter, cfg service.ChannelMonitorV2Config, groupBy service.ChannelMonitorV2GroupBy, groupInfo map[int64]channelMonitorV2GroupInfo) map[channelMonitorV2MatrixKey]*channelMonitorV2MatrixAccumulator {
 	accs := map[channelMonitorV2MatrixKey]*channelMonitorV2MatrixAccumulator{}
+	if groupBy == service.ChannelMonitorV2GroupByGroup {
+		for id, info := range groupInfo {
+			accs[channelMonitorV2MatrixKey{groupID: id}] = &channelMonitorV2MatrixAccumulator{groupName: info.name, total: newMetricAccumulator(), buckets: make(map[string]*metricAccumulator)}
+		}
+		return accs
+	}
 	platforms := channelMonitorV2EnabledPlatforms(cfg)
 	if len(filter.Platforms) > 0 {
 		platforms = intersectStrings(platforms, filter.Platforms)
@@ -515,7 +527,7 @@ func seedChannelMonitorV2MatrixAccumulators(filter service.ChannelMonitorV2Filte
 	// Platform-only groupBy seeds groupID=0. When group is part of the dimension
 	// (platform_group / platform_group_model), never seed a bare platform row —
 	// only real group IDs (from config or discovered groupInfo).
-	needsGroup := groupBy == service.ChannelMonitorV2GroupByPlatformGroup || groupBy == service.ChannelMonitorV2GroupByPlatformGroupModel
+	needsGroup := groupBy == service.ChannelMonitorV2GroupByGroup || groupBy == service.ChannelMonitorV2GroupByPlatformGroup || groupBy == service.ChannelMonitorV2GroupByPlatformGroupModel
 	groupIDs := []int64{0}
 	if needsGroup {
 		groupIDs = configuredChannelMonitorV2GroupIDs(filter, cfg)
@@ -859,7 +871,7 @@ func (r *channelMonitorV2Repository) GetUsers(ctx context.Context, filter servic
 	filter = effectiveFilter
 	where, args, _ := channelMonitorV2WhereWithRollup(filter, cfg, "m")
 	query := `SELECT m.user_id,COALESCE(u.email,''),COALESCE(u.username,''),m.platform,m.model,
-	SUM(m.success_requests),SUM(m.error_requests),SUM(m.input_tokens),SUM(m.output_tokens),SUM(m.cache_creation_tokens),SUM(m.cache_read_tokens),SUM(m.ttft_sum_ms),SUM(m.ttft_count),SUM(m.duration_sum_ms),SUM(m.duration_count)
+	SUM(m.success_requests),SUM(m.error_requests),SUM(m.input_tokens),SUM(m.output_tokens),SUM(m.cache_creation_tokens),SUM(m.cache_read_tokens),SUM(m.ttft_sum_ms),SUM(m.ttft_count),SUM(m.duration_sum_ms),SUM(m.duration_count),COALESCE(SUM(m.availability_error_requests),0),MIN(CASE WHEN m.availability_error_requests IS NULL THEN 1 ELSE m.aggregation_version END)
 	FROM ` + channelMonitorV2UserMetricsTable(filter) + ` m LEFT JOIN users u ON u.id=m.user_id ` + where + ` GROUP BY m.user_id,u.email,u.username,m.platform,m.model`
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
@@ -873,7 +885,7 @@ func (r *channelMonitorV2Repository) GetUsers(ctx context.Context, filter servic
 		var uid int64
 		var email, username string
 		var f channelMonitorV2Fact
-		if err := rows.Scan(&uid, &email, &username, &f.Platform, &f.Model, &f.Success, &f.Errors, &f.Input, &f.Output, &f.CacheCreation, &f.CacheRead, &f.TTFTSum, &f.TTFTCount, &f.DurationSum, &f.DurationCount); err != nil {
+		if err := rows.Scan(&uid, &email, &username, &f.Platform, &f.Model, &f.Success, &f.Errors, &f.Input, &f.Output, &f.CacheCreation, &f.CacheRead, &f.TTFTSum, &f.TTFTCount, &f.DurationSum, &f.DurationCount, &f.AvailabilityErrors, &f.AvailabilityVersion); err != nil {
 			return nil, err
 		}
 		if !channelMonitorV2ModelSelected(filter, cfg, f.Platform, f.Model) {
@@ -953,7 +965,7 @@ func (r *channelMonitorV2Repository) loadFacts(ctx context.Context, filter servi
 			group = bucketExpr + "," + group
 		}
 	}
-	query := `SELECT ` + bucketExpr + `,m.platform,m.group_id,COALESCE(g.name,''),m.model,SUM(m.success_requests),SUM(m.error_requests),SUM(m.upstream_affected_requests),SUM(m.upstream_attempt_count),SUM(m.input_tokens),SUM(m.output_tokens),SUM(m.cache_creation_tokens),SUM(m.cache_read_tokens),SUM(m.ttft_sum_ms),SUM(m.ttft_count),SUM(m.duration_sum_ms),SUM(m.duration_count) FROM ` + channelMonitorV2MetricsTable(filter) + ` m LEFT JOIN groups g ON g.id=NULLIF(m.group_id,0) ` + where + ` GROUP BY ` + group
+	query := `SELECT ` + bucketExpr + `,m.platform,m.group_id,COALESCE(g.name,''),m.model,SUM(m.success_requests),SUM(m.error_requests),SUM(m.upstream_affected_requests),SUM(m.upstream_attempt_count),SUM(m.input_tokens),SUM(m.output_tokens),SUM(m.cache_creation_tokens),SUM(m.cache_read_tokens),SUM(m.ttft_sum_ms),SUM(m.ttft_count),SUM(m.duration_sum_ms),SUM(m.duration_count),COALESCE(SUM(m.availability_error_requests),0),MIN(CASE WHEN m.availability_error_requests IS NULL THEN 1 ELSE m.aggregation_version END) FROM ` + channelMonitorV2MetricsTable(filter) + ` m LEFT JOIN groups g ON g.id=NULLIF(m.group_id,0) ` + where + ` GROUP BY ` + group
 	rows, err := r.db.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
@@ -963,7 +975,7 @@ func (r *channelMonitorV2Repository) loadFacts(ctx context.Context, filter servi
 	for rows.Next() {
 		var bucket time.Time
 		var f channelMonitorV2Fact
-		if err := rows.Scan(&bucket, &f.Platform, &f.GroupID, &f.GroupName, &f.Model, &f.Success, &f.Errors, &f.UpstreamAffected, &f.UpstreamAttempts, &f.Input, &f.Output, &f.CacheCreation, &f.CacheRead, &f.TTFTSum, &f.TTFTCount, &f.DurationSum, &f.DurationCount); err != nil {
+		if err := rows.Scan(&bucket, &f.Platform, &f.GroupID, &f.GroupName, &f.Model, &f.Success, &f.Errors, &f.UpstreamAffected, &f.UpstreamAttempts, &f.Input, &f.Output, &f.CacheCreation, &f.CacheRead, &f.TTFTSum, &f.TTFTCount, &f.DurationSum, &f.DurationCount, &f.AvailabilityErrors, &f.AvailabilityVersion); err != nil {
 			return nil, err
 		}
 		f.BucketStart = bucket.UTC().Format(time.RFC3339Nano)
@@ -1014,17 +1026,30 @@ func (r *channelMonitorV2Repository) loadHistograms(ctx context.Context, filter 
 }
 
 func (r *channelMonitorV2Repository) GetAggregationWatermark(ctx context.Context) (*service.ChannelMonitorV2AggregationWatermark, error) {
-	var usageStart, errorStart, dataThrough, computed, backfill sql.NullTime
+	var usageStart, errorStart, dataThrough, computed, backfill, availabilityStart, sourceStart sql.NullTime
+	var version int
 	err := r.db.QueryRowContext(ctx, `
-		SELECT usage_coverage_start, error_coverage_start, data_through, last_successful_at, backfill_cursor
-		FROM channel_monitor_v2_watermarks WHERE id = 1`).Scan(&usageStart, &errorStart, &dataThrough, &computed, &backfill)
+		SELECT usage_coverage_start, error_coverage_start, data_through, last_successful_at, backfill_cursor,
+		       aggregation_version, availability_coverage_start,
+		       COALESCE(availability_source_start, GREATEST(
+		           date_trunc('minute', NOW()) - INTERVAL '90 days',
+		           date_trunc('minute', COALESCE((SELECT created_at FROM usage_logs ORDER BY created_at LIMIT 1), availability_epoch_at)),
+		           date_trunc('minute', COALESCE((SELECT created_at FROM ops_error_logs ORDER BY created_at LIMIT 1), availability_epoch_at))
+		       ))
+		FROM channel_monitor_v2_watermarks WHERE id = 1`).Scan(&usageStart, &errorStart, &dataThrough, &computed, &backfill, &version, &availabilityStart, &sourceStart)
 	if err == sql.ErrNoRows {
 		return &service.ChannelMonitorV2AggregationWatermark{}, nil
 	}
 	if err != nil {
 		return nil, err
 	}
-	out := &service.ChannelMonitorV2AggregationWatermark{HasData: dataThrough.Valid}
+	out := &service.ChannelMonitorV2AggregationWatermark{HasData: dataThrough.Valid, AggregationVersion: version}
+	if availabilityStart.Valid {
+		out.AvailabilityCoverageStart = availabilityStart.Time.UTC()
+	}
+	if sourceStart.Valid {
+		out.AvailabilitySourceStart = sourceStart.Time.UTC()
+	}
 	if usageStart.Valid {
 		out.UsageCoverageStart = usageStart.Time.UTC()
 	}
@@ -1089,6 +1114,9 @@ func (r *channelMonitorV2Repository) loadCoverage(ctx context.Context, filter se
 	// aligns End to the next whole bucket (often in the future), so a healthy
 	// minute-level lag would otherwise always show "partial historical coverage".
 	return &service.ChannelMonitorV2Coverage{
+		AvailabilityVersion:   wm.AggregationVersion,
+		AvailabilityStart:     wm.AvailabilityCoverageStart,
+		AvailabilityReady:     wm.AggregationVersion >= service.ChannelMonitorV2AggregationVersion && channelMonitorV2HistoryCoverageComplete(wm.AvailabilityCoverageStart, filter.Start),
 		RequestedStart:        filter.Start,
 		RequestedEnd:          filter.End,
 		CoverageStart:         coverageStart,
@@ -1168,7 +1196,11 @@ func channelMonitorV2Where(filter service.ChannelMonitorV2Filter, cfg service.Ch
 	}
 	if len(platforms) > 0 {
 		args = append(args, pq.Array(platforms))
-		conditions = append(conditions, fmt.Sprintf("%s.platform = ANY($%d)", alias, len(args)))
+		platformCondition := fmt.Sprintf("%s.platform = ANY($%d)", alias, len(args))
+		if filter.IncludeUnroutedComposite {
+			platformCondition = "(" + platformCondition + " OR " + alias + ".platform = 'composite')"
+		}
+		conditions = append(conditions, platformCondition)
 	} else {
 		conditions = append(conditions, "FALSE")
 	}
@@ -1313,6 +1345,8 @@ func shiftSQLPlaceholders(query string, offset int) string {
 }
 
 type metricAccumulator struct {
+	availabilityErrors                                                                                                                           int64
+	availabilityUnknown                                                                                                                          bool
 	success, errors, upstreamAffected, upstreamAttempts, input, output, cacheCreation, cacheRead, ttftSum, ttftCount, durationSum, durationCount int64
 	hist                                                                                                                                         map[string]map[int64]int64
 }
@@ -1321,6 +1355,10 @@ func newMetricAccumulator() *metricAccumulator {
 	return &metricAccumulator{hist: map[string]map[int64]int64{"ttft": {}, "duration": {}}}
 }
 func (a *metricAccumulator) addFact(f channelMonitorV2Fact) {
+	a.availabilityErrors += f.AvailabilityErrors
+	if f.AvailabilityVersion < service.ChannelMonitorV2AggregationVersion {
+		a.availabilityUnknown = true
+	}
 	a.success += f.Success
 	a.errors += f.Errors
 	a.upstreamAffected += f.UpstreamAffected
@@ -1348,6 +1386,12 @@ func (a *metricAccumulator) metric(minutes float64, admin bool) service.ChannelM
 		minutes = 1
 	}
 	m := service.ChannelMonitorV2Metric{SuccessRequests: a.success, ErrorRequests: a.errors, RequestCount: requests, InputTokens: a.input, OutputTokens: a.output, CacheCreationTokens: a.cacheCreation, CacheReadTokens: a.cacheRead, TokenCount: tokens, RPM: float64(requests) / minutes, TPM: float64(tokens) / minutes, CacheRateNumerator: a.cacheRead, CacheRateDenominator: denom, TTFT: latencyMetric(a.ttftSum, a.ttftCount, a.hist["ttft"]), Duration: latencyMetric(a.durationSum, a.durationCount, a.hist["duration"])}
+	m.AvailabilityErrorRequests = a.availabilityErrors
+	m.AvailabilitySampleCount = a.success + a.availabilityErrors
+	if !a.availabilityUnknown && m.AvailabilitySampleCount > 0 {
+		rate := float64(a.success) / float64(m.AvailabilitySampleCount)
+		m.AvailabilityRate = &rate
+	}
 	if requests > 0 {
 		m.ErrorRate = float64(a.errors) / float64(requests)
 		m.SuccessRate = float64(a.success) / float64(requests)

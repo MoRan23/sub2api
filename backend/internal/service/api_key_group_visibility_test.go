@@ -98,3 +98,30 @@ func TestGetUserGroupVisibilityEmptyAndErrors(t *testing.T) {
 		})
 	}
 }
+
+func TestGetAvailableGroupsKeepsExhaustedTotalQuotaVisible(t *testing.T) {
+	for _, permanent := range []bool{false, true} {
+		t.Run(map[bool]string{false: "finite", true: "permanent_null_expiry"}[permanent], func(t *testing.T) {
+			group := Group{ID: 42, Status: StatusActive, IsExclusive: true, SubscriptionType: SubscriptionTypeTotalQuota, TotalQuotaNoExpiry: permanent}
+			sub := UserSubscription{UserID: 1, GroupID: group.ID, Status: SubscriptionStatusActive, TotalRemainingUSD: 0}
+			if !permanent {
+				expires := time.Now().Add(time.Hour)
+				sub.ExpiresAt = &expires
+			}
+			svc := &APIKeyService{
+				userRepo:    &visibilityUserRepo{user: &User{ID: 1, Balance: 0, RestrictPublicGroups: true}},
+				userSubRepo: &visibilitySubRepo{subscriptions: []UserSubscription{sub}},
+				groupRepo:   &visibilityGroupRepo{groups: []Group{group}},
+			}
+			available, err := svc.GetAvailableGroups(context.Background(), 1)
+			require.NoError(t, err)
+			require.Len(t, available, 1, "quota and wallet exhaustion must not revoke monitoring visibility")
+			require.Equal(t, group.ID, available[0].ID)
+			// Revocation is effective on the next read, even though the group stays active.
+			svc.userSubRepo.(*visibilitySubRepo).subscriptions[0].Status = SubscriptionStatusExpired
+			available, err = svc.GetAvailableGroups(context.Background(), 1)
+			require.NoError(t, err)
+			require.Empty(t, available)
+		})
+	}
+}

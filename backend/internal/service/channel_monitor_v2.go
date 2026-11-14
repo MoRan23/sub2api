@@ -12,6 +12,8 @@ import (
 const (
 	ChannelMonitorV2OtherModel      = "__other__"
 	ChannelMonitorV2TaxonomyVersion = 1
+	// AggregationVersion separates legacy paid-only facts from final-outcome facts.
+	ChannelMonitorV2AggregationVersion = 2
 )
 
 var (
@@ -24,6 +26,8 @@ var (
 type ChannelMonitorV2GroupBy string
 
 const (
+	// Group is an internal projection used by the authorized group overview.
+	ChannelMonitorV2GroupByGroup              ChannelMonitorV2GroupBy = "group"
 	ChannelMonitorV2GroupByPlatform           ChannelMonitorV2GroupBy = "platform"
 	ChannelMonitorV2GroupByPlatformGroup      ChannelMonitorV2GroupBy = "platform_group"
 	ChannelMonitorV2GroupByPlatformModel      ChannelMonitorV2GroupBy = "platform_model"
@@ -82,32 +86,38 @@ type ChannelMonitorV2Filter struct {
 	// the unrestricted admin/configured scope represented by an empty slice.
 	AllowedGroupIDs []int64
 	RestrictGroups  bool
-	Models          []string
-	Start           time.Time
-	End             time.Time
-	Bucket          time.Duration
+	// IncludeUnroutedComposite is an internal group-overview projection. It keeps
+	// failures before account selection without assigning a fictitious platform.
+	IncludeUnroutedComposite bool
+	Models                   []string
+	Start                    time.Time
+	End                      time.Time
+	Bucket                   time.Duration
 }
 
 type ChannelMonitorV2Metric struct {
-	SuccessRequests          int64                   `json:"success_requests"`
-	ErrorRequests            int64                   `json:"error_requests"`
-	RequestCount             int64                   `json:"request_count"`
-	InputTokens              int64                   `json:"input_tokens"`
-	OutputTokens             int64                   `json:"output_tokens"`
-	CacheCreationTokens      int64                   `json:"cache_creation_tokens"`
-	CacheReadTokens          int64                   `json:"cache_read_tokens"`
-	TokenCount               int64                   `json:"token_count"`
-	RPM                      float64                 `json:"rpm"`
-	TPM                      float64                 `json:"tpm"`
-	ErrorRate                float64                 `json:"error_rate"`
-	SuccessRate              float64                 `json:"success_rate"`
-	CacheRate                float64                 `json:"cache_rate"`
-	CacheRateNumerator       int64                   `json:"cache_rate_numerator"`
-	CacheRateDenominator     int64                   `json:"cache_rate_denominator"`
-	TTFT                     ChannelMonitorV2Latency `json:"ttft"`
-	Duration                 ChannelMonitorV2Latency `json:"duration"`
-	UpstreamAffectedRequests *int64                  `json:"upstream_affected_requests,omitempty"`
-	UpstreamAttemptCount     *int64                  `json:"upstream_attempt_count,omitempty"`
+	AvailabilityErrorRequests int64                   `json:"availability_error_requests"`
+	AvailabilitySampleCount   int64                   `json:"availability_sample_count"`
+	AvailabilityRate          *float64                `json:"availability_rate"`
+	SuccessRequests           int64                   `json:"success_requests"`
+	ErrorRequests             int64                   `json:"error_requests"`
+	RequestCount              int64                   `json:"request_count"`
+	InputTokens               int64                   `json:"input_tokens"`
+	OutputTokens              int64                   `json:"output_tokens"`
+	CacheCreationTokens       int64                   `json:"cache_creation_tokens"`
+	CacheReadTokens           int64                   `json:"cache_read_tokens"`
+	TokenCount                int64                   `json:"token_count"`
+	RPM                       float64                 `json:"rpm"`
+	TPM                       float64                 `json:"tpm"`
+	ErrorRate                 float64                 `json:"error_rate"`
+	SuccessRate               float64                 `json:"success_rate"`
+	CacheRate                 float64                 `json:"cache_rate"`
+	CacheRateNumerator        int64                   `json:"cache_rate_numerator"`
+	CacheRateDenominator      int64                   `json:"cache_rate_denominator"`
+	TTFT                      ChannelMonitorV2Latency `json:"ttft"`
+	Duration                  ChannelMonitorV2Latency `json:"duration"`
+	UpstreamAffectedRequests  *int64                  `json:"upstream_affected_requests,omitempty"`
+	UpstreamAttemptCount      *int64                  `json:"upstream_attempt_count,omitempty"`
 }
 
 type ChannelMonitorV2Latency struct {
@@ -154,7 +164,10 @@ type ChannelMonitorV2HealthThresholds struct {
 }
 
 type ChannelMonitorV2Coverage struct {
-	RequestedStart time.Time `json:"requested_start"`
+	AvailabilityVersion int       `json:"availability_version"`
+	AvailabilityReady   bool      `json:"availability_ready"`
+	AvailabilityStart   time.Time `json:"availability_start"`
+	RequestedStart      time.Time `json:"requested_start"`
 	// RequestedEnd is the exclusive upper bound of the UI-selected window
 	// (filter.End). Charts/matrices should plot [RequestedStart, RequestedEnd)
 	// even when CoverageStart is later (partial backfill).
@@ -192,10 +205,13 @@ type ChannelMonitorV2Bootstrap struct {
 
 // ChannelMonitorV2AggregationWatermark is the durable aggregator cursor state.
 type ChannelMonitorV2AggregationWatermark struct {
-	UsageCoverageStart time.Time
-	ErrorCoverageStart time.Time
-	DataThrough        time.Time
-	LastSuccessfulAt   time.Time
+	AggregationVersion        int
+	AvailabilityCoverageStart time.Time
+	AvailabilitySourceStart   time.Time
+	UsageCoverageStart        time.Time
+	ErrorCoverageStart        time.Time
+	DataThrough               time.Time
+	LastSuccessfulAt          time.Time
 	// BackfillCursor is the earliest start already recomputed; zero when never set.
 	BackfillCursor time.Time
 	// HasData is true once any successful recompute wrote data_through.
@@ -639,6 +655,8 @@ func redactChannelMonitorV2Metric(m *ChannelMonitorV2Metric, hideThroughput bool
 		return
 	}
 	m.SuccessRequests = 0
+	m.AvailabilityErrorRequests = 0
+	m.AvailabilitySampleCount = 0
 	m.ErrorRequests = 0
 	m.RequestCount = 0
 	m.InputTokens = 0

@@ -11,6 +11,33 @@ import (
 const channelMonitorV2PlatformSQL = `lower(` + usageLogEffectivePlatformExpr + `)`
 const channelMonitorV2ModelSQL = `COALESCE(NULLIF(TRIM(ul.requested_model), ''), NULLIF(TRIM(ul.model), ''), 'unknown')`
 
+// Use the same identity on the usage and ops sides without trusting the ID to be
+// globally unique. Both API key and group remain part of every comparison.
+const channelMonitorV2UsageRequestIdentitySQL = `(CASE WHEN left(ul.request_id, 7) = 'client:' OR left(ul.request_id, 6) = 'local:' THEN ul.request_id ELSE 'local:' || NULLIF(ul.request_id, '') END)`
+const channelMonitorV2ErrorRequestIdentitySQL = `(CASE WHEN NULLIF(current_error.client_request_id, '') IS NOT NULL THEN 'client:' || current_error.client_request_id ELSE 'local:' || NULLIF(current_error.request_id, '') END)`
+
+// This predicate is monitor-specific. Billing and legacy financial statistics
+// deliberately retain their own success rules. Recovered 2xx error-log rows
+// must be selected before filtering final failures.
+const channelMonitorV2AcceptedUsageFilterUL = `
+COALESCE(ul.request_type, 0) NOT IN (4, 6)
+AND ul.grok_safety_rejection IS NULL
+AND NOT EXISTS (
+ SELECT 1 FROM (
+  SELECT current_error.status_code, current_error.error_type
+  FROM ops_error_logs current_error
+  WHERE current_error.api_key_id = ul.api_key_id
+    AND COALESCE(current_error.group_id, 0) = COALESCE(ul.group_id, 0)
+    AND ` + channelMonitorV2ErrorRequestIdentitySQL + ` = ` + channelMonitorV2UsageRequestIdentitySQL + `
+    AND NULLIF(ul.request_id, '') IS NOT NULL
+    AND current_error.created_at >= ul.created_at - INTERVAL '90 minutes'
+    AND current_error.created_at < ul.created_at + INTERVAL '90 minutes'
+    AND NOT current_error.is_count_tokens
+  ORDER BY current_error.created_at DESC, current_error.id DESC LIMIT 1
+ ) terminal_error
+ WHERE COALESCE(terminal_error.status_code, 0) >= 400 OR terminal_error.error_type = 'cyber_policy'
+)`
+
 // Tiered retention balances UI windows against storage:
 //
 //	1m facts  → short (late writes + rebuild rollups)
@@ -74,9 +101,15 @@ func (r *channelMonitorV2Repository) pruneChannelMonitorV2Retention(ctx context.
 	// During historical bootstrap, retain all 1m facts until the cursor reaches
 	// the oldest rollup boundary. Otherwise adjacent chunks would rebuild the
 	// same daily bucket from source rows already pruned by the prior chunk.
-	var backfillCursor time.Time
-	if err := tx.QueryRowContext(ctx, `SELECT backfill_cursor FROM channel_monitor_v2_watermarks WHERE id = 1`).Scan(&backfillCursor); err == nil && backfillCursor.After(channelMonitorV2RetentionCutoff(now, channelMonitorV2RetentionMax)) {
-		return nil
+	var backfillCursor, sourceStart sql.NullTime
+	if err := tx.QueryRowContext(ctx, `SELECT backfill_cursor, availability_source_start FROM channel_monitor_v2_watermarks WHERE id = 1`).Scan(&backfillCursor, &sourceStart); err == nil {
+		cutoff := channelMonitorV2RetentionCutoff(now, channelMonitorV2RetentionMax)
+		if sourceStart.Valid && sourceStart.Time.After(cutoff) {
+			cutoff = sourceStart.Time
+		}
+		if backfillCursor.Valid && backfillCursor.Time.After(cutoff) {
+			return nil
+		}
 	}
 	for _, rule := range channelMonitorV2RetentionRules {
 		cutoff := channelMonitorV2RetentionCutoff(now, rule.retention)
@@ -104,6 +137,16 @@ func (r *channelMonitorV2Repository) RecomputeRange(ctx context.Context, start, 
 	maxCutoff := channelMonitorV2RetentionCutoff(now, channelMonitorV2MaxRetention())
 	if start.Before(maxCutoff) {
 		start = maxCutoff
+	}
+	if !start.Before(end) {
+		return nil
+	}
+	watermark, err := r.GetAggregationWatermark(ctx)
+	if err != nil {
+		return err
+	}
+	if watermark.AvailabilitySourceStart.After(start) {
+		start = watermark.AvailabilitySourceStart
 	}
 	if !start.Before(end) {
 		return nil
@@ -146,7 +189,7 @@ func (r *channelMonitorV2Repository) RecomputeRange(ctx context.Context, start, 
 	if _, err = tx.ExecContext(ctx, channelMonitorV2ErrorAggregationSQL, start, end); err != nil {
 		return fmt.Errorf("aggregate channel monitor v2 errors: %w", err)
 	}
-	if err = r.recomputeFixedRollups(ctx, tx, start, end); err != nil {
+	if err = r.recomputeFixedRollups(ctx, tx, start, end, watermark.AvailabilitySourceStart); err != nil {
 		return err
 	}
 	// Drop rows past per-tier TTL (1m short, coarse rollups long). Safe after rollup
@@ -154,7 +197,7 @@ func (r *channelMonitorV2Repository) RecomputeRange(ctx context.Context, start, 
 	if err = r.pruneChannelMonitorV2Retention(ctx, tx, now); err != nil {
 		return err
 	}
-	if _, err = tx.ExecContext(ctx, channelMonitorV2WatermarkSQL, start, end); err != nil {
+	if _, err = tx.ExecContext(ctx, channelMonitorV2WatermarkSQL, start, end, watermark.AvailabilitySourceStart); err != nil {
 		return err
 	}
 	if err = tx.Commit(); err != nil {
@@ -163,66 +206,67 @@ func (r *channelMonitorV2Repository) RecomputeRange(ctx context.Context, start, 
 	return nil
 }
 
-const channelMonitorV2UsageMetricsSQL = `
+const channelMonitorV2AcceptedUsageCTE = `WITH accepted_usage AS MATERIALIZED (
+ SELECT ul.id, ul.api_key_id, ul.user_id, ul.group_id, ul.account_id,
+        ul.request_id, ul.request_type, ul.requested_model, ul.model, ul.created_at,
+        ul.input_tokens, ul.output_tokens, ul.cache_creation_tokens, ul.cache_read_tokens,
+        ul.first_token_ms, ul.duration_ms
+ FROM usage_logs ul
+ WHERE ul.created_at >= $1 AND ul.created_at < $2 AND ` + channelMonitorV2AcceptedUsageFilterUL + `
+)
+`
+
+const channelMonitorV2UsageMetricsSQL = channelMonitorV2AcceptedUsageCTE + `
 INSERT INTO channel_monitor_v2_metrics_1m (
   bucket_start, platform, group_id, model, success_requests,
   input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
-  ttft_sum_ms, ttft_count, duration_sum_ms, duration_count, computed_at
+  ttft_sum_ms, ttft_count, duration_sum_ms, duration_count, computed_at,
+  availability_error_requests, aggregation_version
 )
 SELECT date_trunc('minute', ul.created_at), %s, COALESCE(ul.group_id, 0), %s,
-       COUNT(DISTINCT COALESCE(NULLIF(ul.request_id, ''), 'usage:' || ul.id::text))
-         FILTER (WHERE COALESCE(ul.request_type, 0) NOT IN (4, 6) AND ` + usageLogSuccessFilterUL + `),
-       COALESCE(SUM(ul.input_tokens) FILTER (WHERE ` + usageLogSuccessFilterUL + `), 0),
-       COALESCE(SUM(ul.output_tokens) FILTER (WHERE ` + usageLogSuccessFilterUL + `), 0),
-       COALESCE(SUM(ul.cache_creation_tokens) FILTER (WHERE ` + usageLogSuccessFilterUL + `), 0),
-       COALESCE(SUM(ul.cache_read_tokens) FILTER (WHERE ` + usageLogSuccessFilterUL + `), 0),
-       COALESCE(SUM(ul.first_token_ms) FILTER (WHERE ul.first_token_ms IS NOT NULL AND ` + usageLogSuccessFilterUL + `), 0),
-       COUNT(ul.first_token_ms) FILTER (WHERE ` + usageLogSuccessFilterUL + `),
-       COALESCE(SUM(ul.duration_ms) FILTER (WHERE ul.duration_ms IS NOT NULL AND ` + usageLogSuccessFilterUL + `), 0),
-       COUNT(ul.duration_ms) FILTER (WHERE ` + usageLogSuccessFilterUL + `), NOW()
-FROM usage_logs ul
+       COUNT(DISTINCT (ul.api_key_id, COALESCE(NULLIF(ul.request_id, ''), 'usage:' || ul.id::text))),
+       COALESCE(SUM(ul.input_tokens), 0), COALESCE(SUM(ul.output_tokens), 0),
+       COALESCE(SUM(ul.cache_creation_tokens), 0), COALESCE(SUM(ul.cache_read_tokens), 0),
+       COALESCE(SUM(ul.first_token_ms), 0), COUNT(ul.first_token_ms),
+       COALESCE(SUM(ul.duration_ms), 0), COUNT(ul.duration_ms), NOW(), 0, 2
+FROM accepted_usage ul
 LEFT JOIN groups g ON g.id = ul.group_id
 LEFT JOIN accounts a ON a.id = ul.account_id
 WHERE ul.created_at >= $1 AND ul.created_at < $2
 GROUP BY 1, 2, 3, 4`
 
-const channelMonitorV2UserMetricsSQL = `
+const channelMonitorV2UserMetricsSQL = channelMonitorV2AcceptedUsageCTE + `
 INSERT INTO channel_monitor_v2_user_metrics_1m (
   bucket_start, platform, group_id, model, user_id, success_requests,
   input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
-  ttft_sum_ms, ttft_count, duration_sum_ms, duration_count, computed_at
+  ttft_sum_ms, ttft_count, duration_sum_ms, duration_count, computed_at,
+  availability_error_requests, aggregation_version
 )
 SELECT date_trunc('minute', ul.created_at), %s, COALESCE(ul.group_id, 0), %s, ul.user_id,
-       COUNT(DISTINCT COALESCE(NULLIF(ul.request_id, ''), 'usage:' || ul.id::text))
-         FILTER (WHERE COALESCE(ul.request_type, 0) NOT IN (4, 6) AND ` + usageLogSuccessFilterUL + `),
-       COALESCE(SUM(ul.input_tokens) FILTER (WHERE ` + usageLogSuccessFilterUL + `), 0),
-       COALESCE(SUM(ul.output_tokens) FILTER (WHERE ` + usageLogSuccessFilterUL + `), 0),
-       COALESCE(SUM(ul.cache_creation_tokens) FILTER (WHERE ` + usageLogSuccessFilterUL + `), 0),
-       COALESCE(SUM(ul.cache_read_tokens) FILTER (WHERE ` + usageLogSuccessFilterUL + `), 0),
-       COALESCE(SUM(ul.first_token_ms) FILTER (WHERE ul.first_token_ms IS NOT NULL AND ` + usageLogSuccessFilterUL + `), 0),
-       COUNT(ul.first_token_ms) FILTER (WHERE ` + usageLogSuccessFilterUL + `),
-       COALESCE(SUM(ul.duration_ms) FILTER (WHERE ul.duration_ms IS NOT NULL AND ` + usageLogSuccessFilterUL + `), 0),
-       COUNT(ul.duration_ms) FILTER (WHERE ` + usageLogSuccessFilterUL + `), NOW()
-FROM usage_logs ul
+       COUNT(DISTINCT (ul.api_key_id, COALESCE(NULLIF(ul.request_id, ''), 'usage:' || ul.id::text))),
+       COALESCE(SUM(ul.input_tokens), 0), COALESCE(SUM(ul.output_tokens), 0),
+       COALESCE(SUM(ul.cache_creation_tokens), 0), COALESCE(SUM(ul.cache_read_tokens), 0),
+       COALESCE(SUM(ul.first_token_ms), 0), COUNT(ul.first_token_ms),
+       COALESCE(SUM(ul.duration_ms), 0), COUNT(ul.duration_ms), NOW(), 0, 2
+FROM accepted_usage ul
 LEFT JOIN groups g ON g.id = ul.group_id
 LEFT JOIN accounts a ON a.id = ul.account_id
 WHERE ul.created_at >= $1 AND ul.created_at < $2 AND ul.user_id IS NOT NULL
 GROUP BY 1, 2, 3, 4, 5`
 
-const channelMonitorV2HistogramSQL = `
+const channelMonitorV2HistogramSQL = channelMonitorV2AcceptedUsageCTE + `
 INSERT INTO channel_monitor_v2_latency_histograms_1m (
   bucket_start, platform, group_id, model, user_id, metric, upper_bound_ms, sample_count
 )
 SELECT date_trunc('minute', ul.created_at), %s, COALESCE(ul.group_id, 0), %s,
        audience.user_id, latency.metric, %s, COUNT(*)
-FROM usage_logs ul
+FROM accepted_usage ul
 LEFT JOIN groups g ON g.id = ul.group_id
 LEFT JOIN accounts a ON a.id = ul.account_id
 CROSS JOIN LATERAL (VALUES (0::bigint), (ul.user_id)) audience(user_id)
 CROSS JOIN LATERAL (VALUES ('ttft'::text, ul.first_token_ms), ('duration'::text, ul.duration_ms)) latency(metric, value_ms)
 WHERE ul.created_at >= $1 AND ul.created_at < $2
   AND audience.user_id IS NOT NULL AND latency.value_ms IS NOT NULL AND latency.value_ms >= 0
-  AND ` + usageLogSuccessFilterUL + `
 GROUP BY 1, 2, 3, 4, 5, 6, 7`
 
 func channelMonitorV2HistogramBoundSQL(column string) string {
@@ -243,24 +287,25 @@ ELSE 2147483647 END`
 const channelMonitorV2ErrorAggregationSQL = `
 WITH dedup AS (
   WITH candidate_ids AS MATERIALIZED (
-    SELECT DISTINCT request_id
-    FROM ops_error_logs
-    WHERE created_at >= $1 AND created_at < $2 AND NULLIF(request_id, '') IS NOT NULL
+    SELECT DISTINCT api_key_id, COALESCE(group_id, 0) AS group_id,
+      ` + channelMonitorV2ErrorRequestIdentitySQL + ` AS request_identity
+    FROM ops_error_logs current_error
+    WHERE created_at >= $1 AND created_at < $2
+      AND NULLIF(` + channelMonitorV2ErrorRequestIdentitySQL + `, '') IS NOT NULL
   )
-  SELECT DISTINCT ON (COALESCE(NULLIF(current_error.request_id, ''), 'error:' || current_error.id::text))
+  SELECT DISTINCT ON (current_error.api_key_id, COALESCE(current_error.group_id, 0), COALESCE(NULLIF(` + channelMonitorV2ErrorRequestIdentitySQL + `, ''), 'error:' || current_error.id::text))
     date_trunc('minute', current_error.created_at) AS bucket_start,
     -- Composite groups are a routing layer: resolve the concrete account
     -- platform (mirrors usageLogEffectivePlatformExpr on the usage side) so
-    -- error facts share the usage facts' platform key. Without this, composite
-    -- group errors aggregate under platform 'composite', which is never an
-    -- enabled config platform, and are filtered out of every monitor v2 query.
+    -- error facts share the usage facts' platform key. Before selection there
+    -- is no concrete platform; retain composite for the internal group view.
     lower(CASE
-      WHEN g.platform = 'composite' THEN COALESCE(NULLIF(TRIM(a.platform), ''), NULLIF(NULLIF(lower(TRIM(current_error.platform)), ''), 'composite'), 'unknown')
+      WHEN g.platform = 'composite' THEN COALESCE(NULLIF(TRIM(a.platform), ''), NULLIF(NULLIF(lower(TRIM(current_error.platform)), ''), 'composite'), 'composite')
       ELSE COALESCE(NULLIF(TRIM(current_error.platform), ''), 'unknown')
     END) AS platform,
     COALESCE(current_error.group_id, 0) AS group_id,
     COALESCE(NULLIF(TRIM(current_error.requested_model), ''), NULLIF(TRIM(current_error.model), ''), 'unknown') AS model,
-    current_error.user_id, current_error.error_type, current_error.error_owner, COALESCE(current_error.status_code, 0) AS status_code,
+    current_error.user_id, current_error.error_type, current_error.error_owner, current_error.error_phase, COALESCE(current_error.status_code, 0) AS status_code,
     COALESCE(current_error.upstream_status_code, 0) AS upstream_status_code,
     lower(CONCAT_WS(' ', current_error.error_type, current_error.error_source, current_error.error_message, current_error.upstream_error_message, current_error.upstream_error_detail, current_error.error_body)) AS text,
     (CASE WHEN jsonb_typeof(current_error.upstream_errors) = 'array' THEN jsonb_array_length(current_error.upstream_errors) > 0 ELSE FALSE END
@@ -270,16 +315,18 @@ WITH dedup AS (
   LEFT JOIN groups g ON g.id = current_error.group_id
   LEFT JOIN accounts a ON a.id = current_error.account_id
   WHERE (
-      (NULLIF(current_error.request_id, '') IS NULL AND current_error.created_at >= $1 AND current_error.created_at < $2)
+      (NULLIF(` + channelMonitorV2ErrorRequestIdentitySQL + `, '') IS NULL AND current_error.created_at >= $1 AND current_error.created_at < $2)
       OR (
-        current_error.request_id IN (SELECT request_id FROM candidate_ids)
+        EXISTS (SELECT 1 FROM candidate_ids candidate
+          WHERE candidate.api_key_id IS NOT DISTINCT FROM current_error.api_key_id
+            AND candidate.group_id = COALESCE(current_error.group_id, 0)
+            AND candidate.request_identity = ` + channelMonitorV2ErrorRequestIdentitySQL + `)
         AND current_error.created_at >= $1 - INTERVAL '90 minutes'
-        AND current_error.created_at < $2
+        AND current_error.created_at < $2 + INTERVAL '90 minutes'
       )
     )
     AND NOT current_error.is_count_tokens
-    AND (COALESCE(current_error.status_code, 0) >= 400 OR current_error.error_type = 'cyber_policy')
-  ORDER BY COALESCE(NULLIF(current_error.request_id, ''), 'error:' || current_error.id::text), current_error.created_at DESC, current_error.id DESC
+  ORDER BY current_error.api_key_id, COALESCE(current_error.group_id, 0), COALESCE(NULLIF(` + channelMonitorV2ErrorRequestIdentitySQL + `, ''), 'error:' || current_error.id::text), current_error.created_at DESC, current_error.id DESC
 ), classified AS (
   SELECT *, CASE
     -- Keep in lockstep with service.ClassifyChannelMonitorV2Error needles.
@@ -302,18 +349,33 @@ WITH dedup AS (
     ELSE 'other' END AS category
   FROM dedup
   WHERE bucket_start >= $1 AND bucket_start < $2
+    AND (status_code >= 400 OR error_type = 'cyber_policy')
+), availability AS (
+  SELECT *, CASE
+    WHEN category = 'content_policy' OR text LIKE ANY(ARRAY['%safety_review_rejected%','%prompt_keyword_blocked%','%prompt_jailbreak_blocked%','%prompt_combination_blocked%','%prompt_cbrn_blocked%','%content_filter%','%content policy%','%safety policy%']) THEN FALSE
+    WHEN status_code = 499 OR text LIKE ANY(ARRAY['%client cancelled%','%client canceled%','%context canceled%']) THEN FALSE
+    WHEN error_phase IN ('routing', 'account_auth', 'network') OR category = 'account_pool_unavailable' THEN TRUE
+    WHEN error_owner = 'client' AND error_phase IN ('request', 'auth') THEN FALSE
+    WHEN category IN ('rate_or_capacity', 'timeout', 'transport_or_stream') THEN TRUE
+    WHEN category IN ('authentication', 'quota_or_balance', 'upstream_forbidden') THEN error_owner = 'provider' OR error_phase = 'upstream' OR upstream_status_code >= 400
+    WHEN category IN ('context_limit', 'invalid_request', 'model_unsupported', 'group_access', 'not_found') THEN FALSE
+    WHEN status_code >= 500 OR upstream_status_code >= 500 OR error_owner IN ('provider', 'system') THEN TRUE
+    WHEN error_owner = 'client' OR error_phase IN ('request', 'auth') THEN FALSE
+    ELSE TRUE END AS availability_error
+  FROM classified
 ), metric_rows AS (
-  INSERT INTO channel_monitor_v2_metrics_1m (bucket_start, platform, group_id, model, error_requests, upstream_affected_requests, upstream_attempt_count, computed_at)
-  SELECT bucket_start, platform, group_id, model, COUNT(*), COUNT(*) FILTER (WHERE upstream_affected), SUM(upstream_attempts), NOW()
-  FROM classified GROUP BY 1,2,3,4
+  INSERT INTO channel_monitor_v2_metrics_1m (bucket_start, platform, group_id, model, error_requests, upstream_affected_requests, upstream_attempt_count, computed_at, availability_error_requests, aggregation_version)
+  SELECT bucket_start, platform, group_id, model, COUNT(*), COUNT(*) FILTER (WHERE upstream_affected), SUM(upstream_attempts), NOW(), COUNT(*) FILTER (WHERE availability_error), 2
+  FROM availability GROUP BY 1,2,3,4
   ON CONFLICT (bucket_start, platform, group_id, model) DO UPDATE SET
     error_requests = EXCLUDED.error_requests, upstream_affected_requests = EXCLUDED.upstream_affected_requests,
-    upstream_attempt_count = EXCLUDED.upstream_attempt_count, computed_at = NOW()
+    upstream_attempt_count = EXCLUDED.upstream_attempt_count, computed_at = NOW(),
+    availability_error_requests = EXCLUDED.availability_error_requests, aggregation_version = 2
 ), user_rows AS (
-  INSERT INTO channel_monitor_v2_user_metrics_1m (bucket_start, platform, group_id, model, user_id, error_requests, computed_at)
-  SELECT bucket_start, platform, group_id, model, user_id, COUNT(*), NOW()
-  FROM classified WHERE user_id IS NOT NULL GROUP BY 1,2,3,4,5
-  ON CONFLICT (bucket_start, platform, group_id, model, user_id) DO UPDATE SET error_requests = EXCLUDED.error_requests, computed_at = NOW()
+  INSERT INTO channel_monitor_v2_user_metrics_1m (bucket_start, platform, group_id, model, user_id, error_requests, computed_at, availability_error_requests, aggregation_version)
+  SELECT bucket_start, platform, group_id, model, user_id, COUNT(*), NOW(), COUNT(*) FILTER (WHERE availability_error), 2
+  FROM availability WHERE user_id IS NOT NULL GROUP BY 1,2,3,4,5
+  ON CONFLICT (bucket_start, platform, group_id, model, user_id) DO UPDATE SET error_requests = EXCLUDED.error_requests, computed_at = NOW(), availability_error_requests = EXCLUDED.availability_error_requests, aggregation_version = 2
 )
 INSERT INTO channel_monitor_v2_error_metrics_1m (bucket_start, platform, group_id, model, error_category, taxonomy_version, error_requests)
 SELECT bucket_start, platform, group_id, model, category, 1, COUNT(*) FROM classified GROUP BY 1,2,3,4,5
@@ -328,12 +390,12 @@ DO UPDATE SET error_requests = EXCLUDED.error_requests`
 // error_coverage_start to the first real error forever and collapses UI windows
 // when errors only exist in a recent slice (common on first upgrade).
 const channelMonitorV2WatermarkSQL = `
-INSERT INTO channel_monitor_v2_watermarks (id, usage_coverage_start, error_coverage_start, data_through, last_successful_at, backfill_cursor, updated_at)
+INSERT INTO channel_monitor_v2_watermarks (id, usage_coverage_start, error_coverage_start, data_through, last_successful_at, backfill_cursor, updated_at, aggregation_version, availability_coverage_start, availability_source_start)
 VALUES (
   1,
   $1,
   $1,
-  $2, NOW(), $1, NOW()
+  $2, NOW(), $1, NOW(), 2, $1, $3
 )
 ON CONFLICT (id) DO UPDATE SET
   usage_coverage_start = GREATEST(
@@ -346,12 +408,21 @@ ON CONFLICT (id) DO UPDATE SET
   ),
   data_through = GREATEST(COALESCE(channel_monitor_v2_watermarks.data_through, EXCLUDED.data_through), EXCLUDED.data_through),
   last_successful_at = NOW(),
-  backfill_cursor = LEAST(COALESCE(channel_monitor_v2_watermarks.backfill_cursor, EXCLUDED.backfill_cursor), EXCLUDED.backfill_cursor),
+  backfill_cursor = CASE
+    WHEN channel_monitor_v2_watermarks.aggregation_version < 2 OR EXCLUDED.usage_coverage_start > channel_monitor_v2_watermarks.data_through THEN EXCLUDED.backfill_cursor
+    WHEN EXCLUDED.data_through >= channel_monitor_v2_watermarks.availability_coverage_start THEN LEAST(COALESCE(channel_monitor_v2_watermarks.backfill_cursor, EXCLUDED.backfill_cursor), EXCLUDED.backfill_cursor)
+    ELSE channel_monitor_v2_watermarks.backfill_cursor END,
+  availability_coverage_start = CASE
+    WHEN channel_monitor_v2_watermarks.aggregation_version < 2 OR EXCLUDED.usage_coverage_start > channel_monitor_v2_watermarks.data_through THEN EXCLUDED.availability_coverage_start
+    WHEN EXCLUDED.data_through >= channel_monitor_v2_watermarks.availability_coverage_start THEN LEAST(COALESCE(channel_monitor_v2_watermarks.availability_coverage_start, EXCLUDED.availability_coverage_start), EXCLUDED.availability_coverage_start)
+    ELSE channel_monitor_v2_watermarks.availability_coverage_start END,
+  availability_source_start = COALESCE(channel_monitor_v2_watermarks.availability_source_start, EXCLUDED.availability_source_start),
+  aggregation_version = 2,
   updated_at = NOW()`
 
 var channelMonitorV2FixedRollupSeconds = []int{300, 3600, 43200, 86400}
 
-func (r *channelMonitorV2Repository) recomputeFixedRollups(ctx context.Context, tx *sql.Tx, start, end time.Time) error {
+func (r *channelMonitorV2Repository) recomputeFixedRollups(ctx context.Context, tx *sql.Tx, start, end, sourceStart time.Time) error {
 	for _, seconds := range channelMonitorV2FixedRollupSeconds {
 		// Coarse buckets are immutable between boundaries during the normal
 		// trailing refresh. Historical backfills and boundary-crossing windows
@@ -367,20 +438,20 @@ func (r *channelMonitorV2Repository) recomputeFixedRollups(ctx context.Context, 
 			"channel_monitor_v2_user_metrics_rollup",
 			"channel_monitor_v2_metrics_rollup",
 		} {
-			if _, err := tx.ExecContext(ctx, fmt.Sprintf(channelMonitorV2FixedRollupDeleteSQL, table), interval, seconds, start, end); err != nil {
+			if _, err := tx.ExecContext(ctx, fmt.Sprintf(channelMonitorV2FixedRollupDeleteSQL, table), interval, seconds, start, end, sourceStart); err != nil {
 				return err
 			}
 		}
-		if _, err := tx.ExecContext(ctx, channelMonitorV2MetricsRollupSQL, interval, seconds, start, end); err != nil {
+		if _, err := tx.ExecContext(ctx, channelMonitorV2MetricsRollupSQL, interval, seconds, start, end, sourceStart); err != nil {
 			return fmt.Errorf("roll up channel monitor v2 metrics %ds: %w", seconds, err)
 		}
-		if _, err := tx.ExecContext(ctx, channelMonitorV2UserMetricsRollupSQL, interval, seconds, start, end); err != nil {
+		if _, err := tx.ExecContext(ctx, channelMonitorV2UserMetricsRollupSQL, interval, seconds, start, end, sourceStart); err != nil {
 			return fmt.Errorf("roll up channel monitor v2 user metrics %ds: %w", seconds, err)
 		}
-		if _, err := tx.ExecContext(ctx, channelMonitorV2HistogramRollupSQL, interval, seconds, start, end); err != nil {
+		if _, err := tx.ExecContext(ctx, channelMonitorV2HistogramRollupSQL, interval, seconds, start, end, sourceStart); err != nil {
 			return fmt.Errorf("roll up channel monitor v2 histograms %ds: %w", seconds, err)
 		}
-		if _, err := tx.ExecContext(ctx, channelMonitorV2ErrorRollupSQL, interval, seconds, start, end); err != nil {
+		if _, err := tx.ExecContext(ctx, channelMonitorV2ErrorRollupSQL, interval, seconds, start, end, sourceStart); err != nil {
 			return fmt.Errorf("roll up channel monitor v2 errors %ds: %w", seconds, err)
 		}
 	}
@@ -408,7 +479,10 @@ func channelMonitorV2DateBinExpr(column string) string {
 const channelMonitorV2FixedRollupBoundsSQL = `
 WITH bounds AS (
   SELECT
-    date_bin($1::interval, $3::timestamptz, ` + channelMonitorV2DateBinOrigin + `) AS start_at,
+    GREATEST(date_bin($1::interval, $3::timestamptz, ` + channelMonitorV2DateBinOrigin + `),
+      date_bin($1::interval, $5::timestamptz, ` + channelMonitorV2DateBinOrigin + `)
+      + CASE WHEN $5::timestamptz = date_bin($1::interval, $5::timestamptz, ` + channelMonitorV2DateBinOrigin + `)
+             THEN INTERVAL '0 seconds' ELSE $1::interval END) AS start_at,
     date_bin($1::interval, $4::timestamptz - INTERVAL '1 microsecond', ` + channelMonitorV2DateBinOrigin + `) + $1::interval AS end_at
 )`
 
@@ -424,14 +498,16 @@ INSERT INTO channel_monitor_v2_metrics_rollup (
   bucket_start, bucket_seconds, platform, group_id, model, success_requests, error_requests,
   upstream_affected_requests, upstream_attempt_count, input_tokens, output_tokens,
   cache_creation_tokens, cache_read_tokens, ttft_sum_ms, ttft_count, duration_sum_ms,
-  duration_count, computed_at
+  duration_count, computed_at, availability_error_requests, aggregation_version
 )
 ` + channelMonitorV2FixedRollupBoundsSQL + `
 SELECT date_bin($1::interval, m.bucket_start, ` + channelMonitorV2DateBinOrigin + `), $2::integer,
        platform, group_id, model, SUM(success_requests), SUM(error_requests),
        SUM(upstream_affected_requests), SUM(upstream_attempt_count), SUM(input_tokens),
        SUM(output_tokens), SUM(cache_creation_tokens), SUM(cache_read_tokens),
-       SUM(ttft_sum_ms), SUM(ttft_count), SUM(duration_sum_ms), SUM(duration_count), NOW()
+       SUM(ttft_sum_ms), SUM(ttft_count), SUM(duration_sum_ms), SUM(duration_count), NOW(),
+       CASE WHEN BOOL_AND(aggregation_version >= 2 AND availability_error_requests IS NOT NULL) THEN SUM(availability_error_requests) END,
+       MIN(aggregation_version)
 FROM channel_monitor_v2_metrics_1m m, bounds
 WHERE m.bucket_start >= bounds.start_at AND m.bucket_start < bounds.end_at
 GROUP BY 1, 2, 3, 4, 5`
@@ -440,13 +516,15 @@ const channelMonitorV2UserMetricsRollupSQL = `
 INSERT INTO channel_monitor_v2_user_metrics_rollup (
   bucket_start, bucket_seconds, platform, group_id, model, user_id, success_requests,
   error_requests, input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
-  ttft_sum_ms, ttft_count, duration_sum_ms, duration_count, computed_at
+  ttft_sum_ms, ttft_count, duration_sum_ms, duration_count, computed_at, availability_error_requests, aggregation_version
 )
 ` + channelMonitorV2FixedRollupBoundsSQL + `
 SELECT date_bin($1::interval, m.bucket_start, ` + channelMonitorV2DateBinOrigin + `), $2::integer,
        platform, group_id, model, user_id, SUM(success_requests), SUM(error_requests),
        SUM(input_tokens), SUM(output_tokens), SUM(cache_creation_tokens), SUM(cache_read_tokens),
-       SUM(ttft_sum_ms), SUM(ttft_count), SUM(duration_sum_ms), SUM(duration_count), NOW()
+       SUM(ttft_sum_ms), SUM(ttft_count), SUM(duration_sum_ms), SUM(duration_count), NOW(),
+       CASE WHEN BOOL_AND(aggregation_version >= 2 AND availability_error_requests IS NOT NULL) THEN SUM(availability_error_requests) END,
+       MIN(aggregation_version)
 FROM channel_monitor_v2_user_metrics_1m m, bounds
 WHERE m.bucket_start >= bounds.start_at AND m.bucket_start < bounds.end_at
 GROUP BY 1, 2, 3, 4, 5, 6`

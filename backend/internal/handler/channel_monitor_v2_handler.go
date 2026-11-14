@@ -22,8 +22,54 @@ type channelMonitorV2GroupAuthorizer interface {
 	GetAvailableGroups(ctx context.Context, userID int64) ([]service.Group, error)
 }
 
+type channelMonitorV2UserRateReader interface {
+	GetUserGroupRates(ctx context.Context, userID int64) (map[int64]float64, error)
+}
+
 func NewChannelMonitorV2Handler(svc *service.ChannelMonitorV2Service, apiKeyService *service.APIKeyService) *ChannelMonitorV2Handler {
 	return &ChannelMonitorV2Handler{service: svc, apiKeyService: apiKeyService}
+}
+
+// GroupOverview is intentionally user scoped even when an administrator opens
+// the user monitor page. Query parameters cannot replace the authorized scope.
+func (h *ChannelMonitorV2Handler) GroupOverview(c *gin.Context) {
+	subject, ok := middleware.GetAuthSubjectFromContext(c)
+	if !ok || subject.UserID <= 0 {
+		response.Unauthorized(c, "user not found in context")
+		return
+	}
+	filter, err := h.service.ParseFilter(c.Query("range"), nil, nil, nil)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	ratesReader, ok := h.apiKeyService.(channelMonitorV2UserRateReader)
+	if h.apiKeyService == nil || !ok {
+		response.Error(c, http.StatusInternalServerError, "group authorization unavailable")
+		return
+	}
+	groups, err := h.apiKeyService.GetAvailableGroups(c.Request.Context(), subject.UserID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	rates, err := ratesReader.GetUserGroupRates(c.Request.Context(), subject.UserID)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	result, err := h.service.GetGroupOverview(c.Request.Context(), filter, groups, rates)
+	if err != nil {
+		response.ErrorFrom(c, err)
+		return
+	}
+	for i := range result.Items {
+		item := &result.Items[i]
+		item.GroupName = item.GroupI18n.LocalizeName(c.GetHeader("Accept-Language"), item.GroupName)
+		item.GroupI18n = nil
+	}
+	c.Writer.Header().Add("Vary", "Accept-Language")
+	response.Success(c, result)
 }
 
 // channelMonitorV2IsAdmin is true when the request already passed admin auth
