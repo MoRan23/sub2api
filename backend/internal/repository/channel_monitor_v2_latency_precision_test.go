@@ -33,12 +33,11 @@ func TestChannelMonitorV2TTFTPrecisionBoundaries(t *testing.T) {
 	for _, tc := range []struct {
 		value, want int64
 	}{
-		{0, 0}, {1, 50}, {49, 50}, {50, 50}, {51, 100},
-		{249, 250}, {250, 250}, {251, 300}, {999, 1000}, {1000, 1000},
-		{1001, 1100}, {1099, 1100}, {1100, 1100}, {2345, 2400},
-		{29999, 30000}, {30000, 30000}, {30001, 30250}, {30249, 30250}, {30250, 30250},
-		{59999, 60000}, {60000, 60000}, {60001, 61000}, {60999, 61000}, {61000, 61000},
-		{119999, 120000}, {120000, 120000}, {120001, 125000}, {124999, 125000}, {125000, 125000},
+		{0, 0}, {1, 1}, {9, 9}, {10, 10}, {11, 11}, {9999, 9999}, {10000, 10000},
+		{10001, 10010}, {10009, 10010}, {10010, 10010}, {23455, 23460},
+		{29999, 30000}, {30000, 30000}, {30001, 30050}, {30049, 30050}, {30050, 30050},
+		{59999, 60000}, {60000, 60000}, {60001, 60100}, {60099, 60100}, {60100, 60100},
+		{119999, 120000}, {120000, 120000}, {120001, 121000}, {120999, 121000}, {121000, 121000},
 		{599999, 600000}, {600000, 600000}, {600001, math.MaxInt32},
 		{math.MaxInt32, math.MaxInt32}, {math.MaxInt64, math.MaxInt32},
 	} {
@@ -91,7 +90,7 @@ SELECT COUNT(DISTINCT precise), SUM(CASE WHEN precise < value_ms OR precise > le
 FROM bounds`
 	var bins, violations int64
 	require.NoError(t, db.QueryRow(query).Scan(&bins, &violations))
-	require.Equal(t, int64(588), bins, "586 positive finite bins plus zero and overflow")
+	require.Equal(t, int64(13682), bins, "fine 1ms/10ms/50ms/100ms/1s bins plus zero and overflow")
 	require.Zero(t, violations, "new bounds stay above every sample and at or below its legacy bound")
 }
 
@@ -104,7 +103,7 @@ func TestChannelMonitorV2TTFTPrecisionSQLContract(t *testing.T) {
 	require.Contains(t, query, "('duration'::text, ul.duration_ms)")
 	require.NotContains(t, query, "%!")
 	ttft := channelMonitorV2TTFTHistogramBoundSQL("latency.value_ms")
-	require.Equal(t, 6, strings.Count(ttft, "WHEN "), "use six segment checks instead of hundreds of per-bin branches")
+	require.Equal(t, 6, strings.Count(ttft, "WHEN "), "use six segment checks instead of thousands of per-bin branches")
 	require.Contains(t, ttft, "CAST(latency.value_ms AS bigint)")
 	for _, forbidden := range []string{"CEIL", "FLOOR", "float", "double", "numeric"} {
 		require.NotContains(t, ttft, forbidden)

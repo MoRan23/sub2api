@@ -276,17 +276,18 @@ func channelMonitorV2MetricHistogramBoundSQL(metric, column string) string {
 
 // TTFT uses bounded, finer upper-bound buckets. Integer division rounds upward
 // without floating-point error; cast before adding so even int32 inputs are safe.
+// Keep source milliseconds through 10s, then use 10ms/50ms/100ms/1s steps.
 // Existing coarse histogram rows remain valid upper bounds during incremental
 // refresh/backfill, and duration retains its original bucket scheme below.
 func channelMonitorV2TTFTHistogramBoundSQL(column string) string {
 	value := "CAST(" + column + " AS bigint)"
 	return `CASE
-WHEN ` + column + ` = 0 THEN 0
-WHEN ` + column + ` <= 1000 THEN ((` + value + ` + 49) / 50) * 50
-WHEN ` + column + ` <= 30000 THEN ((` + value + ` + 99) / 100) * 100
-WHEN ` + column + ` <= 60000 THEN ((` + value + ` + 249) / 250) * 250
-WHEN ` + column + ` <= 120000 THEN ((` + value + ` + 999) / 1000) * 1000
-WHEN ` + column + ` <= 600000 THEN ((` + value + ` + 4999) / 5000) * 5000
+	WHEN ` + column + ` = 0 THEN 0
+	WHEN ` + column + ` <= 10000 THEN ` + value + `
+	WHEN ` + column + ` <= 30000 THEN ((` + value + ` + 9) / 10) * 10
+	WHEN ` + column + ` <= 60000 THEN ((` + value + ` + 49) / 50) * 50
+	WHEN ` + column + ` <= 120000 THEN ((` + value + ` + 99) / 100) * 100
+	WHEN ` + column + ` <= 600000 THEN ((` + value + ` + 999) / 1000) * 1000
 ELSE 2147483647 END`
 }
 

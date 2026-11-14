@@ -12,7 +12,7 @@
 
 - **缓存率**：成功样本的缓存读取 token /（普通输入 + 缓存写入 + 缓存读取 token）。30 分钟和 12 小时缓存写入是缓存写入总数的明细，不重复相加。
 - **可用率**：成功请求 /（成功请求 + 服务侧失败）。明确的用户权限、鉴权、余额、参数、安全拒绝和主动取消不纳入分母；上游账号失效、上游额度、账号池不可用、限流、网络、超时和服务错误纳入。
-- **首 Token P50**：合并延迟直方图的样本计数后，取中位样本所在桶的上界。新聚合数据在 1 秒以内按 50ms、1–30 秒按 100ms、30–60 秒按 250ms、60–120 秒按 1 秒、120–600 秒按 5 秒分桶；零耗时单独保留。例如 3.21 秒由原来的 5.00 秒改善为 3.30 秒。不对各分组或各时段的 P50 求平均，也不对桶内分布做插值。
+- **首 Token P50**：合并延迟直方图的样本计数后，取中位样本所在桶的上界。新聚合数据在 10 秒以内保留原始毫秒，10–30 秒按 10ms、30–60 秒按 50ms、60–120 秒按 100ms、120–600 秒按 1 秒分桶；零耗时单独保留。页面秒值显示三位小数，例如原始 3.214 秒显示为 3.214 秒，14.211 秒对应 14.220 秒的桶上界。不对各分组或各时段的 P50 求平均，也不对桶内分布做插值。
 
 免费成功请求参与统计。已经产生部分用量但最终失败的请求不再同时算作成功；内部重试后成功的请求保留为成功。这些变化只影响监控，不修改账单或扣费。
 
@@ -56,7 +56,7 @@ OpenAI／Composite 分组卡片展示当前生效的探针模型：启用分组�
 
 首 Token 分桶细化无需迁移或重置可用率统计版本。正常实时聚合会重算最近 10 分钟，新请求及已重算区间使用细桶；未重算的旧历史仍保留原桶精度，混合窗口继续按样本上界统计。更长历史按现有回填及保留规则逐步更新，不为这次精度调整额外启动全量回填。回退旧程序可读取细桶，后续重算区间会恢复旧精度。
 
-此次仅细化 TTFT，总耗时分桶不变。每个维度最多 588 个 TTFT 上界，数据库只存非空桶；页面仍读取已有汇总表，查询次数不变，非空桶行数和汇总读取量会随样本分布增加。超过 600 秒仍沿用原溢出桶 `2147483647ms`，不赋予该桶细精度。
+此次仅细化 TTFT，总耗时分桶不变。每个维度最多 13,682 个 TTFT 上界，数据库只存非空桶，不预分配全部桶；页面仍读取已有汇总表，查询次数不变，非空桶行数和汇总读取量会随样本分布增加。超过 600 秒仍沿用原溢出桶 `2147483647ms`，不赋予该桶细精度。
 
 ## English
 
@@ -66,7 +66,7 @@ Cards show active monitored groups the authenticated user may use. Exhausted bal
 
 - **Cache rate:** cached input tokens divided by ordinary input, cache writes, and cache reads. Cache-write TTL details are already included in the write total.
 - **Availability:** successful requests divided by successes plus service-side failures. Explicit user-side access, balance, parameter, safety, and cancellation failures are excluded; upstream authentication, upstream quota, capacity, transport, timeout, and server failures remain included.
-- **First-token P50:** the upper bound containing the median sample after merging histogram counts. New aggregates use 50ms buckets up to 1s, 100ms up to 30s, 250ms up to 60s, 1s up to 120s, and 5s up to 600s, with zero kept separately. For example, 3.21s is reported as 3.30s instead of the previous 5.00s. Percentiles are neither averaged across groups/time windows nor interpolated within buckets.
+- **First-token P50:** the upper bound containing the median sample after merging histogram counts. New aggregates retain exact source milliseconds up to 10s, then use 10ms buckets up to 30s, 50ms up to 60s, 100ms up to 120s, and 1s up to 600s, with zero kept separately. Seconds display three decimal places: 3.214s remains 3.214s, while 14.211s maps to the 14.220s upper bound. Percentiles are neither averaged across groups/time windows nor interpolated within buckets.
 
 Zero-cost successes are included. Final failed requests with partial usage are not also counted as successes, while recovered retry attempts remain successful. Billing is unchanged. Health colors use availability only, with existing error thresholds and minimum samples applied separately to the whole card and each interval. Low-sample intervals retain their measured availability and use a short gray column; empty intervals use a thin gray line, while rebuilding uses a dashed gray column. The legend distinguishes all three states. Missing or rebuilding data is not presented as 100% availability.
 
@@ -84,7 +84,7 @@ Each aggregation cycle updates recent requests first. Historical backfill failur
 
 Forward migrations extend aggregation and bounded history lookup. Versioned backfill runs in bounded background batches within available source-log coverage, never within a page request. Deploy aggregators consistently during the statistics transition. Additive database fields and indexes may remain on application rollback; running an old aggregator requires a statistics rebuild when upgrading again.
 
-The finer TTFT buckets require no migration or availability-version reset. Normal live aggregation rewrites the latest ten minutes; new and recomputed intervals gain finer precision while older intervals keep their previous bounds. Mixed windows remain upper-bound estimates, with existing backfill and retention rules handling older data. No additional full-history rebuild is started. An older application can read the fine buckets and returns to coarse precision where it recomputes data. Duration buckets remain unchanged. TTFT has at most 588 bounds per dimension, storing only occupied buckets; query count stays unchanged, although histogram rows and rollup reads may increase. Values above 600s retain the previous overflow bound of 2147483647ms without a finer-precision guarantee.
+The finer TTFT buckets require no migration or availability-version reset. Normal live aggregation rewrites the latest ten minutes; new and recomputed intervals gain finer precision while older intervals keep their previous bounds. Mixed windows remain upper-bound estimates, with existing backfill and retention rules handling older data. No additional full-history rebuild is started. An older application can read the fine buckets and returns to coarse precision where it recomputes data. Duration buckets remain unchanged. TTFT has at most 13,682 bounds per dimension, storing only occupied buckets without preallocating the full set; query count stays unchanged, although histogram rows and rollup reads may increase. Values above 600s retain the previous overflow bound of 2147483647ms without a finer-precision guarantee.
 
 The attribution-summary update requires no migration and reuses index 286. One batch query reads distinct accounts and generates twenty states per group; a second bounded batch preserves legacy `latest/recent` fields. New clients use `enabled/probe_model/as_of/summary_state/history`. The configured model is projected as a scalar in the existing batch query, with no per-group query. Retention keeps the latest 100 jobs plus effective results from the last 215 minutes and each API Key's last effective result before that window. Already-pruned history is not reconstructed; rolling back to an older cleaner can reduce available history on a later upgrade.
 
@@ -160,7 +160,7 @@ GOEXPERIMENT=greenteagc,jsonv2 go build ./...
 
 Read-only production checks confirmed that requests were present in the aggregates. Low-sample and empty intervals previously looked identical, while historical timeouts delayed the whole aggregation loop. The fix separates those visual states and confines historical backoff to history, with cycle duration deducted from the configured refresh interval. Targeted Go unit/race checks, backend compilation, 20 related frontend tests, type checking, targeted lint, the production build and its three i18n checks passed. No SQL or storage format changed, so database integration was not rerun. No production changes, deployment or remote CI were performed.
 
-## 首 Token 精度验证 / First-token precision validation (2026-11-14)
+## 首轮首 Token 精度验证 / Initial first-token precision validation (2026-11-14, c5d5c4906)
 
 使用 Go 1.27.3、`GOEXPERIMENT=greenteagc,jsonv2`，Repository／Service／Handler 的 ChannelMonitorV2 定向单测、Repository 精度及概览 race、后端 `go build ./...` 均通过。SQL 单测遍历 0–600001ms，验证新桶始终向上取整且不粗于旧桶，并覆盖 588 桶上限、零值和溢出边界。隔离 PostgreSQL 18.1 中 4 项新增集成和 4 项既有聚合回归全部通过，覆盖四档 rollup、重复重算、用户／平台隔离、混合历史及失败关联。前端格式化已支持小数，本次未修改前端。
 
@@ -182,3 +182,30 @@ GOEXPERIMENT=greenteagc,jsonv2 go build ./...
 ```
 
 Targeted unit tests, race checks, backend compilation, and all eight selected isolated PostgreSQL integration tests passed. The fixed 20,000-row fixture above measured aggregate query execution, excluding index writes. Occupied histogram rows increased from 5,797 to 37,894 while both versions retained all 80,000 audience/metric samples. Finer resolution trades additional bounded aggregate storage/work for better precision; page requests still read rollups without raw-log scans or per-card queries. No frontend code, production state, deployment, full-history rebuild or remote CI was involved.
+
+## 毫秒精度细化验证 / Millisecond refinement validation (2026-11-14)
+
+在上一轮 `c5d5c4906` 基础上进一步细化，10 秒以内直接使用源毫秒，其他分段按本文说明处理。卡片和详细统计的秒值统一显示三位小数。定向 Go 单测、Repository race 和后端 `go build ./...` 通过；SQL 单测覆盖全部 0–600001ms、13,682 桶上限及旧 duration 行为。隔离 PostgreSQL 18.1 的 8 项顶层精度／聚合测试全部通过，包括 3211ms、5421ms 原样读取、多用户合并、四档 rollup 和旧桶混合。
+
+前端相关 56 项测试、3 项 i18n 检查、类型检查、生产构建及定向 ESLint 通过。构建保留已有 Browserslist、模块分包、大 chunk 及 Node shell 选项提示。
+
+沿用同一 20,000 条合成记录，对最初粗桶、上一版及当前版各测三轮，统计完整保留 80,000 个范围×指标样本：
+
+| 方案 / Variant | 非空桶 / Occupied rows | 第 1 轮 | 第 2 轮 | 第 3 轮 |
+| --- | ---: | ---: | ---: | ---: |
+| 最初粗桶 / Original | 5,797 | 55.464ms | 51.350ms | 55.542ms |
+| 上一版 / Previous | 37,894 | 71.175ms | 69.020ms | 67.550ms |
+| 当前 / Current | 41,760 | 69.769ms | 72.723ms | 78.115ms |
+
+当前版较上一版增加约 10.2% 非空桶，聚合查询均值从 69.248ms 增至 73.536ms（约 6.2%）。这是本地 `EXPLAIN ANALYZE` 查询采样，未包括索引写入和生产流量；精度提升的主要开销是增加非空桶。未新增页面同步原始日志扫描、迁移或全量回填。旧历史保留原上界直到被现有聚合任务重算；本轮未操作生产、未部署、未运行远端 CI。
+
+复现后端命令沿用上一节；前端从 `frontend` 执行：
+
+```sh
+pnpm vitest run src/features/channel-monitor-v2/__tests__ src/views/user/__tests__/ChannelStatusV2View.overview.spec.ts
+pnpm typecheck
+pnpm build
+pnpm exec eslint src/features/channel-monitor-v2/GroupOverviewCard.vue src/features/channel-monitor-v2/monitorFormat.ts src/features/channel-monitor-v2/__tests__/GroupOverview.spec.ts src/features/channel-monitor-v2/__tests__/monitorFormat.spec.ts
+```
+
+The refinement retains source milliseconds through ten seconds and uses the documented coarser steps above that range. Cards and detailed views now display seconds with three decimal places. Targeted Go unit/race checks, backend compilation, eight isolated PostgreSQL tests, 56 related frontend tests, three i18n checks, type checking, production build and targeted lint passed. Compared with the preceding implementation, the same local fixture produced 10.2% more occupied buckets and 6.2% higher mean aggregate-query time (69.248ms to 73.536ms); these measurements exclude index writes. Existing historical bounds remain until normal reaggregation. No production changes, deployment, migration, full-history rebuild or remote CI were performed.

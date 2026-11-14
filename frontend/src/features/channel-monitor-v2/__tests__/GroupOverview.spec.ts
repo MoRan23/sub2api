@@ -70,10 +70,18 @@ describe('group overview', () => {
     expect(wrapper.text()).toContain('用户倍率 0.25×')
     expect(wrapper.text()).toContain('99.0%')
     expect(wrapper.text()).toContain('70.0%')
-    expect(wrapper.text()).toContain('2.46s')
+    expect(wrapper.text()).toContain('2.456s')
     expect(wrapper.text()).toContain('暂无数据')
     expect(wrapper.text()).toContain('近期无有效检测')
     expect(wrapper.get('[data-group-id="3"] dd').text()).toBe('—')
+  })
+
+  it('preserves millisecond precision in the group TTFT metric', async () => {
+    const item = card()
+    item.metrics.ttft_p50_ms = 3214
+    getGroupOverview.mockResolvedValue(response('90m', [item]))
+    wrapper = await mountView(); await flushPromises()
+    expect(wrapper.get('[data-group-id="1"]').text()).toContain('3.214s')
   })
 
   it('updates platform sections and counts when a group leaves the monitoring scope', async () => {

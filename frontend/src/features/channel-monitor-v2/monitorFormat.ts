@@ -65,7 +65,7 @@ export function formatMonitorPercent(value: number, locale = monitorIntlLocale()
 
 export function formatMonitorMs(value: number | null | undefined): string {
   if (value == null) return '-'
-  return value >= 1000 ? `${(value / 1000).toFixed(1)}s` : `${Math.round(value)}ms`
+  return value >= 1000 ? `${(value / 1000).toFixed(3)}s` : `${Math.round(value)}ms`
 }
 
 export function formatMonitorSuccessRate(successRequests: number, requestCount: number): string {

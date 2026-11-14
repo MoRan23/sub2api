@@ -48,12 +48,15 @@ func TestChannelMonitorV2LatencyPrecisionBoundariesAndRollupsIntegration(t *test
 	cases := []struct {
 		value, ttft, duration int64
 	}{
-		{0, 0, 50}, {1, 50, 50}, {50, 50, 50}, {51, 100, 100},
-		{250, 250, 250}, {251, 300, 500}, {1000, 1000, 1000}, {1001, 1100, 2000},
-		{3210, 3300, 5000}, {5420, 5500, 8000}, {14210, 14300, 15000},
-		{30000, 30000, 30000}, {30001, 30250, 60000}, {30250, 30250, 60000}, {30251, 30500, 60000},
-		{60000, 60000, 60000}, {60001, 61000, 120000}, {61000, 61000, 120000}, {61001, 62000, 120000},
-		{120000, 120000, 120000}, {120001, 125000, 300000}, {125000, 125000, 300000}, {125001, 130000, 300000},
+		{0, 0, 50}, {1, 1, 50}, {50, 50, 50}, {51, 51, 100},
+		{250, 250, 250}, {251, 251, 500}, {1000, 1000, 1000}, {1001, 1001, 2000},
+		{3210, 3210, 5000}, {3211, 3211, 5000}, {5420, 5420, 8000}, {5421, 5421, 8000},
+		{9999, 9999, 10000}, {10000, 10000, 10000}, {10001, 10010, 15000}, {10010, 10010, 15000}, {10011, 10020, 15000},
+		{14210, 14210, 15000}, {14211, 14220, 15000}, {29999, 30000, 30000},
+		{30000, 30000, 30000}, {30001, 30050, 60000}, {30050, 30050, 60000}, {30051, 30100, 60000},
+		{59999, 60000, 60000}, {60000, 60000, 60000}, {60001, 60100, 120000}, {60100, 60100, 120000}, {60101, 60200, 120000},
+		{119999, 120000, 120000}, {120000, 120000, 120000}, {120001, 121000, 300000}, {121000, 121000, 300000}, {121001, 122000, 300000},
+		{599999, 600000, 600000},
 		{600000, 600000, 600000}, {600001, 2147483647, 2147483647}, {2147483647, 2147483647, 2147483647},
 	}
 	type expectedBucket struct {
@@ -93,7 +96,7 @@ func TestChannelMonitorV2LatencyPrecisionBoundariesAndRollupsIntegration(t *test
 		}
 	}
 	cfg := service.ChannelMonitorV2Config{Platforms: []service.ChannelMonitorV2PlatformConfig{{Platform: "openai", Enabled: true}}}
-	for _, tc := range []struct{ value, want int64 }{{0, 0}, {3210, 3300}, {5420, 5500}, {14210, 14300}} {
+	for _, tc := range []struct{ value, want int64 }{{0, 0}, {3210, 3210}, {3211, 3211}, {5420, 5420}, {5421, 5421}, {14210, 14210}, {14211, 14220}} {
 		filter := service.ChannelMonitorV2Filter{Start: f.at, End: f.at.Add(5 * time.Minute), Bucket: 5 * time.Minute, Models: []string{fmt.Sprintf("precision-%d", tc.value)}, AllowedGroupIDs: []int64{f.group}, RestrictGroups: true}
 		matrix, err := repo.GetMatrix(context.Background(), filter, cfg, service.ChannelMonitorV2GroupByGroup, false)
 		require.NoError(t, err)
@@ -133,12 +136,12 @@ func TestChannelMonitorV2LatencyPrecisionMergesUsersAndPlatformsIntegration(t *t
 		require.NotNil(t, row.Metrics.TTFT.P50Ms)
 		if *row.GroupID == f.group {
 			require.EqualValues(t, 4, row.Metrics.TTFT.SampleCount)
-			require.EqualValues(t, 14300, *row.Metrics.TTFT.P50Ms, "combine sample counts across platforms, not per-platform medians")
+			require.EqualValues(t, 14210, *row.Metrics.TTFT.P50Ms, "combine sample counts across platforms, not per-platform medians")
 			require.EqualValues(t, 15000, *row.Metrics.Duration.P50Ms, "duration retains legacy precision")
 		} else {
 			require.Equal(t, other.group, *row.GroupID)
 			require.EqualValues(t, 2, row.Metrics.TTFT.SampleCount)
-			require.EqualValues(t, 5500, *row.Metrics.TTFT.P50Ms)
+			require.EqualValues(t, 5420, *row.Metrics.TTFT.P50Ms)
 		}
 	}
 	for _, audience := range []struct{ id, count int64 }{{0, 4}, {f.user, 1}, {second.user, 3}} {
@@ -177,7 +180,7 @@ func TestChannelMonitorV2LatencyPrecisionLegacyAndFineBucketsIntegration(t *test
 	}
 	require.NoError(t, rows.Err())
 	require.NoError(t, rows.Close())
-	require.Equal(t, map[int64]int64{3300: 2, 5000: 3}, hist)
+	require.Equal(t, map[int64]int64{3210: 2, 5000: 3}, hist)
 	cfg := service.ChannelMonitorV2Config{Platforms: []service.ChannelMonitorV2PlatformConfig{{Platform: "openai", Enabled: true}}}
 	filter := service.ChannelMonitorV2Filter{Start: f.at.Add(-5 * time.Minute), End: f.at.Add(5 * time.Minute), Bucket: 5 * time.Minute, AllowedGroupIDs: []int64{f.group}, RestrictGroups: true}
 	matrix, err := repo.GetMatrix(context.Background(), filter, cfg, service.ChannelMonitorV2GroupByGroup, false)
@@ -209,6 +212,17 @@ func TestChannelMonitorV2LatencyPrecisionAggregationSampleIntegration(t *testing
 	_, err = conn.ExecContext(ctx, `ANALYZE latency_precision_sample`)
 	require.NoError(t, err)
 	oldBound := channelMonitorV2HistogramBoundSQL("latency.value_ms")
+	// Freeze the previous refinement so this sample quantifies the current
+	// change as well as the difference from the original coarse histogram.
+	previousTTFT := `CASE
+	 WHEN latency.value_ms = 0 THEN 0
+	 WHEN latency.value_ms <= 1000 THEN ((CAST(latency.value_ms AS bigint) + 49) / 50) * 50
+	 WHEN latency.value_ms <= 30000 THEN ((CAST(latency.value_ms AS bigint) + 99) / 100) * 100
+	 WHEN latency.value_ms <= 60000 THEN ((CAST(latency.value_ms AS bigint) + 249) / 250) * 250
+	 WHEN latency.value_ms <= 120000 THEN ((CAST(latency.value_ms AS bigint) + 999) / 1000) * 1000
+	 WHEN latency.value_ms <= 600000 THEN ((CAST(latency.value_ms AS bigint) + 4999) / 5000) * 5000
+	 ELSE 2147483647 END`
+	previousBound := "CASE WHEN latency.metric = 'ttft' THEN " + previousTTFT + " ELSE " + oldBound + " END"
 	newBound := channelMonitorV2MetricHistogramBoundSQL("latency.metric", "latency.value_ms")
 	type planSummary struct {
 		Plan struct {
@@ -217,7 +231,7 @@ func TestChannelMonitorV2LatencyPrecisionAggregationSampleIntegration(t *testing
 		ExecutionTime float64 `json:"Execution Time"`
 	}
 	for run := 1; run <= 3; run++ {
-		for _, variant := range []struct{ name, bound string }{{"legacy", oldBound}, {"fine TTFT", newBound}} {
+		for _, variant := range []struct{ name, bound string }{{"legacy", oldBound}, {"previous TTFT", previousBound}, {"current TTFT", newBound}} {
 			query := `SELECT created_at,model_id,audience.user_id,latency.metric,` + variant.bound + ` AS upper_bound_ms,COUNT(*) AS sample_count
 			 FROM latency_precision_sample
 			 CROSS JOIN LATERAL (VALUES (0), (user_id)) audience(user_id)

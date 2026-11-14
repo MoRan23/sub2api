@@ -56,13 +56,16 @@ describe('monitorFormat accuracy', () => {
   it('formats latency ms/s boundaries from API fields', () => {
     expect(formatMonitorMs(null)).toBe('-')
     expect(formatMonitorMs(300)).toBe('300ms')
-    expect(formatMonitorMs(1500)).toBe('1.5s')
+    expect(formatMonitorMs(1500)).toBe('1.500s')
+    expect(formatMonitorMs(3214)).toBe('3.214s')
+    expect(formatMonitorMs(1001)).toBe('1.001s')
     expect(formatMonitorMs(999)).toBe('999ms')
   })
 
   it('formats KPI secondary latency as AVG · P90 (P50 is primary)', () => {
     expect(formatLatencyKpiSecondary(150, 400)).toBe('AVG 150ms · P90 400ms')
-    expect(formatLatencyKpiSecondary(1500, null, 2000)).toBe('AVG 1.5s · P95 2.0s')
+    expect(formatLatencyKpiSecondary(1500, null, 2000)).toBe('AVG 1.500s · P95 2.000s')
+    expect(formatLatencyKpiSecondary(3214, 4567)).toBe('AVG 3.214s · P90 4.567s')
     expect(formatLatencyKpiSecondary(null, null)).toBe('-')
   })
 

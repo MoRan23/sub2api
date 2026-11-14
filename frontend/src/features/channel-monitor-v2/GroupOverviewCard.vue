@@ -124,7 +124,7 @@ function normalizeAttributionState(state: unknown): GroupAttributionSummaryState
   return state === 'passed' || state === 'mismatch' || state === 'failed' ? state : 'no_data'
 }
 function percent(value: number | null) { return value != null && Number.isFinite(value) && value >= 0 && value <= 1 ? percentFormatter.value.format(value) : '—' }
-function latency(value: number | null) { return value != null && Number.isFinite(value) && value >= 0 ? `${(value / 1000).toFixed(2)}s` : '—' }
+function latency(value: number | null) { return value != null && Number.isFinite(value) && value >= 0 ? `${(value / 1000).toFixed(3)}s` : '—' }
 function formatTime(value: string) {
   const time = new Date(value)
   return Number.isFinite(time.getTime()) ? dateFormatter.value.format(time) : '—'
