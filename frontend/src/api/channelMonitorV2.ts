@@ -1,6 +1,39 @@
 import { apiClient } from './client'
 
 export type MonitorRange = '90m' | '24h' | '7d' | '30d'
+export type GroupOverviewState = 'unmonitored' | 'rebuilding' | 'no_data' | 'insufficient' | 'healthy' | 'warning' | 'critical'
+export type GroupAttributionStatus = 'passed' | 'mismatch' | 'failed' | 'abnormal' | 'cancelled' | 'skipped'
+
+export interface GroupAttributionEntry {
+  finished_at: string
+  probe_model: string
+  status: GroupAttributionStatus
+  reason_code: string
+}
+
+export interface GroupOverviewCard {
+  group_id: number
+  group_name: string
+  group_i18n?: Record<string, { name?: string; description?: string }>
+  platform: string
+  rate_multiplier: number
+  monitoring_enabled: boolean
+  state: GroupOverviewState
+  metrics: {
+    availability_rate: number | null
+    cache_rate: number | null
+    ttft_p50_ms: number | null
+  }
+  buckets: Array<{ bucket_start: string; state: GroupOverviewState; availability_rate: number | null }>
+  attribution: { latest: GroupAttributionEntry | null; recent: GroupAttributionEntry[] }
+}
+
+export interface GroupOverviewResponse {
+  range: MonitorRange
+  refresh_interval_seconds: 60 | 300
+  coverage: MonitorCoverage & { availability_version: number; availability_ready: boolean; availability_start?: string }
+  items: GroupOverviewCard[]
+}
 export type HealthState = 'unknown' | 'healthy' | 'warning' | 'critical'
 /** Fine-grained score band for multi-stop green→yellow→red gradients (score0..score10). */
 export type HealthScoreBand =
@@ -236,6 +269,11 @@ const requestConfig = (filter: MonitorFilter, signal?: AbortSignal, extraParams:
 })
 
 function base(admin: boolean) { return admin ? '/admin/channel-monitor-v2' : '/channel-monitor-v2' }
+
+export async function getGroupOverview(range: MonitorRange, signal?: AbortSignal) {
+  const { data } = await apiClient.get<GroupOverviewResponse>('/channel-monitor-v2/group-overview', { params: { range }, signal })
+  return data
+}
 
 export async function getDimensions(filter: MonitorFilter, admin = false, signal?: AbortSignal) {
   const { data } = await apiClient.get<MonitorDimensions>(`${base(admin)}/dimensions`, requestConfig(filter, signal))

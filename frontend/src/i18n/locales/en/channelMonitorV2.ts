@@ -1,6 +1,26 @@
 /** Channel Monitor V2 (user + admin passive monitor UI) */
 export default {
   channelMonitorV2: {
+    overview: {
+      viewLabel: 'Channel status view', groups: 'Group overview', details: 'Detailed statistics',
+      description: 'Only groups you can access are shown. Metrics summarize all real requests in each group.',
+      groupCount: '{count} groups', refreshIn: 'Refresh in {seconds}s',
+      coveragePending: 'Some intervals are being rebuilt. Uncovered data is not shown as available.',
+      noGroups: 'No active groups available to view', realRequests: 'Real requests', multiplier: 'Your multiplier {value}×',
+      availability: 'Availability',
+      cacheHint: 'Cache-read tokens divided by the sum of input, cache-write and cache-read tokens',
+      availabilityHint: 'Successful requests divided by successful requests plus service failures, excluding user-side rejections and cancellations.',
+      ttftHint: 'TTFT P50 is an estimate from latency histogram buckets.',
+      historyLabel: 'Real requests · {count} intervals', requestHistory: 'Real request availability history',
+      past: 'Past {range}', now: 'Now',
+      states: { unmonitored: 'Not monitored', rebuilding: 'Updating statistics', no_data: 'No data', insufficient: 'Low sample size', healthy: 'Healthy', warning: 'Degraded', critical: 'Unavailable' },
+      attribution: 'Model attribution', attributionHint: 'Recent checks of accounts in this group · Last 20 checks, independent of the time range above',
+      noAttribution: 'No check history', attributionHistory: 'Last 20 checks of accounts in this group',
+      attributionLegend: 'Green: passed; yellow: mismatch; red: execution error; gray: cancelled or skipped. An execution error is not a mismatch.',
+      results: { passed: 'Passed', mismatch: 'Mismatch', failed: 'Execution failed', abnormal: 'Inconclusive', cancelled: 'Cancelled', skipped: 'Skipped' },
+      reasons: { reference_match: 'Top candidate is in the expected list', reference_mismatch: 'Top candidate is outside the expected list', execution_failed: 'The check failed to execute', analysis_abnormal: 'The check could not produce a valid determination', cancelled: 'The check was cancelled', skipped: 'The check was skipped' },
+      metricsNote: 'Card status uses availability only; cache rate and latency do not affect colors. Attribution reflects existing check results.',
+    },
     title: 'Channel Monitor',
     updating: 'Updating data',
     updatedTo: 'Updated to {time}',

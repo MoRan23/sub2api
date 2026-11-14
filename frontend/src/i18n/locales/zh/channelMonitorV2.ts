@@ -1,6 +1,26 @@
 /** Channel Monitor V2 (user + admin passive monitor UI) */
 export default {
   channelMonitorV2: {
+    overview: {
+      viewLabel: '渠道状态视图', groups: '分组概览', details: '详细统计',
+      description: '仅显示你有权限的分组；指标汇总该组全部真实请求。',
+      groupCount: '{count} 个分组', refreshIn: '{seconds} 秒后刷新',
+      coveragePending: '部分区间统计更新中，尚未覆盖的数据不会显示为可用。',
+      noGroups: '暂无可查看的活跃分组', realRequests: '真实请求', multiplier: '用户倍率 {value}×',
+      availability: '可用率',
+      cacheHint: '缓存读取 tokens ÷ 输入、缓存写入与缓存读取 tokens 合计',
+      availabilityHint: '成功请求 ÷ 成功请求与服务侧失败合计；不含用户侧拒绝及主动取消。',
+      ttftHint: '首 Token P50 为延迟直方图的分桶估算值。',
+      historyLabel: '真实请求 · {count} 个时段', requestHistory: '真实请求可用率历史',
+      past: '过去 {range}', now: '现在',
+      states: { unmonitored: '未纳入监控', rebuilding: '统计更新中', no_data: '暂无数据', insufficient: '样本不足', healthy: '正常', warning: '波动', critical: '异常' },
+      attribution: '降智检测', attributionHint: '组内账号最近检测 · 最近 20 次，与上方时间范围无关',
+      noAttribution: '暂无检测记录', attributionHistory: '组内账号最近 20 次检测',
+      attributionLegend: '通过为绿，不通过为黄，执行异常为红；取消或跳过为灰。执行异常不表示降智。',
+      results: { passed: '通过', mismatch: '不通过', failed: '执行失败', abnormal: '检测异常', cancelled: '已取消', skipped: '已跳过' },
+      reasons: { reference_match: '最高候选在期望列表内', reference_mismatch: '最高候选不在期望列表内', execution_failed: '检测执行失败', analysis_abnormal: '检测未能完成有效判定', cancelled: '检测已取消', skipped: '检测已跳过' },
+      metricsNote: '卡片状态仅依据可用率；缓存率和延迟不参与着色。降智检测仅反映已有检测的判定。',
+    },
     title: '渠道监控',
     updating: '正在更新数据',
     updatedTo: '更新至 {time}',
