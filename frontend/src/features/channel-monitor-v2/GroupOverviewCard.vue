@@ -153,6 +153,8 @@ function barClass(state: GroupOverviewState) {
   if (state === 'healthy') return 'h-6 bg-emerald-500 dark:bg-emerald-500'
   if (state === 'warning') return 'h-3 bg-amber-400 dark:bg-amber-400'
   if (state === 'critical') return 'h-2 bg-rose-500 dark:bg-rose-500'
+  if (state === 'insufficient') return 'h-3 bg-gray-300 dark:bg-dark-500'
+  if (state === 'rebuilding') return 'h-3 border border-dashed border-gray-400 bg-gray-100 dark:border-dark-400 dark:bg-dark-700'
   return 'h-1 bg-gray-300 dark:bg-dark-500'
 }
 function attributionBarClass(status: GroupAttributionSummaryState) {

@@ -16,7 +16,7 @@
 
 免费成功请求参与统计。已经产生部分用量但最终失败的请求不再同时算作成功；内部重试后成功的请求保留为成功。这些变化只影响监控，不修改账单或扣费。
 
-正常／波动／异常仅使用可用率，沿用管理员已有错误率阈值与最低样本设置。无有效样本显示暂无数据，样本不足显示灰色状态。统计仍在回填或原始日志覆盖不足时会明确显示，缺失历史不会显示为 100%。
+正常／波动／异常仅使用可用率，沿用管理员已有错误率阈值与最低样本设置。最低样本数分别用于整张卡片和每个时间格：整段数据充足时，部分时间格仍可能样本不足。无有效样本显示灰色短线，已有请求但样本不足显示灰色短柱，并保留悬停中的实际可用率；统计更新中使用灰色虚线柱。图例区分这三种状态，缺失历史不会显示为 100%。
 
 四个窗口沿用已有粒度：90 分钟 18 格、24 小时 24 格、7 天 14 格、30 天 30 格。页面显示统计截止时间，最新一格可能仍在收集数据。
 
@@ -37,6 +37,8 @@ OpenAI／Composite 分组卡片展示当前生效的探针模型：启用分组�
 ### 刷新与权限
 
 自动刷新使用监控配置的 60 秒或 300 秒，支持手动刷新。隐藏页面暂停轮询，返回页面后重新加载。快速切换窗口时，旧请求不能覆盖新窗口。详细统计接口仅在切换到详细统计时加载。
+
+后台每轮优先更新最近请求，历史回填失败只延后下一次历史尝试，不延后实时统计。刷新间隔从本轮开始计算，扣除已执行时间；聚合仍串行运行并保留原有单例锁及 55 秒总超时。页面刷新时间与统计截止时间分开，最新请求需等后台完成聚合后出现。
 
 新增登录用户只读接口：`GET /api/v1/channel-monitor-v2/group-overview?range=90m`。接口受原有监控开关和 V2 模式控制，授权范围由服务端计算，不接受客户端指定其他用户。管理员访问用户侧概览时也按自身分组权限裁剪。
 
@@ -62,7 +64,7 @@ Cards show active monitored groups the authenticated user may use. Exhausted bal
 - **Availability:** successful requests divided by successes plus service-side failures. Explicit user-side access, balance, parameter, safety, and cancellation failures are excluded; upstream authentication, upstream quota, capacity, transport, timeout, and server failures remain included.
 - **First-token P50:** a histogram-based estimate, described briefly as the estimated median wait for the first token.
 
-Zero-cost successes are included. Final failed requests with partial usage are not also counted as successes, while recovered retry attempts remain successful. Billing is unchanged. Health colors use availability only, with existing error thresholds and minimum samples. Missing or rebuilding data is not presented as 100% availability.
+Zero-cost successes are included. Final failed requests with partial usage are not also counted as successes, while recovered retry attempts remain successful. Billing is unchanged. Health colors use availability only, with existing error thresholds and minimum samples applied separately to the whole card and each interval. Low-sample intervals retain their measured availability and use a short gray column; empty intervals use a thin gray line, while rebuilding uses a dashed gray column. The legend distinguishes all three states. Missing or rebuilding data is not presented as 100% availability.
 
 The traffic windows contain 18, 24, 14, and 30 buckets for 90 minutes, 24 hours, 7 days, and 30 days. Attribution uses only current, nondeleted group members with scheduling enabled. OAuth contributes all effective results from the previous 15 minutes; API Key and Engine accounts contribute their latest effective result regardless of age or the automatic-test switch. Cancelled, skipped, and unfinished jobs are ignored. Any pass wins; otherwise a mismatch wins; failures/errors alone are red; no effective result is gray. Only the current empty summary distinguishes disabled testing from no recent effective tests.
 
@@ -73,6 +75,8 @@ OpenAI and Composite cards also show the currently configured probe model: the g
 Platform icons and labels reuse shared colors in both themes: orange Anthropic, green OpenAI, blue Gemini, neutral Grok, purple Antigravity, and cyan Composite. Result colors remain independent.
 
 Polling follows the configured 60/300-second interval, pauses while hidden, and supports manual refresh. Stale requests cannot overwrite newer selections. The new authenticated `GET /api/v1/channel-monitor-v2/group-overview` endpoint recomputes authorization for every request and returns only small public summaries.
+
+Each aggregation cycle updates recent requests first. Historical backfill failures delay only historical retries, leaving live updates on their configured cadence. Cycle execution time is deducted from the wait; execution remains serial with the existing distributed lock and 55-second total timeout. Page refresh time and aggregate coverage time are distinct, and recent requests appear once aggregation completes.
 
 Forward migrations extend aggregation and bounded history lookup. Versioned backfill runs in bounded background batches within available source-log coverage, never within a page request. Deploy aggregators consistently during the statistics transition. Additive database fields and indexes may remain on application rollback; running an old aggregator requires a statistics rebuild when upgrading again.
 
@@ -132,3 +136,20 @@ The update passed targeted Go unit/race tests, the complete isolated overview in
 本次移除用户页权限及聚合实现说明，新增当前配置的探针模型。Go 定向单测、后端编译、22 项前端相关测试、类型检查、生产构建及定向 lint 均通过。隔离 PostgreSQL 18.1／Redis 8.4 的 8 项归因概览集成测试全部通过，覆盖独立策略、全局继承、配置更新、空组、全局关闭、历史隔离及非 OpenAI 平台；50 组批量查询仍返回固定 1,000 行，执行计划采样为 5.347 ms。构建保留既有 Browserslist、模块分包和大 chunk 提示。本次无数据库迁移、生产修改或部署，未执行远端 CI。
 
 Targeted Go tests, backend compilation, 22 related frontend tests, type checking, the production build and targeted lint passed. Eight isolated PostgreSQL/Redis attribution overview tests passed, including configured probe inheritance and updates independent of historical results. The 50-group query still returned 1,000 rows (5.347 ms in the local plan sample). Existing build warnings remain. No migration, production changes, deployment or remote CI were performed.
+
+## 实时刷新与灰格修复验证 / Live refresh and low-sample display (2026-11-14)
+
+只读核对用量、分钟聚合及后台日志后，确认已有请求进入统计；旧页面把低样本区间和空区间画成相同灰线，同时历史回填超时会触发整个聚合循环退避。现改为区分低样本柱、空数据线和更新中虚线柱，并将历史退避限制在历史阶段，按本轮开始时间计算刷新周期。
+
+- 聚合器及概览定向 Go 单元与 race 测试通过；假时钟覆盖连续历史失败时的 60／300 秒实时节拍、退避截止及恢复、长期失败、首次回填、锁、停止和唤醒。
+- 概览测试验证低样本区间仍保留实际可用率，并与真正空区间区分；前端相关 20 项测试、类型检查、定向 lint、生产构建及构建内 3 项 i18n 检查通过。
+- `GOEXPERIMENT=greenteagc,jsonv2 go build ./...` 通过。无 SQL、表结构或存储格式变更，本次未重复运行数据库集成；生产仅只读排查，未部署。既有构建提示保留，远端 CI 未执行。
+
+```sh
+# backend
+GOEXPERIMENT=greenteagc,jsonv2 go test -tags unit ./internal/service -run 'TestChannelMonitorV2(Aggregator|MaxChunkForDepth|Overview)' -count=1
+GOEXPERIMENT=greenteagc,jsonv2 go test -race -tags unit ./internal/service -run 'TestChannelMonitorV2(Aggregator|MaxChunkForDepth|Overview)' -count=1
+GOEXPERIMENT=greenteagc,jsonv2 go build ./...
+```
+
+Read-only production checks confirmed that requests were present in the aggregates. Low-sample and empty intervals previously looked identical, while historical timeouts delayed the whole aggregation loop. The fix separates those visual states and confines historical backoff to history, with cycle duration deducted from the configured refresh interval. Targeted Go unit/race checks, backend compilation, 20 related frontend tests, type checking, targeted lint, the production build and its three i18n checks passed. No SQL or storage format changed, so database integration was not rerun. No production changes, deployment or remote CI were performed.

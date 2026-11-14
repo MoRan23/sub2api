@@ -88,6 +88,47 @@ describe('group overview', () => {
     expect(wrapper.text()).toContain('1 个分组')
   })
 
+  it('distinguishes low-sample request history from empty intervals and rebuilding statistics', async () => {
+    const item = card()
+    item.state = 'insufficient'
+    item.metrics.availability_rate = 1
+    item.buckets = [
+      { bucket_start: '2026-11-14T10:00:00Z', state: 'insufficient', availability_rate: 1 },
+      { bucket_start: '2026-11-14T10:05:00Z', state: 'no_data', availability_rate: null },
+      { bucket_start: '2026-11-14T10:10:00Z', state: 'rebuilding', availability_rate: null },
+    ]
+    getGroupOverview.mockResolvedValue(response('90m', [item]))
+    wrapper = await mountView(); await flushPromises()
+    const group = wrapper.get('[data-group-id="1"]')
+    expect(group.get('[data-testid="group-state"]').text()).toBe('样本不足')
+    expect(group.text()).toContain('100.0%')
+    const lowSample = group.get('button[data-state="insufficient"]')
+    const empty = group.get('button[data-state="no_data"]')
+    const rebuilding = group.get('button[data-state="rebuilding"]')
+    expect(lowSample.classes()).toEqual(expect.arrayContaining(['h-3', 'bg-gray-300', 'dark:bg-dark-500']))
+    expect(lowSample.classes()).not.toContain('h-1')
+    expect(lowSample.attributes('title')).toContain('样本不足 · 可用率 100.0%')
+    expect(empty.classes()).toEqual(expect.arrayContaining(['h-1', 'bg-gray-300', 'dark:bg-dark-500']))
+    expect(empty.attributes('title')).toContain('暂无数据 · 可用率 —')
+    expect(rebuilding.classes()).toEqual(expect.arrayContaining(['h-3', 'border-dashed']))
+    expect(rebuilding.attributes('title')).toContain('统计更新中')
+    expect(rebuilding.attributes('title')).not.toContain('暂无数据')
+
+    const legend = wrapper.get('footer')
+    for (const [state, label, height, appearance] of [
+      ['healthy', '正常', 'h-6', 'bg-emerald-500'],
+      ['warning', '波动', 'h-3', 'bg-amber-400'],
+      ['critical', '异常', 'h-2', 'bg-rose-500'],
+      ['insufficient', '样本不足', 'h-3', 'bg-gray-300'],
+      ['no_data', '暂无数据', 'h-1', 'bg-gray-300'],
+      ['rebuilding', '统计更新中', 'h-3', 'border-dashed'],
+    ]) {
+      const entry = legend.get(`[data-legend-state="${state}"]`)
+      expect(entry.text()).toBe(label)
+      expect(entry.get('[aria-hidden="true"] span').classes()).toEqual(expect.arrayContaining([height, appearance]))
+    }
+  })
+
   it.each([60, 300] as const)('polls every %i seconds and refreshes when the hidden page becomes visible', async interval => {
     getGroupOverview.mockResolvedValue(response('90m', [card()], interval))
     wrapper = await mountView(); await flushPromises()

@@ -192,6 +192,37 @@ func TestChannelMonitorV2OverviewStateOnlyUsesAvailability(t *testing.T) {
 	}
 }
 
+func TestChannelMonitorV2OverviewPreservesLowSampleBucketRates(t *testing.T) {
+	r := overviewTestRepository()
+	r.cfg.HealthThresholds.MinimumSample = 50
+	svc := NewChannelMonitorV2Service(r)
+	f, err := svc.ParseFilter("90m", nil, nil, nil)
+	require.NoError(t, err)
+	id, rate := int64(91), 1.0
+	row := ChannelMonitorV2MatrixRow{GroupID: &id}
+	// The whole window has enough samples, while individual five-minute
+	// intervals do not. Neither classification may discard their measured rate.
+	for i := 0; i < 17; i++ {
+		row.Buckets = append(row.Buckets, ChannelMonitorV2TrendPoint{
+			BucketStart: f.Start.Add(time.Duration(i) * f.Bucket),
+			Metrics:     ChannelMonitorV2Metric{AvailabilitySampleCount: 10, AvailabilityRate: &rate},
+		})
+	}
+	row.Metrics = ChannelMonitorV2Metric{AvailabilitySampleCount: 170, AvailabilityRate: &rate}
+	r.matrix.Items = []ChannelMonitorV2MatrixRow{row}
+	out, err := svc.GetGroupOverview(context.Background(), f, []Group{{ID: id, Platform: PlatformOpenAI, Status: StatusActive}}, nil)
+	require.NoError(t, err)
+	require.Equal(t, "healthy", out.Items[0].State)
+	require.Len(t, out.Items[0].Buckets, 18)
+	for _, bucket := range out.Items[0].Buckets[:17] {
+		require.Equal(t, "insufficient", bucket.State)
+		require.NotNil(t, bucket.AvailabilityRate)
+		require.Equal(t, 1.0, *bucket.AvailabilityRate)
+	}
+	require.Equal(t, "no_data", out.Items[0].Buckets[17].State)
+	require.Nil(t, out.Items[0].Buckets[17].AvailabilityRate)
+}
+
 func TestChannelMonitorV2OverviewAttributionUsesCurrentClockForAllRanges(t *testing.T) {
 	now := time.Date(2026, 11, 14, 12, 34, 56, 123000000, time.UTC)
 	for _, rangeName := range []string{"90m", "24h", "7d", "30d"} {

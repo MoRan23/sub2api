@@ -62,8 +62,8 @@
 
     <footer v-if="data?.items.length" class="space-y-2 text-xs text-gray-500 dark:text-gray-400">
       <div class="flex flex-wrap gap-4">
-        <span v-for="state in ['healthy', 'warning', 'critical', 'no_data']" :key="state" class="flex items-center gap-1.5">
-          <span class="h-2 w-2 rounded-full" :class="legendClasses[state]" />{{ t(`channelMonitorV2.overview.states.${state}`) }}
+        <span v-for="(classes, state) in legendClasses" :key="state" class="flex items-center gap-1.5" :data-legend-state="state">
+          <span class="flex h-6 w-3 items-end" aria-hidden="true"><span class="w-full rounded-[3px]" :class="classes" /></span>{{ t(`channelMonitorV2.overview.states.${state}`) }}
         </span>
       </div>
     </footer>
@@ -113,7 +113,14 @@ const sections = computed(() => {
     return (ai < 0 ? order.length : ai) - (bi < 0 ? order.length : bi) || a.localeCompare(b)
   }).map(([platform, items]) => ({ platform, items, label: getPlatformSpec(platform)?.display_name || (platform === 'composite' ? 'Composite' : platform) }))
 })
-const legendClasses: Record<string, string> = { healthy: 'bg-emerald-500', warning: 'bg-amber-400', critical: 'bg-rose-500', no_data: 'bg-gray-400' }
+const legendClasses: Record<string, string> = {
+  healthy: 'h-6 bg-emerald-500',
+  warning: 'h-3 bg-amber-400',
+  critical: 'h-2 bg-rose-500',
+  insufficient: 'h-3 bg-gray-300 dark:bg-dark-500',
+  no_data: 'h-1 bg-gray-300 dark:bg-dark-500',
+  rebuilding: 'h-3 border border-dashed border-gray-400 bg-gray-100 dark:border-dark-400 dark:bg-dark-700',
+}
 const dateFormatter = computed(() => new Intl.DateTimeFormat(locale.value || undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }))
 function formatTime(value: string) {
   const time = new Date(value)

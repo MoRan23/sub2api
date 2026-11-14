@@ -58,8 +58,8 @@ type ChannelMonitorV2Aggregator struct {
 	backfillFloor    time.Time
 	backfillChunk    time.Duration
 	backfillFailures int
-	// nextWaitFloor is applied after runOnce when failures require backoff.
-	nextWaitFloor time.Duration
+	// backfillRetryAt delays only historical work; realtime keeps its own cadence.
+	backfillRetryAt time.Time
 	// cursorLoaded is true after the first successful watermark read (or init).
 	cursorLoaded bool
 	// hasAggregated is true once any recompute in this process (or durable data) exists.
@@ -67,6 +67,7 @@ type ChannelMonitorV2Aggregator struct {
 	unsub         func()
 	ctx           context.Context
 	cancel        context.CancelFunc
+	now           func() time.Time
 }
 
 func NewChannelMonitorV2Aggregator(repo ChannelMonitorV2Repository, db *sql.DB, settings channelMonitorRuntimeReader) *ChannelMonitorV2Aggregator {
@@ -78,6 +79,7 @@ func NewChannelMonitorV2Aggregator(repo ChannelMonitorV2Repository, db *sql.DB, 
 		stopCh:        make(chan struct{}),
 		kickCh:        make(chan struct{}, 1),
 		backfillChunk: channelMonitorV2BackfillChunkInit,
+		now:           time.Now,
 	}
 }
 
@@ -148,20 +150,36 @@ func (s *ChannelMonitorV2Aggregator) kick() {
 }
 
 func (s *ChannelMonitorV2Aggregator) loop() {
+	if s == nil || s.repo == nil {
+		return
+	}
+	s.loopWithWait(s.wait)
+}
+
+// A single synchronous loop owns runOnce. Deduct work from the refresh interval
+// instead of adding a full interval after a potentially slow historical chunk.
+// The wait seam lets tests advance a clock without sleeping or spawning workers.
+func (s *ChannelMonitorV2Aggregator) loopWithWait(wait func(time.Duration) bool) {
 	for {
+		select {
+		case <-s.stopCh:
+			return
+		default:
+		}
+		started := s.currentTime()
 		interval := time.Minute
 		ctx, cancel := context.WithTimeout(context.Background(), 3*time.Second)
 		if !s.passiveAggregationAllowed(ctx) {
 			cancel()
-			if !s.wait(interval) {
+			if !wait(s.remainingInterval(started, interval)) {
 				return
 			}
 			continue
 		}
-		if cfg, err := s.repo.GetConfig(ctx); err == nil {
+		if cfg, err := s.repo.GetConfig(ctx); err == nil && cfg != nil {
 			if !cfg.Enabled {
 				cancel()
-				if !s.wait(interval) {
+				if !wait(s.remainingInterval(started, interval)) {
 					return
 				}
 				continue
@@ -172,18 +190,25 @@ func (s *ChannelMonitorV2Aggregator) loop() {
 		}
 		cancel()
 		s.runOnce()
-		// Hard gate: never compress bootstrap to multi-Hz ticks. Soft gate: on
-		// repeated failures raise the wait floor (exponential backoff).
-		s.mu.Lock()
-		floor := s.nextWaitFloor
-		s.mu.Unlock()
-		if floor > interval {
-			interval = floor
-		}
-		if !s.wait(interval) {
+		if !wait(s.remainingInterval(started, interval)) {
 			return
 		}
 	}
+}
+
+func (s *ChannelMonitorV2Aggregator) currentTime() time.Time {
+	if s.now != nil {
+		return s.now()
+	}
+	return time.Now()
+}
+
+func (s *ChannelMonitorV2Aggregator) remainingInterval(started time.Time, interval time.Duration) time.Duration {
+	remaining := interval - s.currentTime().Sub(started)
+	if remaining < 0 {
+		return 0
+	}
+	return remaining
 }
 
 func (s *ChannelMonitorV2Aggregator) passiveAggregationAllowed(ctx context.Context) bool {
@@ -215,6 +240,9 @@ func (s *ChannelMonitorV2Aggregator) wait(interval time.Duration) bool {
 }
 
 func (s *ChannelMonitorV2Aggregator) runOnce() {
+	if s == nil || s.repo == nil {
+		return
+	}
 	s.mu.Lock()
 	parent := s.ctx
 	s.mu.Unlock()
@@ -231,7 +259,7 @@ func (s *ChannelMonitorV2Aggregator) runOnce() {
 		defer release()
 	}
 
-	now := time.Now().UTC().Truncate(time.Minute)
+	now := s.currentTime().UTC().Truncate(time.Minute)
 	if err := s.ensureCursor(ctx, now); err != nil {
 		logger.LegacyPrintf("service.channel_monitor_v2", "[ChannelMonitorV2] load watermark failed: %v", err)
 		return
@@ -249,13 +277,13 @@ func (s *ChannelMonitorV2Aggregator) runOnce() {
 		if backfillFloor.After(start) {
 			start = backfillFloor
 		}
-		started := time.Now()
+		started := s.currentTime()
 		if err := s.repo.RecomputeRange(ctx, start, now); err != nil {
 			logger.LegacyPrintf("service.channel_monitor_v2", "[ChannelMonitorV2] bootstrap recent aggregation failed: %v", err)
-			s.recordBackfillFailure(now, cursor)
+			s.recordBackfillFailure(s.currentTime(), cursor)
 			return
 		}
-		s.recordBackfillSuccess(start, time.Since(started), now)
+		s.recordBackfillSuccess(start, s.currentTime().Sub(started), now)
 		return
 	}
 
@@ -272,7 +300,13 @@ func (s *ChannelMonitorV2Aggregator) runOnce() {
 	s.mu.Lock()
 	cursor = s.backfillAt
 	backfillFloor = s.backfillFloor
+	retryAt := s.backfillRetryAt
 	s.mu.Unlock()
+	// Realtime and its durable watermark refresh above always run, including
+	// while failed historical chunks are waiting for their own retry deadline.
+	if s.currentTime().Before(retryAt) {
+		return
+	}
 
 	// Phase 2: walk history backward at most one chunk per tick until retention max (90d).
 	// Product UI (30d) fills first; remaining 30–90d continues silently.
@@ -312,13 +346,13 @@ func (s *ChannelMonitorV2Aggregator) runOnce() {
 	if !start.Before(end) {
 		return
 	}
-	started := time.Now()
+	started := s.currentTime()
 	if err := s.repo.RecomputeRange(ctx, start, end); err != nil {
 		logger.LegacyPrintf("service.channel_monitor_v2", "[ChannelMonitorV2] backfill failed %s..%s: %v", start, end, err)
-		s.recordBackfillFailure(now, end)
+		s.recordBackfillFailure(s.currentTime(), end)
 		return
 	}
-	s.recordBackfillSuccess(start, time.Since(started), now)
+	s.recordBackfillSuccess(start, s.currentTime().Sub(started), now)
 }
 
 // channelMonitorV2MaxChunkForDepth returns the hard ceiling for a historical
@@ -341,7 +375,7 @@ func (s *ChannelMonitorV2Aggregator) recordBackfillSuccess(coveredFrom time.Time
 	s.backfillAt = coveredFrom
 	s.hasAggregated = true
 	s.backfillFailures = 0
-	s.nextWaitFloor = 0
+	s.backfillRetryAt = time.Time{}
 	maxChunk := channelMonitorV2MaxChunkForDepth(now, coveredFrom)
 	// Grow slowly only when the recompute was clearly cheap.
 	if elapsed > 0 && elapsed < channelMonitorV2GrowChunkUnder {
@@ -384,15 +418,13 @@ func (s *ChannelMonitorV2Aggregator) recordBackfillFailure(now, end time.Time) {
 	if s.backfillChunk > maxChunk {
 		s.backfillChunk = maxChunk
 	}
-	// Exponential backoff on wait floor: 1m, 2m, 4m… capped at 10m.
-	floor := time.Minute << uint(s.backfillFailures-1)
-	if floor > channelMonitorV2MaxBackoff {
-		floor = channelMonitorV2MaxBackoff
+	// Exponential historical retry delay: 1m, 2m, 4m… capped at 10m.
+	// Bound the shift before computing it so prolonged outages cannot overflow.
+	delay := channelMonitorV2MaxBackoff
+	if s.backfillFailures < 5 {
+		delay = time.Minute << uint(s.backfillFailures-1)
 	}
-	if floor < time.Minute {
-		floor = time.Minute
-	}
-	s.nextWaitFloor = floor
+	s.backfillRetryAt = now.Add(delay)
 }
 
 // ensureCursor restores durable backfill_cursor after process restart so progress
