@@ -245,7 +245,37 @@ func attributionRows(rows *sql.Rows) ([]*service.AttributionJob, error) {
 }
 
 func pruneAttribution(ctx context.Context, tx *sql.Tx) error {
-	_, err := tx.ExecContext(ctx, `DELETE FROM model_attribution_jobs WHERE id IN (SELECT id FROM (SELECT id,row_number() OVER(PARTITION BY account_id ORDER BY id DESC) AS rn FROM model_attribution_jobs WHERE finished_at IS NOT NULL) history WHERE rn>100)`)
+	// Keep the usual latest 100 jobs, plus the history needed to
+	// reconstruct the overview's 200-minute timeline. OAuth samples look back
+	// another 15 minutes; API keys also need the last effective result before
+	// that window so an old result survives later cancelled/skipped jobs.
+	// This only changes retention: overview reads still exclude paused accounts.
+	_, err := tx.ExecContext(ctx, `WITH history AS (
+		SELECT id, account_id, finished_at, status,
+		       ROW_NUMBER() OVER (PARTITION BY account_id ORDER BY id DESC) AS rn
+		FROM model_attribution_jobs WHERE finished_at IS NOT NULL
+	), candidates AS MATERIALIZED (
+		SELECT id, account_id FROM history
+		WHERE rn > 100 AND NOT (
+			finished_at >= NOW() - INTERVAL '215 minutes'
+			AND status IN ('passed', 'mismatch', 'failed', 'abnormal')
+		)
+	), api_key_anchors AS MATERIALIZED (
+		SELECT anchor.id
+		FROM (SELECT DISTINCT account_id FROM candidates) c
+		JOIN accounts a ON a.id = c.account_id AND a.type = 'apikey'
+		CROSS JOIN LATERAL (
+			SELECT j.id FROM model_attribution_jobs j
+			WHERE j.account_id = a.id
+			  AND j.finished_at < NOW() - INTERVAL '215 minutes'
+			  AND j.status IN ('passed', 'mismatch', 'failed', 'abnormal')
+			ORDER BY j.finished_at DESC, j.id DESC LIMIT 1
+		) anchor
+	)
+	DELETE FROM model_attribution_jobs j USING candidates c
+	WHERE j.id = c.id AND NOT EXISTS (
+		SELECT 1 FROM api_key_anchors anchor WHERE anchor.id = j.id
+	)`)
 	return err
 }
 

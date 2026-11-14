@@ -21,6 +21,8 @@ type overviewRepositoryStub struct {
 	historyIDs                []int64
 	matrixCalls, historyCalls int
 	historyErr                error
+	attributions              map[int64]ChannelMonitorV2OverviewAttribution
+	asOf                      time.Time
 }
 
 func (r *overviewRepositoryStub) GetConfig(context.Context) (*ChannelMonitorV2Config, error) {
@@ -34,10 +36,22 @@ func (r *overviewRepositoryStub) GetMatrix(_ context.Context, f ChannelMonitorV2
 	r.matrixCalls++
 	return r.matrix, nil
 }
-func (r *overviewRepositoryStub) GetGroupAttributionHistory(_ context.Context, ids []int64) (map[int64][]ChannelMonitorV2AttributionEntry, error) {
+func (r *overviewRepositoryStub) GetGroupAttributionOverview(_ context.Context, ids []int64, asOf time.Time) (map[int64]ChannelMonitorV2OverviewAttribution, error) {
 	r.historyCalls++
 	r.historyIDs = append([]int64(nil), ids...)
-	return r.history, r.historyErr
+	r.asOf = asOf
+	if r.attributions != nil {
+		return r.attributions, r.historyErr
+	}
+	out := make(map[int64]ChannelMonitorV2OverviewAttribution, len(ids))
+	for _, id := range ids {
+		item := NewChannelMonitorV2OverviewAttribution(asOf)
+		if recent := r.history[id]; len(recent) > 0 {
+			item.Recent, item.Latest = recent, &recent[0]
+		}
+		out[id] = item
+	}
+	return out, r.historyErr
 }
 
 func overviewTestRepository() *overviewRepositoryStub {
@@ -133,5 +147,64 @@ func TestChannelMonitorV2OverviewStateOnlyUsesAvailability(t *testing.T) {
 	}{{1, 0, "no_data"}, {1, 9, "insufficient"}, {.99, 10, "healthy"}, {.95, 100, "warning"}, {.9, 100, "warning"}, {.8, 100, "critical"}, {.5, 100, "critical"}} {
 		m := ChannelMonitorV2Metric{AvailabilityRate: &tc.rate, AvailabilitySampleCount: tc.samples, AvailabilityErrorRequests: int64(math.Round((1 - tc.rate) * float64(tc.samples))), CacheRate: 0, ErrorRate: 1}
 		require.Equal(t, tc.want, channelMonitorV2OverviewState(m, true, true, thresholds))
+	}
+}
+
+func TestChannelMonitorV2OverviewAttributionUsesCurrentClockForAllRanges(t *testing.T) {
+	now := time.Date(2026, 11, 14, 12, 34, 56, 123000000, time.UTC)
+	for _, rangeName := range []string{"90m", "24h", "7d", "30d"} {
+		t.Run(rangeName, func(t *testing.T) {
+			r := overviewTestRepository()
+			svc := NewChannelMonitorV2Service(r)
+			svc.now = func() time.Time { return now }
+			f, err := svc.ParseFilter(rangeName, nil, nil, nil)
+			require.NoError(t, err)
+			require.NotEqual(t, now, f.End)
+			clockCalls := 0
+			svc.now = func() time.Time { clockCalls++; return now }
+			out, err := svc.GetGroupOverview(context.Background(), f, []Group{{ID: 1, Status: StatusActive}}, nil)
+			require.NoError(t, err)
+			require.Equal(t, 1, clockCalls)
+			require.Equal(t, now, r.asOf)
+			attr := out.Items[0].Attribution
+			require.Equal(t, now, attr.AsOf)
+			require.False(t, attr.Enabled)
+			require.Equal(t, "no_data", attr.SummaryState)
+			require.Empty(t, attr.Recent)
+			require.NotNil(t, attr.Recent)
+			require.Len(t, attr.History, 20)
+			require.Equal(t, now.Add(-200*time.Minute), attr.History[0].BucketStart)
+			require.Equal(t, now, attr.History[19].BucketEnd)
+			for i, bucket := range attr.History {
+				require.Equal(t, "no_data", bucket.State)
+				require.Equal(t, 10*time.Minute, bucket.BucketEnd.Sub(bucket.BucketStart))
+				if i > 0 {
+					require.Equal(t, attr.History[i-1].BucketEnd, bucket.BucketStart)
+				}
+			}
+		})
+	}
+}
+
+func TestChannelMonitorV2OverviewAttributionProjectsAuthoritativeSummary(t *testing.T) {
+	r := overviewTestRepository()
+	now := time.Date(2026, 11, 14, 12, 34, 56, 0, time.UTC)
+	attr := NewChannelMonitorV2OverviewAttribution(now)
+	attr.Enabled = false
+	attr.SummaryState, attr.History[19].State = "passed", "passed"
+	attr.Recent = []ChannelMonitorV2AttributionEntry{{Status: "failed", FinishedAt: now}}
+	attr.Latest = &attr.Recent[0]
+	r.attributions = map[int64]ChannelMonitorV2OverviewAttribution{1: attr}
+	svc := NewChannelMonitorV2Service(r)
+	svc.now = func() time.Time { return now }
+	f, err := svc.ParseFilter("30d", nil, nil, nil)
+	require.NoError(t, err)
+	out, err := svc.GetGroupOverview(context.Background(), f, []Group{{ID: 1, Status: StatusActive}}, nil)
+	require.NoError(t, err)
+	require.Equal(t, attr, out.Items[0].Attribution)
+	encoded, err := json.Marshal(out.Items[0].Attribution)
+	require.NoError(t, err)
+	for _, field := range []string{`"enabled":false`, `"summary_state":"passed"`, `"as_of":`, `"history":`, `"bucket_end":`, `"latest":`, `"recent":`} {
+		require.Contains(t, string(encoded), field)
 	}
 }

@@ -3,6 +3,24 @@ import { apiClient } from './client'
 export type MonitorRange = '90m' | '24h' | '7d' | '30d'
 export type GroupOverviewState = 'unmonitored' | 'rebuilding' | 'no_data' | 'insufficient' | 'healthy' | 'warning' | 'critical'
 export type GroupAttributionStatus = 'passed' | 'mismatch' | 'failed' | 'abnormal' | 'cancelled' | 'skipped'
+export type GroupAttributionSummaryState = 'passed' | 'mismatch' | 'failed' | 'no_data'
+
+export interface GroupAttributionHistoryBucket {
+  bucket_start: string
+  bucket_end: string
+  state: GroupAttributionSummaryState
+}
+
+export interface GroupAttributionSummary {
+  // Optional during rolling upgrades; missing aggregate data is displayed as no_data.
+  summary_state?: GroupAttributionSummaryState
+  enabled?: boolean
+  as_of?: string
+  history?: GroupAttributionHistoryBucket[]
+  /** Legacy individual results, retained for compatibility with older consumers. */
+  latest: GroupAttributionEntry | null
+  recent: GroupAttributionEntry[]
+}
 
 export interface GroupAttributionEntry {
   finished_at: string
@@ -25,7 +43,7 @@ export interface GroupOverviewCard {
     ttft_p50_ms: number | null
   }
   buckets: Array<{ bucket_start: string; state: GroupOverviewState; availability_rate: number | null }>
-  attribution: { latest: GroupAttributionEntry | null; recent: GroupAttributionEntry[] }
+  attribution: GroupAttributionSummary
 }
 
 export interface GroupOverviewResponse {

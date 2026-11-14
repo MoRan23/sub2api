@@ -6,6 +6,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/server/middleware"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -39,7 +40,7 @@ func (r *overviewHandlerRepo) GetMatrix(_ context.Context, f service.ChannelMoni
 	r.reads++
 	return &service.ChannelMonitorV2Matrix{}, nil
 }
-func (r *overviewHandlerRepo) GetGroupAttributionHistory(context.Context, []int64) (map[int64][]service.ChannelMonitorV2AttributionEntry, error) {
+func (r *overviewHandlerRepo) GetGroupAttributionOverview(context.Context, []int64, time.Time) (map[int64]service.ChannelMonitorV2OverviewAttribution, error) {
 	return nil, nil
 }
 

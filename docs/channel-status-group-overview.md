@@ -22,9 +22,15 @@
 
 ### 已有归因检测
 
-每组显示当前组内账号最近 20 次已结束的检测，按完成时间排序。该区域不触发任何模型请求，也不随真实请求时间窗口裁剪。账号换组后按当前归属展示；影子账号不自动借用母账号记录。
+仅统计当前组内未删除且**调度开启**的账号。OAuth 使用最近 15 分钟内全部有效检测；普通 API Key 和 Codex-Engine 使用各账号最新一次有效检测，不限时间，关闭自动检测后历史仍参与。有效结果为通过、不通过、执行失败和异常；取消、跳过及未完成任务不参与。
 
-通过为绿色，不匹配为黄色，异常／执行失败为红色，取消／跳过为灰色。悬停可查看时间、探针模型和简短结果，不公开账号身份、测试回答、内部配置或原始错误。异常不等于检测判定不通过。
+汇总优先级为：有通过则绿；没有通过但有不通过则黄；只有异常／执行失败则红；没有有效结果则灰。有结果优先显示结果；无结果时根据当前配置区分“未开启降智检测”和“近期无有效检测”。临时限流和排队不改变启用状态。
+
+历史展示最近 **200 分钟、20 格、每格 10 分钟**，每格在结束时刻应用相同规则。最后一格与当前摘要使用同一服务端统计时间；API Key 在窗口之前的有效结果也可延续到窗口内，直至被后续有效结果替换。历史无结果统一显示灰色，不用当前开关推算历史是否开启。
+
+该区域不触发模型请求，也不随上方真实请求时间窗口裁剪。账号换组后按当前归属展示；影子账号只使用自己的记录。关闭调度后，该账号退出摘要及历史统计；再次开启后恢复参与。悬停只公开时间范围、汇总状态和判定口径，不公开账号身份、测试回答或内部错误。
+
+平台图标和标签使用统一品牌色：Anthropic 橙、OpenAI 绿、Gemini 蓝、Grok 中性、Antigravity 紫、Composite 青；检测状态颜色独立使用绿、黄、红、灰，兼容明暗主题。
 
 ### 刷新与权限
 
@@ -38,7 +44,9 @@
 
 历史重建只覆盖仍有原始用量及错误记录的区间。不要为了显示完整历史而关闭日志保留策略或把缺失失败记录推算成成功。
 
-每次概览请求重新验证权限；统计读取已有聚合表，检测历史批量且有上限，不逐卡扫描业务正文。响应不包含账号身份、Key、其他用户、完整检测快照或绝对业务用量。
+每次概览请求重新验证权限；统计读取已有聚合表。检测汇总按唯一账号批量读取时间窗口及 API Key 窗前锚点，再生成每组固定 20 格，不逐卡或逐格查询，也不加载完整任务快照。兼容的 `latest/recent` 通过另一条有界批量查询返回；页面只使用新增的 `enabled/as_of/summary_state/history`。
+
+本次 200 分钟汇总无需新迁移，复用索引 286。清理保留原有最近 100 条任务，并额外保护最近 215 分钟的有效结果及每个 API Key 在窗口前的最后一条有效结果。旧清理策略已经删除的历史不会补造。回退旧应用后，其清理任务可能删除新历史条所需记录；重新升级时只能展示实际保留的数据。
 
 回退应用时可保留新增字段和索引。统计口径升级期间应统一运行新版本，避免旧聚合进程重新写入旧口径；若曾回退并运行旧聚合进程，再升级后应重新执行对应统计版本回填。
 
@@ -54,13 +62,19 @@ Cards show all active groups the authenticated user may use. Exhausted balance o
 
 Zero-cost successes are included. Final failed requests with partial usage are not also counted as successes, while recovered retry attempts remain successful. Billing is unchanged. Health colors use availability only, with existing error thresholds and minimum samples. Missing or rebuilding data is not presented as 100% availability.
 
-The existing time windows contain 18, 24, 14, and 30 buckets for 90 minutes, 24 hours, 7 days, and 30 days. Attribution separately displays the latest 20 completed tests for current group members. It starts no probes and does not inherit a credential owner's result for a shadow account. Public summaries expose only test time, probe model, and safe status information.
+The traffic windows contain 18, 24, 14, and 30 buckets for 90 minutes, 24 hours, 7 days, and 30 days. Attribution uses only current, nondeleted group members with scheduling enabled. OAuth contributes all effective results from the previous 15 minutes; API Key and Engine accounts contribute their latest effective result regardless of age or the automatic-test switch. Cancelled, skipped, and unfinished jobs are ignored. Any pass wins; otherwise a mismatch wins; failures/errors alone are red; no effective result is gray. Only the current empty summary distinguishes disabled testing from no recent effective tests.
+
+Attribution history independently covers 200 minutes in 20 ten-minute buckets. Each bucket evaluates the same rules at its end; the last bucket equals the current server-time summary. API Key results before the window remain effective until superseded. Historical empty buckets do not infer past configuration. Membership and scheduling are evaluated using current accounts, and shadows do not inherit their credential owner's history. Tooltips expose aggregate time, state, and rules only. No additional model probes are started.
+
+Platform icons and labels reuse shared colors in both themes: orange Anthropic, green OpenAI, blue Gemini, neutral Grok, purple Antigravity, and cyan Composite. Result colors remain independent.
 
 Polling follows the configured 60/300-second interval, pauses while hidden, and supports manual refresh. Stale requests cannot overwrite newer selections. The new authenticated `GET /api/v1/channel-monitor-v2/group-overview` endpoint recomputes authorization for every request and returns only small public summaries.
 
 Forward migrations extend aggregation and bounded history lookup. Versioned backfill runs in bounded background batches within available source-log coverage, never within a page request. Deploy aggregators consistently during the statistics transition. Additive database fields and indexes may remain on application rollback; running an old aggregator requires a statistics rebuild when upgrading again.
 
-## 验证记录 / Validation (2026-11-14)
+The attribution-summary update requires no migration and reuses index 286. One batch query reads distinct accounts and generates twenty states per group; a second bounded batch preserves legacy `latest/recent` fields. New clients use `enabled/as_of/summary_state/history`. Retention keeps the latest 100 jobs plus effective results from the last 215 minutes and each API Key's last effective result before that window. Already-pruned history is not reconstructed; rolling back to an older cleaner can reduce available history on a later upgrade.
+
+## 初版验证记录 / Initial implementation validation (2026-11-14)
 
 本轮使用本地模拟 API 与 WSL 中的隔离数据库；未连接真实模型、未修改生产配置、未部署。Go 为 1.27.3，实验参数为 `greenteagc,jsonv2`。
 
@@ -88,3 +102,23 @@ GOEXPERIMENT=greenteagc,jsonv2 CGO_ENABLED=0 go build -trimpath ./cmd/server
 前端从 `frontend` 执行 `pnpm typecheck`、`pnpm build`；相关测试位于 `src/features/channel-monitor-v2/__tests__` 和 `src/views/user/__tests__/ChannelStatusV2View.overview.spec.ts`。保留仓库既有构建警告（Browserslist、模块分包等），不借此次功能升级依赖。
 
 Validation used only local fixtures and isolated PostgreSQL/Redis. Targeted Go tests, race checks, the backend build, 48 frontend tests, type checking, the production build, targeted lint, and desktop/mobile theme checks passed. The database suite actually ran; no integration checks were skipped. The 50-group fixture returned 994 public summaries in one attribution query (113,842 bytes; 1.240 ms local execution). No production models or configuration were accessed. Remote CI is reported separately from these local checks.
+
+## 汇总规则更新验证 / Attribution summary update validation (2026-11-14)
+
+本次补充 OAuth 15 分钟、API Key／Engine 不限时有效历史、20 格状态汇总、调度筛选及平台配色；使用 Go 1.27.3 与 `GOEXPERIMENT=greenteagc,jsonv2`。
+
+- Service／Repository／Handler 定向单元及 race 测试、后端 `cmd/server` 编译通过。
+- 隔离 PostgreSQL 18.1／Redis 8.4 的 `TestChannelMonitorV2Overview` 全套通过，新增 6 个顶层测试覆盖时间边界、21／101 条历史、旧 API Key 锚点、成员与影子隔离、暂停／恢复调度，以及清理前后 20 格一致。
+- 前端相关测试共 55 项、构建中的 i18n 3 项、类型检查、生产构建和定向 ESLint 通过。
+- 独立区间公式对照覆盖 40,000 个状态，包含微秒边界、相同完成时间按任务 ID 排序及无效结果。
+- 50 个共享分组、2,002 条历史的合成场景中，汇总 SQL 返回固定 1,000 行，`EXPLAIN ANALYZE` 为 10.227 ms。兼容历史查询为 2.791 ms；包含兼容字段的公开结果 JSON 共 236,401 字节。上述数值为本地测试测量，并非生产基准。
+
+复现核心检查：
+
+```sh
+GOEXPERIMENT=greenteagc,jsonv2 go test ./internal/service ./internal/repository ./internal/handler -run 'ChannelMonitorV2.*(Overview|GroupAttribution)' -count=1
+GOEXPERIMENT=greenteagc,jsonv2 go test -tags unit -race ./internal/service ./internal/repository ./internal/handler -run 'ChannelMonitorV2.*(Overview|GroupAttribution)' -count=1
+GOEXPERIMENT=greenteagc,jsonv2 go test -tags integration ./internal/repository -run TestChannelMonitorV2Overview -count=1 -timeout=12m -v
+```
+
+The update passed targeted Go unit/race tests, the complete isolated overview integration suite (including six new top-level tests), 55 frontend tests, three i18n checks, type checking, the production build, and targeted lint. Scheduling-disabled accounts are excluded from current, historical, legacy, and enabled-state projections without deleting their history or changing attribution execution. The 50-group fixture used two batch queries, with 1,000 summary rows in 10.227 ms and the legacy-history query in 2.791 ms. No production models, configuration, or deployment were involved. Remote CI was not run for this update.

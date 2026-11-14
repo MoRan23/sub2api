@@ -50,7 +50,7 @@
 
     <section v-for="section in sections" :key="section.platform" class="space-y-3" :aria-label="section.label">
       <h2 class="flex items-center gap-2 text-base font-semibold text-gray-800 dark:text-gray-100">
-        <span class="flex h-8 w-8 items-center justify-center rounded-xl bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300">
+        <span class="flex h-8 w-8 items-center justify-center rounded-xl" :class="platformBadgeLightClass(section.platform)" data-testid="platform-section-icon">
           <PlatformIcon :platform="section.platform" size="md" />
         </span>
         {{ section.label }}
@@ -82,6 +82,7 @@ import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import { listPlatforms, getPlatformSpec } from '@/constants/platformCatalog'
 import { getGroupOverview, type GroupOverviewCard as Card, type GroupOverviewResponse, type MonitorRange } from '@/api/channelMonitorV2'
 import { extractApiErrorMessage } from '@/utils/apiError'
+import { platformBadgeLightClass } from '@/utils/platformColors'
 import GroupOverviewCard from './GroupOverviewCard.vue'
 
 const { t, locale } = useI18n()

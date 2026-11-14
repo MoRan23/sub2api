@@ -286,7 +286,7 @@ func TestChannelMonitorV2OverviewAttributionHistoryIntegration(t *testing.T) {
 	}
 	require.Less(t, len(encoded), 200000)
 	var planJSON []byte
-	require.NoError(t, integrationDB.QueryRowContext(ctx, "EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) "+channelMonitorV2GroupAttributionSQL, pq.Array(groupIDs)).Scan(&planJSON))
+	require.NoError(t, integrationDB.QueryRowContext(ctx, "EXPLAIN (ANALYZE,BUFFERS,FORMAT JSON) "+channelMonitorV2GroupAttributionSQL, pq.Array(groupIDs), time.Now().UTC()).Scan(&planJSON))
 	var plan []struct {
 		Plan struct {
 			ActualRows float64 `json:"Actual Rows"`

@@ -50,14 +50,38 @@ type ChannelMonitorV2AttributionEntry struct {
 }
 
 type ChannelMonitorV2OverviewAttribution struct {
-	Latest *ChannelMonitorV2AttributionEntry  `json:"latest"`
-	Recent []ChannelMonitorV2AttributionEntry `json:"recent"`
+	Latest       *ChannelMonitorV2AttributionEntry   `json:"latest"`
+	Recent       []ChannelMonitorV2AttributionEntry  `json:"recent"`
+	Enabled      bool                                `json:"enabled"`
+	AsOf         time.Time                           `json:"as_of"`
+	SummaryState string                              `json:"summary_state"`
+	History      []ChannelMonitorV2AttributionBucket `json:"history"`
+}
+
+type ChannelMonitorV2AttributionBucket struct {
+	BucketStart time.Time `json:"bucket_start"`
+	BucketEnd   time.Time `json:"bucket_end"`
+	State       string    `json:"state"`
+}
+
+// NewChannelMonitorV2OverviewAttribution also supplies the complete empty-group
+// timeline. Its last sample is the current summary's exact evaluation instant.
+func NewChannelMonitorV2OverviewAttribution(asOf time.Time) ChannelMonitorV2OverviewAttribution {
+	out := ChannelMonitorV2OverviewAttribution{
+		AsOf: asOf, SummaryState: "no_data", Recent: []ChannelMonitorV2AttributionEntry{},
+		History: make([]ChannelMonitorV2AttributionBucket, 20),
+	}
+	for i := range out.History {
+		end := asOf.Add(time.Duration(i-19) * 10 * time.Minute)
+		out.History[i] = ChannelMonitorV2AttributionBucket{BucketStart: end.Add(-10 * time.Minute), BucketEnd: end, State: "no_data"}
+	}
+	return out
 }
 
 // Optional extension keeps the existing detailed monitoring repository contract
 // independent of attribution storage.
 type channelMonitorV2GroupAttributionReader interface {
-	GetGroupAttributionHistory(context.Context, []int64) (map[int64][]ChannelMonitorV2AttributionEntry, error)
+	GetGroupAttributionOverview(context.Context, []int64, time.Time) (map[int64]ChannelMonitorV2OverviewAttribution, error)
 }
 
 func (s *ChannelMonitorV2Service) GetGroupOverview(ctx context.Context, filter ChannelMonitorV2Filter, groups []Group, userRates map[int64]float64) (*ChannelMonitorV2GroupOverview, error) {
@@ -102,7 +126,10 @@ func (s *ChannelMonitorV2Service) GetGroupOverview(ctx context.Context, filter C
 	if !ok {
 		return nil, errors.New("group attribution history unavailable")
 	}
-	histories, err := reader.GetGroupAttributionHistory(ctx, filter.AllowedGroupIDs)
+	// The monitor filter ends at an aligned bucket boundary, which can be hours
+	// old. Attribution always evaluates against a single current clock reading.
+	asOf := s.now().UTC()
+	attributions, err := reader.GetGroupAttributionOverview(ctx, filter.AllowedGroupIDs, asOf)
 	if err != nil {
 		return nil, err
 	}
@@ -156,12 +183,9 @@ func (s *ChannelMonitorV2Service) GetGroupOverview(ctx context.Context, filter C
 			}
 			item.Buckets = append(item.Buckets, bucket)
 		}
-		item.Attribution.Recent = histories[group.ID]
-		if item.Attribution.Recent == nil {
-			item.Attribution.Recent = []ChannelMonitorV2AttributionEntry{}
-		}
-		if len(item.Attribution.Recent) > 0 {
-			item.Attribution.Latest = &item.Attribution.Recent[0]
+		item.Attribution = attributions[group.ID]
+		if item.Attribution.History == nil {
+			item.Attribution = NewChannelMonitorV2OverviewAttribution(asOf)
 		}
 		out.Items = append(out.Items, item)
 	}

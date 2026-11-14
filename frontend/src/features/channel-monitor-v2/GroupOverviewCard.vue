@@ -2,13 +2,13 @@
   <article class="card min-w-0 rounded-3xl p-5 ring-1 ring-gray-900/5 dark:ring-white/10 sm:p-6" :data-group-id="item.group_id">
     <header class="flex items-start justify-between gap-3">
       <div class="flex min-w-0 gap-3">
-        <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl bg-primary-100 text-primary-700 dark:bg-primary-900/30 dark:text-primary-300">
+        <span class="flex h-10 w-10 shrink-0 items-center justify-center rounded-xl" :class="platformBadgeLightClass(item.platform)" data-testid="platform-card-icon">
           <PlatformIcon :platform="item.platform" size="lg" />
         </span>
         <div class="min-w-0">
           <h3 class="break-words font-semibold text-gray-900 dark:text-gray-100">{{ groupName }}</h3>
           <p class="mt-1 flex flex-wrap items-center gap-x-2 gap-y-1 text-xs text-gray-500 dark:text-gray-400">
-            <span>{{ platformName }}</span>
+            <span class="rounded-md px-1.5 py-0.5" :class="platformBadgeLightClass(item.platform)" data-testid="platform-label">{{ platformName }}</span>
             <span>{{ t('channelMonitorV2.overview.realRequests') }}</span>
             <span class="text-primary-700 dark:text-primary-300">{{ t('channelMonitorV2.overview.multiplier', { value: multiplier }) }}</span>
           </p>
@@ -56,25 +56,28 @@
     <div class="mt-5 border-t border-gray-100 pt-4 dark:border-dark-700">
       <div class="flex flex-wrap items-center justify-between gap-2">
         <h4 class="text-xs font-semibold text-gray-700 dark:text-gray-200">{{ t('channelMonitorV2.overview.attribution') }}</h4>
-        <span class="text-xs" :class="attributionTextClass(item.attribution.latest?.status)" data-testid="attribution-state">
-          {{ item.attribution.latest ? attributionText(item.attribution.latest.status) : t('channelMonitorV2.overview.noAttribution') }}
+        <span class="text-xs" :class="attributionTextClass(attributionState)" :data-state="attributionState" data-testid="attribution-state">
+          {{ attributionSummaryText }}
         </span>
       </div>
       <p class="mt-1 text-[11px] text-gray-500 dark:text-gray-400">{{ t('channelMonitorV2.overview.attributionHint') }}</p>
+      <p class="mt-1 text-[10px] leading-relaxed text-gray-500 dark:text-gray-400">{{ t('channelMonitorV2.overview.attributionPolicy') }}</p>
       <div class="mt-3 flex h-6 items-end gap-1" :aria-label="t('channelMonitorV2.overview.attributionHistory')">
-        <span v-for="index in 20 - recent.length" :key="`empty-${index}`" class="h-1 min-w-0 flex-1 rounded-sm bg-gray-200 dark:bg-dark-600" />
         <button
-          v-for="(entry, index) in recent"
-          :key="`${entry.finished_at}-${index}`"
+          v-for="(bucket, index) in attributionHistory"
+          :key="index"
           type="button"
           class="history-cell attribution-cell"
-          :class="attributionBarClass(entry.status)"
-          :title="attributionTooltip(entry)"
-          :aria-label="attributionTooltip(entry)"
-          :data-result="entry.status"
-        ><span class="sr-only">{{ attributionTooltip(entry) }}</span></button>
+          :class="attributionBarClass(bucket.state)"
+          :title="attributionTooltip(bucket)"
+          :aria-label="attributionTooltip(bucket)"
+          :data-result="bucket.state"
+        ><span class="sr-only">{{ attributionTooltip(bucket) }}</span></button>
       </div>
-      <p v-if="item.attribution.latest" class="mt-2 text-right text-[10px] text-gray-400 dark:text-gray-500">{{ formatTime(item.attribution.latest.finished_at) }}</p>
+      <div class="mt-1 flex justify-between text-[10px] text-gray-400 dark:text-gray-500">
+        <span>{{ t('channelMonitorV2.overview.attributionPast') }}</span><span>{{ t('channelMonitorV2.overview.now') }}</span>
+      </div>
+      <p v-if="item.attribution?.as_of" class="mt-2 text-right text-[10px] text-gray-400 dark:text-gray-500" data-testid="attribution-through">{{ t('channelMonitorV2.updatedTo', { time: formatTime(item.attribution.as_of) }) }}</p>
       <p class="mt-2 text-[10px] leading-relaxed text-gray-500 dark:text-gray-400">{{ t('channelMonitorV2.overview.attributionLegend') }}</p>
     </div>
   </article>
@@ -84,23 +87,42 @@
 import { computed } from 'vue'
 import { useI18n } from 'vue-i18n'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
-import { getPlatformSpec } from '@/constants/platformCatalog'
-import type { GroupAttributionEntry, GroupAttributionStatus, GroupOverviewCard, GroupOverviewState, MonitorRange } from '@/api/channelMonitorV2'
+import { platformBadgeLightClass, platformLabel } from '@/utils/platformColors'
+import type { GroupAttributionHistoryBucket, GroupAttributionSummaryState, GroupOverviewCard, GroupOverviewState, MonitorRange } from '@/api/channelMonitorV2'
 
 const props = defineProps<{ item: GroupOverviewCard; range: MonitorRange; bucketSeconds: number }>()
 const { t, locale } = useI18n()
 const groupName = computed(() => props.item.group_i18n?.[locale.value]?.name || props.item.group_name)
-const platformName = computed(() => getPlatformSpec(props.item.platform)?.display_name || props.item.platform)
+const platformName = computed(() => platformLabel(props.item.platform))
 const numberFormatter = computed(() => new Intl.NumberFormat(locale.value || undefined, { maximumFractionDigits: 4 }))
 const percentFormatter = computed(() => new Intl.NumberFormat(locale.value || undefined, { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1 }))
 const dateFormatter = computed(() => new Intl.DateTimeFormat(locale.value || undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }))
 const multiplier = computed(() => Number.isFinite(props.item.rate_multiplier) ? numberFormatter.value.format(props.item.rate_multiplier) : '—')
-const recent = computed(() => (props.item.attribution.recent || []).slice(0, 20).reverse())
+const attributionState = computed(() => normalizeAttributionState(props.item.attribution?.summary_state))
+const attributionSummaryText = computed(() => attributionState.value === 'no_data'
+  ? t(`channelMonitorV2.overview.${props.item.attribution?.enabled === false ? 'attributionDisabled' : 'noAttribution'}`)
+  : attributionText(attributionState.value))
+const attributionHistory = computed<GroupAttributionHistoryBucket[]>(() => {
+  const attribution = props.item.attribution
+  const buckets = Array.isArray(attribution?.history) ? attribution.history.slice(-20) : []
+  const asOf = new Date(attribution?.as_of || '').getTime()
+  // Only pad missing intervals. Account selection and aggregation belong to the server.
+  return Array.from({ length: 20 }, (_, index) => {
+    const bucket = buckets[index - (20 - buckets.length)]
+    const end = asOf - (19 - index) * 10 * 60_000
+    return {
+      bucket_start: bucket?.bucket_start || (Number.isFinite(end) ? new Date(end - 10 * 60_000).toISOString() : ''),
+      bucket_end: bucket?.bucket_end || (Number.isFinite(end) ? new Date(end).toISOString() : ''),
+      state: index === 19 ? attributionState.value : normalizeAttributionState(bucket?.state),
+    }
+  })
+})
 const knownStates = new Set(['unmonitored', 'rebuilding', 'no_data', 'insufficient', 'healthy', 'warning', 'critical'])
-const knownResults = new Set(['passed', 'mismatch', 'failed', 'abnormal', 'cancelled', 'skipped'])
-const knownReasons = new Set(['reference_match', 'reference_mismatch', 'execution_failed', 'analysis_abnormal', 'cancelled', 'skipped'])
 const stateText = (state: GroupOverviewState) => t(`channelMonitorV2.overview.states.${knownStates.has(state) ? state : 'no_data'}`)
-const attributionText = (status: GroupAttributionStatus) => t(`channelMonitorV2.overview.results.${knownResults.has(status) ? status : 'failed'}`)
+const attributionText = (state: GroupAttributionSummaryState) => t(`channelMonitorV2.overview.results.${state}`)
+function normalizeAttributionState(state: unknown): GroupAttributionSummaryState {
+  return state === 'passed' || state === 'mismatch' || state === 'failed' ? state : 'no_data'
+}
 function percent(value: number | null) { return value != null && Number.isFinite(value) && value >= 0 && value <= 1 ? percentFormatter.value.format(value) : '—' }
 function latency(value: number | null) { return value != null && Number.isFinite(value) && value >= 0 ? `${(value / 1000).toFixed(2)}s` : '—' }
 function formatTime(value: string) {
@@ -112,9 +134,8 @@ function bucketTooltip(bucket: GroupOverviewCard['buckets'][number]) {
   const end = Number.isFinite(start) && props.bucketSeconds > 0 ? ` – ${formatTime(new Date(start + props.bucketSeconds * 1000).toISOString())}` : ''
   return `${formatTime(bucket.bucket_start)}${end}\n${stateText(bucket.state)} · ${t('channelMonitorV2.overview.availability')} ${percent(bucket.availability_rate)}`
 }
-function attributionTooltip(entry: GroupAttributionEntry) {
-  const reason = knownReasons.has(entry.reason_code) ? t(`channelMonitorV2.overview.reasons.${entry.reason_code}`) : ''
-  return [formatTime(entry.finished_at), entry.probe_model, attributionText(entry.status), reason].filter(Boolean).join(' · ')
+function attributionTooltip(bucket: GroupAttributionHistoryBucket) {
+  return `${formatTime(bucket.bucket_start)} – ${formatTime(bucket.bucket_end)}\n${attributionText(bucket.state)}\n${t('channelMonitorV2.overview.attributionPolicy')}`
 }
 function metricClass(state: GroupOverviewState) {
   if (state === 'healthy') return 'text-emerald-700 dark:text-emerald-400'
@@ -134,16 +155,16 @@ function barClass(state: GroupOverviewState) {
   if (state === 'critical') return 'h-2 bg-rose-500 dark:bg-rose-500'
   return 'h-1 bg-gray-300 dark:bg-dark-500'
 }
-function attributionBarClass(status: GroupAttributionStatus) {
+function attributionBarClass(status: GroupAttributionSummaryState) {
   if (status === 'passed') return 'h-5 bg-emerald-500'
   if (status === 'mismatch') return 'h-3 bg-amber-400'
-  if (status === 'failed' || status === 'abnormal') return 'h-2 bg-rose-500'
+  if (status === 'failed') return 'h-2 bg-rose-500'
   return 'h-1 bg-gray-300 dark:bg-dark-500'
 }
-function attributionTextClass(status?: GroupAttributionStatus) {
+function attributionTextClass(status: GroupAttributionSummaryState) {
   if (status === 'passed') return 'text-emerald-700 dark:text-emerald-400'
   if (status === 'mismatch') return 'text-amber-700 dark:text-amber-300'
-  if (status === 'failed' || status === 'abnormal') return 'text-rose-600 dark:text-rose-400'
+  if (status === 'failed') return 'text-rose-600 dark:text-rose-400'
   return 'text-gray-500 dark:text-gray-400'
 }
 </script>
