@@ -3,10 +3,10 @@ export default {
   channelMonitorV2: {
     overview: {
       viewLabel: 'Channel status view', groups: 'Group overview', details: 'Detailed statistics',
-      description: 'Only groups you can access are shown. Metrics summarize all real requests in each group.',
+      description: 'Only monitored groups you can access are shown. Metrics summarize all real requests in each group.',
       groupCount: '{count} groups', refreshIn: 'Refresh in {seconds}s',
       coveragePending: 'Some intervals are being rebuilt. Uncovered data is not shown as available.',
-      noGroups: 'No active groups available to view', realRequests: 'Real requests', multiplier: 'Your multiplier {value}×',
+      noGroups: 'No monitored groups available to view', realRequests: 'Real requests', multiplier: 'Your multiplier {value}×',
       availability: 'Availability',
       cacheHint: 'Cache-read tokens divided by the sum of input, cache-write and cache-read tokens',
       availabilityHint: 'Successful requests divided by successful requests plus service failures, excluding user-side rejections and cancellations.',

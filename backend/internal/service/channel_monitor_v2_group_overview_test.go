@@ -69,19 +69,20 @@ func TestChannelMonitorV2OverviewScopesAndProjectsOnce(t *testing.T) {
 	f, _ := svc.ParseFilter("90m", []string{"grok"}, []string{"private"}, []int64{99})
 	out, err := svc.GetGroupOverview(context.Background(), f, []Group{{ID: 2, Name: "shared", Platform: PlatformComposite, Status: StatusActive, RateMultiplier: 1}, {ID: 3, Name: "idle", Platform: PlatformOpenAI, Status: StatusActive}, {ID: 4, Name: "outside monitor", Platform: PlatformOpenAI, Status: StatusActive}, {ID: 9, Status: StatusDisabled}, {ID: 2, Status: StatusActive}}, map[int64]float64{2: 0})
 	require.NoError(t, err)
-	require.Len(t, out.Items, 3)
+	require.Len(t, out.Items, 2)
 	require.Equal(t, 1, r.matrixCalls)
 	require.Equal(t, 1, r.historyCalls)
 	require.Equal(t, ChannelMonitorV2GroupBy("group"), r.groupBy)
 	require.True(t, r.filter.RestrictGroups)
-	require.ElementsMatch(t, []int64{2, 3, 4}, r.filter.AllowedGroupIDs)
-	require.ElementsMatch(t, []int64{2, 3, 4}, r.historyIDs)
+	require.ElementsMatch(t, []int64{2, 3}, r.filter.AllowedGroupIDs)
+	require.ElementsMatch(t, []int64{2, 3}, r.historyIDs)
 	require.Empty(t, r.filter.GroupIDs)
 	require.Empty(t, r.filter.Models)
 	require.Empty(t, r.filter.Platforms)
 	byID := map[int64]ChannelMonitorV2GroupOverviewItem{}
 	for _, item := range out.Items {
 		byID[item.GroupID] = item
+		require.True(t, item.MonitoringEnabled)
 		require.Len(t, item.Buckets, 18)
 	}
 	require.Equal(t, 0.0, byID[2].RateMultiplier)
@@ -91,8 +92,7 @@ func TestChannelMonitorV2OverviewScopesAndProjectsOnce(t *testing.T) {
 	require.Equal(t, int64(500), *byID[2].Metrics.TTFTP50Ms)
 	require.Equal(t, "passed", byID[2].Attribution.Latest.Status)
 	require.Equal(t, "no_data", byID[3].State)
-	require.Equal(t, "unmonitored", byID[4].State)
-	require.Nil(t, byID[4].Metrics.AvailabilityRate)
+	require.NotContains(t, byID, int64(4))
 	encoded, _ := json.Marshal(out)
 	for _, field := range []string{"account_id", "account_name", "request_count", "api_key", "snapshot", "private"} {
 		require.NotContains(t, string(encoded), field)
@@ -108,6 +108,48 @@ func TestChannelMonitorV2OverviewEmptyPermissionDoesNotReadStats(t *testing.T) {
 	require.Empty(t, out.Items)
 	require.Zero(t, r.matrixCalls)
 	require.Zero(t, r.historyCalls)
+}
+
+func TestChannelMonitorV2OverviewOnlyReadsMonitoredGroups(t *testing.T) {
+	for _, tc := range []struct {
+		name       string
+		configured []int64
+		disabled   bool
+		wantIDs    []int64
+	}{
+		{name: "nil group selection means all", wantIDs: []int64{1, 3}},
+		{name: "empty group selection means all", configured: []int64{}, wantIDs: []int64{1, 3}},
+		{name: "configured intersection", configured: []int64{1, 2}, wantIDs: []int64{1}},
+		{name: "no configured overlap", configured: []int64{99}},
+		{name: "all platforms disabled", disabled: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := overviewTestRepository()
+			r.cfg.GroupIDs = tc.configured
+			r.cfg.Platforms[0].Enabled = !tc.disabled
+			svc := NewChannelMonitorV2Service(r)
+			f, err := svc.ParseFilter("90m", nil, nil, nil)
+			require.NoError(t, err)
+			out, err := svc.GetGroupOverview(context.Background(), f, []Group{
+				{ID: 1, Platform: PlatformOpenAI, Status: StatusActive},
+				{ID: 2, Platform: PlatformAnthropic, Status: StatusActive},
+				{ID: 3, Platform: PlatformComposite, Status: StatusActive},
+			}, nil)
+			require.NoError(t, err)
+			require.Len(t, out.Items, len(tc.wantIDs))
+			if len(tc.wantIDs) == 0 {
+				require.Zero(t, r.matrixCalls)
+				require.Zero(t, r.historyCalls)
+				return
+			}
+			require.ElementsMatch(t, tc.wantIDs, r.filter.AllowedGroupIDs)
+			require.ElementsMatch(t, tc.wantIDs, r.historyIDs)
+			for _, item := range out.Items {
+				require.True(t, item.MonitoringEnabled)
+				require.Equal(t, "no_data", item.State)
+			}
+		})
+	}
 }
 
 func TestChannelMonitorV2OverviewHistoricalCoverageAndRanges(t *testing.T) {
@@ -134,7 +176,7 @@ func TestChannelMonitorV2OverviewHistoryFailureIsNotHidden(t *testing.T) {
 	r.historyErr = errors.New("database down")
 	svc := NewChannelMonitorV2Service(r)
 	f, _ := svc.ParseFilter("90m", nil, nil, nil)
-	_, err := svc.GetGroupOverview(context.Background(), f, []Group{{ID: 1, Status: StatusActive}}, nil)
+	_, err := svc.GetGroupOverview(context.Background(), f, []Group{{ID: 1, Status: StatusActive, Platform: PlatformOpenAI}}, nil)
 	require.ErrorIs(t, err, r.historyErr)
 }
 
@@ -162,7 +204,7 @@ func TestChannelMonitorV2OverviewAttributionUsesCurrentClockForAllRanges(t *test
 			require.NotEqual(t, now, f.End)
 			clockCalls := 0
 			svc.now = func() time.Time { clockCalls++; return now }
-			out, err := svc.GetGroupOverview(context.Background(), f, []Group{{ID: 1, Status: StatusActive}}, nil)
+			out, err := svc.GetGroupOverview(context.Background(), f, []Group{{ID: 1, Status: StatusActive, Platform: PlatformOpenAI}}, nil)
 			require.NoError(t, err)
 			require.Equal(t, 1, clockCalls)
 			require.Equal(t, now, r.asOf)
@@ -199,7 +241,7 @@ func TestChannelMonitorV2OverviewAttributionProjectsAuthoritativeSummary(t *test
 	svc.now = func() time.Time { return now }
 	f, err := svc.ParseFilter("30d", nil, nil, nil)
 	require.NoError(t, err)
-	out, err := svc.GetGroupOverview(context.Background(), f, []Group{{ID: 1, Status: StatusActive}}, nil)
+	out, err := svc.GetGroupOverview(context.Background(), f, []Group{{ID: 1, Status: StatusActive, Platform: PlatformOpenAI}}, nil)
 	require.NoError(t, err)
 	require.Equal(t, attr, out.Items[0].Attribution)
 	encoded, err := json.Marshal(out.Items[0].Attribution)

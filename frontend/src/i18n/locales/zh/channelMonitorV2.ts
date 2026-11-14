@@ -3,10 +3,10 @@ export default {
   channelMonitorV2: {
     overview: {
       viewLabel: '渠道状态视图', groups: '分组概览', details: '详细统计',
-      description: '仅显示你有权限的分组；指标汇总该组全部真实请求。',
+      description: '仅显示你有权限且已纳入监控的分组；指标汇总该组全部真实请求。',
       groupCount: '{count} 个分组', refreshIn: '{seconds} 秒后刷新',
       coveragePending: '部分区间统计更新中，尚未覆盖的数据不会显示为可用。',
-      noGroups: '暂无可查看的活跃分组', realRequests: '真实请求', multiplier: '用户倍率 {value}×',
+      noGroups: '暂无已纳入监控的可查看分组', realRequests: '真实请求', multiplier: '用户倍率 {value}×',
       availability: '可用率',
       cacheHint: '缓存读取 tokens ÷ 输入、缓存写入与缓存读取 tokens 合计',
       availabilityHint: '成功请求 ÷ 成功请求与服务侧失败合计；不含用户侧拒绝及主动取消。',

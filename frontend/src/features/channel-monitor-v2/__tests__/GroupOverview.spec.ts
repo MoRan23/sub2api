@@ -61,8 +61,8 @@ afterEach(() => { wrapper?.unmount(); wrapper = undefined; vi.useRealTimers(); v
 
 describe('group overview', () => {
   it('loads one shared overview, groups by platform and displays aggregate metrics and gray states', async () => {
-    const unmonitored = { ...card(3, 'composite'), state: 'unmonitored' as const, monitoring_enabled: false, metrics: { availability_rate: null, cache_rate: null, ttft_p50_ms: null } }
-    getGroupOverview.mockResolvedValue(response('90m', [card(), card(2), unmonitored]))
+    const empty = { ...card(3, 'composite'), state: 'no_data' as const, metrics: { availability_rate: null, cache_rate: null, ttft_p50_ms: null } }
+    getGroupOverview.mockResolvedValue(response('90m', [card(), card(2), empty]))
     wrapper = await mountView(); await flushPromises()
     expect(getGroupOverview).toHaveBeenCalledTimes(1)
     expect(wrapper.findAll('[data-group-id]')).toHaveLength(3)
@@ -71,9 +71,21 @@ describe('group overview', () => {
     expect(wrapper.text()).toContain('99.0%')
     expect(wrapper.text()).toContain('70.0%')
     expect(wrapper.text()).toContain('2.46s')
-    expect(wrapper.text()).toContain('未纳入监控')
+    expect(wrapper.text()).toContain('暂无数据')
     expect(wrapper.text()).toContain('近期无有效检测')
     expect(wrapper.get('[data-group-id="3"] dd').text()).toBe('—')
+  })
+
+  it('updates platform sections and counts when a group leaves the monitoring scope', async () => {
+    getGroupOverview.mockResolvedValueOnce(response('90m', [card(), card(2, 'composite')]))
+    wrapper = await mountView(); await flushPromises()
+    expect(wrapper.findAll('h2')).toHaveLength(2)
+    expect(wrapper.text()).toContain('2 个分组')
+    getGroupOverview.mockResolvedValueOnce(response('90m', [card()]))
+    await wrapper.get('[data-testid="overview-refresh"]').trigger('click'); await flushPromises()
+    expect(wrapper.find('[data-group-id="2"]').exists()).toBe(false)
+    expect(wrapper.findAll('h2')).toHaveLength(1)
+    expect(wrapper.text()).toContain('1 个分组')
   })
 
   it.each([60, 300] as const)('polls every %i seconds and refreshes when the hidden page becomes visible', async interval => {

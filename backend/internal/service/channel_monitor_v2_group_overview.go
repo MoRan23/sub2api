@@ -90,14 +90,14 @@ func (s *ChannelMonitorV2Service) GetGroupOverview(ctx context.Context, filter C
 		return nil, err
 	}
 	// Ignore any caller-supplied group/model/platform filter: only the trusted
-	// authorization result defines this endpoint's scope.
+	// authorization result intersected with monitoring configuration defines scope.
 	filter.GroupIDs, filter.Platforms, filter.Models = nil, nil, nil
 	filter.RestrictGroups = true
 	filter.AllowedGroupIDs = make([]int64, 0, len(groups))
 	allowed := make([]Group, 0, len(groups))
 	seen := make(map[int64]struct{}, len(groups))
 	for _, group := range groups {
-		if group.ID <= 0 || group.Status != StatusActive {
+		if group.ID <= 0 || group.Status != StatusActive || !channelMonitorV2GroupMonitored(group, *cfg) {
 			continue
 		}
 		if _, exists := seen[group.ID]; exists {
@@ -149,7 +149,7 @@ func (s *ChannelMonitorV2Service) GetGroupOverview(ctx context.Context, filter C
 		return allowed[i].ID < allowed[j].ID
 	})
 	for _, group := range allowed {
-		monitored := channelMonitorV2GroupMonitored(group, *cfg)
+		monitored := true // Already filtered before any statistics or attribution reads.
 		item := ChannelMonitorV2GroupOverviewItem{GroupID: group.ID, GroupName: group.Name, GroupI18n: group.I18n, Platform: group.Platform, RateMultiplier: group.RateMultiplier, MonitoringEnabled: monitored}
 		if rate, exists := userRates[group.ID]; exists {
 			item.RateMultiplier = rate

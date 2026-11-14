@@ -4,7 +4,7 @@
 
 在监控设置中选择 V2「真实请求统计」后，用户侧 `/monitor` 默认进入「分组概览」，可切换到原有「详细统计」。V1 主动探测和管理员监控页继续使用原有界面。
 
-概览按平台展示当前用户有权使用的活跃分组。余额或订阅额度耗尽不会隐藏分组；订阅过期、分组停用或授权撤销后，下次刷新会移除卡片。未纳入监控的授权分组仍显示，但不会把缺失数据当作健康。Composite 分组内的真实平台请求汇总为一张卡片。
+概览按平台展示当前用户有权使用且已纳入监控的活跃分组。余额或订阅额度耗尽不会隐藏分组；订阅过期、分组停用、授权撤销或移出监控范围后，下次刷新会移除卡片。已纳入监控但没有记录的分组继续显示“暂无数据”。Composite 分组内的真实平台请求汇总为一张卡片。
 
 卡片上的用户倍率使用用户专属分组倍率，没有专属设置时使用分组默认倍率；模型、时段等计费规则仍按实际请求执行。
 
@@ -54,7 +54,7 @@
 
 The user-facing `/monitor` page defaults to **Group overview** in V2 real-request mode, with the previous detailed statistics available through a view switch. V1 active monitoring and the admin monitor remain unchanged.
 
-Cards show all active groups the authenticated user may use. Exhausted balance or quota does not remove a card; revoked access, inactive groups, and expired subscriptions do. Authorized groups outside the configured monitoring scope remain visible with an unmonitored state. Composite traffic is merged into one group card using counters and latency histograms, never by averaging rates or percentiles.
+Cards show active monitored groups the authenticated user may use. Exhausted balance or quota does not remove a card; revoked access, inactive groups, expired subscriptions, or removal from monitoring scope do. Monitored groups without records remain visible with a no-data state. Composite traffic is merged into one group card using counters and latency histograms, never by averaging rates or percentiles.
 
 - **Cache rate:** cached input tokens divided by ordinary input, cache writes, and cache reads. Cache-write TTL details are already included in the write total.
 - **Availability:** successful requests divided by successes plus service-side failures. Explicit user-side access, balance, parameter, safety, and cancellation failures are excluded; upstream authentication, upstream quota, capacity, transport, timeout, and server failures remain included.
