@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"math"
 	"sort"
 	"time"
 )
@@ -13,27 +14,38 @@ import (
 type ChannelMonitorV2GroupOverview struct {
 	Range                  string                              `json:"range"`
 	RefreshIntervalSeconds int                                 `json:"refresh_interval_seconds"`
+	ShowThroughput         bool                                `json:"show_throughput"`
 	Coverage               ChannelMonitorV2Coverage            `json:"coverage"`
 	Items                  []ChannelMonitorV2GroupOverviewItem `json:"items"`
 }
 
 type ChannelMonitorV2GroupOverviewItem struct {
-	GroupID           int64                               `json:"group_id"`
-	GroupName         string                              `json:"group_name"`
-	GroupI18n         GroupI18n                           `json:"-"`
-	Platform          string                              `json:"platform"`
-	RateMultiplier    float64                             `json:"rate_multiplier"`
-	MonitoringEnabled bool                                `json:"monitoring_enabled"`
-	State             string                              `json:"state"`
-	Metrics           ChannelMonitorV2OverviewMetrics     `json:"metrics"`
-	Buckets           []ChannelMonitorV2OverviewBucket    `json:"buckets"`
-	Attribution       ChannelMonitorV2OverviewAttribution `json:"attribution"`
+	GroupID           int64                                `json:"group_id"`
+	GroupName         string                               `json:"group_name"`
+	GroupI18n         GroupI18n                            `json:"-"`
+	Platform          string                               `json:"platform"`
+	RateMultiplier    float64                              `json:"rate_multiplier"`
+	MonitoringEnabled bool                                 `json:"monitoring_enabled"`
+	State             string                               `json:"state"`
+	Metrics           ChannelMonitorV2OverviewMetrics      `json:"metrics"`
+	MetricStates      ChannelMonitorV2OverviewMetricStates `json:"metric_states"`
+	Buckets           []ChannelMonitorV2OverviewBucket     `json:"buckets"`
+	Attribution       ChannelMonitorV2OverviewAttribution  `json:"attribution"`
 }
 
 type ChannelMonitorV2OverviewMetrics struct {
 	AvailabilityRate *float64 `json:"availability_rate"`
 	CacheRate        *float64 `json:"cache_rate"`
 	TTFTP50Ms        *int64   `json:"ttft_p50_ms"`
+	TTFTAvgMs        *float64 `json:"ttft_avg_ms"`
+	TTFTP90Ms        *int64   `json:"ttft_p90_ms"`
+	TokensPerSecond  *float64 `json:"tokens_per_second"`
+}
+
+type ChannelMonitorV2OverviewMetricStates struct {
+	Availability string `json:"availability"`
+	Cache        string `json:"cache"`
+	TTFT         string `json:"ttft"`
 }
 
 type ChannelMonitorV2OverviewBucket struct {
@@ -92,6 +104,12 @@ type channelMonitorV2GroupMetricsReader interface {
 }
 
 func (s *ChannelMonitorV2Service) GetGroupOverview(ctx context.Context, filter ChannelMonitorV2Filter, groups []Group, userRates map[int64]float64) (*ChannelMonitorV2GroupOverview, error) {
+	return s.GetGroupOverviewForViewer(ctx, filter, groups, userRates, false)
+}
+
+// GetGroupOverviewForViewer only uses admin to control throughput visibility;
+// the caller must always supply the current viewer's authorized group scope.
+func (s *ChannelMonitorV2Service) GetGroupOverviewForViewer(ctx context.Context, filter ChannelMonitorV2Filter, groups []Group, userRates map[int64]float64, admin bool) (*ChannelMonitorV2GroupOverview, error) {
 	cfg, err := s.getEnabledConfig(ctx)
 	if err != nil {
 		return nil, err
@@ -114,7 +132,7 @@ func (s *ChannelMonitorV2Service) GetGroupOverview(ctx context.Context, filter C
 		allowed = append(allowed, group)
 		filter.AllowedGroupIDs = append(filter.AllowedGroupIDs, group.ID)
 	}
-	out := &ChannelMonitorV2GroupOverview{Range: filter.Range, RefreshIntervalSeconds: cfg.RefreshIntervalSeconds, Items: make([]ChannelMonitorV2GroupOverviewItem, 0, len(allowed))}
+	out := &ChannelMonitorV2GroupOverview{Range: filter.Range, RefreshIntervalSeconds: cfg.RefreshIntervalSeconds, ShowThroughput: !s.hideThroughputForViewer(ctx, admin), Items: make([]ChannelMonitorV2GroupOverviewItem, 0, len(allowed))}
 	out.Coverage = ChannelMonitorV2Coverage{RequestedStart: filter.Start, RequestedEnd: filter.End, BucketSeconds: int(filter.Bucket.Seconds())}
 	if len(allowed) == 0 {
 		return out, nil
@@ -174,6 +192,12 @@ func (s *ChannelMonitorV2Service) GetGroupOverview(ctx context.Context, filter C
 			}
 		}
 		item.State = channelMonitorV2OverviewState(metric, monitored, out.Coverage.AvailabilityReady, cfg.HealthThresholds)
+		health := ChannelMonitorV2HealthForWithThresholds(metric, cfg.HealthThresholds)
+		item.MetricStates = ChannelMonitorV2OverviewMetricStates{Availability: "unknown", Cache: health.Cache, TTFT: health.TTFT}
+		switch item.State {
+		case "healthy", "warning", "critical":
+			item.MetricStates.Availability = item.State
+		}
 		if monitored && out.Coverage.AvailabilityReady {
 			item.Metrics.AvailabilityRate = metric.AvailabilityRate
 		}
@@ -183,6 +207,14 @@ func (s *ChannelMonitorV2Service) GetGroupOverview(ctx context.Context, filter C
 				item.Metrics.CacheRate = &rate
 			}
 			item.Metrics.TTFTP50Ms = metric.TTFT.P50Ms
+			item.Metrics.TTFTAvgMs = metric.TTFT.AvgMs
+			item.Metrics.TTFTP90Ms = metric.TTFT.P90Ms
+			// The repository computes TPM over the effective covered interval. Do
+			// not divide again by the requested window, which may include gaps.
+			if out.ShowThroughput && metric.RequestCount > 0 && metric.TPM >= 0 && !math.IsInf(metric.TPM, 0) && !math.IsNaN(metric.TPM) {
+				tps := metric.TPM / 60
+				item.Metrics.TokensPerSecond = &tps
+			}
 		}
 		item.Buckets = make([]ChannelMonitorV2OverviewBucket, 0, int(filter.End.Sub(filter.Start)/filter.Bucket))
 		for at := filter.Start; at.Before(filter.End); at = at.Add(filter.Bucket) {

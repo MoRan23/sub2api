@@ -58,7 +58,7 @@ func (h *ChannelMonitorV2Handler) GroupOverview(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	result, err := h.service.GetGroupOverview(c.Request.Context(), filter, groups, rates)
+	result, err := h.service.GetGroupOverviewForViewer(c.Request.Context(), filter, groups, rates, channelMonitorV2IsAdmin(c))
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

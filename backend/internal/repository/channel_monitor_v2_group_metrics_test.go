@@ -30,6 +30,37 @@ func TestChannelMonitorV2SharedQuantileSortMatchesLegacy(t *testing.T) {
 	}
 }
 
+func TestChannelMonitorV2OverviewCounterWeightedStatistics(t *testing.T) {
+	count := channelMonitorV2OverviewCounter{ready: true}
+	count.add(channelMonitorV2OverviewCounter{success: 9, errors: 2, availabilityErrors: 1,
+		input: 100, output: 20, creation: 30, read: 50, ttftSum: 9009, ttftCount: 9, ready: true})
+	count.add(channelMonitorV2OverviewCounter{success: 1, errors: 3, availabilityErrors: 2,
+		input: 200, output: 40, creation: 60, read: 100, ttftSum: 9001, ttftCount: 1, ready: true})
+	metric := count.metric(2)
+	require.EqualValues(t, 15, metric.RequestCount)
+	require.EqualValues(t, 13, metric.AvailabilitySampleCount)
+	require.Equal(t, 10.0/13, *metric.AvailabilityRate)
+	require.EqualValues(t, 600, metric.TokenCount)
+	require.Equal(t, 300.0, metric.TPM)
+	require.EqualValues(t, 10, metric.TTFT.SampleCount)
+	require.Equal(t, 1801.0, *metric.TTFT.AvgMs)
+	count.add(channelMonitorV2OverviewCounter{ready: false})
+	require.Nil(t, count.metric(2).AvailabilityRate)
+}
+
+func TestChannelMonitorV2OverviewCounterMissingStatistics(t *testing.T) {
+	metric := (channelMonitorV2OverviewCounter{ready: true}).metric(0)
+	require.Zero(t, metric.TPM)
+	require.Nil(t, metric.TTFT.AvgMs)
+	require.Nil(t, metric.TTFT.P50Ms)
+	require.Nil(t, metric.TTFT.P90Ms)
+	require.Nil(t, metric.AvailabilityRate)
+	// A measured zero is distinct from a missing measurement.
+	metric = (channelMonitorV2OverviewCounter{success: 1, ttftCount: 1, ready: true}).metric(1)
+	require.NotNil(t, metric.TTFT.AvgMs)
+	require.Zero(t, *metric.TTFT.AvgMs)
+}
+
 var monitorQuantileSink [3]*int64
 
 func BenchmarkChannelMonitorV2SharedQuantileSort(b *testing.B) {

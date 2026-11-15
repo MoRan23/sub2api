@@ -53,6 +53,7 @@
       {{ t('channelMonitorV2.overview.noGroups') }}
     </div>
 
+    <OverviewHistoryTooltip>
     <section v-for="section in sections" :key="section.platform" class="space-y-3" :aria-label="section.label">
       <h2 class="flex items-center gap-2 text-base font-semibold text-gray-800 dark:text-gray-100">
         <span class="flex h-8 w-8 items-center justify-center rounded-xl" :class="platformBadgeLightClass(section.platform)" data-testid="platform-section-icon">
@@ -62,9 +63,10 @@
         <span class="rounded-lg bg-gray-100 px-2 py-0.5 text-xs font-normal text-gray-500 dark:bg-dark-700 dark:text-gray-400">{{ section.items.length }}</span>
       </h2>
       <div class="grid grid-cols-1 gap-4 md:grid-cols-2 2xl:grid-cols-3 min-[2100px]:grid-cols-4">
-        <GroupOverviewCard v-for="item in section.items" :key="item.group_id" :item="item" :range="range" :bucket-seconds="data?.coverage.bucket_seconds || 0" />
+        <GroupOverviewCard v-for="item in section.items" :key="item.group_id" :item="item" :range="range" :bucket-seconds="data?.coverage.bucket_seconds || 0" :show-throughput="data?.show_throughput === true" />
       </div>
     </section>
+    </OverviewHistoryTooltip>
 
   </div>
 </template>
@@ -81,6 +83,7 @@ import { getGroupOverview, type GroupOverviewCard as Card, type GroupOverviewRes
 import { extractApiErrorMessage } from '@/utils/apiError'
 import { platformBadgeLightClass } from '@/utils/platformColors'
 import GroupOverviewCard from './GroupOverviewCard.vue'
+import OverviewHistoryTooltip from './OverviewHistoryTooltip.vue'
 
 const { t, locale } = useI18n()
 const route = useRoute()

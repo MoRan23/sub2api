@@ -2,6 +2,7 @@ package handler
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
@@ -30,6 +31,7 @@ type overviewHandlerRepo struct {
 	service.ChannelMonitorV2Repository
 	filter service.ChannelMonitorV2Filter
 	reads  int
+	matrix *service.ChannelMonitorV2Matrix
 }
 
 func (r *overviewHandlerRepo) GetConfig(context.Context) (*service.ChannelMonitorV2Config, error) {
@@ -38,6 +40,9 @@ func (r *overviewHandlerRepo) GetConfig(context.Context) (*service.ChannelMonito
 func (r *overviewHandlerRepo) GetGroupOverviewMetrics(_ context.Context, f service.ChannelMonitorV2Filter, _ service.ChannelMonitorV2Config) (*service.ChannelMonitorV2Matrix, error) {
 	r.filter = f
 	r.reads++
+	if r.matrix != nil {
+		return r.matrix, nil
+	}
 	return &service.ChannelMonitorV2Matrix{}, nil
 }
 func (r *overviewHandlerRepo) GetGroupAttributionOverview(context.Context, []int64, time.Time) (map[int64]service.ChannelMonitorV2OverviewAttribution, error) {
@@ -91,4 +96,49 @@ func TestChannelMonitorV2GroupOverviewRateErrorFailsClosed(t *testing.T) {
 	h.GroupOverview(c)
 	require.Equal(t, http.StatusInternalServerError, recorder.Code)
 	require.Zero(t, r.reads)
+}
+
+func TestChannelMonitorV2GroupOverviewUsesAuthenticatedRoleForThroughput(t *testing.T) {
+	for _, role := range []string{service.RoleUser, service.RoleAdmin, ""} {
+		t.Run("role_"+role, func(t *testing.T) {
+			gin.SetMode(gin.TestMode)
+			recorder := httptest.NewRecorder()
+			c, _ := gin.CreateTestContext(recorder)
+			c.Request = httptest.NewRequest(http.MethodGet, "/channel-monitor-v2/group-overview?range=90m&admin=true&show_throughput=true&group_id=99", nil)
+			c.Request.Header.Set("X-User-Role", service.RoleAdmin)
+			c.Set(string(middleware.ContextKeyUser), middleware.AuthSubject{UserID: 42})
+			if role != "" {
+				c.Set(string(middleware.ContextKeyUserRole), role)
+			}
+			id, unallowed := int64(7), int64(99)
+			a := &overviewHandlerAuthorizer{channelMonitorV2GroupAuthorizerStub: channelMonitorV2GroupAuthorizerStub{groups: []service.Group{{ID: id, Name: "permitted", Platform: "openai", Status: service.StatusActive}}}}
+			r := &overviewHandlerRepo{matrix: &service.ChannelMonitorV2Matrix{Items: []service.ChannelMonitorV2MatrixRow{
+				{GroupID: &id, Metrics: service.ChannelMonitorV2Metric{RequestCount: 100, TPM: 12345}},
+				{GroupID: &unallowed, Metrics: service.ChannelMonitorV2Metric{RequestCount: 100, TPM: 67890}},
+			}}}
+			h := &ChannelMonitorV2Handler{service: service.NewChannelMonitorV2Service(r), apiKeyService: a}
+			h.GroupOverview(c)
+			require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+			var result struct {
+				Data service.ChannelMonitorV2GroupOverview `json:"data"`
+			}
+			require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &result))
+			require.Len(t, result.Data.Items, 1)
+			require.Equal(t, id, result.Data.Items[0].GroupID)
+			require.Equal(t, []int64{id}, r.filter.AllowedGroupIDs)
+			require.True(t, r.filter.RestrictGroups)
+			require.Equal(t, role == service.RoleAdmin, result.Data.ShowThroughput)
+			if role == service.RoleAdmin {
+				require.NotNil(t, result.Data.Items[0].Metrics.TokensPerSecond)
+				require.Equal(t, 205.75, *result.Data.Items[0].Metrics.TokensPerSecond)
+			} else {
+				require.Nil(t, result.Data.Items[0].Metrics.TokensPerSecond)
+				require.Contains(t, recorder.Body.String(), `"tokens_per_second":null`)
+				require.NotContains(t, recorder.Body.String(), "205.75")
+			}
+			for _, field := range []string{`"tpm"`, `"request_count"`, `"token_count"`, `"sample_count"`, `"group_id":99`} {
+				require.NotContains(t, recorder.Body.String(), field)
+			}
+		})
+	}
 }

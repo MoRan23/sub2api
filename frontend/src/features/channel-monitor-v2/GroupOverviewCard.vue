@@ -19,18 +19,28 @@
       </span>
     </header>
 
-    <dl class="mt-5 grid grid-cols-3 gap-2">
-      <div class="metric-box" :title="t('channelMonitorV2.overview.cacheHint')">
-        <dt>{{ t('channelMonitorV2.metrics.cacheRate') }}</dt>
-        <dd>{{ percent(item.metrics.cache_rate) }}</dd>
+    <dl class="mt-5 grid gap-2" :class="showThroughput ? 'grid-cols-2' : 'grid-cols-3'" data-testid="overview-metrics">
+      <div class="metric-box" :title="t('channelMonitorV2.overview.availabilityHint')" data-metric="availability">
+        <dt><span class="metric-dot" :class="dotClass(metricStates.availability)" aria-hidden="true" />{{ t('channelMonitorV2.overview.availability') }}</dt>
+        <dd :class="metricClass(metricStates.availability)">{{ percent(item.metrics.availability_rate) }}</dd>
+        <div class="metric-detail">{{ t('channelMonitorV2.overview.unavailabilityDetail', { value: percent(unavailability) }) }}</div>
       </div>
-      <div class="metric-box" :title="t('channelMonitorV2.overview.availabilityHint')">
-        <dt>{{ t('channelMonitorV2.overview.availability') }}</dt>
-        <dd :class="metricClass(item.state)">{{ percent(item.metrics.availability_rate) }}</dd>
+      <div class="metric-box" :title="t('channelMonitorV2.overview.ttftHint')" data-metric="ttft">
+        <dt><span class="metric-dot" :class="dotClass(metricStates.ttft)" aria-hidden="true" />{{ t('channelMonitorV2.metrics.ttftP50') }}</dt>
+        <dd :class="metricClass(metricStates.ttft)">{{ latency(item.metrics.ttft_p50_ms) }}</dd>
+        <div v-if="latencyDetails.length" class="metric-detail flex flex-wrap gap-x-2 gap-y-0.5">
+          <span v-for="detail in latencyDetails" :key="detail" class="whitespace-nowrap">{{ detail }}</span>
+        </div>
       </div>
-      <div class="metric-box" :title="t('channelMonitorV2.overview.ttftHint')">
-        <dt>{{ t('channelMonitorV2.metrics.ttftP50') }}</dt>
-        <dd>{{ latency(item.metrics.ttft_p50_ms) }}</dd>
+      <div v-if="showThroughput" class="metric-box" :title="throughputTitle" data-metric="throughput">
+        <dt>{{ t('channelMonitorV2.metrics.tps') }}</dt>
+        <dd :class="validNumber(item.metrics.tokens_per_second) ? 'text-gray-900 dark:text-white' : metricClass('unknown')">{{ throughput }}</dd>
+        <div class="metric-detail">{{ t('channelMonitorV2.metrics.tpsDetail') }}</div>
+      </div>
+      <div class="metric-box" :title="t('channelMonitorV2.overview.cacheHint')" data-metric="cache">
+        <dt><span class="metric-dot" :class="dotClass(metricStates.cache)" aria-hidden="true" />{{ t('channelMonitorV2.metrics.cacheRate') }}</dt>
+        <dd :class="metricClass(metricStates.cache)">{{ percent(item.metrics.cache_rate) }}</dd>
+        <div class="metric-detail">{{ t('channelMonitorV2.metrics.cacheDetail') }}</div>
       </div>
     </dl>
 
@@ -43,10 +53,14 @@
           type="button"
           class="history-cell"
           :class="barClass(bucket.state)"
-          :title="bucketTooltip(bucket)"
-          :aria-label="bucketTooltip(bucket)"
+          :aria-label="`${bucket.bucket_start} · ${stateText(bucket.state)}`"
           :data-state="bucket.state"
-        ><span class="sr-only">{{ bucketTooltip(bucket) }}</span></button>
+          @mouseenter="showHistory($event, bucket)"
+          @focus="showHistory($event, bucket)"
+          @click="showHistory($event, bucket, true)"
+          @mouseleave="tooltip?.hide(item.group_id, $event.currentTarget)"
+          @blur="tooltip?.dismiss(item.group_id)"
+        />
       </div>
       <div class="mt-1 flex justify-between text-[10px] uppercase text-gray-400 dark:text-gray-500">
         <span>{{ t('channelMonitorV2.overview.past', { range }) }}</span><span>{{ t('channelMonitorV2.overview.now') }}</span>
@@ -70,10 +84,14 @@
           type="button"
           class="history-cell attribution-cell"
           :class="attributionBarClass(bucket.state)"
-          :title="attributionTooltip(bucket)"
-          :aria-label="attributionTooltip(bucket)"
+          :aria-label="`${bucket.bucket_start} – ${bucket.bucket_end} · ${attributionText(bucket.state)}`"
           :data-result="bucket.state"
-        ><span class="sr-only">{{ attributionTooltip(bucket) }}</span></button>
+          @mouseenter="showAttribution($event, bucket)"
+          @focus="showAttribution($event, bucket)"
+          @click="showAttribution($event, bucket, true)"
+          @mouseleave="tooltip?.hide(item.group_id, $event.currentTarget)"
+          @blur="tooltip?.dismiss(item.group_id)"
+        />
       </div>
       <div class="mt-1 flex justify-between text-[10px] text-gray-400 dark:text-gray-500">
         <span>{{ t('channelMonitorV2.overview.attributionPast') }}</span><span>{{ t('channelMonitorV2.overview.now') }}</span>
@@ -84,20 +102,39 @@
 </template>
 
 <script setup lang="ts">
-import { computed } from 'vue'
+import { computed, inject, onBeforeUnmount, watch } from 'vue'
 import { useI18n } from 'vue-i18n'
 import PlatformIcon from '@/components/common/PlatformIcon.vue'
 import { platformBadgeLightClass, platformLabel } from '@/utils/platformColors'
-import type { GroupAttributionHistoryBucket, GroupAttributionSummaryState, GroupOverviewCard, GroupOverviewState, MonitorRange } from '@/api/channelMonitorV2'
+import type { GroupAttributionHistoryBucket, GroupAttributionSummaryState, GroupOverviewCard, GroupOverviewState, HealthState, MonitorRange } from '@/api/channelMonitorV2'
+import { formatMonitorThroughput } from './monitorFormat'
+import { overviewTooltipKey } from './overviewTooltip'
 
-const props = defineProps<{ item: GroupOverviewCard; range: MonitorRange; bucketSeconds: number }>()
+const props = defineProps<{ item: GroupOverviewCard; range: MonitorRange; bucketSeconds: number; showThroughput?: boolean }>()
 const { t, locale } = useI18n()
+const tooltip = inject(overviewTooltipKey, undefined)
+watch(() => [props.item, props.range, props.bucketSeconds, locale.value], () => tooltip?.dismiss(props.item.group_id))
+onBeforeUnmount(() => tooltip?.dismiss(props.item.group_id))
 const groupName = computed(() => props.item.group_i18n?.[locale.value]?.name || props.item.group_name)
 const platformName = computed(() => platformLabel(props.item.platform))
 const numberFormatter = computed(() => new Intl.NumberFormat(locale.value || undefined, { maximumFractionDigits: 4 }))
 const percentFormatter = computed(() => new Intl.NumberFormat(locale.value || undefined, { style: 'percent', minimumFractionDigits: 1, maximumFractionDigits: 1 }))
 const dateFormatter = computed(() => new Intl.DateTimeFormat(locale.value || undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }))
 const multiplier = computed(() => Number.isFinite(props.item.rate_multiplier) ? numberFormatter.value.format(props.item.rate_multiplier) : '—')
+const unavailability = computed(() => validRate(props.item.metrics.availability_rate) ? 1 - props.item.metrics.availability_rate : null)
+const latencyDetails = computed(() => {
+  const parts = []
+  if (validNumber(props.item.metrics.ttft_avg_ms)) parts.push(`AVG ${latency(props.item.metrics.ttft_avg_ms)}`)
+  if (validNumber(props.item.metrics.ttft_p90_ms)) parts.push(`P90 ${latency(props.item.metrics.ttft_p90_ms)}`)
+  return parts
+})
+const throughput = computed(() => validNumber(props.item.metrics.tokens_per_second) ? formatMonitorThroughput(props.item.metrics.tokens_per_second) : '—')
+const throughputTitle = computed(() => `${validNumber(props.item.metrics.tokens_per_second) ? numberFormatter.value.format(props.item.metrics.tokens_per_second) : '—'} · ${t('channelMonitorV2.metrics.tpsDetail')}`)
+const metricStates = computed(() => ({
+  availability: metricState(props.item.metric_states?.availability, validRate(props.item.metrics.availability_rate)),
+  cache: metricState(props.item.metric_states?.cache, validRate(props.item.metrics.cache_rate)),
+  ttft: metricState(props.item.metric_states?.ttft, validNumber(props.item.metrics.ttft_p50_ms)),
+}))
 const attributionState = computed(() => normalizeAttributionState(props.item.attribution?.summary_state))
 const attributionSummaryText = computed(() => attributionState.value === 'no_data'
   ? t(`channelMonitorV2.overview.${props.item.attribution?.enabled === false ? 'attributionDisabled' : 'noAttribution'}`)
@@ -123,25 +160,39 @@ const attributionText = (state: GroupAttributionSummaryState) => t(`channelMonit
 function normalizeAttributionState(state: unknown): GroupAttributionSummaryState {
   return state === 'passed' || state === 'mismatch' || state === 'failed' ? state : 'no_data'
 }
-function percent(value: number | null) { return value != null && Number.isFinite(value) && value >= 0 && value <= 1 ? percentFormatter.value.format(value) : '—' }
-function latency(value: number | null) { return value != null && Number.isFinite(value) && value >= 0 ? `${(value / 1000).toFixed(3)}s` : '—' }
+function validNumber(value: unknown): value is number { return typeof value === 'number' && Number.isFinite(value) && value >= 0 }
+function validRate(value: unknown): value is number { return validNumber(value) && value <= 1 }
+function percent(value: number | null) { return validRate(value) ? percentFormatter.value.format(value) : '—' }
+function latency(value: number | null | undefined) { return validNumber(value) ? `${(value / 1000).toFixed(3)}s` : '—' }
+function metricState(state: unknown, valid: boolean): HealthState {
+  return valid && (state === 'healthy' || state === 'warning' || state === 'critical') ? state : 'unknown'
+}
 function formatTime(value: string) {
   const time = new Date(value)
   return Number.isFinite(time.getTime()) ? dateFormatter.value.format(time) : '—'
 }
-function bucketTooltip(bucket: GroupOverviewCard['buckets'][number]) {
+function showHistory(event: MouseEvent | FocusEvent, bucket: GroupOverviewCard['buckets'][number], pinned = false) {
+  tooltip?.show(event, props.item.group_id, () => {
   const start = new Date(bucket.bucket_start).getTime()
   const end = Number.isFinite(start) && props.bucketSeconds > 0 ? ` – ${formatTime(new Date(start + props.bucketSeconds * 1000).toISOString())}` : ''
-  return `${formatTime(bucket.bucket_start)}${end}\n${stateText(bucket.state)} · ${t('channelMonitorV2.overview.availability')} ${percent(bucket.availability_rate)}`
+  const state = stateText(bucket.state)
+  return [`${formatTime(bucket.bucket_start)}${end}`, validRate(bucket.availability_rate) ? `${state} · ${t('channelMonitorV2.overview.availability')} ${percent(bucket.availability_rate)}` : state]
+  }, pinned)
 }
-function attributionTooltip(bucket: GroupAttributionHistoryBucket) {
-  return `${formatTime(bucket.bucket_start)} – ${formatTime(bucket.bucket_end)}\n${attributionText(bucket.state)}`
+function showAttribution(event: MouseEvent | FocusEvent, bucket: GroupAttributionHistoryBucket, pinned = false) {
+  tooltip?.show(event, props.item.group_id, () => [`${formatTime(bucket.bucket_start)} – ${formatTime(bucket.bucket_end)}`, attributionText(bucket.state)], pinned)
 }
-function metricClass(state: GroupOverviewState) {
+function metricClass(state: HealthState) {
   if (state === 'healthy') return 'text-emerald-700 dark:text-emerald-400'
   if (state === 'warning') return 'text-amber-700 dark:text-amber-300'
   if (state === 'critical') return 'text-rose-600 dark:text-rose-400'
   return 'text-gray-500 dark:text-gray-400'
+}
+function dotClass(state: HealthState) {
+  if (state === 'healthy') return 'bg-emerald-500'
+  if (state === 'warning') return 'bg-amber-400'
+  if (state === 'critical') return 'bg-rose-500'
+  return 'bg-gray-300 dark:bg-dark-500'
 }
 function badgeClass(state: GroupOverviewState) {
   if (state === 'healthy') return 'bg-emerald-100 text-emerald-800 dark:bg-emerald-900/40 dark:text-emerald-300'
@@ -173,7 +224,9 @@ function attributionTextClass(status: GroupAttributionSummaryState) {
 
 <style scoped>
 .metric-box { @apply min-w-0 rounded-2xl border border-gray-100 bg-gray-50/70 px-2.5 py-3 dark:border-dark-600 dark:bg-dark-700/40; }
-.metric-box dt { @apply text-[10px] leading-4 text-gray-500 dark:text-gray-400; }
+.metric-box dt { @apply flex items-center gap-1.5 text-[10px] leading-4 text-gray-500 dark:text-gray-400; }
 .metric-box dd { @apply mt-1 text-base font-bold tabular-nums sm:text-lg; }
+.metric-dot { @apply h-2 w-2 shrink-0 rounded-full; }
+.metric-detail { @apply mt-1.5 break-words text-[10px] leading-4 text-gray-500 dark:text-gray-400; }
 .history-cell { @apply min-w-0 flex-1 rounded-[3px] transition-opacity hover:opacity-75 focus-visible:outline focus-visible:outline-2 focus-visible:outline-offset-2 focus-visible:outline-primary-500; }
 </style>

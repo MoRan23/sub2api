@@ -7,6 +7,7 @@ export default {
       coveragePending: '部分数据更新中',
       noGroups: '暂无可查看的分组', realRequests: '真实请求', multiplier: '用户倍率 {value}×',
       availability: '可用率',
+      unavailabilityDetail: '不可用率 {value}',
       cacheHint: '输入内容的缓存命中比例',
       availabilityHint: '请求成功完成的比例',
       ttftHint: '首个响应 Token 等待时间的估算中位数',

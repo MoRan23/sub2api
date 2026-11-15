@@ -43,12 +43,18 @@ export interface GroupOverviewCard {
     availability_rate: number | null
     cache_rate: number | null
     ttft_p50_ms: number | null
+    tokens_per_second?: number | null
+    ttft_avg_ms?: number | null
+    ttft_p90_ms?: number | null
   }
+  metric_states?: { availability: HealthState; cache: HealthState; ttft: HealthState }
   buckets: Array<{ bucket_start: string; state: GroupOverviewState; availability_rate: number | null }>
   attribution: GroupAttributionSummary
 }
 
 export interface GroupOverviewResponse {
+  /** Missing on older servers; throughput remains hidden. */
+  show_throughput?: boolean
   range: MonitorRange
   refresh_interval_seconds: 60 | 300
   coverage: MonitorCoverage & { availability_version: number; availability_ready: boolean; availability_start?: string }

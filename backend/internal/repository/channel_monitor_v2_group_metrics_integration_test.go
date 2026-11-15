@@ -29,10 +29,20 @@ func assertGroupOverviewMetricsMatch(t *testing.T, repo *channelMonitorV2Reposit
 		require.Equal(t, want.AvailabilityErrorRequests, got.AvailabilityErrorRequests)
 		require.Equal(t, want.CacheRate, got.CacheRate)
 		require.Equal(t, want.CacheRateDenominator, got.CacheRateDenominator)
+		require.Equal(t, want.SuccessRequests, got.SuccessRequests)
+		require.Equal(t, want.ErrorRequests, got.ErrorRequests)
+		require.Equal(t, want.RequestCount, got.RequestCount)
+		require.Equal(t, want.TokenCount, got.TokenCount)
+		require.Equal(t, want.TPM, got.TPM)
+		require.Equal(t, want.TTFT.SampleCount, got.TTFT.SampleCount)
+		require.Equal(t, want.TTFT.AvgMs, got.TTFT.AvgMs)
 		if latency {
 			require.Equal(t, want.TTFT.P50Ms, got.TTFT.P50Ms)
+			require.Equal(t, want.TTFT.P90Ms, got.TTFT.P90Ms)
+		} else {
+			require.Nil(t, got.TTFT.P50Ms)
+			require.Nil(t, got.TTFT.P90Ms)
 		}
-		require.Nil(t, got.TTFT.P90Ms)
 		require.Nil(t, got.Duration.P50Ms)
 	}
 	for _, want := range detail.Items {
@@ -46,6 +56,101 @@ func assertGroupOverviewMetricsMatch(t *testing.T, repo *channelMonitorV2Reposit
 		delete(byID, *want.GroupID)
 	}
 	require.Empty(t, byID, "no extra groups may escape the authorized scope")
+}
+
+func TestChannelMonitorV2GroupMetricsStatisticsEdgesIntegration(t *testing.T) {
+	f, repo, start := newLatencyPrecisionFixture(t)
+	ctx := context.Background()
+	empty := newMonitorOverviewFixture(t, "openai")
+	single := newMonitorOverviewFixture(t, "openai")
+	single.at = f.at
+	insertLatencyPrecisionUsage(t, single, "zero-latency", 0, 100)
+	for i := 0; i < 9; i++ {
+		insertLatencyPrecisionUsage(t, f, "many-fast", 1001, 2000)
+	}
+	f.at = f.at.Add(5 * time.Minute)
+	insertLatencyPrecisionUsage(t, f, "one-slow", 9001, 10000)
+	require.NoError(t, repo.RecomputeRange(ctx, start, start.Add(24*time.Hour)))
+	cfg := service.ChannelMonitorV2Config{Platforms: []service.ChannelMonitorV2PlatformConfig{{Platform: "openai", Enabled: true}}}
+	filter := service.ChannelMonitorV2Filter{Start: start, End: start.Add(24 * time.Hour), Bucket: 5 * time.Minute,
+		RestrictGroups: true, AllowedGroupIDs: []int64{f.group, single.group, empty.group}}
+	assertGroupOverviewMetricsMatch(t, repo, filter, cfg)
+	result, err := repo.GetGroupOverviewMetrics(ctx, filter, cfg)
+	require.NoError(t, err)
+	require.Len(t, result.Items, 3)
+	for _, row := range result.Items {
+		switch *row.GroupID {
+		case f.group:
+			require.EqualValues(t, 10, row.Metrics.TTFT.SampleCount)
+			require.Equal(t, 1801.0, *row.Metrics.TTFT.AvgMs, "weight original samples, not per-bucket averages")
+			require.EqualValues(t, 1001, *row.Metrics.TTFT.P90Ms, "the ninth of ten samples exactly meets P90")
+		case single.group:
+			require.EqualValues(t, 1, row.Metrics.TTFT.SampleCount)
+			require.Equal(t, 0.0, *row.Metrics.TTFT.AvgMs)
+			require.EqualValues(t, 0, *row.Metrics.TTFT.P50Ms)
+			require.EqualValues(t, 0, *row.Metrics.TTFT.P90Ms)
+		case empty.group:
+			require.Zero(t, row.Metrics.TPM)
+			require.Zero(t, row.Metrics.RequestCount)
+			require.Nil(t, row.Metrics.TTFT.AvgMs)
+			require.Nil(t, row.Metrics.TTFT.P50Ms)
+			require.Nil(t, row.Metrics.TTFT.P90Ms)
+		}
+	}
+	// Keep legacy coarse bounds beside a newer fine bucket. The SQL must merge
+	// distributions without duplicating the private-user histogram audience.
+	_, err = integrationDB.Exec(`UPDATE channel_monitor_v2_latency_histograms_rollup SET upper_bound_ms=2000
+	 WHERE group_id=$1 AND metric='ttft' AND upper_bound_ms=1001`, f.group)
+	require.NoError(t, err)
+	f.at = f.at.Add(5 * time.Minute)
+	insertLatencyPrecisionUsage(t, f, "new-fine", 11001, 12000)
+	require.NoError(t, repo.RecomputeRange(ctx, f.at, f.at.Add(time.Minute)))
+	assertGroupOverviewMetricsMatch(t, repo, filter, cfg)
+	result, err = repo.GetGroupOverviewMetrics(ctx, filter, cfg)
+	require.NoError(t, err)
+	for _, row := range result.Items {
+		if *row.GroupID == f.group {
+			require.EqualValues(t, 11, row.Metrics.TTFT.SampleCount)
+			require.EqualValues(t, 2000, *row.Metrics.TTFT.P50Ms)
+			require.EqualValues(t, 9001, *row.Metrics.TTFT.P90Ms, "P90 crosses into the next bound for eleven samples")
+			require.InDelta(t, float64(1001*9+9001+11001)/11, *row.Metrics.TTFT.AvgMs, 1e-9)
+		}
+	}
+}
+
+func TestChannelMonitorV2GroupMetricsPartialCoverageIntegration(t *testing.T) {
+	f, repo, start := newLatencyPrecisionFixture(t)
+	ctx := context.Background()
+	for i, latency := range []int{50001, 3001, 7001, 60001} {
+		f.at = start.Add(time.Hour + time.Duration(i)*5*time.Minute)
+		f.usage(t, f.key, "partial-free", fmt.Sprintf("local:partial-%d-%d", f.group, i), latency)
+	}
+	require.NoError(t, repo.RecomputeRange(ctx, start, start.Add(24*time.Hour)))
+	var watermark string
+	require.NoError(t, integrationDB.QueryRow(`SELECT row_to_json(w)::text FROM channel_monitor_v2_watermarks w WHERE id=1`).Scan(&watermark))
+	t.Cleanup(func() {
+		_, err := integrationDB.Exec(`UPDATE channel_monitor_v2_watermarks w SET
+		 usage_coverage_start=p.usage_coverage_start,error_coverage_start=p.error_coverage_start,data_through=p.data_through
+		 FROM json_populate_record(NULL::channel_monitor_v2_watermarks,$1::json) p WHERE w.id=1`, watermark)
+		require.NoError(t, err)
+	})
+	_, err := integrationDB.Exec(`UPDATE channel_monitor_v2_watermarks SET
+	 usage_coverage_start=$1,error_coverage_start=$2,data_through=$3 WHERE id=1`,
+		start.Add(time.Hour), start.Add(65*time.Minute), start.Add(75*time.Minute))
+	require.NoError(t, err)
+	cfg := service.ChannelMonitorV2Config{Platforms: []service.ChannelMonitorV2PlatformConfig{{Platform: "openai", Enabled: true}}}
+	filter := service.ChannelMonitorV2Filter{Start: start, End: start.Add(48 * time.Hour), Bucket: 5 * time.Minute,
+		RestrictGroups: true, AllowedGroupIDs: []int64{f.group}}
+	assertGroupOverviewMetricsMatch(t, repo, filter, cfg)
+	result, err := repo.GetGroupOverviewMetrics(ctx, filter, cfg)
+	require.NoError(t, err)
+	require.Len(t, result.Items, 1)
+	metric := result.Items[0].Metrics
+	require.EqualValues(t, 2, metric.RequestCount, "source coverage excludes both the early and uncomputed trailing facts")
+	require.EqualValues(t, 640, metric.TokenCount, "all input/output/cache token classes count, including free requests")
+	require.Equal(t, 64.0, metric.TPM, "divide by the ten covered minutes, not the requested two days")
+	require.Equal(t, 5001.0, *metric.TTFT.AvgMs)
+	require.EqualValues(t, 7001, *metric.TTFT.P90Ms)
 }
 
 func TestChannelMonitorV2GroupMetricsMatchesDetailedIntegration(t *testing.T) {

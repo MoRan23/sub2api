@@ -7,6 +7,7 @@ export default {
       coveragePending: 'Some data is updating',
       noGroups: 'No groups available to view', realRequests: 'Real requests', multiplier: 'Your multiplier {value}×',
       availability: 'Availability',
+      unavailabilityDetail: 'Unavailable {value}',
       cacheHint: 'Share of input served from cache',
       availabilityHint: 'Share of requests completed successfully',
       ttftHint: 'Estimated median wait for the first response token',

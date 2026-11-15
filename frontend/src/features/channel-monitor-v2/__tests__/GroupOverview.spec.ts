@@ -48,7 +48,7 @@ async function mountView() {
   const router = createRouter({ history: createMemoryHistory(), routes: [{ path: '/monitor', component: GroupOverview }] })
   await router.push('/monitor')
   const i18n = createI18n({ legacy: false, locale: 'zh-CN', messages: { 'zh-CN': { ...messages, common: { refresh: '刷新', retry: '重试' } } } })
-  return mount(GroupOverview, { global: { plugins: [router, i18n], stubs: { Icon: true, PlatformIcon: true, LoadingSpinner: true } } })
+  return mount(GroupOverview, { attachTo: document.body, global: { plugins: [router, i18n], stubs: { Icon: true, PlatformIcon: true, LoadingSpinner: true } } })
 }
 let wrapper: Awaited<ReturnType<typeof mountView>> | undefined
 beforeEach(() => {
@@ -57,7 +57,7 @@ beforeEach(() => {
   Object.defineProperty(document, 'hidden', { configurable: true, value: false })
   getGroupOverview.mockReset().mockResolvedValue(response())
 })
-afterEach(() => { wrapper?.unmount(); wrapper = undefined; vi.useRealTimers(); vi.restoreAllMocks() })
+afterEach(() => { wrapper?.unmount(); wrapper = undefined; document.body.innerHTML = ''; vi.useRealTimers(); vi.restoreAllMocks() })
 
 describe('group overview', () => {
   it('loads one shared overview, groups by platform and displays aggregate metrics and gray states', async () => {
@@ -82,6 +82,116 @@ describe('group overview', () => {
     getGroupOverview.mockResolvedValue(response('90m', [item]))
     wrapper = await mountView(); await flushPromises()
     expect(wrapper.get('[data-group-id="1"]').text()).toContain('3.214s')
+  })
+
+  it('shows four metrics with independent colors, weighted latency details and compact throughput', async () => {
+    const item = card()
+    item.metrics = { ...item.metrics, tokens_per_second: 41623.456, ttft_avg_ms: 6160.25, ttft_p90_ms: 10010 }
+    item.metric_states = { availability: 'healthy', ttft: 'warning', cache: 'critical' }
+    getGroupOverview.mockResolvedValue({ ...response('24h', [item]), range: '90m', show_throughput: true })
+    wrapper = await mountView(); await flushPromises()
+    expect(wrapper.get('[data-testid="overview-metrics"]').classes()).toContain('grid-cols-2')
+    expect(wrapper.findAll('[data-metric]').map(metric => metric.attributes('data-metric'))).toEqual(['availability', 'ttft', 'throughput', 'cache'])
+    expect(wrapper.get('[data-metric="availability"]').text()).toContain('不可用率 1.0%')
+    const latency = wrapper.get('[data-metric="ttft"]')
+    expect(latency.text()).toContain('AVG 6.160s')
+    expect(latency.text()).toContain('P90 10.010s')
+    expect(wrapper.get('[data-metric="throughput"] dd').text()).toBe('41.6K')
+    expect(wrapper.get('[data-metric="throughput"]').attributes('title')).toContain('41,623.456')
+    expect(wrapper.get('[data-metric="throughput"]').text()).toContain('由 TPM ÷ 60 换算')
+    expect(wrapper.get('[data-metric="cache"]').text()).toContain('读缓存占比')
+    for (const [key, textColor, dotColor] of [['availability', 'text-emerald-700', 'bg-emerald-500'], ['ttft', 'text-amber-700', 'bg-amber-400'], ['cache', 'text-rose-600', 'bg-rose-500']]) {
+      const metric = wrapper.get(`[data-metric="${key}"]`)
+      expect(metric.get('dd').classes()).toContain(textColor)
+      expect(metric.get('.metric-dot').classes()).toContain(dotColor)
+    }
+    expect(wrapper.find('[data-metric="throughput"] .metric-dot').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="group-state"]').text()).toBe('正常')
+  })
+
+  it.each([false, undefined])('keeps throughput hidden for visibility=%s and renders legacy states gray', async visibility => {
+    const item = card()
+    item.metrics.tokens_per_second = 123456
+    getGroupOverview.mockResolvedValue({ ...response('90m', [item]), show_throughput: visibility })
+    wrapper = await mountView(); await flushPromises()
+    expect(wrapper.find('[data-metric="throughput"]').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="overview-metrics"]').classes()).toContain('grid-cols-3')
+    expect(wrapper.html()).not.toContain('123456')
+    expect(wrapper.html()).not.toContain('TPM')
+    expect(wrapper.text()).not.toMatch(/AVG|P90/)
+    expect(wrapper.findAll('.metric-dot').every(dot => dot.classes().includes('bg-gray-300'))).toBe(true)
+  })
+
+  it('distinguishes a zero rate from missing values without inventing secondary latency or colors', async () => {
+    const zero = card()
+    zero.metrics = { availability_rate: 0, cache_rate: 0, ttft_p50_ms: 0, tokens_per_second: 0, ttft_avg_ms: 0, ttft_p90_ms: 0 }
+    const missing = card(2)
+    missing.metrics = { availability_rate: null, cache_rate: null, ttft_p50_ms: null, tokens_per_second: null, ttft_avg_ms: null, ttft_p90_ms: null }
+    missing.metric_states = { availability: 'healthy', cache: 'healthy', ttft: 'healthy' }
+    getGroupOverview.mockResolvedValue({ ...response('90m', [zero, missing]), show_throughput: true })
+    wrapper = await mountView(); await flushPromises()
+    const first = wrapper.get('[data-group-id="1"]')
+    expect(first.get('[data-metric="throughput"] dd').text()).toBe('0')
+    expect(first.text()).toContain('不可用率 100.0%')
+    expect(first.text()).toContain('AVG 0.000s')
+    expect(first.text()).toContain('P90 0.000s')
+    const second = wrapper.get('[data-group-id="2"]')
+    expect(second.findAll('dd').every(value => value.text() === '—')).toBe(true)
+    expect(second.text()).toContain('不可用率 —')
+    expect(second.text()).not.toMatch(/AVG|P90/)
+    expect(second.findAll('.metric-dot').every(dot => dot.classes().includes('bg-gray-300'))).toBe(true)
+  })
+
+  it('shares one history tooltip across cards and supports keyboard, touch and refresh dismissal', async () => {
+    getGroupOverview.mockResolvedValue(response('90m', [card(), card(2)]))
+    wrapper = await mountView(); await flushPromises()
+    const cells = wrapper.findAll('.history-cell')
+    await cells[0]!.trigger('focus')
+    expect(document.querySelectorAll('[role="tooltip"]')).toHaveLength(1)
+    expect(cells[0]!.attributes('aria-describedby')).toBe(document.querySelector('[role="tooltip"]')?.id)
+    await cells[21]!.trigger('mouseenter')
+    expect(document.querySelectorAll('[role="tooltip"]')).toHaveLength(1)
+    expect(cells[0]!.attributes('aria-describedby')).toBeUndefined()
+    await cells[21]!.trigger('mouseleave')
+    expect(document.querySelector('[role="tooltip"]')).toBeNull()
+    await cells[1]!.trigger('click')
+    await cells[1]!.trigger('mouseleave')
+    expect(document.querySelector('[role="tooltip"]')).not.toBeNull()
+    await cells[1]!.trigger('click')
+    expect(document.querySelector('[role="tooltip"]')).toBeNull()
+    await cells[1]!.trigger('click')
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); await flushPromises()
+    expect(document.querySelector('[role="tooltip"]')).toBeNull()
+    await cells[0]!.trigger('focus')
+    await cells[0]!.trigger('blur')
+    expect(document.querySelector('[role="tooltip"]')).toBeNull()
+    await cells[0]!.trigger('click')
+    document.body.dispatchEvent(new Event('pointerdown', { bubbles: true })); await flushPromises()
+    expect(document.querySelector('[role="tooltip"]')).toBeNull()
+    await cells[0]!.trigger('mouseenter')
+    getGroupOverview.mockResolvedValueOnce(response('90m', [card(), card(2)]))
+    await wrapper.get('[data-testid="overview-refresh"]').trigger('click'); await flushPromises()
+    expect(document.querySelector('[role="tooltip"]')).toBeNull()
+    await wrapper.get('.history-cell').trigger('mouseenter')
+    wrapper.unmount(); wrapper = undefined
+    expect(document.querySelector('[role="tooltip"]')).toBeNull()
+    expect(getGroupOverview).toHaveBeenCalledTimes(2)
+  })
+
+  it('clamps the tooltip to the viewport and switches below a cell near the top edge', async () => {
+    vi.spyOn(HTMLElement.prototype, 'getBoundingClientRect').mockImplementation(function (this: HTMLElement) {
+      return (this.classList.contains('overview-floating-tooltip')
+        ? { left: 0, top: 0, width: 280, height: 60, right: 280, bottom: 60 }
+        : { left: window.innerWidth - 4, top: 2, width: 4, height: 20, right: window.innerWidth, bottom: 22 }) as DOMRect
+    })
+    wrapper = await mountView(); await flushPromises()
+    await wrapper.get('.history-cell').trigger('mouseenter'); await flushPromises()
+    const tooltip = document.querySelector<HTMLElement>('[role="tooltip"]')!
+    expect(Number.parseFloat(tooltip.style.left)).toBe(window.innerWidth - 280 - 12)
+    expect(Number.parseFloat(tooltip.style.top)).toBe(30)
+    expect(tooltip.style.visibility).toBe('visible')
+    window.dispatchEvent(new Event('resize')); await flushPromises()
+    expect(document.querySelector('[role="tooltip"]')).toBeNull()
   })
 
   it('updates platform sections and counts when a group leaves the monitoring scope', async () => {
@@ -115,12 +225,16 @@ describe('group overview', () => {
     const rebuilding = group.get('button[data-state="rebuilding"]')
     expect(lowSample.classes()).toEqual(expect.arrayContaining(['h-3', 'bg-gray-300', 'dark:bg-dark-500']))
     expect(lowSample.classes()).not.toContain('h-1')
-    expect(lowSample.attributes('title')).toContain('样本不足 · 可用率 100.0%')
+    expect(lowSample.attributes('title')).toBeUndefined()
+    await lowSample.trigger('mouseenter')
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toContain('样本不足 · 可用率 100.0%')
     expect(empty.classes()).toEqual(expect.arrayContaining(['h-1', 'bg-gray-300', 'dark:bg-dark-500']))
-    expect(empty.attributes('title')).toContain('暂无数据 · 可用率 —')
+    await empty.trigger('mouseenter')
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toContain('暂无数据')
     expect(rebuilding.classes()).toEqual(expect.arrayContaining(['h-3', 'border-dashed']))
-    expect(rebuilding.attributes('title')).toContain('统计更新中')
-    expect(rebuilding.attributes('title')).not.toContain('暂无数据')
+    await rebuilding.trigger('mouseenter')
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toContain('统计更新中')
+    expect(document.querySelector('[role="tooltip"]')?.textContent).not.toContain('暂无数据')
 
     const legend = wrapper.get('[data-testid="overview-legend"]')
     for (const [state, label, height, appearance] of [
@@ -225,7 +339,9 @@ describe('group overview', () => {
     expect(wrapper.html()).not.toContain('secret-account-42')
     expect(wrapper.html()).not.toContain('model-0')
     const time = (value: string) => new Intl.DateTimeFormat('zh-CN', { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }).format(new Date(value))
-    const title = cells[0]!.attributes('title')
+    expect(cells[0]!.attributes('title')).toBeUndefined()
+    await cells[0]!.trigger('mouseenter')
+    const title = Array.from(document.querySelectorAll('[role="tooltip"] .tooltip-line')).map(line => line.textContent).join('\n')
     expect(title).toContain(time(item.attribution.history[0]!.bucket_start))
     expect(title).toContain(time(item.attribution.history[0]!.bucket_end))
     expect(title).toContain('通过')
@@ -302,12 +418,12 @@ describe('group overview', () => {
     item.attribution.history = attributionHistory('mismatch')
     getGroupOverview.mockImplementation((range: MonitorRange) => Promise.resolve(response(range, [item])))
     wrapper = await mountView(); await flushPromises()
-    const history = wrapper.findAll('.attribution-cell').map(cell => ({ state: cell.attributes('data-result'), title: cell.attributes('title') }))
+    const history = wrapper.findAll('.attribution-cell').map(cell => ({ state: cell.attributes('data-result'), label: cell.attributes('aria-label') }))
     expect(history).toHaveLength(20)
     expect(wrapper.text()).toContain('最近 200 分钟')
     await wrapper.get('[data-range="30d"]').trigger('click'); await flushPromises()
     expect(wrapper.get('[data-range="30d"]').attributes('aria-pressed')).toBe('true')
-    expect(wrapper.findAll('.attribution-cell').map(cell => ({ state: cell.attributes('data-result'), title: cell.attributes('title') }))).toEqual(history)
+    expect(wrapper.findAll('.attribution-cell').map(cell => ({ state: cell.attributes('data-result'), label: cell.attributes('aria-label') }))).toEqual(history)
   })
 
   it('uses platform brand colors in section icons, card icons and labels in both themes', async () => {

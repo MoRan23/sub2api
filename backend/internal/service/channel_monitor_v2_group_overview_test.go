@@ -279,3 +279,125 @@ func TestChannelMonitorV2OverviewAttributionProjectsAuthoritativeSummary(t *test
 		require.Contains(t, string(encoded), field)
 	}
 }
+
+func overviewMetricPointer[T any](value T) *T { return &value }
+
+func TestChannelMonitorV2OverviewThroughputVisibilityAndNulls(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		runtime   *ChannelMonitorRuntime
+		admin     bool
+		requests  int64
+		tpm       float64
+		wantShow  bool
+		wantValue *float64
+	}{
+		{name: "missing settings hides", requests: 10, tpm: 12345},
+		{name: "configured hidden", runtime: &ChannelMonitorRuntime{HideThroughput: true}, requests: 10, tpm: 12345},
+		{name: "visible", runtime: &ChannelMonitorRuntime{}, requests: 10, tpm: 12345, wantShow: true, wantValue: overviewMetricPointer(205.75)},
+		{name: "admin bypasses missing settings", admin: true, requests: 10, tpm: 12345, wantShow: true, wantValue: overviewMetricPointer(205.75)},
+		{name: "admin bypasses hidden setting", runtime: &ChannelMonitorRuntime{HideThroughput: true}, admin: true, requests: 10, tpm: 12345, wantShow: true, wantValue: overviewMetricPointer(205.75)},
+		{name: "empty statistics is not zero", runtime: &ChannelMonitorRuntime{}, wantShow: true},
+		{name: "valid zero token requests", runtime: &ChannelMonitorRuntime{}, requests: 10, wantShow: true, wantValue: overviewMetricPointer(0.0)},
+		{name: "nonfinite unavailable", runtime: &ChannelMonitorRuntime{}, requests: 10, tpm: math.Inf(1), wantShow: true},
+		{name: "negative unavailable", runtime: &ChannelMonitorRuntime{}, requests: 10, tpm: -1, wantShow: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := overviewTestRepository()
+			id := int64(7)
+			r.matrix.Items = []ChannelMonitorV2MatrixRow{{GroupID: &id, Metrics: ChannelMonitorV2Metric{RequestCount: tc.requests, TPM: tc.tpm}}}
+			svc := NewChannelMonitorV2Service(r)
+			if tc.runtime != nil {
+				svc.SetRuntimeReader(channelMonitorV2RuntimeStub{rt: *tc.runtime})
+			}
+			filter, err := svc.ParseFilter("90m", nil, nil, nil)
+			require.NoError(t, err)
+			out, err := svc.GetGroupOverviewForViewer(context.Background(), filter, []Group{{ID: id, Platform: PlatformOpenAI, Status: StatusActive}}, nil, tc.admin)
+			require.NoError(t, err)
+			require.Equal(t, tc.wantShow, out.ShowThroughput)
+			require.Equal(t, tc.wantValue, out.Items[0].Metrics.TokensPerSecond)
+			require.Equal(t, tc.tpm, r.matrix.Items[0].Metrics.TPM, "viewer projection must not mutate the aggregate")
+			encoded, err := json.Marshal(out)
+			require.NoError(t, err)
+			if tc.wantValue == nil {
+				require.Contains(t, string(encoded), `"tokens_per_second":null`)
+			}
+			for _, field := range []string{`"ttft_avg_ms":null`, `"ttft_p90_ms":null`, `"cache":"unknown"`, `"ttft":"unknown"`} {
+				require.Contains(t, string(encoded), field)
+			}
+			for _, field := range []string{`"tpm"`, `"token_count"`, `"request_count"`, `"sample_count"`} {
+				require.NotContains(t, string(encoded), field)
+			}
+		})
+	}
+}
+
+func TestChannelMonitorV2OverviewMetricColorsRemainIndependent(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		requests         int64
+		availability     float64
+		availabilityN    int64
+		availabilityErrs int64
+		ready            bool
+		ttft             *int64
+		ttftN            int64
+		cacheRate        float64
+		cacheDenominator int64
+		want             ChannelMonitorV2OverviewMetricStates
+	}{
+		{name: "availability green latency red cache yellow", requests: 100, availability: .99, availabilityN: 100, availabilityErrs: 1, ready: true, ttft: overviewMetricPointer(int64(10000)), ttftN: 100, cacheRate: .5, cacheDenominator: 100, want: ChannelMonitorV2OverviewMetricStates{Availability: "healthy", TTFT: "critical", Cache: "warning"}},
+		{name: "availability red others green", requests: 100, availability: .8, availabilityN: 100, availabilityErrs: 20, ready: true, ttft: overviewMetricPointer(int64(4999)), ttftN: 80, cacheRate: .9, cacheDenominator: 100, want: ChannelMonitorV2OverviewMetricStates{Availability: "critical", TTFT: "healthy", Cache: "healthy"}},
+		{name: "cache at critical threshold stays warning", requests: 10, availability: .9, availabilityN: 10, availabilityErrs: 1, ready: true, ttft: overviewMetricPointer(int64(5000)), ttftN: 10, cacheRate: .3, cacheDenominator: 10, want: ChannelMonitorV2OverviewMetricStates{Availability: "warning", TTFT: "warning", Cache: "warning"}},
+		{name: "cache below critical threshold", requests: 10, availability: .9, availabilityN: 10, availabilityErrs: 1, ready: true, ttft: overviewMetricPointer(int64(5000)), ttftN: 10, cacheRate: .29, cacheDenominator: 10, want: ChannelMonitorV2OverviewMetricStates{Availability: "warning", TTFT: "warning", Cache: "critical"}},
+		{name: "insufficient requests all unknown", requests: 9, availability: 1, availabilityN: 9, ready: true, ttft: overviewMetricPointer(int64(500)), ttftN: 9, cacheRate: .9, cacheDenominator: 1000, want: ChannelMonitorV2OverviewMetricStates{Availability: "unknown", TTFT: "unknown", Cache: "unknown"}},
+		{name: "insufficient latency samples", requests: 100, availability: 1, availabilityN: 100, ready: true, ttft: overviewMetricPointer(int64(500)), ttftN: 9, cacheRate: .9, cacheDenominator: 1000, want: ChannelMonitorV2OverviewMetricStates{Availability: "healthy", TTFT: "unknown", Cache: "healthy"}},
+		{name: "missing latency and cache", requests: 100, availability: 1, availabilityN: 100, ready: true, want: ChannelMonitorV2OverviewMetricStates{Availability: "healthy", TTFT: "unknown", Cache: "unknown"}},
+		{name: "availability rebuilding keeps independent signals", requests: 100, availability: 1, availabilityN: 100, ready: false, ttft: overviewMetricPointer(int64(500)), ttftN: 100, cacheRate: .9, cacheDenominator: 1000, want: ChannelMonitorV2OverviewMetricStates{Availability: "unknown", TTFT: "healthy", Cache: "healthy"}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			r := overviewTestRepository()
+			r.cfg.HealthThresholds.TargetTTFTMs = 1000
+			r.cfg.HealthThresholds.WarningTTFTMs = 5000
+			r.cfg.HealthThresholds.CriticalTTFTMs = 10000
+			r.cfg.HealthThresholds.WarningCacheRate = .8
+			r.cfg.HealthThresholds.CriticalCacheRate = .3
+			r.matrix.Coverage.AvailabilityReady = tc.ready
+			id := int64(7)
+			avg, p90 := 6160.25, int64(10010)
+			metric := ChannelMonitorV2Metric{RequestCount: tc.requests, AvailabilityRate: &tc.availability, AvailabilitySampleCount: tc.availabilityN, AvailabilityErrorRequests: tc.availabilityErrs, CacheRate: tc.cacheRate, CacheRateDenominator: tc.cacheDenominator, TTFT: ChannelMonitorV2Latency{P50Ms: tc.ttft, SampleCount: tc.ttftN, AvgMs: &avg, P90Ms: &p90}}
+			r.matrix.Items = []ChannelMonitorV2MatrixRow{{GroupID: &id, Metrics: metric}}
+			svc := NewChannelMonitorV2Service(r)
+			filter, err := svc.ParseFilter("90m", nil, nil, nil)
+			require.NoError(t, err)
+			out, err := svc.GetGroupOverview(context.Background(), filter, []Group{{ID: id, Platform: PlatformOpenAI, Status: StatusActive}}, nil)
+			require.NoError(t, err)
+			item := out.Items[0]
+			require.Equal(t, tc.want, item.MetricStates)
+			require.Equal(t, channelMonitorV2OverviewState(metric, true, tc.ready, r.cfg.HealthThresholds), item.State)
+			require.Equal(t, &avg, item.Metrics.TTFTAvgMs)
+			require.Equal(t, &p90, item.Metrics.TTFTP90Ms)
+			if !tc.ready {
+				require.Nil(t, item.Metrics.AvailabilityRate)
+			}
+		})
+	}
+}
+
+func TestChannelMonitorV2OverviewLatencyUsesConfiguredDetailThresholds(t *testing.T) {
+	r := overviewTestRepository()
+	r.cfg.HealthThresholds = DefaultChannelMonitorV2HealthThresholds()
+	r.cfg.HealthThresholds.WarningTTFTMs = 8000
+	r.cfg.HealthThresholds.CriticalTTFTMs = 15000
+	id, p50 := int64(7), int64(5025)
+	metric := ChannelMonitorV2Metric{RequestCount: 100, TTFT: ChannelMonitorV2Latency{SampleCount: 100, P50Ms: &p50}}
+	r.matrix.Items = []ChannelMonitorV2MatrixRow{{GroupID: &id, Metrics: metric}}
+	svc := NewChannelMonitorV2Service(r)
+	filter, err := svc.ParseFilter("90m", nil, nil, nil)
+	require.NoError(t, err)
+	out, err := svc.GetGroupOverview(context.Background(), filter, []Group{{ID: id, Platform: PlatformOpenAI, Status: StatusActive}}, nil)
+	require.NoError(t, err)
+	require.Equal(t, "healthy", out.Items[0].MetricStates.TTFT)
+	require.Equal(t, ChannelMonitorV2HealthForWithThresholds(metric, r.cfg.HealthThresholds).TTFT, out.Items[0].MetricStates.TTFT)
+	require.Equal(t, &p50, out.Items[0].Metrics.TTFTP50Ms)
+}

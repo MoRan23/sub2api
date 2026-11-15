@@ -13,6 +13,11 @@
 - **缓存率**：成功样本的缓存读取 token /（普通输入 + 缓存写入 + 缓存读取 token）。30 分钟和 12 小时缓存写入是缓存写入总数的明细，不重复相加。
 - **可用率**：成功请求 /（成功请求 + 服务侧失败）。明确的用户权限、鉴权、余额、参数、安全拒绝和主动取消不纳入分母；上游账号失效、上游额度、账号池不可用、限流、网络、超时和服务错误纳入。
 - **首 Token P50**：合并延迟直方图的样本计数后，取中位样本所在桶的上界。新聚合数据在 10 秒以内保留原始毫秒，10–30 秒按 10ms、30–60 秒按 50ms、60–120 秒按 100ms、120–600 秒按 1 秒分桶；零耗时单独保留。页面秒值显示三位小数，例如原始 3.214 秒显示为 3.214 秒，14.211 秒对应 14.220 秒的桶上界。不对各分组或各时段的 P50 求平均，也不对桶内分布做插值。
+- **每秒 Token**：普通输入、输出、缓存写入和缓存读取 Token 合计除以实际覆盖秒数，与详细统计的 TPM ÷ 60 一致，表示整个分组在所选窗口内的吞吐量。未回填区间和未来时间不计入分母。沿用吞吐隐藏设置及管理员例外，服务端隐藏时不返回数值。
+
+四项指标采用 2×2 布局，隐藏吞吐时保留三列。可用率下显示“不可用率”；首 Token 下显示 AVG 与 P90，AVG 按总耗时／样本数计算，P90 从同一合并直方图读取；吞吐下显示“由 TPM ÷ 60 换算”，缓存率下显示“读缓存占比”。缺失值保持未知，不将缺失的 AVG／P90 补成零。
+
+可用率、首 Token 和缓存率分别使用现有阈值及最低样本规则显示状态圆点和数字颜色，吞吐保持中性色。卡片总状态和真实请求历史仍只使用可用率。历史格支持悬停、键盘聚焦及触屏点击，浮层只显示时间范围、汇总状态及已有可用率；降智浮层不公开账号或内部诊断。
 
 免费成功请求参与统计。已经产生部分用量但最终失败的请求不再同时算作成功；内部重试后成功的请求保留为成功。这些变化只影响监控，不修改账单或扣费。
 
@@ -58,7 +63,7 @@ OpenAI／Composite 分组卡片展示当前生效的探针模型：启用分组�
 
 升级时统一切换聚合进程，避免旧进程再次写入版本 2 的粗桶。回退旧程序可读取细桶；旧程序重新聚合后会写回旧版本，下次升级由版本检查重新启动精度回填。
 
-此次仅细化 TTFT，总耗时分桶不变。每个维度最多 13,682 个 TTFT 上界，数据库只存非空桶，不预分配全部桶；概览在数据库内合并汇总，只返回分组时间格计数及每组 P50。详细统计继续读取所需直方图，其返回量随非空桶增加。超过 600 秒仍沿用原溢出桶 `2147483647ms`，不赋予该桶细精度。
+此次仅细化 TTFT，总耗时分桶不变。每个维度最多 13,682 个 TTFT 上界，数据库只存非空桶，不预分配全部桶；概览在数据库内合并汇总，只返回分组时间格计数及每组 P50／P90 标量。AVG 和吞吐复用同一计数查询，新增指标不增加数据库查询次数，不将完整直方图带入应用。详细统计继续读取所需直方图，其返回量随非空桶增加。超过 600 秒仍沿用原溢出桶 `2147483647ms`，不赋予该桶细精度。
 
 ## English
 
@@ -69,6 +74,11 @@ Cards show active monitored groups the authenticated user may use. Exhausted bal
 - **Cache rate:** cached input tokens divided by ordinary input, cache writes, and cache reads. Cache-write TTL details are already included in the write total.
 - **Availability:** successful requests divided by successes plus service-side failures. Explicit user-side access, balance, parameter, safety, and cancellation failures are excluded; upstream authentication, upstream quota, capacity, transport, timeout, and server failures remain included.
 - **First-token P50:** the upper bound containing the median sample after merging histogram counts. New aggregates retain exact source milliseconds up to 10s, then use 10ms buckets up to 30s, 50ms up to 60s, 100ms up to 120s, and 1s up to 600s, with zero kept separately. Seconds display three decimal places: 3.214s remains 3.214s, while 14.211s maps to the 14.220s upper bound. Percentiles are neither averaged across groups/time windows nor interpolated within buckets.
+- **Tokens per second:** ordinary input, output, cache-write and cache-read tokens divided by effective covered seconds, matching detailed TPM ÷ 60. It measures group throughput over the selected range. Unrebuilt intervals and future time are excluded. The existing throughput privacy setting and administrator exception apply; hidden values are withheld by the server.
+
+Four metrics use a compact 2×2 layout; hiding throughput retains three columns. Secondary labels show unavailability, first-token AVG/P90, the TPM ÷ 60 conversion, and cache-read share. AVG uses total first-token duration divided by its sample count; P90 shares the merged histogram used for P50. Missing values remain unknown. Availability, TTFT and cache each have their own status dot and numeric color using existing thresholds and minimum samples; throughput is neutral. Card badges and traffic history still depend only on availability.
+
+History tooltips support hover, keyboard focus and touch, stay within the viewport and show only the interval, aggregate state and existing availability. Attribution tooltips expose no account identities or internal diagnostics. The counter query supplies AVG and throughput, while one histogram query returns P50/P90 scalars per group. No additional queries, raw-log scans, full histogram transfers or schema changes are needed for these metrics.
 
 Zero-cost successes are included. Final failed requests with partial usage are not also counted as successes, while recovered retry attempts remain successful. Billing is unchanged. Health colors use availability only, with existing error thresholds and minimum samples applied separately to the whole card and each interval. Low-sample intervals retain their measured availability and use a short gray column; empty intervals use a thin gray line, while rebuilding uses a dashed gray column. The legend distinguishes all three states. Missing or rebuilding data is not presented as 100% availability.
 
@@ -86,7 +96,7 @@ Each aggregation cycle updates recent requests first. Historical backfill failur
 
 Forward migrations extend aggregation and bounded history lookup. Versioned backfill runs in bounded background batches within available source-log coverage, never within a page request. Deploy aggregators consistently during the statistics transition. Additive database fields and indexes may remain on application rollback; running an old aggregator requires a statistics rebuild when upgrading again.
 
-Finer TTFT uses aggregation version 3 while keeping availability semantics at version 2; no database migration is required. On upgrade, the background worker first rebuilds the latest two hours to cover the default 90-minute view, then walks older source-covered history in the existing adaptive batches. Every subsequent cycle still prioritizes the latest ten minutes. Cursor and facts commit together and resume after restart; page requests never scan source logs to rebuild history. Existing version-2 availability coverage stays usable, while longer windows may temporarily contain coarse historical bounds until their batches finish. Switch all aggregator processes together; an old application can read fine bounds but writes its older version when recomputing, triggering a fresh precision backfill on the next upgrade. Duration buckets remain unchanged. TTFT has at most 13,682 bounds per dimension, storing only occupied buckets without preallocating the full set; the overview combines histograms in PostgreSQL and returns one P50 per group, while detailed views still read occupied bounds. Values above 600s retain the previous overflow bound of 2147483647ms without a finer-precision guarantee.
+Finer TTFT uses aggregation version 3 while keeping availability semantics at version 2; no database migration is required. On upgrade, the background worker first rebuilds the latest two hours to cover the default 90-minute view, then walks older source-covered history in the existing adaptive batches. Every subsequent cycle still prioritizes the latest ten minutes. Cursor and facts commit together and resume after restart; page requests never scan source logs to rebuild history. Existing version-2 availability coverage stays usable, while longer windows may temporarily contain coarse historical bounds until their batches finish. Switch all aggregator processes together; an old application can read fine bounds but writes its older version when recomputing, triggering a fresh precision backfill on the next upgrade. Duration buckets remain unchanged. TTFT has at most 13,682 bounds per dimension, storing only occupied buckets without preallocating the full set; the overview combines histograms in PostgreSQL and returns P50/P90 scalars per group, while detailed views still read occupied bounds. Values above 600s retain the previous overflow bound of 2147483647ms without a finer-precision guarantee.
 
 The attribution-summary update requires no migration and reuses index 286. One batch query reads distinct accounts and generates twenty states per group; a second bounded batch preserves legacy `latest/recent` fields. New clients use `enabled/probe_model/as_of/summary_state/history`. The configured model is projected as a scalar in the existing batch query, with no per-group query. Retention keeps the latest 100 jobs plus effective results from the last 215 minutes and each API Key's last effective result before that window. Already-pruned history is not reconstructed; rolling back to an older cleaner can reduce available history on a later upgrade.
 
@@ -286,3 +296,36 @@ go test -tags integration ./internal/repository -run 'TestChannelMonitorV2(Group
 无数据库迁移或配置开关变更。升级沿用版本 3 的已提交水位，不强制重新回填整个历史；旧版本可读取同一数据结构。部署时统一切换聚合进程以采用新维护逻辑。此次不修改生产配置、不调用模型、不自动部署。
 
 No schema migration or new setting is required. Existing version-3 progress is reused without forcing another full replay, and stored data remains readable by the previous version. Switch aggregation processes together when deploying the maintenance changes. No production configuration, model calls or deployment are part of this change.
+
+## 卡片指标与提示框验证 / Card metrics and tooltips (2026-11-16)
+
+本次新增 TPS、首 Token AVG／P90、独立指标颜色及按需历史浮层。接口增加 `show_throughput`、`metrics.tokens_per_second`、`metrics.ttft_avg_ms`、`metrics.ttft_p90_ms` 和 `metric_states.{availability,cache,ttft}`；吞吐被隐藏时数值为 `null`。旧响应缺少新字段时不显示吞吐或缺失的辅助值，状态使用未知。无迁移、聚合版本变化或历史重建要求，可直接回退应用。
+
+- Repository／Service／Handler 定向单元及 race、后端 `go build ./...` 通过，使用 Go 1.27.3 与 `GOEXPERIMENT=greenteagc,jsonv2`。
+- 隔离 PostgreSQL／Redis 的 3 项概览集成测试通过（13.877s），包含五种粒度差分、加权 AVG、P90 边界、零／单样本、旧粗桶与细桶混合、部分覆盖、Composite、多组及权限。计数与分位数仍只使用原有三次聚合读取。
+- Service 测试确认 5.025s 在 8s／15s 阈值下为绿色，与详细统计使用相同规则；本次没有更改默认阈值或生产配置。
+- 前端 27 项相关测试、3 项 i18n 检查、类型检查、生产构建及定向 ESLint 通过。构建保留既有 Browserslist、分包／大 chunk 及 Node shell 选项提示。
+- Playwright 使用本地模拟卡片验证 1440px／390px、明暗主题、四项／三项布局、悬停与聚焦、点击固定、Escape／外部点击关闭、提示框边界及单浮层。未访问生产页面或调用真实模型。
+
+沿用 30 天、720,000 条直方图的合成夹具，核对新增指标后仍保持精简读取（下表是完整矩阵与新概览的规模对照，不是本次改动前后对照）：
+
+| 路径 / Path | 第 1 轮 | 第 2 轮 | 第 3 轮 | B/op | allocs/op |
+| --- | ---: | ---: | ---: | ---: | ---: |
+| 完整矩阵 / Full matrix | 1252.484 ms | 1334.708 ms | 1242.796 ms | 约 316 MB | 约 4,685,400 |
+| 精简概览 / Compact overview | 228.315 ms | 231.930 ms | 210.122 ms | 58,445–58,468 | 790–791 |
+
+Targeted Go unit/race checks, backend compilation, isolated database differential tests, 27 frontend tests, three locale checks, type checking, the frontend build and targeted lint passed. Browser checks covered desktop/mobile layouts and both themes using local synthetic data. AVG and both percentiles match the detailed path; throughput respects server-side privacy and the current viewer's group scope. The benchmark compares query shapes on the same fixture, not pre/post feature versions. No schema or aggregate-version change is needed; application rollback is sufficient. No production configuration or deployment was performed. Remote CI was not run.
+
+复现 / Reproduce:
+
+```sh
+# backend
+export GOEXPERIMENT=greenteagc,jsonv2
+go test -race ./internal/service ./internal/handler ./internal/repository -run 'TestChannelMonitorV2.*(Overview|GroupMetrics|SharedQuantile)' -count=1
+go test -tags integration ./internal/repository -run 'TestChannelMonitorV2GroupMetrics' -count=1 -v
+go build ./...
+# frontend
+pnpm exec vitest run src/features/channel-monitor-v2/__tests__/GroupOverview.spec.ts src/views/user/__tests__/ChannelStatusV2View.overview.spec.ts
+pnpm typecheck
+pnpm build
+```
