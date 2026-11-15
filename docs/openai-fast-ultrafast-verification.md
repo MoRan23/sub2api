@@ -71,3 +71,45 @@ go build ./cmd/server
 - 运行的是受影响范围测试，未执行全仓库测试。远端 Actions 未运行；本次无部署验证。
 
 Existing UA assertion failure was reproduced against the original HEAD implementation and retained unchanged. Targeted new tests, race checks, isolated database tests, frontend checks and builds passed. Microbenchmarks are one local synthetic run; no production load test or deployment was performed.
+
+## 强制 Ultrafast 回退 / Forced Ultrafast fallback (2026-11-15)
+
+基线 / Baseline: `0a723eec5`.
+
+- 账号或分组开启强制 Ultrafast 时，有效上游目录未声明最终映射模型支持 Ultrafast，则发送 `service_tier="priority"`。无需同时开启强制 Fast；两个强制开关继续互斥。
+- 目录不可用、无效、过期或降级时仍保留客户端档位；不把查询失败作为不支持的证据。账号优先级、Guardian 和全局 Fast 策略继续生效。
+- 指纹保留强制意图 `ultrafast`、能力结果 `unsupported` 及实际发送值 `priority`，不修改旧观测记录。回退后的费用按实际档位处理，对应免费开关为免费 Fast。
+- 沿用现有能力缓存与定点修改；跨 HTTP 重试及 WS 回合按当前模型决策，原始正文不变。原本已经是 `priority` 的正文复用原切片，不增加模型请求或目录重复查询。
+
+When account or group policy forces Ultrafast but a valid upstream catalog does not declare it for the final mapped model, the request now uses `priority`. Force Fast need not be enabled, and the force switches remain mutually exclusive. Unavailable, invalid, expired or degraded catalogs retain the client tier. Account precedence, Guardian and global Fast policy remain authoritative. Fingerprint records retain the Ultrafast intent, unsupported capability and actual priority tier; historical records are unchanged. Billing follows the effective tier, including the Free Fast option. Existing capability caching and immutable request ownership are reused.
+
+验证范围 / Verification scope:
+
+- OAuth 原生 Responses 的真实出站正文及结果档位。
+- 普通 API Key、Engine、账号／分组优先级、历史冲突配置。
+- HTTP／WS 不同初始档位、映射模型与后续回合、原文不变及缓存只查询一次。
+- 目录不可用保留原值、全局过滤／拦截、Guardian、有效免费档位。
+- 共用开关的中英文提示、互斥行为及 i18n 消息编译。
+
+全部请求使用本地模拟上游，无数据库字段或持久化逻辑变更；本次不运行数据库迁移测试，不修改生产配置或部署。前端只修改两条翻译，验证相关消息编译、完整性、交互辅助测试及定向 ESLint。
+
+All upstream requests are simulated locally. No schema or persistence behavior changed, so migration tests are outside this patch. Only the two translated hints change in the frontend; related message-compilation, integrity, toggle-helper tests and targeted ESLint cover them. No production configuration or deployment is involved.
+
+结果 / Results：请求策略定向单测通过（5.355s），请求／WS／指纹／Guardian 竞态测试通过（9.410s），免费档位计费回归通过（5.802s），后端 `go build ./...` 通过。前端 3 个文件共 9 项测试及两份 locale 的定向 ESLint 通过。未运行远端 CI。
+
+Targeted policy tests, request/WS/fingerprint/Guardian race tests, free-tier billing regression tests and the backend build passed. All nine tests across the three frontend files and targeted locale ESLint passed. Remote CI was not run.
+
+```sh
+# backend; Go 1.27.3
+export GOEXPERIMENT=greenteagc,jsonv2
+go test ./internal/service -run 'Test(ForcedServiceTier|FingerprintServiceTierPolicy|OpenAIGatewayService_.*Fast|OpenAIFast)' -count=1
+go test -race ./internal/service -run 'Test(ForcedServiceTier|FingerprintServiceTierPolicy|ApplyOpenAIFastPolicyToBody|WSResponseCreate|OpenAIGuardian)' -count=1
+go test -tags=unit ./internal/service -run 'Test(OpenAIFreeServiceTierPolicy|OpenAIRecordUsageFreeAcceleration|CodexEngineFreeUltrafast|EffectiveOpenAIFreeServiceTiers)' -count=1
+go build ./...
+```
+
+```sh
+# frontend
+pnpm exec vitest run src/components/account/__tests__/openaiServiceTierSettings.spec.ts src/i18n/__tests__/openaiFastPolicyLocales.spec.ts src/i18n/__tests__/localeKeyCompleteness.spec.ts
+pnpm exec eslint src/i18n/locales/zh/admin/overview.ts src/i18n/locales/en/admin/overview.ts
+```

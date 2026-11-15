@@ -50,7 +50,7 @@ func TestForcedServiceTierNativeResponsesWire(t *testing.T) {
 			result, err := svc.Forward(forceTierGroupContext(true, false), c, account, []byte(`{"model":"gpt-6-astra","service_tier":"flex","stream":false,"input":[{"type":"text","text":"hi"}]}`))
 			require.NoError(t, err)
 			require.NotNil(t, result)
-			expected := "flex"
+			expected := "priority"
 			if supported {
 				expected = "ultrafast"
 			}
@@ -104,10 +104,11 @@ func TestForcedServiceTierPrecedenceAcrossHTTPAndWS(t *testing.T) {
 	}{
 		{"account fast overrides group ultra", true, false, false, true, true, "priority"},
 		{"account ultra overrides group fast", false, true, true, false, true, "ultrafast"},
-		{"unsupported account ultra preserves client", false, true, true, false, false, "flex"},
+		{"unsupported account ultra falls back to fast", false, true, true, false, false, "priority"},
+		{"unsupported account ultra needs no group fast", false, true, false, false, false, "priority"},
 		{"group ultra", false, false, false, true, true, "ultrafast"},
-		{"unsupported group ultra preserves client", false, false, false, true, false, "flex"},
-		{"legacy conflict prefers ultra without fast fallback", true, true, true, false, false, "flex"},
+		{"unsupported group ultra falls back to fast", false, false, false, true, false, "priority"},
+		{"legacy conflict falls back to fast", true, true, true, false, false, "priority"},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			body := `{"models":[{"slug":"mapped-model","service_tiers":[]}]}`
@@ -138,6 +139,102 @@ func TestForcedServiceTierPrecedenceAcrossHTTPAndWS(t *testing.T) {
 				require.Zero(t, calls.Load())
 			} else {
 				require.EqualValues(t, 1, calls.Load())
+			}
+		})
+	}
+}
+
+func TestForcedServiceTierFallbackUsesCurrentModel(t *testing.T) {
+	for _, mode := range []string{"generic", "codex_engine"} {
+		t.Run(mode, func(t *testing.T) {
+			svc, calls := tierCatalogService(`{"models":[{"slug":"ultra-model","service_tiers":[{"id":"ultrafast"}]},{"slug":"fast-model","service_tiers":[]}]}`, make(http.Header))
+			account := newCodexModelsAPIKeyTestAccount("https://upstream.example/v1")
+			account.Extra = map[string]any{OpenAIAPIKeyModeExtraKey: mode, ForceOpenAIUltrafastExtraKey: true}
+			for _, ws := range []bool{false, true} {
+				for _, initialTier := range []string{"", "flex", "ultrafast", "priority"} {
+					input := `{"model":"public-alias","type":"response.create","input":"hello"`
+					if initialTier != "" {
+						input += `,"service_tier":"` + initialTier + `"`
+					}
+					input += `}`
+					body := []byte(input)
+					// Later WS turns and retries decide from their current mapped model,
+					// without changing the original request or inheriting the prior tier.
+					for _, model := range []string{"ultra-model", "fast-model", "ultra-model"} {
+						ctx := context.WithValue(context.Background(), openAIServiceTierPolicyContextKey{}, &openAIServiceTierPolicyCapture{})
+						var out []byte
+						if ws {
+							var blocked *OpenAIFastBlockedError
+							var err error
+							out, blocked, err = svc.applyOpenAIFastPolicyToWSResponseCreate(ctx, account, model, body)
+							require.NoError(t, err)
+							require.Nil(t, blocked)
+						} else {
+							var err error
+							out, err = svc.applyOpenAIFastPolicyToBody(ctx, account, model, body)
+							require.NoError(t, err)
+						}
+						expected, capability := "ultrafast", "supported"
+						if model == "fast-model" {
+							expected, capability = "priority", "unsupported"
+						}
+						require.Equal(t, expected, gjson.GetBytes(out, "service_tier").String())
+						require.Equal(t, input, string(body))
+						if initialTier == expected {
+							require.True(t, &body[0] == &out[0], "unchanged tier reuses the original body")
+						}
+						observation := snapshotOpenAIServiceTierPolicy(ctx, account)
+						populateFingerprintServiceTierPolicy(observation, gjson.GetBytes(out, "service_tier"))
+						require.Equal(t, &FingerprintServiceTierPolicy{Source: "account", RequestedTier: initialTier, ForcedTier: "ultrafast", EffectiveTier: expected, Capability: capability}, observation)
+					}
+				}
+			}
+			require.EqualValues(t, 1, calls.Load(), "all decisions share the cached capability index")
+		})
+	}
+}
+
+func TestForcedServiceTierUnavailablePreservesClientTier(t *testing.T) {
+	for _, tc := range []struct {
+		name, body string
+		headers    http.Header
+	}{
+		{"invalid catalog", `{"models":[{"slug":"model","service_tiers":"invalid"}]}`, nil},
+		{"degraded catalog", `{"models":[{"slug":"model","service_tiers":[]}]}`, http.Header{"X-Codex-Catalog-Degraded": []string{"true"}}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			svc, _ := tierCatalogService(tc.body, tc.headers)
+			account := newCodexModelsAPIKeyTestAccount("https://upstream.example/v1")
+			account.Extra = map[string]any{ForceOpenAIUltrafastExtraKey: true}
+			for _, tier := range []string{"", "flex", "ultrafast"} {
+				input := `{"model":"model","type":"response.create"`
+				if tier != "" {
+					input += `,"service_tier":"` + tier + `"`
+				}
+				body := []byte(input + `}`)
+				out, blocked, err := svc.applyOpenAIFastPolicyToWSResponseCreate(forceTierGroupContext(true, false), account, "model", body)
+				require.NoError(t, err)
+				require.Nil(t, blocked)
+				require.True(t, &body[0] == &out[0], "unavailable evidence must not force or copy the body")
+			}
+		})
+	}
+}
+
+func TestForcedServiceTierFallbackRespectsGlobalFastPolicy(t *testing.T) {
+	for _, action := range []string{BetaPolicyActionFilter, BetaPolicyActionBlock} {
+		t.Run(action, func(t *testing.T) {
+			svc, _ := tierCatalogService(`{"models":[{"slug":"model","service_tiers":[]}]}`, make(http.Header))
+			svc.settingService = newOpenAIGatewayServiceWithSettings(t, &OpenAIFastPolicySettings{Rules: []OpenAIFastPolicyRule{{ServiceTier: OpenAIFastTierPriority, Action: action, Scope: BetaPolicyScopeAll}}}).settingService
+			account := newCodexModelsAPIKeyTestAccount("https://upstream.example/v1")
+			account.Extra = map[string]any{ForceOpenAIUltrafastExtraKey: true}
+			out, err := svc.applyOpenAIFastPolicyToBody(context.Background(), account, "model", []byte(`{"model":"model","service_tier":"flex"}`))
+			if action == BetaPolicyActionBlock {
+				var blocked *OpenAIFastBlockedError
+				require.ErrorAs(t, err, &blocked)
+			} else {
+				require.NoError(t, err)
+				require.False(t, gjson.GetBytes(out, "service_tier").Exists())
 			}
 		})
 	}

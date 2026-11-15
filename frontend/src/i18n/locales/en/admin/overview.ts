@@ -1306,7 +1306,7 @@ export default {
         forceUltrafast: 'Force Ultrafast',
         hint: 'Force options are mutually exclusive. Account overrides take precedence over the group. Global Fast/Flex and OAuth Guardian rules still apply last. Saving affects new requests; existing WebSocket sessions must reconnect.',
         accountHint: 'Applies to the selected OpenAI business account, including API Key, Codex-Engine and shadow accounts. Account overrides take precedence over the group; disabling both follows the group or client. Global policy and OAuth Guardian rules still apply. Existing WebSocket sessions must reconnect.',
-        ultrafastHint: 'Forces Ultrafast only when the account’s real upstream catalog declares support for the final model. Otherwise retains the client tier without falling back to group Fast.',
+        ultrafastHint: 'Uses Ultrafast when the account’s real upstream catalog declares support for the final model; otherwise a valid catalog selects Fast (priority). No separate Force Fast setting is needed. Unavailable or stale catalogs retain the client tier.',
         free: 'Free Fast',
         freeHint: 'Enabled by either the account or group: Fast still uses priority, while customers pay the equivalent Standard price. Upstream and account costs remain unchanged.',
         freeUltrafast: 'Free Ultrafast',

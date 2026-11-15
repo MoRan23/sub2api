@@ -95,8 +95,9 @@ func openAIModelsResponseForRequest(manifest *OpenAIModelsResponse, ifNoneMatch 
 	return &OpenAIModelsResponse{serviceTierCatalog: manifest.serviceTierCatalog, observedAt: manifest.observedAt, catalogDegraded: manifest.catalogDegraded}
 }
 
-// Account policy owns the choice even when its Ultrafast capability check fails:
-// preserve the client tier instead of falling through to the group's Fast rule.
+// Account policy owns the choice, including the Fast fallback when the upstream
+// catalog does not support Ultrafast. Unavailable evidence preserves the client
+// tier instead of falling through to the group's policy.
 func (s *OpenAIGatewayService) resolveOpenAIForcedServiceTier(ctx context.Context, account *Account, model, requested string) string {
 	if account == nil || account.Platform != PlatformOpenAI {
 		return ""
@@ -134,6 +135,9 @@ func (s *OpenAIGatewayService) resolveOpenAIForcedServiceTier(ctx context.Contex
 		capability = s.openAIUltrafastCapability(ctx, account, model)
 	}
 	recordOpenAIServiceTierPolicy(ctx, account, source, requested, forced, capability)
+	if forced == OpenAIFastTierUltrafast && capability == "unsupported" {
+		return OpenAIFastTierPriority
+	}
 	if forced == OpenAIFastTierUltrafast && capability != "supported" {
 		return ""
 	}

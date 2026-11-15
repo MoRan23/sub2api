@@ -1304,7 +1304,7 @@ export default {
         forceUltrafast: '强制使用 Ultrafast',
         hint: '强制选项互斥，账号强制设置优先于分组。全局 Fast/Flex 策略和 OAuth Guardian 规则仍优先执行。保存后新请求生效，已建立的 WebSocket 会话需重连。',
         accountHint: '适用于所选 OpenAI 业务账号，包括 API Key、Codex-Engine 和影子账号。账号强制设置优先于分组；均关闭时沿用分组或客户端选择。全局策略及 OAuth Guardian 规则仍优先。已建立的 WebSocket 会话需重连。',
-        ultrafastHint: '仅当账号真实上游目录明确声明最终模型支持 ultrafast 时强制；无法确认时保留客户端档位，不回退分组强制 Fast。',
+        ultrafastHint: '账号真实上游目录声明最终模型支持 Ultrafast 时使用 Ultrafast；有效目录未声明支持时回退 Fast（priority），无需同时开启强制 Fast。目录不可用或已过期时保留客户端档位。',
         free: '免费 Fast',
         freeHint: '账号或分组任一开启即可：Fast 仍使用 priority，用户按同一请求的 Standard 价格付费，上游及账号成本照实记录。',
         freeUltrafast: '免费 Ultrafast',

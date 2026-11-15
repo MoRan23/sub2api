@@ -12,7 +12,7 @@ Saving affects new requests. Existing WebSocket sessions retain their settings u
 
 Fast selects `service_tier="priority"`. Forced Ultrafast selects `service_tier="ultrafast"` only when the selected account's raw upstream catalog explicitly declares `service_tiers[].id == "ultrafast"` for the final mapped model. OAuth uses its authorization slot; API Key and Engine use their own upstreams.
 
-ID-only, missing, empty, degraded, stale or failed catalogs preserve the client tier. Account Ultrafast never falls back to group Force Fast. Public catalogs, synthetic descriptors, model-family guesses and `additional_speed_tiers` are not capability evidence. Explicit client tiers retain existing handling.
+A valid catalog that contains only model IDs, omits the final model, or has missing/empty tier declarations makes forced Ultrafast fall back to Fast (`priority`). No separate Force Fast setting is needed; the original account or group remains the policy source. Degraded, invalid, stale or failed catalogs preserve the client tier. Public catalogs, synthetic descriptors, model-family guesses and `additional_speed_tiers` are not capability evidence. Without forced Ultrafast, explicit client tiers retain existing handling.
 
 Refresh builds an immutable capability index. Cache hits share this small index without cloning catalog bodies. Observations expire after 60 seconds; stale data triggers the existing refresh while skipping this attempt. Cold queries wait at most two seconds and never alter account health. Existing URL, key, proxy and authorization isolation applies. Disabling forced Ultrafast avoids its catalog queries.
 
@@ -20,11 +20,11 @@ Global Fast/Flex rules remain authoritative; OAuth Guardian still removes the ti
 
 ## Billing and diagnostics
 
-Free means the customer pays the equivalent Standard price rather than the acceleration premium. Actual upstream tier, original cost, account cost and account quota accounting remain unchanged. Existing channel, long-context, peak and user multipliers still apply. Free Fast covers priority/Fast only; Free Ultrafast covers Ultrafast only.
+Free means the customer pays the equivalent Standard price rather than the acceleration premium. Actual upstream tier, original cost, account cost and account quota accounting remain unchanged. Existing channel, long-context, peak and user multipliers still apply. Free Fast covers priority/Fast only; Free Ultrafast covers Ultrafast only. Requests that fall back to Fast use the Free Fast setting.
 
 Queued billing stores compact flags without retaining complete extra maps or request bodies. Engine settlement snapshots preserve the same flags; missing fields in old snapshots default to false. Existing pricing lookup timing remains unchanged.
 
-Fingerprint details show client tier, force source, forced tier, actual outbound tier and the capability decision. Observations are isolated per physical request or WS turn. Historical records are not inferred from current configuration.
+Fingerprint details show client tier, force source, forced tier, actual outbound tier and the capability decision. On fallback, the requested forced tier remains Ultrafast, capability is not declared by the catalog, and the outbound tier is priority (subject to global policy). Observations are isolated per physical request or WS turn. Historical records are not reinterpreted using the new rule.
 
 ## Storage and rollout
 

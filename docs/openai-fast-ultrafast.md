@@ -5,7 +5,7 @@
 OpenAI 和 Composite 分组支持强制 Fast、强制 Ultrafast、免费 Fast、免费 Ultrafast。OpenAI 账号（OAuth、普通 API Key、Codex-Engine、影子账号）支持相同四项偏好。新增设置默认关闭，已有分组 Fast 设置保持原值。
 
 - 同一层的两个强制开关互斥。界面自动关闭另一个；接口拒绝最终组合同时开启。部分更新若要切换档位，应同时提交旧档位 `false` 和新档位 `true`。
-- 强制来源按账号、分组、客户端依次决定。账号开启 Ultrafast 后，即使能力不足，也不回退使用分组强制 Fast。
+- 强制来源按账号、分组、客户端依次决定。选择强制 Ultrafast 后，有效目录未声明最终模型支持时自动回退 Fast（priority），无需同时开启强制 Fast；回退仍属于原账号或分组的强制策略。
 - 两个免费开关独立，可同时启用，无需开启强制。账号或分组任一开启对应免费标志即可生效。
 - 影子账号使用自己的业务设置；凭据来源只提供认证与能力。非 OpenAI 路由不受影响。
 - 设置保存后影响新请求；既有 WebSocket 会话沿用设置快照，重连后更新。每一轮仍重新检查能力观察是否有效。
@@ -14,7 +14,7 @@ OpenAI 和 Composite 分组支持强制 Fast、强制 Ultrafast、免费 Fast、
 
 Fast 写入 `service_tier="priority"`，Ultrafast 写入 `service_tier="ultrafast"`。强制 Ultrafast 需要所选账号的原始上游目录对最终映射模型明确声明 `service_tiers[].id == "ultrafast"`。OAuth 按真实授权槽位查询；API Key 和 Engine 使用各自上游。
 
-只含模型 ID、缺失或空声明、降级目录、查询失败或过期证据均跳过自动强制，保留客户端档位。公开目录、内置描述符、别名推测和 `additional_speed_tiers` 不提供此项证据。客户端自己指定 Ultrafast 时按既有策略处理。
+有效目录只含模型 ID、最终模型缺失或缺少／空的档位声明时，强制 Ultrafast 回退为 `priority`。降级目录、无效目录、查询失败或过期证据继续保留客户端档位。公开目录、内置描述符、别名推测和 `additional_speed_tiers` 不提供此项证据。未开启强制 Ultrafast 时，客户端自己指定的档位仍按既有策略处理。
 
 能力索引在目录刷新时构建，缓存命中只共享只读索引；有效观察期为 60 秒。过期缓存触发已有刷新，本轮跳过；冷缓存最多等待 2 秒，失败不改变账号健康。缓存沿用 URL、凭据、代理及 OAuth 授权隔离。无强制 Ultrafast 时不为该功能查询目录。
 
@@ -22,11 +22,11 @@ Fast 写入 `service_tier="priority"`，Ultrafast 写入 `service_tier="ultrafas
 
 ## 免费含义与诊断
 
-“免费”表示免加速溢价：用户按同一请求的 Standard 价格计费。实际发送档位、上游原始成本、账号成本和账号额度统计保持原规则；渠道、长上下文、峰时和用户倍率沿用现有计价。免费 Fast 仅覆盖 priority/Fast，免费 Ultrafast 仅覆盖 Ultrafast。
+“免费”表示免加速溢价：用户按同一请求的 Standard 价格计费。实际发送档位、上游原始成本、账号成本和账号额度统计保持原规则；渠道、长上下文、峰时和用户倍率沿用现有计价。免费 Fast 仅覆盖 priority/Fast，免费 Ultrafast 仅覆盖 Ultrafast。自动回退到 Fast 的请求使用免费 Fast 设置。
 
 异步计费只冻结两个小型布尔标志和现有计费数据，不持有完整账号 extra 或正文。Engine 独立结算快照保存相同偏好，旧快照缺失字段按关闭处理，保持原有查价时点。
 
-指纹详情新增 Fast / Ultrafast 策略：客户端档位、强制来源、请求强制档位、实际出站档位及能力跳过原因。最终档位来自实际物理请求或当前 WS 帧；旧记录显示未记录。
+指纹详情新增 Fast / Ultrafast 策略：客户端档位、强制来源、请求强制档位、实际出站档位及能力检查结果。自动回退时，请求强制档位仍为 Ultrafast，能力结果为目录未声明支持，实际出站档位为 priority（仍受全局策略影响）。最终档位来自实际物理请求或当前 WS 帧；旧记录显示未记录，不按新规则重解释。
 
 ## API 与升级
 
