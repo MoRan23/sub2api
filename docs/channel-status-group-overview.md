@@ -54,11 +54,11 @@ OpenAI／Composite 分组卡片展示当前生效的探针模型：启用分组�
 
 回退应用时可保留新增字段和索引。统计口径升级期间应统一运行新版本，避免旧聚合进程重新写入旧口径；若曾回退并运行旧聚合进程，再升级后应重新执行对应统计版本回填。
 
-首 Token 分桶细化使用聚合版本 3，独立保留可用率口径版本 2，无需数据库迁移。升级后后台先重算最近 2 小时，覆盖默认 90 分钟窗口，再按已有自适应批次向更早历史推进；每轮仍优先刷新最近 10 分钟。回填进度与聚合结果一起提交，重启后继续，不在页面请求中扫描原始日志。版本 2 已完成的可用率覆盖保持有效；尚未重算的较长窗口仍可能混有旧的粗桶，随回填逐步更新。
+首 Token 分桶细化使用聚合版本 3，独立保留可用率口径版本 2，无需数据库迁移。升级后后台优先重算最近 2 小时，失败时退避并缩小批次，成功提交后向更早历史推进；后续每轮优先刷新最近 10 分钟。回填进度与聚合结果一起提交，重启后继续，不在页面请求中扫描原始日志。版本 2 已完成的可用率覆盖保持有效；尚未重算的较长窗口仍可能混有旧的粗桶，随回填逐步更新。
 
 升级时统一切换聚合进程，避免旧进程再次写入版本 2 的粗桶。回退旧程序可读取细桶；旧程序重新聚合后会写回旧版本，下次升级由版本检查重新启动精度回填。
 
-此次仅细化 TTFT，总耗时分桶不变。每个维度最多 13,682 个 TTFT 上界，数据库只存非空桶，不预分配全部桶；页面仍读取已有汇总表，查询次数不变，非空桶行数和汇总读取量会随样本分布增加。超过 600 秒仍沿用原溢出桶 `2147483647ms`，不赋予该桶细精度。
+此次仅细化 TTFT，总耗时分桶不变。每个维度最多 13,682 个 TTFT 上界，数据库只存非空桶，不预分配全部桶；概览在数据库内合并汇总，只返回分组时间格计数及每组 P50。详细统计继续读取所需直方图，其返回量随非空桶增加。超过 600 秒仍沿用原溢出桶 `2147483647ms`，不赋予该桶细精度。
 
 ## English
 
@@ -86,7 +86,7 @@ Each aggregation cycle updates recent requests first. Historical backfill failur
 
 Forward migrations extend aggregation and bounded history lookup. Versioned backfill runs in bounded background batches within available source-log coverage, never within a page request. Deploy aggregators consistently during the statistics transition. Additive database fields and indexes may remain on application rollback; running an old aggregator requires a statistics rebuild when upgrading again.
 
-Finer TTFT uses aggregation version 3 while keeping availability semantics at version 2; no database migration is required. On upgrade, the background worker first rebuilds the latest two hours to cover the default 90-minute view, then walks older source-covered history in the existing adaptive batches. Every subsequent cycle still prioritizes the latest ten minutes. Cursor and facts commit together and resume after restart; page requests never scan source logs to rebuild history. Existing version-2 availability coverage stays usable, while longer windows may temporarily contain coarse historical bounds until their batches finish. Switch all aggregator processes together; an old application can read fine bounds but writes its older version when recomputing, triggering a fresh precision backfill on the next upgrade. Duration buckets remain unchanged. TTFT has at most 13,682 bounds per dimension, storing only occupied buckets without preallocating the full set; query count stays unchanged, although histogram rows and rollup reads may increase. Values above 600s retain the previous overflow bound of 2147483647ms without a finer-precision guarantee.
+Finer TTFT uses aggregation version 3 while keeping availability semantics at version 2; no database migration is required. On upgrade, the background worker first rebuilds the latest two hours to cover the default 90-minute view, then walks older source-covered history in the existing adaptive batches. Every subsequent cycle still prioritizes the latest ten minutes. Cursor and facts commit together and resume after restart; page requests never scan source logs to rebuild history. Existing version-2 availability coverage stays usable, while longer windows may temporarily contain coarse historical bounds until their batches finish. Switch all aggregator processes together; an old application can read fine bounds but writes its older version when recomputing, triggering a fresh precision backfill on the next upgrade. Duration buckets remain unchanged. TTFT has at most 13,682 bounds per dimension, storing only occupied buckets without preallocating the full set; the overview combines histograms in PostgreSQL and returns one P50 per group, while detailed views still read occupied bounds. Values above 600s retain the previous overflow bound of 2147483647ms without a finer-precision guarantee.
 
 The attribution-summary update requires no migration and reuses index 286. One batch query reads distinct accounts and generates twenty states per group; a second bounded batch preserves legacy `latest/recent` fields. New clients use `enabled/probe_model/as_of/summary_state/history`. The configured model is projected as a scalar in the existing batch query, with no per-group query. Retention keeps the latest 100 jobs plus effective results from the last 215 minutes and each API Key's last effective result before that window. Already-pruned history is not reconstructed; rolling back to an older cleaner can reduce available history on a later upgrade.
 
@@ -234,3 +234,55 @@ GOEXPERIMENT=greenteagc,jsonv2 go test -race -tags unit ./internal/service ./int
 GOEXPERIMENT=greenteagc,jsonv2 go build ./...
 GOEXPERIMENT=greenteagc,jsonv2 go test -tags integration ./internal/repository -run 'TestChannelMonitorV2(PrecisionUpgrade|LatencyPrecision|Overview(AggregationOutcomes|AvailabilityErrorClassification|CompositeHistogramAndScope|RecoveredAcrossChunks|MigrationUpgrade)Integration)' -count=1 -v
 ```
+
+## 回填与概览性能优化 / Backfill and overview performance (2026-11-15)
+
+保留上述 TTFT 毫秒分桶、可用率、权限及历史显示规则，本轮仅减少重复工作并限制后台维护开销：
+
+- 首次回填仍优先覆盖最近两小时；失败后遵守退避并逐次缩小到一小时、半小时、最低十五分钟。成功提交小窗口后继续补齐历史。七天以前的回填也遵守实际批次上限，不再将小批次扩大到整天。
+- 分钟事实保留原 TTL，加上回填游标所在未完成 UTC 日所需的部分数据。已经过期的短周期汇总不再生成；完成日桶后即可回收其临时分钟事实，不等待整个历史任务结束。
+- 清理移至聚合提交之后，总预算两秒，每条语句最多五百毫秒，每批最多一千行；满批继续轮询，轮换起始表。清理失败保留已提交进度，后续继续。按有界 `ctid` 数组定位删除，避免外层全表扫描。
+- 基础统计、用户统计和延迟直方图共用一次物化的有效请求筛选，保留原有最终失败排除与账号、分组关联规则。
+- 分组概览使用独立的批量查询：按组和时间格读取计数，仅计算每组整窗 TTFT P50。无需传回逐模型、逐格的完整直方图、总耗时或 P90/P95；详细统计仍保留这些信息。详细统计的三个分位数共用一次排序和累计扫描。
+
+The TTFT resolution, availability semantics, permissions and displayed history remain unchanged. Bootstrap failures now shrink the actual work and observe retry delays; historical chunks no longer expand to whole days. Only the unfinished frontier day is retained beyond normal minute-fact TTLs. Expired short rollups are skipped, and bounded cleanup runs after committing aggregation progress, using fair multi-batch scheduling and direct tuple lookup. The three usage-derived outputs share one materialized accepted-request scan. Public cards load grouped counters and a single whole-window P50 per group; detailed views retain their full metrics while sorting each histogram once for all three quantiles.
+
+### 固定场景对比 / Reproducible comparisons
+
+以下每项均在同一工具链、同一环境和数据下比较，使用 Go 1.27.3 和 `GOEXPERIMENT=greenteagc,jsonv2`。分位数微基准在 Windows/amd64 运行；数据库读写在 WSL Ubuntu 24.04、隔离 PostgreSQL 18.1 中运行。数值为本地合成数据，不是生产压测。
+
+| 场景 / Scenario | 原路径，三轮 / Previous | 新路径，三轮 / Updated |
+|---|---|---|
+| 13,682 桶，三个分位数 / Three quantiles | 4.170 / 4.053 / 3.977 ms | 1.372 / 1.447 / 1.512 ms |
+| 分位数分配 / Quantile B/op | 344,256 | 114,768 |
+| 分位数分配次数 / Quantile allocs/op | 12 | 6 |
+| 30 天概览 / 30-day overview | 624.817 / 643.594 / 637.831 ms | 150.314 / 135.963 / 140.008 ms |
+| 概览分配 / Overview B/op | 316,041,788 / 316,042,080 / 316,041,960 | 53,478 / 53,442 / 53,440 |
+| 概览分配次数 / Overview allocs/op | 4,685,390 / 4,685,393 / 4,685,392 | 603 / 603 / 603 |
+| 20,000 条请求生成三类统计 / Three usage-derived outputs | 796.070 / 766.681 / 760.075 ms | 679.894 / 733.471 / 698.824 ms |
+
+概览场景为一个组、三十天、三个模型、每天每模型两千个非空桶，含 TTFT／总耗时及全局／用户两个范围，共 720,000 条直方图行。旧矩阵读取 360,000 条直方图；新路径在数据库内合并，只返回分组时间格计数和每组一个 P50。对照矩阵已经使用一次排序实现，概览收益没有重复计入分位数优化。B/op 是 Go 进程每次调用累计分配，不含 PostgreSQL 内存。
+
+The overview fixture contains one group, 30 days, three models, 2,000 occupied bounds per model/day, two metrics and global/private-user audiences: 720,000 histogram rows. The matrix reads 360,000 histogram rows; the dedicated path returns grouped time-bucket counters and one median per group. The comparison matrix already uses the shared sort, so the overview improvement does not count that optimization twice. B/op measures cumulative Go allocations per call, excluding PostgreSQL memory.
+
+三类统计写入的均值为 774.275 → 704.063 ms，降低约 9.1%。计时包含实际索引写入，不含准备、清理和 COMMIT。数据库内对三张结果表排除 `computed_at` 后执行双向 `EXCEPT ALL`，确认全部业务字段一致，计数保持 20,000／20,000／80,000。Windows 分位数微基准与 Linux 数据库基准仅各自做前后比较。
+
+The shared-scan write benchmark averages 774.275 → 704.063 ms (9.1% less), including index writes but excluding setup, cleanup and COMMIT. Bidirectional SQL comparisons verify every persisted business field except the refresh timestamp; counts remain 20,000 / 20,000 / 80,000. Windows quantile microbenchmarks and Linux database benchmarks are compared only within their respective environments.
+
+### 验证 / Validation
+
+Repository、Service、Handler 的 `TestChannelMonitorV2` 单元和竞态测试、带 `unit` 标签的调度专项单元与竞态测试、后端 `go build ./...` 均通过。隔离 PostgreSQL／Redis 的 17 项写入及历史回填集成测试全部通过（50.871s），另完成五种时间粒度的概览差分和三轮读取基准。覆盖五千行积压的多批清理、`Index Scan + Tid Scan` 删除计划、跨两个午夜的六小时回填、清理失败仍保留水位、升级／来源边界及原有可用率规则。没有前端实现变更，未重复执行前端构建；未执行远端 CI。
+
+Targeted repository/service/handler unit and race tests, tagged scheduler unit/race tests and the backend build passed. All 17 isolated PostgreSQL/Redis write/backfill integration tests passed (50.871s), alongside overview equivalence checks at five granularities and three read-benchmark rounds. Coverage includes multi-batch removal of 5,000 expired rows, an index-plus-TID delete plan, six-hour chunks spanning two midnights, committed progress surviving cleanup failure, upgrade/source boundaries and existing availability rules. No frontend implementation changed, so no frontend rebuild was needed. Remote CI was not run.
+
+复现 / Reproduce from `backend`:
+
+```sh
+export GOEXPERIMENT=greenteagc,jsonv2
+go test ./internal/repository -run '^$' -bench '^BenchmarkChannelMonitorV2SharedQuantileSort$' -benchmem -count=3
+go test -tags integration ./internal/repository -run 'TestChannelMonitorV2(GroupMetrics|SharedUsageAggregation|RetentionBacklogAndPlan|BoundedHistoricalRetention|CleanupFailureKeepsProgress)' -count=1 -v
+```
+
+无数据库迁移或配置开关变更。升级沿用版本 3 的已提交水位，不强制重新回填整个历史；旧版本可读取同一数据结构。部署时统一切换聚合进程以采用新维护逻辑。此次不修改生产配置、不调用模型、不自动部署。
+
+No schema migration or new setting is required. Existing version-3 progress is reused without forcing another full replay, and stored data remains readable by the previous version. Switch aggregation processes together when deploying the maintenance changes. No production configuration, model calls or deployment are part of this change.

@@ -28,11 +28,8 @@ type overviewRepositoryStub struct {
 func (r *overviewRepositoryStub) GetConfig(context.Context) (*ChannelMonitorV2Config, error) {
 	return &r.cfg, nil
 }
-func (r *overviewRepositoryStub) GetMatrix(_ context.Context, f ChannelMonitorV2Filter, _ ChannelMonitorV2Config, by ChannelMonitorV2GroupBy, admin bool) (*ChannelMonitorV2Matrix, error) {
-	if admin {
-		panic("public overview must not load admin metadata")
-	}
-	r.filter, r.groupBy = f, by
+func (r *overviewRepositoryStub) GetGroupOverviewMetrics(_ context.Context, f ChannelMonitorV2Filter, _ ChannelMonitorV2Config) (*ChannelMonitorV2Matrix, error) {
+	r.filter, r.groupBy = f, ChannelMonitorV2GroupByGroup
 	r.matrixCalls++
 	return r.matrix, nil
 }

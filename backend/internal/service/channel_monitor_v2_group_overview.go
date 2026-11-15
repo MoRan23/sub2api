@@ -85,6 +85,12 @@ type channelMonitorV2GroupAttributionReader interface {
 	GetGroupAttributionOverview(context.Context, []int64, time.Time) (map[int64]ChannelMonitorV2OverviewAttribution, error)
 }
 
+// The overview needs group counters and one whole-window percentile, not the
+// detailed matrix's per-model, per-bucket latency distributions.
+type channelMonitorV2GroupMetricsReader interface {
+	GetGroupOverviewMetrics(context.Context, ChannelMonitorV2Filter, ChannelMonitorV2Config) (*ChannelMonitorV2Matrix, error)
+}
+
 func (s *ChannelMonitorV2Service) GetGroupOverview(ctx context.Context, filter ChannelMonitorV2Filter, groups []Group, userRates map[int64]float64) (*ChannelMonitorV2GroupOverview, error) {
 	cfg, err := s.getEnabledConfig(ctx)
 	if err != nil {
@@ -115,7 +121,11 @@ func (s *ChannelMonitorV2Service) GetGroupOverview(ctx context.Context, filter C
 	}
 	// Internal group dimension merges raw counts and histogram bins across actual
 	// upstream platforms, including Composite; it never averages rates or P50s.
-	matrix, err := s.repo.GetMatrix(ctx, filter, *cfg, ChannelMonitorV2GroupBy("group"), false)
+	metricsReader, ok := s.repo.(channelMonitorV2GroupMetricsReader)
+	if !ok {
+		return nil, errors.New("group monitoring data unavailable")
+	}
+	matrix, err := metricsReader.GetGroupOverviewMetrics(ctx, filter, *cfg)
 	if err != nil {
 		return nil, err
 	}

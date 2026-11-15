@@ -35,7 +35,7 @@ type overviewHandlerRepo struct {
 func (r *overviewHandlerRepo) GetConfig(context.Context) (*service.ChannelMonitorV2Config, error) {
 	return &service.ChannelMonitorV2Config{Enabled: true, RefreshIntervalSeconds: 60, Platforms: []service.ChannelMonitorV2PlatformConfig{{Platform: "openai", Enabled: true}}}, nil
 }
-func (r *overviewHandlerRepo) GetMatrix(_ context.Context, f service.ChannelMonitorV2Filter, _ service.ChannelMonitorV2Config, _ service.ChannelMonitorV2GroupBy, _ bool) (*service.ChannelMonitorV2Matrix, error) {
+func (r *overviewHandlerRepo) GetGroupOverviewMetrics(_ context.Context, f service.ChannelMonitorV2Filter, _ service.ChannelMonitorV2Config) (*service.ChannelMonitorV2Matrix, error) {
 	r.filter = f
 	r.reads++
 	return &service.ChannelMonitorV2Matrix{}, nil

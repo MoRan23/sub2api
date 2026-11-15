@@ -1424,10 +1424,44 @@ func latencyMetric(sum, count int64, hist map[int64]int64) service.ChannelMonito
 		avg := float64(sum) / float64(count)
 		result.AvgMs = &avg
 	}
-	result.P50Ms = histPercentile(hist, 0.50)
-	result.P90Ms = histPercentile(hist, 0.90)
-	result.P95Ms = histPercentile(hist, 0.95)
+	result.P50Ms, result.P90Ms, result.P95Ms = histQuantiles(hist)
 	return result
+}
+
+// All three percentiles share one sorted set of occupied bounds.
+func histQuantiles(hist map[int64]int64) (p50, p90, p95 *int64) {
+	var total int64
+	keys := make([]int64, 0, len(hist))
+	for bound, count := range hist {
+		keys = append(keys, bound)
+		total += count
+	}
+	if total == 0 {
+		return nil, nil, nil
+	}
+	sort.Slice(keys, func(i, j int) bool { return keys[i] < keys[j] })
+	targets := [3]int64{int64(float64(total)*.50 + .999999), int64(float64(total)*.90 + .999999), int64(float64(total)*.95 + .999999)}
+	var values [3]*int64
+	var cumulative int64
+	for _, bound := range keys {
+		cumulative += hist[bound]
+		for i, target := range targets {
+			if values[i] == nil && cumulative >= target {
+				value := bound
+				values[i] = &value
+			}
+		}
+		if values[2] != nil {
+			break
+		}
+	}
+	for i := range values {
+		if values[i] == nil {
+			value := keys[len(keys)-1]
+			values[i] = &value
+		}
+	}
+	return values[0], values[1], values[2]
 }
 func histPercentile(hist map[int64]int64, p float64) *int64 {
 	var total int64
