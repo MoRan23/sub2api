@@ -4,8 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 )
 
@@ -45,8 +47,8 @@ AND NOT EXISTS (
 //	1m facts  → short (late writes + rebuild rollups)
 //	5m/1h/12h/1d rollups → longer, aligned to 90m / 24h / 7d / 30d(+audit)
 //
-// Backfill may still write short-lived 1m rows for old windows so rollups can be
-// built; prune at end of each recompute drops them past their TTL while rollups remain.
+// Backfill writes short-lived 1m rows to build retained rollups. Bounded cleanup
+// after commit removes expired rows, except the unfinished day at the frontier.
 const (
 	channelMonitorV2RetentionUser1m      = 3 * 24 * time.Hour
 	channelMonitorV2RetentionMetrics1m   = 7 * 24 * time.Hour
@@ -99,36 +101,93 @@ var channelMonitorV2RetentionRules = []channelMonitorV2RetentionRule{
 	{table: "channel_monitor_v2_latency_histograms_rollup", retention: channelMonitorV2RetentionRollup1d, bucketSeconds: 86400},
 }
 
-func (r *channelMonitorV2Repository) pruneChannelMonitorV2Retention(ctx context.Context, tx *sql.Tx, now time.Time) error {
-	// During historical bootstrap, retain all 1m facts until the cursor reaches
-	// the oldest rollup boundary. Otherwise adjacent chunks would rebuild the
-	// same daily bucket from source rows already pruned by the prior chunk.
+const channelMonitorV2PruneBatchSize = 1000
+
+var channelMonitorV2PruneRound atomic.Uint64
+
+func (r *channelMonitorV2Repository) pruneChannelMonitorV2Retention(ctx context.Context, now time.Time) error {
+	// Only the reconstructed portion of the frontier's unfinished UTC day is
+	// needed by subsequent chunks. Completed days already have durable rollups.
 	var backfillCursor, sourceStart sql.NullTime
-	if err := tx.QueryRowContext(ctx, `SELECT backfill_cursor, availability_source_start FROM channel_monitor_v2_watermarks WHERE id = 1`).Scan(&backfillCursor, &sourceStart); err == nil {
-		cutoff := channelMonitorV2RetentionCutoff(now, channelMonitorV2RetentionMax)
-		if sourceStart.Valid && sourceStart.Time.After(cutoff) {
-			cutoff = sourceStart.Time
-		}
-		if backfillCursor.Valid && backfillCursor.Time.After(cutoff) {
-			return nil
+	if err := r.db.QueryRowContext(ctx, `SELECT backfill_cursor, availability_source_start FROM channel_monitor_v2_watermarks WHERE id = 1`).Scan(&backfillCursor, &sourceStart); err != nil {
+		return err
+	}
+	protectStart, protectEnd := channelMonitorV2ProtectedFrontier(now, backfillCursor, sourceStart)
+	// Rotate the first table between calls; a large backlog in one tier cannot
+	// consume every cleanup budget before later tiers are visited. Repeat only
+	// full batches, keeping each statement small while draining more than the
+	// incoming row rate whenever the two-second budget permits.
+	first := int((channelMonitorV2PruneRound.Add(1) - 1) % uint64(len(channelMonitorV2RetentionRules)))
+	pending := make([]bool, len(channelMonitorV2RetentionRules))
+	for i := range pending {
+		pending[i] = true
+	}
+	var firstErr error
+	for remaining := len(pending); remaining > 0; {
+		for offset := range pending {
+			i := (first + offset) % len(pending)
+			if !pending[i] {
+				continue
+			}
+			if err := ctx.Err(); err != nil {
+				return err
+			}
+			rule := channelMonitorV2RetentionRules[i]
+			cutoff := channelMonitorV2RetentionCutoff(now, rule.retention)
+			var err error
+			var result sql.Result
+			// A bounded TID array permits direct tuple lookup. IN (subquery)
+			// can instead choose a hash join that rescans the entire target table.
+			if rule.bucketSeconds == 0 {
+				result, err = r.execChannelMonitorV2PruneBatch(ctx, fmt.Sprintf(`DELETE FROM %s WHERE ctid = ANY(ARRAY(
+SELECT ctid FROM %s WHERE bucket_start < $1
+AND NOT (bucket_start >= $2 AND bucket_start < $3)
+ORDER BY bucket_start LIMIT $4))`, rule.table, rule.table), cutoff, protectStart, protectEnd, channelMonitorV2PruneBatchSize)
+			} else {
+				result, err = r.execChannelMonitorV2PruneBatch(ctx,
+					fmt.Sprintf(`DELETE FROM %s WHERE ctid = ANY(ARRAY(SELECT ctid FROM %s
+WHERE bucket_seconds = $1 AND bucket_start < $2 ORDER BY bucket_start LIMIT $3))`, rule.table, rule.table),
+					rule.bucketSeconds, cutoff, channelMonitorV2PruneBatchSize,
+				)
+			}
+			if err != nil {
+				if firstErr == nil {
+					firstErr = fmt.Errorf("prune %s (bucket_seconds=%d): %w", rule.table, rule.bucketSeconds, err)
+				}
+				pending[i] = false
+				remaining--
+				continue
+			}
+			rows, err := result.RowsAffected()
+			if err != nil || rows < channelMonitorV2PruneBatchSize {
+				pending[i] = false
+				remaining--
+			}
 		}
 	}
-	for _, rule := range channelMonitorV2RetentionRules {
-		cutoff := channelMonitorV2RetentionCutoff(now, rule.retention)
-		var err error
-		if rule.bucketSeconds == 0 {
-			_, err = tx.ExecContext(ctx, fmt.Sprintf(`DELETE FROM %s WHERE bucket_start < $1`, rule.table), cutoff)
-		} else {
-			_, err = tx.ExecContext(ctx,
-				fmt.Sprintf(`DELETE FROM %s WHERE bucket_seconds = $1 AND bucket_start < $2`, rule.table),
-				rule.bucketSeconds, cutoff,
-			)
-		}
-		if err != nil {
-			return fmt.Errorf("prune %s (bucket_seconds=%d): %w", rule.table, rule.bucketSeconds, err)
-		}
+	return firstErr
+}
+
+func (r *channelMonitorV2Repository) execChannelMonitorV2PruneBatch(ctx context.Context, query string, args ...any) (sql.Result, error) {
+	batchCtx, cancel := context.WithTimeout(ctx, 500*time.Millisecond)
+	defer cancel()
+	return r.db.ExecContext(batchCtx, query, args...)
+}
+
+func channelMonitorV2ProtectedFrontier(now time.Time, cursor, source sql.NullTime) (time.Time, time.Time) {
+	floor := channelMonitorV2RetentionCutoff(now, channelMonitorV2RetentionMax)
+	if source.Valid && source.Time.After(floor) {
+		floor = source.Time
 	}
-	return nil
+	if !cursor.Valid || !cursor.Time.After(floor) {
+		return time.Unix(0, 0), time.Unix(0, 0)
+	}
+	start := cursor.Time.UTC()
+	day := start.Truncate(24 * time.Hour)
+	if start.Equal(day) {
+		return start, start
+	}
+	return start, day.Add(24 * time.Hour)
 }
 
 func (r *channelMonitorV2Repository) RecomputeRange(ctx context.Context, start, end time.Time) (err error) {
@@ -183,14 +242,8 @@ WHERE id = 1 AND aggregation_version >= 2 AND aggregation_version < 3`, watermar
 		}
 	}
 
-	if _, err = tx.ExecContext(ctx, fmt.Sprintf(channelMonitorV2UsageMetricsSQL, channelMonitorV2PlatformSQL, channelMonitorV2ModelSQL), start, end); err != nil {
-		return fmt.Errorf("aggregate channel monitor v2 usage: %w", err)
-	}
-	if _, err = tx.ExecContext(ctx, fmt.Sprintf(channelMonitorV2UserMetricsSQL, channelMonitorV2PlatformSQL, channelMonitorV2ModelSQL), start, end); err != nil {
-		return fmt.Errorf("aggregate channel monitor v2 users: %w", err)
-	}
-	if _, err = tx.ExecContext(ctx, fmt.Sprintf(channelMonitorV2HistogramSQL, channelMonitorV2PlatformSQL, channelMonitorV2ModelSQL, channelMonitorV2MetricHistogramBoundSQL("latency.metric", "latency.value_ms")), start, end); err != nil {
-		return fmt.Errorf("aggregate channel monitor v2 histograms: %w", err)
+	if _, err = tx.ExecContext(ctx, channelMonitorV2UsageAggregationSQL, start, end); err != nil {
+		return fmt.Errorf("aggregate channel monitor v2 usage facts: %w", err)
 	}
 	if _, err = tx.ExecContext(ctx, channelMonitorV2ErrorAggregationSQL, start, end); err != nil {
 		return fmt.Errorf("aggregate channel monitor v2 errors: %w", err)
@@ -213,13 +266,15 @@ WHERE id = 1 AND aggregation_version >= 2 AND aggregation_version < 3`, watermar
 	if _, err = tx.ExecContext(ctx, channelMonitorV2WatermarkSQL, start, end, watermark.AvailabilitySourceStart); err != nil {
 		return err
 	}
-	// Prune after publishing the transaction's cursor so a version upgrade keeps
-	// all reconstructed minute facts until the new historical pass is complete.
-	if err = r.pruneChannelMonitorV2Retention(ctx, tx, now); err != nil {
-		return err
-	}
 	if err = tx.Commit(); err != nil {
 		return err
+	}
+	// Cleanup is bounded and independent of publishing progress. A timeout must
+	// never roll back a successfully rebuilt chunk or cause it to be replayed.
+	cleanupCtx, cleanupCancel := context.WithTimeout(ctx, 2*time.Second)
+	defer cleanupCancel()
+	if cleanupErr := r.pruneChannelMonitorV2Retention(cleanupCtx, now); cleanupErr != nil {
+		logger.LegacyPrintf("service.channel_monitor_v2", "[ChannelMonitorV2] bounded retention cleanup deferred: %v", cleanupErr)
 	}
 	return nil
 }
@@ -234,7 +289,8 @@ const channelMonitorV2AcceptedUsageCTE = `WITH accepted_usage AS MATERIALIZED (
 )
 `
 
-const channelMonitorV2UsageMetricsSQL = channelMonitorV2AcceptedUsageCTE + `
+const channelMonitorV2UsageMetricsSQL = channelMonitorV2AcceptedUsageCTE + channelMonitorV2UsageMetricsInsertSQL
+const channelMonitorV2UsageMetricsInsertSQL = `
 INSERT INTO channel_monitor_v2_metrics_1m (
   bucket_start, platform, group_id, model, success_requests,
   input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
@@ -253,7 +309,8 @@ LEFT JOIN accounts a ON a.id = ul.account_id
 WHERE ul.created_at >= $1 AND ul.created_at < $2
 GROUP BY 1, 2, 3, 4`
 
-const channelMonitorV2UserMetricsSQL = channelMonitorV2AcceptedUsageCTE + `
+const channelMonitorV2UserMetricsSQL = channelMonitorV2AcceptedUsageCTE + channelMonitorV2UserMetricsInsertSQL
+const channelMonitorV2UserMetricsInsertSQL = `
 INSERT INTO channel_monitor_v2_user_metrics_1m (
   bucket_start, platform, group_id, model, user_id, success_requests,
   input_tokens, output_tokens, cache_creation_tokens, cache_read_tokens,
@@ -272,7 +329,8 @@ LEFT JOIN accounts a ON a.id = ul.account_id
 WHERE ul.created_at >= $1 AND ul.created_at < $2 AND ul.user_id IS NOT NULL
 GROUP BY 1, 2, 3, 4, 5`
 
-const channelMonitorV2HistogramSQL = channelMonitorV2AcceptedUsageCTE + `
+const channelMonitorV2HistogramSQL = channelMonitorV2AcceptedUsageCTE + channelMonitorV2HistogramInsertSQL
+const channelMonitorV2HistogramInsertSQL = `
 INSERT INTO channel_monitor_v2_latency_histograms_1m (
   bucket_start, platform, group_id, model, user_id, metric, upper_bound_ms, sample_count
 )
@@ -286,6 +344,13 @@ CROSS JOIN LATERAL (VALUES ('ttft'::text, ul.first_token_ms), ('duration'::text,
 WHERE ul.created_at >= $1 AND ul.created_at < $2
   AND audience.user_id IS NOT NULL AND latency.value_ms IS NOT NULL AND latency.value_ms >= 0
 GROUP BY 1, 2, 3, 4, 5, 6, 7`
+
+// All three outputs share one accepted-usage scan and final-outcome lookup.
+// Data-modifying CTEs execute once even without RETURNING or a consumer.
+var channelMonitorV2UsageAggregationSQL = channelMonitorV2AcceptedUsageCTE + ", metric_rows AS (" +
+	fmt.Sprintf(channelMonitorV2UsageMetricsInsertSQL, channelMonitorV2PlatformSQL, channelMonitorV2ModelSQL) +
+	"), user_rows AS (" + fmt.Sprintf(channelMonitorV2UserMetricsInsertSQL, channelMonitorV2PlatformSQL, channelMonitorV2ModelSQL) + ") " +
+	fmt.Sprintf(channelMonitorV2HistogramInsertSQL, channelMonitorV2PlatformSQL, channelMonitorV2ModelSQL, channelMonitorV2MetricHistogramBoundSQL("latency.metric", "latency.value_ms"))
 
 func channelMonitorV2MetricHistogramBoundSQL(metric, column string) string {
 	return "CASE WHEN " + metric + " = 'ttft' THEN " + channelMonitorV2TTFTHistogramBoundSQL(column) +
@@ -466,7 +531,18 @@ ON CONFLICT (id) DO UPDATE SET
 var channelMonitorV2FixedRollupSeconds = []int{300, 3600, 43200, 86400}
 
 func (r *channelMonitorV2Repository) recomputeFixedRollups(ctx context.Context, tx *sql.Tx, start, end, sourceStart time.Time, refreshingRecent bool) error {
+	now := time.Now().UTC().Truncate(time.Minute)
 	for _, seconds := range channelMonitorV2FixedRollupSeconds {
+		// Historical replay only writes tiers still useful at the current time.
+		// The shared bounds round this floor up to a complete retained bucket.
+		retainedFrom := channelMonitorV2RetentionCutoff(now, channelMonitorV2RollupRetention(seconds))
+		tierSourceStart := sourceStart
+		if retainedFrom.After(tierSourceStart) {
+			tierSourceStart = retainedFrom
+		}
+		if !end.After(tierSourceStart) {
+			continue
+		}
 		// Coarse buckets are immutable between boundaries during the normal
 		// trailing refresh. Historical backfills and boundary-crossing windows
 		// still rebuild them; this avoids repeatedly regrouping the full current
@@ -481,24 +557,37 @@ func (r *channelMonitorV2Repository) recomputeFixedRollups(ctx context.Context, 
 			"channel_monitor_v2_user_metrics_rollup",
 			"channel_monitor_v2_metrics_rollup",
 		} {
-			if _, err := tx.ExecContext(ctx, fmt.Sprintf(channelMonitorV2FixedRollupDeleteSQL, table), interval, seconds, start, end, sourceStart); err != nil {
+			if _, err := tx.ExecContext(ctx, fmt.Sprintf(channelMonitorV2FixedRollupDeleteSQL, table), interval, seconds, start, end, tierSourceStart); err != nil {
 				return err
 			}
 		}
-		if _, err := tx.ExecContext(ctx, channelMonitorV2MetricsRollupSQL, interval, seconds, start, end, sourceStart); err != nil {
+		if _, err := tx.ExecContext(ctx, channelMonitorV2MetricsRollupSQL, interval, seconds, start, end, tierSourceStart); err != nil {
 			return fmt.Errorf("roll up channel monitor v2 metrics %ds: %w", seconds, err)
 		}
-		if _, err := tx.ExecContext(ctx, channelMonitorV2UserMetricsRollupSQL, interval, seconds, start, end, sourceStart); err != nil {
+		if _, err := tx.ExecContext(ctx, channelMonitorV2UserMetricsRollupSQL, interval, seconds, start, end, tierSourceStart); err != nil {
 			return fmt.Errorf("roll up channel monitor v2 user metrics %ds: %w", seconds, err)
 		}
-		if _, err := tx.ExecContext(ctx, channelMonitorV2HistogramRollupSQL, interval, seconds, start, end, sourceStart); err != nil {
+		if _, err := tx.ExecContext(ctx, channelMonitorV2HistogramRollupSQL, interval, seconds, start, end, tierSourceStart); err != nil {
 			return fmt.Errorf("roll up channel monitor v2 histograms %ds: %w", seconds, err)
 		}
-		if _, err := tx.ExecContext(ctx, channelMonitorV2ErrorRollupSQL, interval, seconds, start, end, sourceStart); err != nil {
+		if _, err := tx.ExecContext(ctx, channelMonitorV2ErrorRollupSQL, interval, seconds, start, end, tierSourceStart); err != nil {
 			return fmt.Errorf("roll up channel monitor v2 errors %ds: %w", seconds, err)
 		}
 	}
 	return nil
+}
+
+func channelMonitorV2RollupRetention(seconds int) time.Duration {
+	switch seconds {
+	case 300:
+		return channelMonitorV2RetentionRollup5m
+	case 3600:
+		return channelMonitorV2RetentionRollup1h
+	case 43200:
+		return channelMonitorV2RetentionRollup12h
+	default:
+		return channelMonitorV2RetentionRollup1d
+	}
 }
 
 func sameFixedRollupBucket(start, end time.Time, seconds int) bool {

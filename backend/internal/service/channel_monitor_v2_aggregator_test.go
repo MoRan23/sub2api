@@ -196,28 +196,103 @@ func TestChannelMonitorV2AggregatorBackoffStaysCappedDuringLongOutage(t *testing
 	}
 }
 
-func TestChannelMonitorV2AggregatorBootstrapRetriesOnRegularCadence(t *testing.T) {
+func TestChannelMonitorV2AggregatorBootstrapBackoffShrinksAndRecovers(t *testing.T) {
 	s, repo, clock := newAggregatorClockFixture(t, 60)
 	repo.watermark = nil
+	base := clock.at
+	var attempts []time.Time
+	windows := []time.Duration{2 * time.Hour, time.Hour, 30 * time.Minute}
 	calls := 0
 	repo.recompute = func(_ context.Context, start, end time.Time) error {
+		attempts = append(attempts, clock.at)
+		require.Equal(t, windows[calls], end.Sub(start))
 		calls++
-		require.Equal(t, channelMonitorV2BootstrapFirst, end.Sub(start))
 		clock.add(55 * time.Second)
 		if calls < 3 {
 			return context.DeadlineExceeded
 		}
+		repo.watermark = &ChannelMonitorV2AggregationWatermark{
+			AggregationVersion: ChannelMonitorV2AggregationVersion,
+			HasData:            true, BackfillCursor: start, DataThrough: end,
+		}
 		return nil
 	}
+	waits := 0
 	s.loopWithWait(func(delay time.Duration) bool {
-		require.Equal(t, 5*time.Second, delay)
+		waits++
+		require.Equal(t, base.Add(time.Duration(waits)*time.Minute), clock.at.Add(delay))
 		clock.add(delay)
 		return calls < 3
 	})
 	require.Equal(t, 3, calls)
+	require.Equal(t, []time.Time{base, base.Add(2 * time.Minute), base.Add(5 * time.Minute)}, attempts)
 	require.True(t, s.hasAggregated)
 	require.Zero(t, s.backfillFailures)
 	require.True(t, s.backfillRetryAt.IsZero())
+
+	// A smaller seed is durable progress: the next round runs the trailing
+	// overlap and then continues before the seed rather than retrying two hours.
+	cursor := repo.watermark.BackfillCursor
+	var resumed [][2]time.Time
+	repo.recompute = func(_ context.Context, start, end time.Time) error {
+		resumed = append(resumed, [2]time.Time{start, end})
+		return nil
+	}
+	s.runOnce()
+	require.Len(t, resumed, 2)
+	require.Equal(t, [2]time.Time{clock.at.Add(-channelMonitorV2RecentOverlap), clock.at}, resumed[0])
+	require.Equal(t, cursor, resumed[1][1])
+	require.True(t, resumed[1][0].Before(cursor))
+}
+
+func TestChannelMonitorV2AggregatorBootstrapRespectsRetryAndMinimum(t *testing.T) {
+	s, repo, clock := newAggregatorClockFixture(t, 60)
+	repo.watermark.AggregationVersion = ChannelMonitorV2AvailabilitySchemaVersion
+	windows := []time.Duration{2 * time.Hour, time.Hour, 30 * time.Minute, 15 * time.Minute, 15 * time.Minute}
+	calls := 0
+	repo.recompute = func(_ context.Context, start, end time.Time) error {
+		require.Equal(t, windows[calls], end.Sub(start))
+		calls++
+		return context.DeadlineExceeded
+	}
+	for i := range windows {
+		s.runOnce()
+		require.Equal(t, i+1, calls)
+		require.False(t, s.hasAggregated)
+		require.Equal(t, ChannelMonitorV2AvailabilitySchemaVersion, repo.watermark.AggregationVersion)
+		clock.at = s.backfillRetryAt.Add(-time.Nanosecond)
+		s.runOnce()
+		require.Equal(t, i+1, calls, "a retry just before the deadline must not reach the database")
+		clock.at = s.backfillRetryAt
+	}
+}
+
+func TestChannelMonitorV2AggregatorFarHistoryKeepsAdaptiveBounds(t *testing.T) {
+	for _, hour := range []int{0, 13} {
+		t.Run((time.Duration(hour) * time.Hour).String(), func(t *testing.T) {
+			s, repo, clock := newAggregatorClockFixture(t, 60)
+			cursor := time.Date(2026, 11, 1, hour, 0, 0, 0, time.UTC)
+			repo.watermark.BackfillCursor = cursor
+			s.backfillChunk = channelMonitorV2MaxChunkFar
+			windows := []time.Duration{6 * time.Hour, 3 * time.Hour, 90 * time.Minute, 45 * time.Minute, 22*time.Minute + 30*time.Second, 15 * time.Minute, 15 * time.Minute}
+			calls := 0
+			repo.recompute = func(_ context.Context, start, end time.Time) error {
+				if end.Equal(clock.at.UTC().Truncate(time.Minute)) {
+					require.Equal(t, channelMonitorV2RecentOverlap, end.Sub(start))
+					return nil
+				}
+				require.Equal(t, cursor, end)
+				require.Equal(t, windows[calls], end.Sub(start), "calendar alignment must not expand a bounded chunk")
+				calls++
+				return context.DeadlineExceeded
+			}
+			for i := range windows {
+				s.runOnce()
+				require.Equal(t, i+1, calls)
+				clock.at = s.backfillRetryAt
+			}
+		})
+	}
 }
 
 func TestChannelMonitorV2AggregatorUnavailableInputsAndLease(t *testing.T) {

@@ -54,9 +54,12 @@ type ChannelMonitorV2Aggregator struct {
 	mu        sync.Mutex
 	// backfillAt is the earliest minute already recomputed (mirrors DB cursor).
 	// Zero means "not yet loaded from durable watermark this process".
-	backfillAt       time.Time
-	backfillFloor    time.Time
-	backfillChunk    time.Duration
+	backfillAt    time.Time
+	backfillFloor time.Time
+	backfillChunk time.Duration
+	// bootstrapChunk adapts independently so a failed 2h seed can make progress
+	// without changing the normal historical chunk's initial size.
+	bootstrapChunk   time.Duration
 	backfillFailures int
 	// backfillRetryAt delays only historical work; realtime keeps its own cadence.
 	backfillRetryAt time.Time
@@ -72,14 +75,15 @@ type ChannelMonitorV2Aggregator struct {
 
 func NewChannelMonitorV2Aggregator(repo ChannelMonitorV2Repository, db *sql.DB, settings channelMonitorRuntimeReader) *ChannelMonitorV2Aggregator {
 	return &ChannelMonitorV2Aggregator{
-		repo:          repo,
-		db:            db,
-		settings:      settings,
-		instanceID:    uuid.NewString(),
-		stopCh:        make(chan struct{}),
-		kickCh:        make(chan struct{}, 1),
-		backfillChunk: channelMonitorV2BackfillChunkInit,
-		now:           time.Now,
+		repo:           repo,
+		db:             db,
+		settings:       settings,
+		instanceID:     uuid.NewString(),
+		stopCh:         make(chan struct{}),
+		kickCh:         make(chan struct{}, 1),
+		backfillChunk:  channelMonitorV2BackfillChunkInit,
+		bootstrapChunk: channelMonitorV2BootstrapFirst,
+		now:            time.Now,
 	}
 }
 
@@ -269,18 +273,29 @@ func (s *ChannelMonitorV2Aggregator) runOnce() {
 	cursor := s.backfillAt
 	backfillFloor := s.backfillFloor
 	hasData := s.hasAggregated
+	bootstrapChunk := s.bootstrapChunk
+	retryAt := s.backfillRetryAt
 	s.mu.Unlock()
 
 	// Phase 1 (first upgrade / empty): seed the default 90m UI window quickly.
 	if !hasData || cursor.IsZero() {
-		start := now.Add(-channelMonitorV2BootstrapFirst)
+		if s.currentTime().Before(retryAt) {
+			return
+		}
+		if bootstrapChunk <= 0 || bootstrapChunk > channelMonitorV2BootstrapFirst {
+			bootstrapChunk = channelMonitorV2BootstrapFirst
+		}
+		if bootstrapChunk < channelMonitorV2MinBackfillChunk {
+			bootstrapChunk = channelMonitorV2MinBackfillChunk
+		}
+		start := now.Add(-bootstrapChunk)
 		if backfillFloor.After(start) {
 			start = backfillFloor
 		}
 		started := s.currentTime()
 		if err := s.repo.RecomputeRange(ctx, start, now); err != nil {
 			logger.LegacyPrintf("service.channel_monitor_v2", "[ChannelMonitorV2] bootstrap recent aggregation failed: %v", err)
-			s.recordBackfillFailure(s.currentTime(), cursor)
+			s.recordBootstrapFailure(s.currentTime(), now.Sub(start))
 			return
 		}
 		s.recordBackfillSuccess(start, s.currentTime().Sub(started), now)
@@ -300,7 +315,7 @@ func (s *ChannelMonitorV2Aggregator) runOnce() {
 	s.mu.Lock()
 	cursor = s.backfillAt
 	backfillFloor = s.backfillFloor
-	retryAt := s.backfillRetryAt
+	retryAt = s.backfillRetryAt
 	s.mu.Unlock()
 	// Realtime and its durable watermark refresh above always run, including
 	// while failed historical chunks are waiting for their own retry deadline.
@@ -332,14 +347,8 @@ func (s *ChannelMonitorV2Aggregator) runOnce() {
 		chunk = channelMonitorV2MinBackfillChunk
 	}
 	start := end.Add(-chunk)
-	// Once bootstrap reaches historical data, keep chunks on day boundaries so
-	// daily rollups never depend on 1m rows from two independently pruned chunks.
-	if end.Before(now.Add(-7 * 24 * time.Hour)) {
-		aligned := end.Add(-chunk).Truncate(24 * time.Hour)
-		if aligned.Before(end) {
-			start = aligned
-		}
-	}
+	// The repository retains partial coarse buckets until the next chunk fills
+	// them. Do not expand small chunks to day boundaries: that defeats backoff.
 	if start.Before(retentionCutoff) {
 		start = retentionCutoff
 	}
@@ -425,6 +434,16 @@ func (s *ChannelMonitorV2Aggregator) recordBackfillFailure(now, end time.Time) {
 		delay = time.Minute << uint(s.backfillFailures-1)
 	}
 	s.backfillRetryAt = now.Add(delay)
+}
+
+func (s *ChannelMonitorV2Aggregator) recordBootstrapFailure(now time.Time, attempted time.Duration) {
+	s.recordBackfillFailure(now, now)
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	s.bootstrapChunk = attempted / 2
+	if s.bootstrapChunk < channelMonitorV2MinBackfillChunk {
+		s.bootstrapChunk = channelMonitorV2MinBackfillChunk
+	}
 }
 
 // ensureCursor restores durable backfill_cursor after process restart so progress
