@@ -1,0 +1,13 @@
+2026/11/16 07:07:16 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/repository
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkCodexTelemetryRuntimeCapacity/states_32-12         	      10	   8952713 ns/op	   20391 B/op	     363 allocs/op
+BenchmarkCodexTelemetryRuntimeCapacity/states_32-12         	      10	   9517201 ns/op	   20799 B/op	     364 allocs/op
+BenchmarkCodexTelemetryRuntimeCapacity/states_32-12         	      10	   8993188 ns/op	   20351 B/op	     363 allocs/op
+BenchmarkCodexTelemetryRuntimeCapacity/states_4096-12       	      10	   9252100 ns/op	   20311 B/op	     364 allocs/op
+BenchmarkCodexTelemetryRuntimeCapacity/states_4096-12       	      10	   9684139 ns/op	   20316 B/op	     364 allocs/op
+BenchmarkCodexTelemetryRuntimeCapacity/states_4096-12       	      10	  10977748 ns/op	   20300 B/op	     364 allocs/op
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/repository	11.318s

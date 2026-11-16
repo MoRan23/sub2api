@@ -281,6 +281,7 @@ type codexTelemetryActivityTransaction struct {
 	persisted        map[string]*service.CodexTelemetryActivity
 	dirty            map[string]service.CodexTelemetryActivityKey
 	runtimeValidated bool
+	runtimeOccupancy int
 }
 
 func cloneCodexTelemetryActivity(a service.CodexTelemetryActivity) service.CodexTelemetryActivity {
@@ -400,7 +401,9 @@ func (a *codexTelemetryActivityTransaction) Put(item service.CodexTelemetryActiv
 	}
 	a.cache[mk] = &item
 	a.dirty[mk] = service.CodexTelemetryActivityKey{Kind: item.Kind, Key: item.Key}
-	a.runtimeValidated = false
+	if isCodexTelemetryRuntimeKind(item.Kind) {
+		a.runtimeValidated = false
+	}
 	return nil
 }
 
@@ -411,7 +414,9 @@ func (a *codexTelemetryActivityTransaction) Delete(kind, key string) error {
 	mk := service.CodexTelemetryActivityMapKey(kind, key)
 	a.cache[mk] = nil
 	a.dirty[mk] = service.CodexTelemetryActivityKey{Kind: kind, Key: key}
-	a.runtimeValidated = false
+	if isCodexTelemetryRuntimeKind(kind) {
+		a.runtimeValidated = false
+	}
 	return nil
 }
 
@@ -451,17 +456,9 @@ func (a *codexTelemetryActivityTransaction) flush() error {
 	return nil
 }
 
-// SQL only inspects these runtime fields. Missing/null fields have the same zero
-// values as encoding/json. Exact typed decoding also runs on touched rows.
-const codexTelemetryRuntimeShape = `CASE a.kind
-	WHEN 'turn' THEN jsonb_typeof(a.state) IN ('object','null')
-		AND COALESCE(jsonb_typeof(a.state->'sealed'),'null') IN ('boolean','null')
-		AND COALESCE(jsonb_typeof(a.state->'incomplete'),'null') IN ('boolean','null')
-		AND COALESCE(jsonb_typeof(a.state->'inflight'),'null') IN ('object','null')
-	WHEN 'attempt' THEN jsonb_typeof(a.state) IN ('object','null')
-		AND COALESCE(jsonb_typeof(a.state->'finished'),'null') IN ('boolean','null')
-		AND COALESCE(jsonb_typeof(a.state->'turn_key'),'null') IN ('string','null')
-	ELSE TRUE END`
+func isCodexTelemetryRuntimeKind(kind string) bool {
+	return kind == "turn" || kind == "attempt" || kind == "sampling"
+}
 
 const codexTelemetryRuntimeActive = `COALESCE(a.state->'sealed','false'::jsonb) <> 'true'::jsonb
 	AND COALESCE(a.state->'incomplete','false'::jsonb) <> 'true'::jsonb`
@@ -475,19 +472,8 @@ const codexTelemetryRuntimeCompleted = `(a.kind='sampling'
 		AND COALESCE(parent.state->'incomplete','false'::jsonb) <> 'true'::jsonb))))`
 
 func (a *codexTelemetryActivityTransaction) validateRuntime() error {
-	if a.runtimeValidated {
-		return nil
-	}
-	var valid bool
-	if err := a.tx.QueryRowContext(a.ctx, `SELECT COALESCE(bool_and(`+codexTelemetryRuntimeShape+`),TRUE)
-		FROM codex_telemetry_activities a WHERE pool_id=$1::uuid AND kind IN ('turn','attempt','sampling')`, a.poolID).Scan(&valid); err != nil {
-		return err
-	}
-	if !valid {
-		return service.ErrCodexTelemetryInvalidState
-	}
-	a.runtimeValidated = true
-	return nil
+	_, err := a.RuntimeOccupancy()
+	return err
 }
 
 func (a *codexTelemetryActivityTransaction) ListActiveTurns(dueBefore time.Time, limit int) ([]service.CodexTelemetryActivity, error) {
@@ -526,11 +512,12 @@ func (a *codexTelemetryActivityTransaction) RuntimeOccupancy() (int, error) {
 	if err := a.flush(); err != nil {
 		return 0, err
 	}
+	if a.runtimeValidated {
+		return a.runtimeOccupancy, nil
+	}
 	var count int
 	var valid bool
-	err := a.tx.QueryRowContext(a.ctx, `SELECT count(*)+COALESCE(sum(CASE WHEN a.kind='turn' AND `+codexTelemetryRuntimeActive+`
-		THEN (SELECT count(*) FROM jsonb_object_keys(CASE WHEN jsonb_typeof(a.state->'inflight')='object' THEN a.state->'inflight' ELSE '{}'::jsonb END)) ELSE 0 END),0),
-		COALESCE(bool_and(`+codexTelemetryRuntimeShape+`),TRUE)
+	err := a.tx.QueryRowContext(a.ctx, `SELECT COALESCE(sum(runtime_slots),0), COALESCE(bool_and(runtime_slots >= 0),TRUE)
 		FROM codex_telemetry_activities a WHERE pool_id=$1::uuid AND kind IN ('turn','attempt','sampling')`, a.poolID).Scan(&count, &valid)
 	if err != nil {
 		return 0, err
@@ -539,6 +526,7 @@ func (a *codexTelemetryActivityTransaction) RuntimeOccupancy() (int, error) {
 		return 0, service.ErrCodexTelemetryInvalidState
 	}
 	a.runtimeValidated = true
+	a.runtimeOccupancy = count
 	return count, nil
 }
 
@@ -558,6 +546,11 @@ func (a *codexTelemetryActivityTransaction) deleted(rows *sql.Rows) (int, error)
 		a.cache[mk] = nil
 		a.persisted[mk] = nil
 		delete(a.dirty, mk)
+		// Both callers delete only completed runtime rows, which occupy one
+		// slot each. Preserve the summary while this transaction owns the pool.
+		if a.runtimeValidated {
+			a.runtimeOccupancy--
+		}
 		count++
 	}
 	return count, rows.Err()
