@@ -491,7 +491,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	sessionHashBody := body
 	originalRequestPath := c.Request.URL.Path
 	// Classify without changing the client wire. Compatibility bridges are
-	// applied only after account selection, separately for every attempt.
+	// applied lazily after a non-Engine account is selected; account-independent
+	// normalization can then be reused by later non-Engine attempts.
 	setOpenAICompactionRoute(c, classifyOpenAICompactionRoute(c, body))
 	compactionRoute := openAICompactionRouteFromContext(c)
 	legacyCompact := compactionRoute == openAICompactionRouteLegacy
@@ -699,6 +700,8 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 	// token 计费部分仍受利润门保护，独立图片/视频端点才在门外。
 	pricingCtx, pricingAt := h.gatewayService.WithOpenAIRequestPricingContext(c.Request.Context(), apiKey.GroupID)
 	c.Request = c.Request.WithContext(pricingCtx)
+	preparation := openAIResponsesRetryPreparation{body: forwardBody, path: originalRequestPath}
+	payloadHash := openAIUsagePayloadHash{body: body}
 
 	for {
 		// Streaming Forward intentionally detaches the upstream request so usage can
@@ -831,8 +834,6 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		// 跨 passthrough 边界的 failover：从 Kiro 等透传账号切到 Bedrock 等非透传账号前，
 		// 从不可变的 canonical forwardBody 派生本次尝试 body 并整块剔除上游私有的加密
 		// reasoning item（含耦合的 id/summary），避免非透传上游 400 拒绝 Kiro reasoning 形态。
-		c.Request.URL.Path = originalRequestPath
-		attemptBody := forwardBody
 		attemptRejected := false
 		result, err := func() (*service.OpenAIForwardResult, error) {
 			defer func() {
@@ -840,20 +841,12 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 					accountReleaseFunc()
 				}
 			}()
+			attemptBody, valid := preparation.forAccount(h, c, reqLog, account)
+			if !valid {
+				attemptRejected = true
+				return nil, nil
+			}
 			if !account.IsCodexEngine() {
-				var valid bool
-				attemptBody, valid = h.normalizeOpenAIResponsesCompactRequest(c, reqLog, attemptBody)
-				if !valid {
-					attemptRejected = true
-					return nil, nil
-				}
-				attemptBody, _ = normalizeCodexPageContext(attemptBody)
-				attemptBody, _ = normalizeCodexAutomationBootstrap(attemptBody)
-				attemptBody, _ = normalizeCodexDelegationBootstrap(attemptBody)
-				if !h.validateFunctionCallOutputRequest(c, attemptBody, reqLog) {
-					attemptRejected = true
-					return nil, nil
-				}
 				attemptBody = h.deriveOpenAIForwardAttemptBody(reqLog, attemptBody, account, &passthroughFailoverState)
 				stopKeepalive := service.StartOpenAICompactSSEKeepalive(c, h.openAICompactKeepaliveInterval())
 				defer stopKeepalive()
@@ -867,11 +860,9 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 		if h.handleForwardRequestBodyMemoryOverload(c, err, streamStarted) {
 			return
 		}
-		var cyberBlockBodyHTTP []byte
 		if service.GetOpsCyberPolicy(c) != nil {
-			cyberBlockBodyHTTP = sessionHashBody
+			h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, reqModel, err != nil && result == nil, sessionHashBody, clientRequestedUsageFields(c, channelMapping, reqModel, ""), payloadHash.value())
 		}
-		h.recordCyberPolicyIfMarked(c, apiKey, account, subscription, reqModel, err != nil && result == nil, cyberBlockBodyHTTP, clientRequestedUsageFields(c, channelMapping, reqModel, ""), service.HashUsageRequestPayload(body))
 		forwardDurationMs := time.Since(forwardStart).Milliseconds()
 		upstreamLatencyMs, _ := getContextInt64(c, service.OpsUpstreamLatencyMsKey)
 		responseLatencyMs := forwardDurationMs
@@ -891,7 +882,7 @@ func (h *OpenAIGatewayHandler) Responses(c *gin.Context) {
 			stampOpenAIRequestedReasoningEffort(res, c)
 			userAgent := c.GetHeader("User-Agent")
 			clientIP := ip.GetClientIP(c)
-			requestPayloadHash := service.HashUsageRequestPayload(body)
+			requestPayloadHash := payloadHash.value()
 			inboundEndpoint := GetInboundEndpoint(c)
 			upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account, res)
 			quotaPlatform := service.QuotaPlatform(c.Request.Context(), apiKey)
