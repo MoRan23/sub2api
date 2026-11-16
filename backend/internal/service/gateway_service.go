@@ -21,7 +21,6 @@ import (
 	"unsafe"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
-	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
@@ -781,6 +780,7 @@ func (s *GatewayService) TempUnscheduleRetryableError(ctx context.Context, accou
 
 // GatewayService handles API gateway operations
 type GatewayService struct {
+	localCatalogStore       modelCatalogStoreHolder
 	accountRepo             AccountRepository
 	groupRepo               GroupRepository
 	usageLogRepo            UsageLogRepository
@@ -1544,46 +1544,11 @@ func (s *GatewayService) resolveCompositeModelOwnership(ctx context.Context, gro
 		return CompositeModelOwnership{}, nil
 	}
 
-	revision := s.modelCatalogRevision()
-	cacheKey := compositeModelOwnershipCacheKey(groupID, model)
-	if s.modelsListCache != nil {
-		if cached, found := s.modelsListCache.Get(cacheKey); found {
-			if ownership, ok := cached.(CompositeModelOwnership); ok {
-				return ownership, nil
-			}
-		}
-	}
-
-	// 归属取决于配置而非运行时健康：限流/临时不可调度不应让同一模型在
-	// 「唯一归属」与「歧义」之间来回翻转，否则配置错误只会间歇暴露。
-	accounts, err := s.accountRepo.ListModelAvailabilityCandidates(ctx, &groupID, domain.ConcretePlatformIDs(), false)
+	index, err := s.compositeOwnershipIndex(ctx, groupID)
 	if err != nil {
 		return CompositeModelOwnership{}, err
 	}
-
-	platforms := make(map[string]struct{})
-	ownership := CompositeModelOwnership{}
-	for _, account := range accounts {
-		if explicitModelMappingClaims(account, model) {
-			platforms[account.Platform] = struct{}{}
-			ownership.OpenAIGatewayOAuthClaimed = ownership.OpenAIGatewayOAuthClaimed ||
-				(account.IsOAuth() && domain.UsesOpenAIGateway(account.Platform))
-		}
-	}
-
-	if len(platforms) == 1 {
-		for platform := range platforms {
-			ownership.TargetPlatform = platform
-		}
-		ownership.Matched = true
-	} else if len(platforms) > 1 {
-		ownership.Ambiguous = true
-	}
-
-	if s.modelsListCache != nil {
-		s.storeModelCatalog(cacheKey, ownership, revision)
-	}
-	return ownership, nil
+	return index[model], nil
 }
 
 func explicitModelMappingClaims(account Account, model string) bool {
@@ -1653,6 +1618,9 @@ func (s *GatewayService) storeModelCatalog(key string, value any, revision uint6
 }
 
 func (s *GatewayService) InvalidateAvailableModelsCache(groupID *int64, platform string) {
+	if s != nil {
+		s.catalogStore().Invalidate()
+	}
 	if s == nil || s.modelsListCache == nil {
 		return
 	}

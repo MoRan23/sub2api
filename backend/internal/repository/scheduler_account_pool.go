@@ -274,6 +274,7 @@ func (c *schedulerCache) StartCacheCleanup() {
 }
 
 func (c *schedulerCache) StopCacheCleanup() {
+	c.metadataLoads.Cancel()
 	c.cleanupStop.Do(func() { close(c.cleanupCancel) })
 	// Starting an already-stopped cleaner makes Stop safe before Start as well.
 	c.StartCacheCleanup()

@@ -3,6 +3,7 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
 	"log/slog"
 	"time"
 )
@@ -105,24 +106,31 @@ func (s *SchedulerSnapshotService) ListSchedulableCandidates(ctx context.Context
 			slog.Warn("scheduler candidate publish token failed", "bucket", bucket.String(), "error", err)
 		}
 	}
-	if err := s.guardFallback(ctx); err != nil {
-		return nil, useMixed, err
-	}
-	fallbackCtx, cancel := s.withFallbackTimeout(ctx)
-	defer cancel()
-	accounts, err := s.loadAccountsFromDB(fallbackCtx, bucket, useMixed)
+	key := fmt.Sprintf("%s|%d|%t", bucket.String(), token.Epoch, canPublish)
+	views, err := s.candidateLoads.Do(ctx, key, func(loadCtx context.Context) (CandidateSet, error) {
+		if err := s.guardFallback(loadCtx); err != nil {
+			return nil, err
+		}
+		fallbackCtx, cancel := s.withFallbackTimeout(loadCtx)
+		defer cancel()
+		accounts, err := s.loadAccountsFromDB(fallbackCtx, bucket, useMixed)
+		if err != nil {
+			return nil, err
+		}
+		if err := fallbackCtx.Err(); err != nil {
+			return nil, err
+		}
+		if s.cache != nil && canPublish {
+			if err := s.cache.SetSnapshot(fallbackCtx, bucket, token, accounts); err != nil {
+				slog.Debug("scheduler candidate snapshot publish failed", "bucket", bucket.String(), "error", err)
+			}
+		}
+		return CandidatesFromAccounts(accounts), nil
+	})
 	if err != nil {
 		return nil, useMixed, err
 	}
-	if err := ctx.Err(); err != nil {
-		return nil, useMixed, err
-	}
-	if s.cache != nil && canPublish {
-		if err := s.cache.SetSnapshot(fallbackCtx, bucket, token, accounts); err != nil {
-			slog.Debug("scheduler candidate snapshot publish failed", "bucket", bucket.String(), "error", err)
-		}
-	}
-	return CandidatesFromAccounts(accounts), useMixed, nil
+	return append(CandidateSet(nil), views...), useMixed, nil
 }
 
 // ApplyCandidateSchedulingThreshold preserves threshold side effects while

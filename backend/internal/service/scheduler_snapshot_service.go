@@ -15,6 +15,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/sharedflight"
 )
 
 var (
@@ -121,6 +122,8 @@ type schedulerActiveGroupIDLister interface {
 }
 
 type SchedulerSnapshotService struct {
+	catalogStore                 modelCatalogStoreHolder
+	candidateLoads               sharedflight.Group[string, CandidateSet]
 	modelCatalogInvalidator      atomic.Pointer[func(*int64, string)]
 	modelCatalogRevision         atomic.Pointer[string]
 	cache                        SchedulerCache
@@ -156,6 +159,7 @@ func (s *SchedulerSnapshotService) SetModelCatalogInvalidator(fn func(*int64, st
 }
 
 func (s *SchedulerSnapshotService) invalidateModelCatalogGroups(groupIDs []int64, platform string) {
+	s.catalogStore.get().Invalidate()
 	if fn := s.modelCatalogInvalidator.Load(); fn != nil {
 		if len(groupIDs) == 0 {
 			(*fn)(nil, platform)
@@ -230,6 +234,7 @@ func (s *SchedulerSnapshotService) Stop() {
 	}
 	s.stopOnce.Do(func() {
 		close(s.stopCh)
+		s.candidateLoads.Cancel()
 	})
 	s.wg.Wait()
 	if cache, ok := s.cache.(interface{ StopCacheCleanup() }); ok {
@@ -238,66 +243,18 @@ func (s *SchedulerSnapshotService) Stop() {
 }
 
 func (s *SchedulerSnapshotService) ListSchedulableAccounts(ctx context.Context, groupID *int64, platform string, hasForcePlatform bool) ([]Account, bool, error) {
-	useMixed := (platform == PlatformAnthropic || platform == PlatformGemini) && !hasForcePlatform
-	mode := s.resolveMode(platform, hasForcePlatform)
-	bucket := s.bucketFor(groupID, platform, mode)
-	var writeToken SchedulerBucketWriteToken
-	canPublish := false
-	if err := ctx.Err(); err != nil {
-		return nil, useMixed, err
-	}
-
-	if s.cache != nil {
-		cached, hit, err := s.cache.GetSnapshot(ctx, bucket)
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, useMixed, ctxErr
-		}
-		if err != nil {
-			logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] cache read failed: bucket=%s err=%v", bucket.String(), err)
-		} else if hit {
-			return derefAccounts(cached), useMixed, nil
-		}
-		token, err := s.cache.CaptureBucketWriteToken(ctx, bucket)
-		if ctxErr := ctx.Err(); ctxErr != nil {
-			return nil, useMixed, ctxErr
-		}
-		if err != nil {
-			if errors.Is(err, ErrSchedulerBucketRetired) || errors.Is(err, ErrSchedulerBucketWriteFenced) {
-				slog.Debug("[Scheduler] cache publish fenced", "bucket", bucket.String())
-			} else {
-				logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] cache publish token failed: bucket=%s err=%v", bucket.String(), err)
-			}
-		} else {
-			writeToken = token
-			canPublish = true
-		}
-	}
-
-	if err := s.guardFallback(ctx); err != nil {
-		return nil, useMixed, err
-	}
-
-	fallbackCtx, cancel := s.withFallbackTimeout(ctx)
-	defer cancel()
-
-	accounts, err := s.loadAccountsFromDB(fallbackCtx, bucket, useMixed)
+	candidates, useMixed, err := s.ListSchedulableCandidates(ctx, groupID, platform, hasForcePlatform)
 	if err != nil {
 		return nil, useMixed, err
 	}
-	if ctxErr := ctx.Err(); ctxErr != nil {
-		return nil, useMixed, ctxErr
-	}
-
-	if s.cache != nil && canPublish {
-		if err := s.cache.SetSnapshot(fallbackCtx, bucket, writeToken, accounts); err != nil {
-			if errors.Is(err, ErrSchedulerBucketRetired) || errors.Is(err, ErrSchedulerBucketWriteFenced) {
-				slog.Debug("[Scheduler] cache publish fenced", "bucket", bucket.String())
-			} else {
-				logger.LegacyPrintf("service.scheduler_snapshot", "[Scheduler] cache write failed: bucket=%s err=%v", bucket.String(), err)
-			}
+	accounts := make([]Account, 0, len(candidates))
+	for _, candidate := range candidates {
+		if candidate.Account != nil {
+			account := *candidate.Account
+			account.LastUsedAt = candidate.LastUsedAt
+			accounts = append(accounts, account)
 		}
 	}
-
 	return accounts, useMixed, nil
 }
 

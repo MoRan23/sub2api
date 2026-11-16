@@ -160,7 +160,7 @@ type pinnedOpenAIModelsResult struct {
 
 // fetchPinnedOpenAIModels shares membership, eligibility, fanout and partial
 // failure policy between ordinary model lists and Codex manifests.
-func (s *OpenAIGatewayService) fetchPinnedOpenAIModels(ctx context.Context, group *Group, fetch func(context.Context, *Account) (*OpenAIModelsResponse, error)) ([]pinnedOpenAIModelsResult, error) {
+func (s *OpenAIGatewayService) fetchPinnedOpenAIModels(ctx context.Context, group *Group, fetch func(context.Context, *Account) (*OpenAIModelsResponse, error), projections ...[]Account) ([]pinnedOpenAIModelsResult, error) {
 	if s == nil || s.accountRepo == nil || group == nil {
 		return nil, ErrNoPinnedCodexModelsAccounts
 	}
@@ -169,7 +169,13 @@ func (s *OpenAIGatewayService) fetchPinnedOpenAIModels(ctx context.Context, grou
 		return nil, ErrNoPinnedCodexModelsAccounts
 	}
 
-	members, err := s.accountRepo.ListByGroup(ctx, group.ID)
+	var members []Account
+	var err error
+	if len(projections) != 0 {
+		members = projections[0]
+	} else {
+		members, err = s.accountRepo.ListByGroup(ctx, group.ID)
+	}
 	if err != nil {
 		return nil, fmt.Errorf("load pinned codex models manifest accounts: %w", err)
 	}
@@ -188,6 +194,15 @@ func (s *OpenAIGatewayService) fetchPinnedOpenAIModels(ctx context.Context, grou
 		}
 		if !isPinnedCodexModelsAccountUsable(&member) {
 			continue
+		}
+		if len(projections) != 0 {
+			if _, projected := s.accountRepo.(CatalogAccountProjectionReader); projected {
+				full, loadErr := s.accountRepo.GetByID(ctx, member.ID)
+				if loadErr != nil || full == nil || !isPinnedCodexModelsAccountUsable(full) || !containsInt64(full.GroupIDs, group.ID) {
+					continue
+				}
+				member = *full
+			}
 		}
 		projected, resolveErr := ResolveOpenAIOAuthCredentialAccount(ctx, s.accountRepo, &member, OpenAIRequestOSFromContext(ctx).Family)
 		if resolveErr != nil {

@@ -1509,6 +1509,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 	}
 
 	filterStats := openAISelectionFilterStats{pool: len(accounts)}
+	filterCtx := s.withShadowParentHealth(ctx, accounts)
 	filtered := make(CandidateSet, 0, len(accounts))
 	loadReq := make([]AccountWithConcurrency, 0, len(accounts))
 	for i := range accounts {
@@ -1539,7 +1540,7 @@ func (s *defaultOpenAIAccountScheduler) selectByLoadBalance(
 			filterStats.exclude("privacy_not_set")
 			continue
 		}
-		if compatible, reason := s.isAccountRequestCompatibleReason(ctx, account, req); !compatible {
+		if compatible, reason := s.isAccountRequestCompatibleReason(filterCtx, account, req); !compatible {
 			filterStats.exclude(reason)
 			continue
 		}
@@ -1821,6 +1822,11 @@ func (s *defaultOpenAIAccountScheduler) isAccountTransportCompatible(account *Ac
 }
 
 func (s *defaultOpenAIAccountScheduler) lookupShadowParentAccount(ctx context.Context, id int64) *Account {
+	if parents, ok := ctx.Value(shadowParentHealthContextKey{}).(map[int64]*Account); ok {
+		if account, exists := parents[id]; exists {
+			return account
+		}
+	}
 	if s == nil || s.service == nil {
 		return nil
 	}

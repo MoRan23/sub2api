@@ -14,6 +14,7 @@ import (
 	"sync/atomic"
 	"time"
 
+	"github.com/Wei-Shaw/sub2api/internal/pkg/sharedflight"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/redis/go-redis/v9"
@@ -242,6 +243,7 @@ return 1
 )
 
 type schedulerCache struct {
+	metadataLoads  sharedflight.Group[string, schedulerMetadataLoad]
 	rdb            *redis.Client
 	mgetChunkSize  int
 	writeChunkSize int
@@ -286,6 +288,11 @@ type schedulerSnapshotEntry struct {
 	runtimeVersion uint64
 	lastAccess     time.Time
 	estimatedBytes int64
+}
+
+type schedulerMetadataLoad struct {
+	accounts     service.CandidateSet
+	lastUsedKeys []string
 }
 
 func NewSchedulerCache(rdb *redis.Client) service.SchedulerCache {
@@ -350,7 +357,8 @@ func (c *schedulerCache) GetCandidateSnapshot(ctx context.Context, bucket servic
 
 	now := c.now()
 	runtimeVersion := xai.RuntimeModelMappingVersion()
-	if entry := c.lookupSnapshotEntry(bucketKey); entry != nil && entry.runtimeVersion == runtimeVersion && entry.matches(activeVal, revisions, now) {
+	observedEntry := c.lookupSnapshotEntry(bucketKey)
+	if entry := observedEntry; entry != nil && entry.runtimeVersion == runtimeVersion && entry.matches(activeVal, revisions, now) {
 		accounts, err := c.snapshotCandidatesFromEntry(ctx, entry)
 		if err != nil {
 			return nil, false, err
@@ -362,69 +370,91 @@ func (c *schedulerCache) GetCandidateSnapshot(ctx context.Context, bucket servic
 	}
 	c.bucketMisses.Add(1)
 
-	ids, err := c.rdb.ZRange(ctx, schedulerSnapshotKey(bucket, activeVal), 0, -1).Result()
+	identity, _ := json.Marshal([]any{bucketKey, activeVal, revisions, runtimeVersion})
+	loaded, err := c.metadataLoads.Do(ctx, string(identity), func(ctx context.Context) (schedulerMetadataLoad, error) {
+		ids, err := c.rdb.ZRange(ctx, schedulerSnapshotKey(bucket, activeVal), 0, -1).Result()
+		if err != nil {
+			return schedulerMetadataLoad{}, err
+		}
+		if len(ids) == 0 {
+			// 空快照视为缓存未命中，触发数据库回退查询
+			// 这解决了新分组创建后立即绑定账号时的竞态条件问题
+			c.dropSnapshotEntryIfCurrent(bucketKey, observedEntry)
+			return schedulerMetadataLoad{}, nil
+		}
+
+		keys := make([]string, 0, len(ids))
+		lastUsedKeys := make([]string, 0, len(ids))
+		for _, id := range ids {
+			keys = append(keys, schedulerAccountMetaKey(id))
+			lastUsedKeys = append(lastUsedKeys, schedulerLastUsedKey(id))
+		}
+		values, err := c.mgetChunked(ctx, keys)
+		if err != nil {
+			return schedulerMetadataLoad{}, err
+		}
+
+		accounts := make(service.CandidateSet, 0, len(values))
+		accountKeys := make([]schedulerAccountPoolKey, 0, len(values))
+		cacheable := true
+		for i, val := range values {
+			if val == nil {
+				c.dropSnapshotEntryIfCurrent(bucketKey, observedEntry)
+				return schedulerMetadataLoad{}, nil
+			}
+			id, err := strconv.ParseInt(ids[i], 10, 64)
+			if err != nil {
+				return schedulerMetadataLoad{}, err
+			}
+			account, key, retained, err := c.internSchedulerAccount(id, val, runtimeVersion, now)
+			if err != nil {
+				return schedulerMetadataLoad{}, err
+			}
+			accounts = append(accounts, service.NewCandidateView(account, account.LastUsedAt))
+			accountKeys = append(accountKeys, key)
+			cacheable = cacheable && retained
+		}
+
+		// 条目记录的是加载前读到的 (active, 修订号) 与当时的时钟：精简记录读取晚于这组取值，
+		// 之后若再有改写，修订号或 active 必然不同，或在最长复用时长后过期。
+		entry := &schedulerSnapshotEntry{
+			active:         activeVal,
+			revisions:      revisions,
+			loadedAt:       now,
+			accountKeys:    accountKeys,
+			lastUsedKeys:   lastUsedKeys,
+			runtimeVersion: runtimeVersion,
+			lastAccess:     now,
+		}
+		if cacheable {
+			current, tagErr := c.rdb.MGet(ctx, tagKeys...).Result()
+			if tagErr != nil {
+				return schedulerMetadataLoad{}, tagErr
+			}
+			unchanged := len(current) == len(tags)
+			for i := range current {
+				if i >= len(tags) || current[i] != tags[i] {
+					unchanged = false
+					break
+				}
+			}
+			if unchanged && ctx.Err() == nil && runtimeVersion == xai.RuntimeModelMappingVersion() {
+				c.storeSnapshotEntry(bucketKey, entry)
+			}
+		}
+
+		return schedulerMetadataLoad{accounts: accounts, lastUsedKeys: lastUsedKeys}, nil
+	})
 	if err != nil {
 		return nil, false, err
 	}
-	if len(ids) == 0 {
-		// 空快照视为缓存未命中，触发数据库回退查询
-		// 这解决了新分组创建后立即绑定账号时的竞态条件问题
-		c.dropSnapshotEntry(bucketKey)
+	if len(loaded.accounts) == 0 {
 		return nil, false, nil
 	}
-
-	keys := make([]string, 0, len(ids))
-	lastUsedKeys := make([]string, 0, len(ids))
-	for _, id := range ids {
-		keys = append(keys, schedulerAccountMetaKey(id))
-		lastUsedKeys = append(lastUsedKeys, schedulerLastUsedKey(id))
-	}
-	values, err := c.mgetChunked(ctx, keys)
-	if err != nil {
-		return nil, false, err
-	}
-
-	accounts := make(service.CandidateSet, 0, len(values))
-	accountKeys := make([]schedulerAccountPoolKey, 0, len(values))
-	cacheable := true
-	for i, val := range values {
-		if val == nil {
-			c.dropSnapshotEntry(bucketKey)
-			return nil, false, nil
-		}
-		id, err := strconv.ParseInt(ids[i], 10, 64)
-		if err != nil {
-			return nil, false, err
-		}
-		account, key, retained, err := c.internSchedulerAccount(id, val, runtimeVersion, now)
-		if err != nil {
-			return nil, false, err
-		}
-		accounts = append(accounts, service.NewCandidateView(account, account.LastUsedAt))
-		accountKeys = append(accountKeys, key)
-		cacheable = cacheable && retained
-	}
-
-	// 条目记录的是加载前读到的 (active, 修订号) 与当时的时钟：精简记录读取晚于这组取值，
-	// 之后若再有改写，修订号或 active 必然不同，或在最长复用时长后过期。
-	entry := &schedulerSnapshotEntry{
-		active:         activeVal,
-		revisions:      revisions,
-		loadedAt:       now,
-		accountKeys:    accountKeys,
-		lastUsedKeys:   lastUsedKeys,
-		runtimeVersion: runtimeVersion,
-		lastAccess:     now,
-	}
-	if cacheable {
-		c.storeSnapshotEntry(bucketKey, entry)
-	}
-
-	accounts, err = c.snapshotCandidates(ctx, accounts, lastUsedKeys)
-	if err != nil {
-		return nil, false, err
-	}
-	return accounts, true, nil
+	// Never let a waiter's LastUsed refresh mutate the shared flight result.
+	views := append(service.CandidateSet(nil), loaded.accounts...)
+	views, err = c.snapshotCandidates(ctx, views, loaded.lastUsedKeys)
+	return views, err == nil, err
 }
 
 func (e *schedulerSnapshotEntry) matches(active string, revisions []string, now time.Time) bool {
@@ -532,6 +562,15 @@ func (c *schedulerCache) dropSnapshotEntry(bucketKey string) {
 	}
 	delete(c.snapshotEntries, bucketKey)
 	c.snapshotMu.Unlock()
+}
+
+func (c *schedulerCache) dropSnapshotEntryIfCurrent(bucketKey string, observed *schedulerSnapshotEntry) {
+	c.snapshotMu.Lock()
+	defer c.snapshotMu.Unlock()
+	if entry := c.snapshotEntries[bucketKey]; entry != nil && entry == observed {
+		c.bucketBytes -= entry.estimatedBytes
+		delete(c.snapshotEntries, bucketKey)
+	}
 }
 
 // schedulerSnapshotTagKeys 返回 GetSnapshot 一次读取的键：ready、active、全局修订号、bucket 平台的修订号，
@@ -1221,16 +1260,28 @@ func (c *schedulerCache) mgetChunked(ctx context.Context, keys []string) ([]any,
 	if chunkSize <= 0 {
 		chunkSize = defaultSchedulerSnapshotMGetChunkSize
 	}
-	for start := 0; start < len(keys); start += chunkSize {
-		end := start + chunkSize
-		if end > len(keys) {
-			end = len(keys)
-		}
-		part, err := c.rdb.MGet(ctx, keys[start:end]...).Result()
-		if err != nil {
+	const pipelineCommands = 8
+	for start := 0; start < len(keys); {
+		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		out = append(out, part...)
+		pipe := c.rdb.Pipeline()
+		commands := make([]*redis.SliceCmd, 0, pipelineCommands)
+		for len(commands) < pipelineCommands && start < len(keys) {
+			end := min(start+chunkSize, len(keys))
+			commands = append(commands, pipe.MGet(ctx, keys[start:end]...))
+			start = end
+		}
+		if _, err := pipe.Exec(ctx); err != nil {
+			return nil, err
+		}
+		for _, cmd := range commands {
+			part, err := cmd.Result()
+			if err != nil {
+				return nil, err
+			}
+			out = append(out, part...)
+		}
 	}
 	return out, nil
 }

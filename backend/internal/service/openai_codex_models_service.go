@@ -111,6 +111,8 @@ func codexProviderQualifiedModelID(modelID string) string {
 // OpenAIModelsResponse carries either an OpenAI model list or a Codex manifest
 // together with upstream and client caching metadata.
 type OpenAIModelsResponse struct {
+	sourceIdentity               string
+	sourceContentVersion         string
 	Body                         []byte
 	ETag                         string
 	upstreamETag                 string
@@ -135,7 +137,7 @@ func (s *OpenAIGatewayService) BuildGroupConfiguredCodexModelsManifest(
 		return nil, false, nil
 	}
 
-	visible, catalog, err := loadCodexGroupCatalogAccounts(ctx, s.accountRepo, group.ID)
+	visible, catalog, err := s.loadCatalogAccounts(ctx, group.ID)
 	if err != nil {
 		return nil, false, fmt.Errorf("load group configured Codex models: %w", err)
 	}
@@ -192,7 +194,7 @@ func (s *OpenAIGatewayService) MergeGroupConfiguredCodexModels(
 		return nil
 	}
 
-	visible, accounts, err := loadCodexGroupCatalogAccounts(ctx, s.accountRepo, group.ID)
+	visible, accounts, err := s.loadCatalogAccounts(ctx, group.ID)
 	if err != nil {
 		return fmt.Errorf("load group configured Codex models: %w", err)
 	}
@@ -898,7 +900,7 @@ func (s *GatewayService) BuildCodexModelsManifestForGroup(
 		return BuildCodexModelsManifest(modelIDs)
 	}
 
-	_, catalog, err := loadCodexGroupCatalogAccounts(ctx, s.accountRepo, group.ID)
+	_, catalog, err := s.loadCatalogAccounts(ctx, group.ID)
 	if err != nil {
 		return BuildCodexModelsManifest(modelIDs)
 	}
@@ -1985,14 +1987,24 @@ func (s *OpenAIGatewayService) fetchCachedOpenAIModels(ctx context.Context, requ
 		}
 		return response, err
 	}
+	respond := func(manifest *OpenAIModelsResponse) *OpenAIModelsResponse {
+		if readOnly, _ := ctx.Value(catalogSourceReadOnlyContextKey{}).(bool); readOnly && !request.capabilityOnly && manifest != nil {
+			if codexModelsManifestETagMatches(ifNoneMatch, manifest.ETag) {
+				return &OpenAIModelsResponse{ETag: manifest.ETag, NotModified: true}
+			}
+			view := *manifest
+			return &view
+		}
+		return openAIModelsResponseForRequest(manifest, ifNoneMatch, request.capabilityOnly)
+	}
 	cacheKey := buildOpenAIModelsCacheKey(request)
 	manifest, state := s.openAIModelsCache.get(cacheKey, time.Now())
 	if state == openAIModelsCacheFresh {
-		return openAIModelsResponseForRequest(manifest, ifNoneMatch, request.capabilityOnly), nil
+		return respond(manifest), nil
 	}
 	resultCh := s.refreshCachedOpenAIModels(cacheKey, request, fetch)
 	if state == openAIModelsCacheStale {
-		return openAIModelsResponseForRequest(manifest, ifNoneMatch, request.capabilityOnly), nil
+		return respond(manifest), nil
 	}
 	select {
 	case <-ctx.Done():
@@ -2005,7 +2017,7 @@ func (s *OpenAIGatewayService) fetchCachedOpenAIModels(ctx context.Context, requ
 		if !ok || manifest == nil {
 			return nil, infraerrors.New(http.StatusInternalServerError, "OPENAI_CODEX_MODELS_REQUEST_FAILED", "invalid shared Codex models manifest result")
 		}
-		return openAIModelsResponseForRequest(manifest, ifNoneMatch, request.capabilityOnly), nil
+		return respond(manifest), nil
 	}
 }
 
@@ -2041,6 +2053,8 @@ func (s *OpenAIGatewayService) refreshCachedOpenAIModels(cacheKey string, reques
 			return cached, nil
 		}
 		if !manifest.NotModified {
+			manifest.sourceIdentity = cacheKey
+			manifest.sourceContentVersion = codexModelsManifestBodyETag(manifest.upstreamSourceBody)
 			s.openAIModelsCache.set(cacheKey, manifest, time.Now())
 		}
 		return manifest, nil

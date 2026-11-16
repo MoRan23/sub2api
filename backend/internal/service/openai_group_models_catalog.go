@@ -24,9 +24,14 @@ func (s *OpenAIGatewayService) BuildOpenAIGroupModelsCatalog(ctx context.Context
 	if s == nil || s.accountRepo == nil || group == nil || group.Platform != PlatformOpenAI {
 		return nil, nil, fmt.Errorf("OpenAI group model catalog requires an OpenAI group and account repository")
 	}
-	visible, accounts, err := loadCodexGroupCatalogAccounts(ctx, s.accountRepo, group.ID)
+	ctx = context.WithValue(ctx, catalogSourceReadOnlyContextKey{}, true)
+	visible, accounts, err := s.loadCatalogAccounts(ctx, group.ID)
 	if err != nil {
 		return nil, nil, err
+	}
+	projectionVersion := "empty"
+	if len(accounts) > 0 {
+		projectionVersion = accounts[0].catalogProjectionVersion
 	}
 	var fixed []pinnedOpenAIModelsResult
 	var selected *Account
@@ -38,22 +43,9 @@ func (s *OpenAIGatewayService) BuildOpenAIGroupModelsCatalog(ctx context.Context
 			if fetchErr != nil {
 				return nil, fetchErr
 			}
-			raw := response.upstreamSourceBody
-			if len(raw) == 0 {
-				raw = response.Body
-			}
-			if _, _, manifestErr := modelCatalogEntries(raw, "models"); manifestErr == nil {
-				response.Body, fetchErr = standardOpenAIModelsBody(raw, true)
-			} else {
-				response.Body, fetchErr = standardOpenAIModelsBody(raw, false)
-			}
-			if fetchErr != nil {
-				return nil, fetchErr
-			}
-			response.Body, fetchErr = projectAccountModelsBody(response.Body, account, group, false)
-			return response, fetchErr
+			return s.cachedPinnedOpenAIGroupSource(fetchCtx, group, account, response)
 		}
-		fixed, err = s.fetchPinnedOpenAIModels(ctx, group, fetch)
+		fixed, err = s.fetchPinnedOpenAIModels(ctx, group, fetch, accounts)
 		if err != nil && ctx.Err() == nil && group.CodexModelsManifestConfig.FallbackToScheduler {
 			maxSwitches := 3
 			if len(maxAccountSwitches) != 0 && maxAccountSwitches[0] > 0 {
@@ -88,7 +80,7 @@ func (s *OpenAIGatewayService) BuildOpenAIGroupModelsCatalog(ctx context.Context
 	if official == nil {
 		official = public
 	}
-	return buildOpenAIGroupModelsCatalog(group, visible, accounts, fixed, official, public, ifNoneMatch, codex, selected)
+	return s.cachedOpenAIGroupModelsCatalog(ctx, group, visible, accounts, fixed, official, public, ifNoneMatch, clientVersion, projectionVersion, codex, selected)
 }
 
 // fetchGroupOfficialCodexModels tries only distinct, currently authorized OAuth
@@ -144,6 +136,20 @@ func (s *OpenAIGatewayService) fetchGroupOfficialCodexModels(ctx context.Context
 		}
 		seenOwners[ownerID] = true
 		attempts++
+		if _, projected := s.accountRepo.(CatalogAccountProjectionReader); projected {
+			full, loadErr := s.accountRepo.GetByID(ctx, account.ID)
+			if loadErr != nil || full == nil || !full.IsSchedulable() || !containsInt64(full.GroupIDs, group.ID) {
+				continue
+			}
+			currentOwner := full.ID
+			if full.IsShadow() {
+				currentOwner = *full.ParentAccountID
+			}
+			if currentOwner != ownerID {
+				continue
+			}
+			account = full
+		}
 		scoped, err := ResolveOpenAIOAuthCredentialAccount(ctx, s.accountRepo, account, OpenAIRequestOSFromContext(ctx).Family)
 		if err != nil {
 			continue
@@ -360,7 +366,11 @@ func buildOpenAIGroupModelsCatalog(group *Group, visible, accounts []Account, fi
 		}
 	}
 	response := &OpenAIModelsResponse{Body: body, ETag: codexModelsManifestBodyETag(body)}
-	return openAIModelsResponseForClient(response, ifNoneMatch), selected, nil
+	if codexModelsManifestETagMatches(ifNoneMatch, response.ETag) {
+		response.Body = nil
+		response.NotModified = true
+	}
+	return response, selected, nil
 }
 
 func indexCodexCatalogModels(entries []json.RawMessage) map[string]json.RawMessage {

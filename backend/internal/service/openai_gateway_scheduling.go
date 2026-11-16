@@ -1312,20 +1312,11 @@ func (s *OpenAIGatewayService) selectAccountWithLoadAwareness(ctx context.Contex
 	}
 
 	// ============ Layer 2: Load-aware selection ============
-	// Per-pass parent-health cache to avoid repeated DB calls when multiple shadow
-	// accounts share the same parent.
-	parentCacheL2 := make(map[int64]*Account)
-	parentLookupL2 := func(id int64) *Account {
-		if a, ok := parentCacheL2[id]; ok {
-			return a
-		}
-		if s.accountRepo == nil {
-			return nil
-		}
-		a, _ := s.accountRepo.GetByID(ctx, id)
-		parentCacheL2[id] = a
-		return a
-	}
+	// Batch the minimal parent projection for this candidate pass. Final selected
+	// account checks below retain their fresh authorization/health reads.
+	parentScheduler := &defaultOpenAIAccountScheduler{service: s}
+	parentCtx := parentScheduler.withShadowParentHealth(ctx, accounts)
+	parentLookupL2 := func(id int64) *Account { return parentScheduler.lookupShadowParentAccount(parentCtx, id) }
 	baseCandidateCount := 0
 	filterStats := openAISelectionFilterStats{pool: len(accounts)}
 	candidates := make(CandidateSet, 0, len(accounts))
