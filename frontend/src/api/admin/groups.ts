@@ -449,24 +449,24 @@ export async function clearGroupRPMOverrides(id: number): Promise<{ message: str
  * Get usage summary (today + yesterday + cumulative cost) for all groups
  * @returns Array of group usage summaries
  */
-export async function getUsageSummary(): Promise<
+export async function getUsageSummary(groupIds?: number[], signal?: AbortSignal): Promise<
   { group_id: number; today_cost: number; yesterday_cost: number; total_cost: number }[]
 > {
   const { data } = await apiClient.get<
     { group_id: number; today_cost: number; yesterday_cost: number; total_cost: number }[]
-  >('/admin/groups/usage-summary')
+  >('/admin/groups/usage-summary', { params: groupIds ? { group_ids: groupIds.join(',') } : undefined, signal })
   return data
 }
 
 /**
  * Get capacity summary (concurrency/sessions/RPM) for all active groups
  */
-export async function getCapacitySummary(): Promise<
+export async function getCapacitySummary(groupIds?: number[], signal?: AbortSignal): Promise<
   { group_id: number; concurrency_used: number; concurrency_max: number; sessions_used: number; sessions_max: number; rpm_used: number; rpm_max: number }[]
 > {
   const { data } = await apiClient.get<
     { group_id: number; concurrency_used: number; concurrency_max: number; sessions_used: number; sessions_max: number; rpm_used: number; rpm_max: number }[]
-  >('/admin/groups/capacity-summary')
+  >('/admin/groups/capacity-summary', { params: groupIds ? { group_ids: groupIds.join(',') } : undefined, signal })
   return data
 }
 

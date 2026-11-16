@@ -12,6 +12,20 @@ import (
 
 // ListScopedAdminCapacityGroupIDs 先在数据库内限定分组，再查询账户与实时容量。
 func (r *groupRepository) ListScopedAdminCapacityGroupIDs(ctx context.Context) ([]int64, error) {
+	return r.listCapacityGroupIDs(ctx, nil)
+}
+
+func (r *groupRepository) ListActiveCapacityGroupIDs(ctx context.Context, ids []int64) ([]int64, error) {
+	if len(ids) == 0 {
+		return []int64{}, nil
+	}
+	if adminaccess.RestrictedFromContext(ctx) != nil {
+		return r.listCapacityGroupIDs(ctx, ids)
+	}
+	return r.client.Group.Query().Where(group.DeletedAtIsNil(), group.StatusEQ(service.StatusActive), group.IDIn(ids...)).Order(group.ByID()).IDs(ctx)
+}
+
+func (r *groupRepository) listCapacityGroupIDs(ctx context.Context, ids []int64) ([]int64, error) {
 	p := adminaccess.FromContext(ctx)
 	if p == nil {
 		return nil, infraerrors.Forbidden("SCOPED_GROUP_CAPACITY_FORBIDDEN", "缺少受限身份")
@@ -33,5 +47,9 @@ func (r *groupRepository) ListScopedAdminCapacityGroupIDs(ctx context.Context) (
 	if len(alternatives) == 0 {
 		return []int64{}, nil
 	}
-	return r.client.Group.Query().Where(group.DeletedAtIsNil(), group.StatusEQ(service.StatusActive), group.Or(alternatives...)).Order(group.ByID()).IDs(ctx)
+	q := r.client.Group.Query().Where(group.DeletedAtIsNil(), group.StatusEQ(service.StatusActive), group.Or(alternatives...))
+	if ids != nil {
+		q.Where(group.IDIn(ids...))
+	}
+	return q.Order(group.ByID()).IDs(ctx)
 }

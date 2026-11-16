@@ -888,6 +888,8 @@ func (s *UsageLogRepoSuite) TestGetUserDashboardStats() {
 	account := mustCreateAccount(s.T(), s.client, &service.Account{Name: "acc-userdash"})
 
 	s.createUsageLog(user, apiKey, account, 10, 20, 0.5, time.Now())
+	_, err := s.repo.sql.ExecContext(s.ctx, `UPDATE usage_subject_rollup_state SET closed_before=$1::date, retained_from=$2, timezone_name=$3 WHERE id=1`, service.GroupUsageDate(time.Now()), service.GroupUsageTodayStart(time.Now()), service.GroupUsageTimezoneName())
+	s.Require().NoError(err)
 
 	stats, err := s.repo.GetUserDashboardStats(s.ctx, user.ID)
 	s.Require().NoError(err, "GetUserDashboardStats")

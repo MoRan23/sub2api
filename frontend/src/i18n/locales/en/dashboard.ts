@@ -1,5 +1,7 @@
 export default {
   dashboard: {
+    statsInitializing: 'Usage statistics are updating',
+    statsInitializingHint: 'Your balance and quota remain available. Refresh the statistics again shortly.',
     title: 'Dashboard',
     welcomeMessage: "Welcome back! Here's an overview of your account.",
     balance: 'Balance',
@@ -475,6 +477,17 @@ export default {
     failedToLoad: 'Failed to load usage logs',
     noDataToExport: 'No data to export',
     exportSuccess: 'Usage data exported successfully',
+    exportTasks: {
+      title: 'Export tasks',
+      download: 'Download',
+      hint: 'Exports run in the background. You can leave this page and download them here later.',
+      recent: 'Most recent 50 tasks',
+      empty: 'No export tasks',
+      rows: '{count} rows exported',
+      expires: 'File available until {time}',
+      failed: 'Export task operation failed. Please try again.',
+      status: { queued: 'Queued', running: 'Exporting', completed: 'Completed', failed: 'Export failed', cancelled: 'Cancelled', deleting: 'Deleting' }
+    },
     exportFailed: 'Failed to export usage data',
     exportRateLimited: 'Too many requests, export will resume in {seconds} seconds',
     exportExcelSuccess: 'Usage data exported successfully (Excel format)',

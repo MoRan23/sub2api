@@ -1,5 +1,7 @@
 export default {
   dashboard: {
+    statsInitializing: '用量统计更新中',
+    statsInitializingHint: '余额和额度正常可用，可稍后刷新统计。',
     title: '仪表盘',
     welcomeMessage: '欢迎回来！这是您账户的概览。',
     balance: '余额',
@@ -480,6 +482,17 @@ export default {
     failedToLoad: '加载使用记录失败',
     noDataToExport: '没有可导出的数据',
     exportSuccess: '使用数据导出成功',
+    exportTasks: {
+      title: '导出任务',
+      download: '下载',
+      hint: '导出在后台进行，可关闭页面，稍后在这里下载。',
+      recent: '最近 50 个任务',
+      empty: '暂无导出任务',
+      rows: '已导出 {count} 行',
+      expires: '文件保留至 {time}',
+      failed: '导出任务操作失败，请重试',
+      status: { queued: '排队中', running: '正在导出', completed: '已完成', failed: '导出失败', cancelled: '已取消', deleting: '正在删除' }
+    },
     exportFailed: '使用数据导出失败',
     exportRateLimited: '请求过于频繁，{seconds} 秒后自动继续导出',
     exportExcelSuccess: '使用数据导出成功（Excel格式）',

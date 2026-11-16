@@ -4,7 +4,10 @@ import (
 	"context"
 	"database/sql"
 	"fmt"
+	"strings"
 	"time"
+
+	"github.com/lib/pq"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/usagestats"
 	"github.com/Wei-Shaw/sub2api/internal/service"
@@ -67,6 +70,17 @@ func readGroupUsageRollupSnapshot(ctx context.Context, sqlq sqlExecutor, timezon
 }
 
 func (r *usageLogRepository) getAllGroupUsageSummaryFromRollups(ctx context.Context, todayStart time.Time) (results []usagestats.GroupUsageSummary, err error) {
+	return r.getGroupUsageSummaryFromRollups(ctx, todayStart, nil)
+}
+
+func (r *usageLogRepository) GetGroupUsageSummaryByIDs(ctx context.Context, todayStart time.Time, ids []int64) ([]usagestats.GroupUsageSummary, error) {
+	if len(ids) == 0 {
+		return []usagestats.GroupUsageSummary{}, nil
+	}
+	return r.getGroupUsageSummaryFromRollups(ctx, todayStart, ids)
+}
+
+func (r *usageLogRepository) getGroupUsageSummaryFromRollups(ctx context.Context, todayStart time.Time, ids []int64) (results []usagestats.GroupUsageSummary, err error) {
 	sqlq := r.sql
 	if db, ok := sqlq.(*sql.DB); ok {
 		// Cleanup can delete logs and move the watermark backwards while rollup
@@ -110,7 +124,7 @@ func (r *usageLogRepository) getAllGroupUsageSummaryFromRollups(ctx context.Cont
 	// 换成参数之后走 idx_usage_logs_created_at：
 	//   Index Scan … Index Cond: (created_at >= $7)
 	//   Execution Time: 34 ms
-	const query = `
+	query := `
 		WITH historical AS (
 			SELECT
 				rollup.group_id,
@@ -148,9 +162,7 @@ func (r *usageLogRepository) getAllGroupUsageSummaryFromRollups(ctx context.Cont
 		ORDER BY g.id
 	`
 
-	rows, err := sqlq.QueryContext(
-		ctx,
-		query,
+	args := []any{
 		todayStart,
 		yesterdayStart,
 		yesterdayDate,
@@ -158,7 +170,14 @@ func (r *usageLogRepository) getAllGroupUsageSummaryFromRollups(ctx context.Cont
 		state.retainedDate,
 		state.closedBefore,
 		state.tailStart,
-	)
+	}
+	if ids != nil {
+		query = strings.Replace(query, "WHERE $4::boolean", "WHERE $4::boolean AND rollup.group_id = ANY($8::bigint[])", 1)
+		query = strings.Replace(query, "WHERE ul.created_at >= $7", "WHERE ul.created_at >= $7 AND ul.group_id = ANY($8::bigint[])", 1)
+		query = strings.Replace(query, "ORDER BY g.id", "WHERE g.id = ANY($8::bigint[]) ORDER BY g.id", 1)
+		args = append(args, pq.Array(ids))
+	}
+	rows, err := sqlq.QueryContext(ctx, query, args...)
 	if err != nil {
 		return nil, err
 	}
@@ -183,124 +202,19 @@ func (r *usageLogRepository) getAllGroupUsageSummaryFromRollups(ctx context.Cont
 	return results, nil
 }
 
-// SyncGroupUsageRollups 将服务端配置时区今日以前的用量发布为分组日桶。
+// SyncGroupUsageRollups publishes one day at a time without holding a state lock during scans.
 func (r *dashboardAggregationRepository) SyncGroupUsageRollups(ctx context.Context, todayStart time.Time) error {
 	if r == nil || r.sql == nil {
 		return nil
 	}
-	todayStart = service.GroupUsageTodayStart(todayStart)
-	if db, ok := r.sql.(*sql.DB); ok {
-		tx, err := db.BeginTx(ctx, nil)
-		if err != nil {
-			return err
-		}
-		txRepo := newDashboardAggregationRepositoryWithSQL(tx)
-		if err := txRepo.syncGroupUsageRollupsInTx(ctx, todayStart); err != nil {
-			_ = tx.Rollback()
-			return err
-		}
-		return tx.Commit()
+	db, ok := r.sql.(*sql.DB)
+	if !ok {
+		return fmt.Errorf("daily rollup builder requires a database, not a caller transaction")
 	}
-	return r.syncGroupUsageRollupsInTx(ctx, todayStart)
-}
-
-func (r *dashboardAggregationRepository) syncGroupUsageRollupsInTx(ctx context.Context, todayStart time.Time) error {
-	var closedBefore string
-	var previousRetainedFrom time.Time
-	var stateTimezoneName string
-	if err := scanSingleRow(ctx, r.sql, `
-		SELECT closed_before::text, retained_from, timezone_name
-		FROM usage_group_rollup_state
-		WHERE id = 1
-		FOR UPDATE
-	`, nil, &closedBefore, &previousRetainedFrom, &stateTimezoneName); err != nil {
-		return fmt.Errorf("读取分组用量汇总水位: %w", err)
-	}
-
-	todayDate := service.GroupUsageDate(todayStart)
-	timezoneName := service.GroupUsageTimezoneName()
-	timezoneChanged := stateTimezoneName != timezoneName
-	var closedTime time.Time
-	if !timezoneChanged {
-		var err error
-		closedTime, err = service.ParseGroupUsageDate(closedBefore)
-		if err != nil {
-			return fmt.Errorf("解析分组用量汇总水位 %q: %w", closedBefore, err)
-		}
-		todayDateTime, err := service.ParseGroupUsageDate(todayDate)
-		if err != nil {
-			return err
-		}
-		if closedTime.After(todayDateTime) {
-			return fmt.Errorf("分组用量汇总水位位于未来: %s", closedBefore)
-		}
-		if closedBefore == todayDate {
-			return nil
-		}
-	}
-
-	var earliest sql.NullTime
-	if err := scanSingleRow(ctx, r.sql, "SELECT MIN(created_at) FROM usage_logs", nil, &earliest); err != nil {
-		return fmt.Errorf("读取最早用量记录: %w", err)
-	}
-	retainedFrom := todayStart
-	if earliest.Valid {
-		retainedFrom = earliest.Time.UTC()
-	}
-	retainedDate := service.GroupUsageDate(retainedFrom)
-	retainedDateTime, err := service.ParseGroupUsageDate(retainedDate)
-	if err != nil {
+	if err := syncUsageDailyRollups(ctx, db, "group", todayStart); err != nil {
 		return err
 	}
-	rebuildStartDate := retainedDate
-	if !timezoneChanged && closedTime.After(retainedDateTime) {
-		rebuildStartDate = closedBefore
-	}
-	rebuildStart, err := service.ParseGroupUsageDate(rebuildStartDate)
-	if err != nil {
-		return err
-	}
-
-	if _, err := r.sql.ExecContext(ctx, `
-		DELETE FROM usage_group_daily_rollups
-		WHERE bucket_date < $1::date
-			OR (bucket_date >= $2::date AND bucket_date < $3::date)
-			OR bucket_date >= $3::date
-	`, retainedDate, rebuildStartDate, todayDate); err != nil {
-		return fmt.Errorf("清理分组用量日桶: %w", err)
-	}
-
-	if _, err := r.sql.ExecContext(ctx, `
-		INSERT INTO usage_group_daily_rollups (bucket_date, group_id, actual_cost, computed_at)
-		SELECT
-			(created_at AT TIME ZONE $3::text)::date AS bucket_date,
-			group_id,
-			COALESCE(SUM(actual_cost), 0) AS actual_cost,
-			NOW()
-		FROM usage_logs
-		WHERE group_id IS NOT NULL
-			AND created_at >= $1
-			AND created_at < $2
-		GROUP BY 1, 2
-		ON CONFLICT (bucket_date, group_id)
-		DO UPDATE SET
-			actual_cost = EXCLUDED.actual_cost,
-			computed_at = EXCLUDED.computed_at
-	`, rebuildStart.UTC(), todayStart.UTC(), timezoneName); err != nil {
-		return fmt.Errorf("重建分组用量日桶: %w", err)
-	}
-
-	if _, err := r.sql.ExecContext(ctx, `
-		UPDATE usage_group_rollup_state
-		SET closed_before = $1::date,
-			retained_from = $2,
-			timezone_name = $3,
-			updated_at = NOW()
-		WHERE id = 1
-	`, todayDate, retainedFrom, timezoneName); err != nil {
-		return fmt.Errorf("更新分组用量汇总水位: %w", err)
-	}
-	return nil
+	return syncUsageDailyRollups(ctx, db, "subject", todayStart)
 }
 
 func lockGroupUsageRollupState(ctx context.Context, tx *sql.Tx) error {
@@ -326,6 +240,16 @@ func invalidateGroupUsageRollupsAt(ctx context.Context, tx *sql.Tx, affectedAt t
 		),
 			updated_at = NOW()
 		WHERE id = 1
+	`, affectedAt.UTC(), timezoneName)
+	if err != nil {
+		return err
+	}
+	// DROP PARTITION does not run usage row triggers. Fence an in-flight
+	// subject build even when the group watermark was already at this date.
+	_, err = tx.ExecContext(ctx, `
+		UPDATE usage_subject_rollup_state
+		SET closed_before=LEAST(closed_before,($1::timestamptz AT TIME ZONE $2::text)::date),updated_at=NOW()
+		WHERE id=1
 	`, affectedAt.UTC(), timezoneName)
 	return err
 }

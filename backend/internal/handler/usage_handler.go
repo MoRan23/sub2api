@@ -1,6 +1,7 @@
 package handler
 
 import (
+	"errors"
 	"net/http"
 	"strconv"
 	"strings"
@@ -457,6 +458,11 @@ func (h *UsageHandler) DashboardStats(c *gin.Context) {
 
 	stats, err := h.usageService.GetUserDashboardStats(c.Request.Context(), subject.UserID)
 	if err != nil {
+		if errors.Is(err, service.ErrUsageStatsInitializing) {
+			c.Header("Retry-After", "10")
+			response.ErrorWithDetails(c, http.StatusServiceUnavailable, "Usage statistics are updating", "USAGE_STATS_INITIALIZING", nil)
+			return
+		}
 		response.ErrorFrom(c, err)
 		return
 	}

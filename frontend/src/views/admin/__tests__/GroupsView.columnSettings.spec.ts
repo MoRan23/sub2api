@@ -409,7 +409,7 @@ describe('admin GroupsView column settings', () => {
     await openColumnSettings(wrapper)
     await clickColumnToggle(wrapper, 'Usage')
     expect(getUsageSummary).toHaveBeenCalledTimes(1)
-    expect(getUsageSummary).toHaveBeenCalledWith()
+    expect(getUsageSummary).toHaveBeenCalledWith([1], expect.any(AbortSignal))
     expect(getCapacitySummary).not.toHaveBeenCalled()
 
     await clickColumnToggle(wrapper, 'Capacity')

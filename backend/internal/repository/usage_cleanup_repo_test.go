@@ -427,6 +427,7 @@ func TestUsageCleanupRepositoryDeleteUsageLogsBatch(t *testing.T) {
 	mock.ExpectExec(`UPDATE usage_group_rollup_state`).
 		WithArgs(start.Add(time.Hour), "Asia/Shanghai").
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`UPDATE usage_subject_rollup_state`).WithArgs(start.Add(time.Hour), "Asia/Shanghai").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
 	deleted, err := repo.DeleteUsageLogsBatch(context.Background(), filters, 2)
@@ -457,6 +458,7 @@ func TestUsageCleanupRepositoryDeleteUsageLogsBatchAtomicallyInvalidatesGroupRol
 	mock.ExpectExec(`UPDATE usage_group_rollup_state`).
 		WithArgs(firstDeletedAt, "Asia/Shanghai").
 		WillReturnResult(sqlmock.NewResult(0, 1))
+	mock.ExpectExec(`UPDATE usage_subject_rollup_state`).WithArgs(firstDeletedAt, "Asia/Shanghai").WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectCommit()
 
 	deleted, err := repo.DeleteUsageLogsBatch(context.Background(), filters, 2)

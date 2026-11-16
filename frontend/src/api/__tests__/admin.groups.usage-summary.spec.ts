@@ -24,6 +24,14 @@ describe('admin group usage summary API', () => {
 
     await expect(getUsageSummary()).resolves.toEqual(summary)
 
-    expect(get).toHaveBeenCalledWith('/admin/groups/usage-summary')
+    expect(get).toHaveBeenCalledWith('/admin/groups/usage-summary', { params: undefined, signal: undefined })
+  })
+
+  it('scopes summaries to current page IDs and supports cancellation', async () => {
+    const signal = new AbortController().signal
+    await getUsageSummary([2, 9], signal)
+    expect(get).toHaveBeenCalledWith('/admin/groups/usage-summary', { params: { group_ids: '2,9' }, signal })
+    await getUsageSummary([], signal)
+    expect(get).toHaveBeenLastCalledWith('/admin/groups/usage-summary', { params: { group_ids: '' }, signal })
   })
 })

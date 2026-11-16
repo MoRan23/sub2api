@@ -1003,8 +1003,17 @@ func (h *GroupHandler) GetUsageSummary(c *gin.Context) {
 		return
 	}
 	todayStart := service.GroupUsageTodayStart(time.Now())
-
-	results, err := h.dashboardService.GetGroupUsageSummary(c.Request.Context(), todayStart)
+	ids, scoped, err := parseGroupSummaryIDs(c)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	var results any
+	if scoped {
+		results, err = h.dashboardService.GetGroupUsageSummaryByIDs(c.Request.Context(), todayStart, ids)
+	} else {
+		results, err = h.dashboardService.GetGroupUsageSummary(c.Request.Context(), todayStart)
+	}
 	if err != nil {
 		response.Error(c, 500, "Failed to get group usage summary")
 		return
@@ -1019,7 +1028,17 @@ func (h *GroupHandler) GetCapacitySummary(c *gin.Context) {
 	if h.rejectUnsupportedSimpleModeOperation(c, "advanced") {
 		return
 	}
-	results, err := h.groupCapacityService.GetAllGroupCapacity(c.Request.Context())
+	ids, scoped, err := parseGroupSummaryIDs(c)
+	if err != nil {
+		response.BadRequest(c, err.Error())
+		return
+	}
+	var results any
+	if scoped {
+		results, err = h.groupCapacityService.GetGroupCapacityByIDs(c.Request.Context(), ids)
+	} else {
+		results, err = h.groupCapacityService.GetAllGroupCapacity(c.Request.Context())
+	}
 	if err != nil {
 		response.Error(c, 500, "Failed to get group capacity summary")
 		return

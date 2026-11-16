@@ -5741,13 +5741,16 @@ const getQuotaUsageClass = (
 };
 
 const loadUsageSummary = async () => {
-  if (!hasVisibleUsageSummaryConsumer.value) {
+	if (!hasVisibleUsageSummaryConsumer.value || groups.value.length === 0) {
     usageLoading.value = false;
     return;
   }
   usageLoading.value = true;
+  const requestController = abortController;
+  const ids = groups.value.map(group => group.id);
   try {
-    const data = await adminAPI.groups.getUsageSummary();
+    const data = await adminAPI.groups.getUsageSummary(ids, requestController?.signal);
+    if (requestController !== abortController || requestController?.signal.aborted) return;
     const map = new Map<number, GroupUsageSummary>();
     for (const item of data) {
       map.set(item.group_id, {
@@ -5760,16 +5763,19 @@ const loadUsageSummary = async () => {
   } catch (error) {
     console.error("Error loading group usage summary:", error);
   } finally {
-    usageLoading.value = false;
+    if (requestController === abortController) usageLoading.value = false;
   }
 };
 
 const loadCapacitySummary = async () => {
-  if (!hasVisibleCapacityColumn.value) {
+  if (!hasVisibleCapacityColumn.value || groups.value.length === 0) {
     return;
   }
+  const requestController = abortController;
+  const ids = groups.value.map(group => group.id);
   try {
-    const data = await adminAPI.groups.getCapacitySummary();
+    const data = await adminAPI.groups.getCapacitySummary(ids, requestController?.signal);
+    if (requestController !== abortController || requestController?.signal.aborted) return;
     const map = new Map<
       number,
       {

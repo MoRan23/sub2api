@@ -78,6 +78,26 @@ func (s *GroupCapacityService) GetAllGroupCapacity(ctx context.Context) ([]Group
 	return s.getGroupCapacitiesSequential(ctx, groupIDs), nil
 }
 
+func (s *GroupCapacityService) GetGroupCapacityByIDs(ctx context.Context, ids []int64) ([]GroupCapacitySummary, error) {
+	if len(ids) == 0 {
+		return []GroupCapacitySummary{}, nil
+	}
+	repo, ok := s.groupRepo.(interface {
+		ListActiveCapacityGroupIDs(context.Context, []int64) ([]int64, error)
+	})
+	if !ok {
+		return nil, infraerrors.ServiceUnavailable("GROUP_CAPACITY_UNAVAILABLE", "Group capacity selection unavailable")
+	}
+	selected, err := repo.ListActiveCapacityGroupIDs(ctx, ids)
+	if err != nil {
+		return nil, err
+	}
+	if lister, ok := s.accountRepo.(groupCapacityAccountLister); ok {
+		return s.getGroupCapacitiesBatch(ctx, selected, lister)
+	}
+	return s.getGroupCapacitiesSequential(ctx, selected), nil
+}
+
 func (s *GroupCapacityService) listActiveGroupIDs(ctx context.Context) ([]int64, error) {
 	if adminaccess.RestrictedFromContext(ctx) != nil {
 		if repo, ok := s.groupRepo.(interface {
