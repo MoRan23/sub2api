@@ -149,8 +149,12 @@ func provideCleanup(
 	openAIAutoReset *service.OpenAIQuotaAutoResetService,
 	promptAudit *securityaudit.PromptService,
 	pluginManager *service.PluginManager,
+	usageExports *service.UsageExportService,
 ) func() {
 	return func() {
+		if usageExports != nil {
+			usageExports.Stop()
+		}
 		if openAIGateway != nil {
 			openAIGateway.StopPublicCodexCatalog()
 		}

@@ -4,7 +4,7 @@ import { defineComponent, ref } from 'vue'
 
 import UsageView from '../UsageView.vue'
 
-const { list, exportList, getStats, getSnapshotV2, getById, getModelStats, listErrorLogs, routeQuery, aoaToSheet, sheetAddAoa, saveAs, xlsxWrite } = vi.hoisted(() => {
+const { list, createExport, getStats, getSnapshotV2, getById, getModelStats, listErrorLogs, routeQuery } = vi.hoisted(() => {
   vi.stubGlobal('localStorage', {
     getItem: vi.fn(() => null),
     setItem: vi.fn(),
@@ -13,17 +13,13 @@ const { list, exportList, getStats, getSnapshotV2, getById, getModelStats, listE
 
   return {
     list: vi.fn(),
-		exportList: vi.fn(),
+		createExport: vi.fn(),
     getStats: vi.fn(),
     getSnapshotV2: vi.fn(),
     getById: vi.fn(),
     getModelStats: vi.fn(),
     listErrorLogs: vi.fn(),
     routeQuery: {} as Record<string, string>,
-		aoaToSheet: vi.fn(() => ({})),
-		sheetAddAoa: vi.fn(),
-		saveAs: vi.fn(),
-		xlsxWrite: vi.fn(() => new Uint8Array([1, 2, 3])),
   }
 })
 
@@ -65,23 +61,7 @@ vi.mock('@/api/admin', () => ({
   },
 }))
 
-vi.mock('@/api/admin/usage', () => ({
-  adminUsageAPI: {
-		list: exportList,
-  },
-}))
-
-vi.mock('file-saver', () => ({ saveAs }))
-
-vi.mock('xlsx', () => ({
-	utils: {
-		aoa_to_sheet: aoaToSheet,
-		sheet_add_aoa: sheetAddAoa,
-		book_new: vi.fn(() => ({})),
-		book_append_sheet: vi.fn(),
-	},
-	write: xlsxWrite,
-}))
+vi.mock('@/api/admin/usageExports', () => ({ usageExportsAPI: { create: createExport, list: vi.fn(async () => []) } }))
 
 vi.mock('@/api/admin/ops', () => ({
   listErrorLogs,
@@ -106,6 +86,7 @@ vi.mock('vue-i18n', async () => {
     ...actual,
     useI18n: () => ({
       t: (key: string) => messages[key] ?? key,
+      locale: ref('en'),
     }),
   }
 })
@@ -740,41 +721,20 @@ describe('admin UsageView model audit export', () => {
 	beforeEach(() => {
 		vi.useFakeTimers()
 		list.mockReset().mockResolvedValue({ items: [], total: 0, pages: 0 })
-		exportList.mockReset().mockResolvedValue({
-			items: [{
-				id: 1,
-				created_at: '2026-08-04T00:00:00Z',
-				model: 'gpt-5.6-sol',
-				upstream_model: 'gpt-5.5',
-				upstream_response_model: 'gpt-5.4',
-				upstream_model_mismatch: true,
-				request_type: 'sync',
-				input_tokens: 1,
-				output_tokens: 1,
-				cache_read_tokens: 0,
-				cache_creation_tokens: 0,
-				duration_ms: 10,
-			}],
-			total: 1,
-			pages: 1,
-		})
+		createExport.mockReset().mockResolvedValue({ id: 'export-1', status: 'queued' })
 		getStats.mockReset().mockResolvedValue({
 			total_requests: 0, total_input_tokens: 0, total_output_tokens: 0,
 			total_cache_tokens: 0, total_tokens: 0, total_cost: 0, total_actual_cost: 0, average_duration_ms: 0,
 		})
 		getSnapshotV2.mockReset().mockResolvedValue({ trend: [], models: [], groups: [] })
 		getModelStats.mockReset().mockResolvedValue({ models: [] })
-		aoaToSheet.mockClear()
-		sheetAddAoa.mockClear()
-		saveAs.mockClear()
-		xlsxWrite.mockClear()
 	})
 
 	afterEach(() => {
 		vi.useRealTimers()
 	})
 
-	it('exports requested, sent, response, and mismatch as separate admin columns', async () => {
+		it('creates one background export with frozen filters and locale', async () => {
 		const wrapper = mountRouteFilteredUsageView()
 		vi.advanceTimersByTime(120)
 		await flushPromises()
@@ -783,37 +743,23 @@ describe('admin UsageView model audit export', () => {
 		await (wrapper.vm as any).exportToExcel()
 		await flushPromises()
 
-		expect(exportList).toHaveBeenCalledWith(
-			expect.objectContaining({ native_compaction_v2: true }),
-			expect.anything()
+			expect(createExport).toHaveBeenCalledWith(
+				expect.objectContaining({ native_compaction_v2: true, language: 'en', timezone: expect.any(String) }),
+				expect.any(AbortSignal)
 		)
-
-		const headers = aoaToSheet.mock.calls[0][0][0]
-		expect(headers.slice(4, 8)).toEqual([
-			'Requested model',
-			'Sent upstream model',
-			'Upstream response model',
-			'Upstream model mismatch',
-		])
-		const row = sheetAddAoa.mock.calls[0][1][0]
-		expect(row.slice(4, 8)).toEqual(['gpt-5.6-sol', 'gpt-5.5', 'gpt-5.4', 'Yes'])
-		expect(saveAs).toHaveBeenCalledTimes(1)
+			expect(list).toHaveBeenCalledTimes(1)
+			wrapper.unmount()
 	})
 
-		it('exports safety refusal fees without multiplying the fixed fee in account cost', async () => {
-			exportList.mockResolvedValue({ items: [{ created_at: '2026-11-13T00:00:00Z', model: 'grok', total_cost: 0.15, actual_cost: 0.25, account_stats_cost: 0.35, rate_multiplier: 2, account_rate_multiplier: 3,
-				grok_safety_rejection: { code: 'safety_review_rejected', fee: 0.05, http_status: 400, upstream_client_request_id: 'admin-client-id' } }], total: 1, pages: 1 })
+			it('cancels only the browser request when leaving during task creation', async () => {
+				createExport.mockImplementation(() => new Promise(() => {}))
 			const wrapper = mountRouteFilteredUsageView()
 			vi.advanceTimersByTime(120)
 			await flushPromises()
-			await (wrapper.vm as any).exportToExcel()
-			const headers = aoaToSheet.mock.calls[0][0][0]
-			const row = sheetAddAoa.mock.calls[0][1][0]
-			expect(row[headers.indexOf('usage.accountBilled')]).toBe('0.950000')
-			expect(row[headers.indexOf('usage.result')]).toBe('usage.grokSafetyRejection')
-			expect(row[headers.indexOf('usage.grokSafetyTokenCost')]).toBe('0.20000000')
-			expect(row[headers.indexOf('usage.grokSafetyFee')]).toBe('0.05000000')
-			expect(row[headers.indexOf('usage.grokSafetyClientRequestId')]).toBe('admin-client-id')
+				void (wrapper.vm as any).exportToExcel()
+				await flushPromises()
+				const signal = createExport.mock.calls[0][1] as AbortSignal
 			wrapper.unmount()
+				expect(signal.aborted).toBe(true)
 		})
 })

@@ -97,6 +97,26 @@ type UsageLogFilters = usagestats.UsageLogFilters
 
 // ListWithFilters lists usage logs with optional filters (for admin)
 func (r *usageLogRepository) ListWithFilters(ctx context.Context, params pagination.PaginationParams, filters UsageLogFilters) ([]service.UsageLog, *pagination.PaginationResult, error) {
+	conditions, args := usageLogFilterConditions(filters)
+	whereClause := buildWhere(conditions)
+	var logs []service.UsageLog
+	var page *pagination.PaginationResult
+	var err error
+	if shouldUseFastUsageLogTotal(filters) {
+		logs, page, err = r.listUsageLogsWithFastPagination(ctx, whereClause, args, params)
+	} else {
+		logs, page, err = r.listUsageLogsWithPagination(ctx, whereClause, args, params)
+	}
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := r.hydrateUsageLogAssociations(ctx, logs); err != nil {
+		return nil, nil, err
+	}
+	return logs, page, nil
+}
+
+func usageLogFilterConditions(filters UsageLogFilters) ([]string, []any) {
 	conditions := make([]string, 0, 9)
 	args := make([]any, 0, 9)
 
@@ -140,25 +160,7 @@ func (r *usageLogRepository) ListWithFilters(ctx context.Context, params paginat
 		args = append(args, *filters.EndTime)
 	}
 
-	whereClause := buildWhere(conditions)
-	var (
-		logs []service.UsageLog
-		page *pagination.PaginationResult
-		err  error
-	)
-	if shouldUseFastUsageLogTotal(filters) {
-		logs, page, err = r.listUsageLogsWithFastPagination(ctx, whereClause, args, params)
-	} else {
-		logs, page, err = r.listUsageLogsWithPagination(ctx, whereClause, args, params)
-	}
-	if err != nil {
-		return nil, nil, err
-	}
-
-	if err := r.hydrateUsageLogAssociations(ctx, logs); err != nil {
-		return nil, nil, err
-	}
-	return logs, page, nil
+	return conditions, args
 }
 
 func upstreamModelMismatchCondition(column string, mismatch bool) string {
@@ -438,7 +440,7 @@ func (r *usageLogRepository) loadSubscriptions(ctx context.Context, ids []int64)
 	return out, nil
 }
 
-func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, error) {
+func scanUsageLog(scanner interface{ Scan(...any) error }, exportModelCursor ...*string) (*service.UsageLog, error) {
 	var (
 		id                        int64
 		userID                    int64
@@ -579,6 +581,10 @@ func scanUsageLog(scanner interface{ Scan(...any) error }) (*service.UsageLog, e
 		return nil, err
 	}
 
+	// Export keysets must use the SQL ordering value before display normalization.
+	if len(exportModelCursor) > 0 && exportModelCursor[0] != nil {
+		*exportModelCursor[0] = usageExportModelCursor(requestedModel.String, model)
+	}
 	log := &service.UsageLog{
 		ID:                        id,
 		UserID:                    userID,

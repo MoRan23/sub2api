@@ -24,6 +24,9 @@ func RegisterAdminRoutes(
 ) {
 	// 插件 UI 使用短时能力 URL，仅提供经过安装校验的静态资源。
 	v1.GET("/plugin-ui/:token/*path", h.Admin.Plugin.ServeUIAsset)
+	if h.Admin.UsageExport != nil {
+		v1.GET("/usage-exports/download/:ticket", h.Admin.UsageExport.Download)
+	}
 
 	admin := v1.Group("/admin")
 	admin.Use(gin.HandlerFunc(adminAuth))
@@ -783,6 +786,14 @@ func registerUsageRoutes(admin *gin.RouterGroup, h *handler.Handlers) {
 		usage.GET("/cleanup-tasks", h.Admin.Usage.ListCleanupTasks)
 		usage.POST("/cleanup-tasks", h.Admin.Usage.CreateCleanupTask)
 		usage.POST("/cleanup-tasks/:id/cancel", h.Admin.Usage.CancelCleanupTask)
+		if h.Admin.UsageExport != nil {
+			usage.POST("/exports", h.Admin.UsageExport.Create)
+			usage.GET("/exports", h.Admin.UsageExport.List)
+			usage.GET("/exports/:id", h.Admin.UsageExport.Get)
+			usage.POST("/exports/:id/cancel", h.Admin.UsageExport.Cancel)
+			usage.POST("/exports/:id/download-ticket", h.Admin.UsageExport.Ticket)
+			usage.DELETE("/exports/:id", h.Admin.UsageExport.Delete)
+		}
 	}
 }
 

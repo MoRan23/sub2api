@@ -99,6 +99,7 @@ type Config struct {
 	Dashboard               DashboardCacheConfig          `mapstructure:"dashboard_cache"`
 	DashboardAgg            DashboardAggregationConfig    `mapstructure:"dashboard_aggregation"`
 	UsageCleanup            UsageCleanupConfig            `mapstructure:"usage_cleanup"`
+	UsageExport             UsageExportConfig             `mapstructure:"usage_export"`
 	Concurrency             ConcurrencyConfig             `mapstructure:"concurrency"`
 	TokenRefresh            TokenRefreshConfig            `mapstructure:"token_refresh"`
 	SimpleMode              SimpleModeConfig              `mapstructure:"simple_mode" yaml:"simple_mode"`
@@ -2577,6 +2578,8 @@ func setDefaults() {
 
 	// Usage cleanup task
 	viper.SetDefault("usage_cleanup.enabled", true)
+	viper.SetDefault("usage_export.directory", "/app/data/usage-exports")
+	viper.SetDefault("usage_export.max_rows", 200000)
 	viper.SetDefault("usage_cleanup.max_range_days", 31)
 	viper.SetDefault("usage_cleanup.batch_size", 5000)
 	viper.SetDefault("usage_cleanup.worker_interval_seconds", 10)
@@ -2897,6 +2900,9 @@ func setEnvReachableDefaults() {
 }
 
 func (c *Config) Validate() error {
+	if c.UsageExport.MaxRows < 0 || c.UsageExport.MaxRows > 1048575 {
+		return fmt.Errorf("usage_export.max_rows must be between 1 and 1048575 (0 uses default)")
+	}
 	if c.Gateway.MinOutputTokens < 16 {
 		return fmt.Errorf("gateway.min_output_tokens must be at least 16")
 	}

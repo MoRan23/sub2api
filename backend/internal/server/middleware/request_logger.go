@@ -35,7 +35,7 @@ func RequestLogger() gin.HandlerFunc {
 			zap.String("component", "http"),
 			zap.String("request_id", requestID),
 			zap.String("client_request_id", strings.TrimSpace(clientRequestID)),
-			zap.String("path", c.Request.URL.Path),
+			zap.String("path", redactCapabilityPath(c.Request.URL.Path)),
 			zap.String("method", c.Request.Method),
 		)
 
@@ -43,4 +43,12 @@ func RequestLogger() gin.HandlerFunc {
 		c.Request = c.Request.WithContext(ctx)
 		c.Next()
 	}
+}
+
+func redactCapabilityPath(path string) string {
+	const prefix = "/api/v1/usage-exports/download/"
+	if strings.HasPrefix(path, prefix) {
+		return prefix + "[redacted]"
+	}
+	return path
 }
