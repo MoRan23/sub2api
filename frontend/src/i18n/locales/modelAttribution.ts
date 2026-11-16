@@ -1,4 +1,5 @@
 export const attributionZh = {
+  maxConcurrentJobs: '集群检测并发账号数', maxConcurrentJobsHelp: '默认同时检测 8 个账号，可设为 1–64；每个账号保留 3 个并行探针。',
   title: '降智检测', column: '归因测试', description: '定期核对模型归因，按账号设置替换模型白名单或控制调度。白名单首次按有效判定立即应用，后续升级需连续通过两次；恢复归因暂停的调度仍需连续通过两次。',
   global: '全局配置', enabled: '启用自动检测', service: 'LM Fingerpoint Detector 服务地址', model: '探针模型', high: '高级模型白名单', low: '低级模型白名单',
   expectedModels: '期望模型列表', expectedInherit: '继承账号配置', expectedCustom: '单独设置', expectedFollowProbe: '当前为空：跟随本轮实际使用的探针模型。',
@@ -78,6 +79,7 @@ export const attributionZh = {
   }
 }
 export const attributionEn = {
+  maxConcurrentJobs: 'Cluster concurrent account tests', maxConcurrentJobsHelp: 'Defaults to 8 accounts, configurable from 1–64. Each account keeps 3 parallel probes.',
   title: 'Model attribution', column: 'Attribution', description: 'Verify model attribution and apply each account’s allowlist or scheduling policy. The first applicable valid verdict applies allowlists immediately; later upgrades require two consecutive passes. Resuming attribution-paused scheduling still requires two consecutive passes.',
   global: 'Global configuration', enabled: 'Enable automatic detection', service: 'LM Fingerpoint Detector service URL', model: 'Probe model', high: 'High-tier model allowlist', low: 'Low-tier model allowlist',
   expectedModels: 'Expected models', expectedInherit: 'Inherit account configuration', expectedCustom: 'Set separately', expectedFollowProbe: 'Empty list: use the actual probe model for this round.',

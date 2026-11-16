@@ -6,6 +6,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/DATA-DOG/go-sqlmock"
 	"github.com/stretchr/testify/require"
 )
 
@@ -87,6 +88,9 @@ func TestTryAcquireSingletonLeaderLock_CacheErrorFallsThrough(t *testing.T) {
 }
 
 func TestSubscriptionExpiryService_ReminderSkipsScanWhenNotLeader(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
 	cache := &fakeLeaderLockCache{}
 	// A peer already holds the reminder leader lock.
 	_, _ = cache.TryAcquireLeaderLock(context.Background(), subscriptionExpiryReminderLeaderLockKey, "peer", time.Minute)
@@ -96,49 +100,68 @@ func TestSubscriptionExpiryService_ReminderSkipsScanWhenNotLeader(t *testing.T) 
 	svc := NewSubscriptionExpiryService(repo, time.Minute)
 	svc.SetSettingRepository(settingRepo)
 	svc.SetNotificationEmailService(NewNotificationEmailService(settingRepo, NewEmailService(settingRepo, nil)))
-	svc.SetLeaderLock(cache, nil)
+	svc.SetLeaderLock(cache, db)
 
 	svc.sendExpiryReminders(context.Background())
 
 	require.Zero(t, repo.listCalls, "non-leader must not scan active subscriptions")
+	require.NoError(t, mock.ExpectationsWereMet())
 }
 
 func TestSubscriptionExpiryService_ReminderScansWhenLeader(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+	mock.ExpectQuery("SELECT s.id,s.user_id,u.email,s.expires_at").WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "email", "expires_at", "days"}))
 	repo := &subscriptionExpiryRepoStub{}
 	settingRepo := &subscriptionExpirySettingRepoStub{values: map[string]string{SettingKeySMTPHost: "smtp.example.com"}}
 	svc := NewSubscriptionExpiryService(repo, time.Minute)
 	svc.SetSettingRepository(settingRepo)
 	svc.SetNotificationEmailService(NewNotificationEmailService(settingRepo, NewEmailService(settingRepo, nil)))
-	svc.SetLeaderLock(&fakeLeaderLockCache{}, nil)
+	svc.SetLeaderLock(&fakeLeaderLockCache{}, db)
 
 	svc.sendExpiryReminders(context.Background())
 
-	require.Equal(t, 1, repo.listCalls, "leader should scan active subscriptions once")
+	require.Zero(t, repo.listCalls, "reminders must use the narrow projection, never full subscription hydration")
+	require.NoError(t, mock.ExpectationsWereMet())
 }
 
 // Single-instance correctness: the lock is released at the end of each cycle, so
 // the same instance must re-acquire it and run on every subsequent cycle (no
-// self-lockout). Covers both the cache-backed path and the no-backend path.
+// self-lockout). Covers both Redis and PostgreSQL coordination.
 func TestSubscriptionExpiryService_ReminderRunsEveryCycleSingleInstance(t *testing.T) {
 	cases := map[string]LeaderLockCache{
-		"with_cache": &fakeLeaderLockCache{},
-		"no_backend": nil,
+		"with_cache":  &fakeLeaderLockCache{},
+		"db_fallback": nil,
 	}
 	for name, cache := range cases {
 		t.Run(name, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			require.NoError(t, err)
+			defer db.Close()
+			for range 3 {
+				if cache == nil {
+					mock.ExpectQuery("SELECT pg_try_advisory_lock").WillReturnRows(sqlmock.NewRows([]string{"acquired"}).AddRow(true))
+				}
+				mock.ExpectQuery("SELECT s.id,s.user_id,u.email,s.expires_at").WillReturnRows(sqlmock.NewRows([]string{"id", "user_id", "email", "expires_at", "days"}))
+				if cache == nil {
+					mock.ExpectExec("SELECT pg_advisory_unlock").WillReturnResult(sqlmock.NewResult(0, 1))
+				}
+			}
 			repo := &subscriptionExpiryRepoStub{}
 			settingRepo := &subscriptionExpirySettingRepoStub{values: map[string]string{SettingKeySMTPHost: "smtp.example.com"}}
 			svc := NewSubscriptionExpiryService(repo, time.Minute)
 			svc.SetSettingRepository(settingRepo)
 			svc.SetNotificationEmailService(NewNotificationEmailService(settingRepo, NewEmailService(settingRepo, nil)))
-			svc.SetLeaderLock(cache, nil)
+			svc.SetLeaderLock(cache, db)
 
 			// Three consecutive cycles, mimicking the ticker loop.
 			svc.sendExpiryReminders(context.Background())
 			svc.sendExpiryReminders(context.Background())
 			svc.sendExpiryReminders(context.Background())
 
-			require.Equal(t, 3, repo.listCalls, "single instance must run every cycle")
+			require.Zero(t, repo.listCalls)
+			require.NoError(t, mock.ExpectationsWereMet(), "single instance must run each narrow scan")
 		})
 	}
 }

@@ -50,12 +50,22 @@ func (h *AccountHandler) SaveAttributionConfig(c *gin.Context) {
 	if !h.attributionReady(c) {
 		return
 	}
-	var v service.AttributionConfig
+	var v struct {
+		service.AttributionConfig
+		MaxConcurrentJobs *int `json:"max_concurrent_jobs"`
+	}
 	if c.ShouldBindJSON(&v) != nil {
 		response.BadRequest(c, "Invalid configuration")
 		return
 	}
-	out, err := h.attributionService.SaveConfig(c.Request.Context(), v)
+	if v.MaxConcurrentJobs != nil {
+		if *v.MaxConcurrentJobs < 1 || *v.MaxConcurrentJobs > 64 {
+			response.BadRequest(c, "max_concurrent_jobs must be between 1 and 64")
+			return
+		}
+		v.AttributionConfig.MaxConcurrentJobs = *v.MaxConcurrentJobs
+	}
+	out, err := h.attributionService.SaveConfig(c.Request.Context(), v.AttributionConfig)
 	if err != nil {
 		attributionError(c, err)
 		return

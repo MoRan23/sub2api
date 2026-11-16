@@ -9,6 +9,8 @@
           <section class="space-y-4 rounded-xl border border-gray-200 bg-white p-5 dark:border-dark-600 dark:bg-dark-800">
             <div class="flex flex-wrap items-center justify-between gap-3"><h2 class="font-semibold">{{ t('attribution.global') }}</h2><label class="flex items-center gap-2 text-sm"><input v-model="config.enabled" type="checkbox" data-testid="attribution-enable" />{{ t('attribution.enabled') }}</label></div>
             <p class="text-sm text-gray-500 dark:text-gray-400">{{ t('attribution.notice') }}</p>
+            <label class="block text-sm font-medium">{{ t('attribution.maxConcurrentJobs') }}<input v-model.number="config.max_concurrent_jobs" type="number" min="1" max="64" step="1" class="input mt-2 w-32" data-testid="attribution-concurrency" /></label>
+            <p class="text-xs text-gray-500 dark:text-gray-400">{{ t('attribution.maxConcurrentJobsHelp') }}</p>
             <label class="block text-sm font-medium">{{ t('attribution.service') }}<input v-model="config.base_url" type="url" class="input mt-2 w-full" placeholder="http://lm-detector:8080" data-testid="attribution-url" /></label>
             <button type="button" class="btn btn-secondary btn-sm" :disabled="connecting || !validConnectionURL" data-testid="attribution-connect" @click="connect">{{ connecting ? t('attribution.loading') : t('attribution.connect') }}</button>
             <p v-if="candidates.length" class="break-all text-xs text-gray-500">{{ t('attribution.candidates') }}: {{ candidates.join(', ') }}</p>
@@ -130,7 +132,7 @@ async function load() {
   try {
     const [c, g] = await Promise.all([attributionAPI.config(controller.signal), getAllIncludingInactive()])
     if (disposed || request !== loadGeneration) return
-    config.value = { ...c, group_priority: c.group_priority || [] }
+    config.value = { ...c, max_concurrent_jobs: c.max_concurrent_jobs ?? 8, group_priority: c.group_priority || [] }
     // Keep saved metadata available even if the optional live check fails.
     config.value.detector = c.detector
     groups.value = g
@@ -151,6 +153,8 @@ function validPolicy(p: AttributionPolicy) {
 async function save() {
   if (!config.value) return
   error.value = ''; message.value = ''
+  const concurrency = config.value.max_concurrent_jobs
+  if (typeof concurrency !== 'number' || !Number.isInteger(concurrency) || concurrency < 1 || concurrency > 64) { error.value = t('attribution.maxConcurrentJobsHelp'); return }
   if (defaultFields.value?.validate() === false || groupFields.value.some(fields => !fields.validate()) ||
       !validAttributionActions(config.value.default) || config.value.groups.some(group => !validAttributionActions(group))) {
     error.value = t('attribution.accountActions.invalid'); return

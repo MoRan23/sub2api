@@ -244,7 +244,7 @@ func attributionRows(rows *sql.Rows) ([]*service.AttributionJob, error) {
 	return out, rows.Err()
 }
 
-func pruneAttribution(ctx context.Context, tx *sql.Tx) error {
+func pruneAttribution(ctx context.Context, tx *sql.Tx, accountIDs ...int64) error {
 	// Keep the usual latest 100 jobs, plus the history needed to
 	// reconstruct the overview's 200-minute timeline. OAuth samples look back
 	// another 15 minutes; API keys also need the last effective result before
@@ -254,6 +254,7 @@ func pruneAttribution(ctx context.Context, tx *sql.Tx) error {
 		SELECT id, account_id, finished_at, status,
 		       ROW_NUMBER() OVER (PARTITION BY account_id ORDER BY id DESC) AS rn
 		FROM model_attribution_jobs WHERE finished_at IS NOT NULL
+		  AND (COALESCE(cardinality($1::bigint[]),0) = 0 OR account_id = ANY($1::bigint[]))
 	), candidates AS MATERIALIZED (
 		SELECT id, account_id FROM history
 		WHERE rn > 100 AND NOT (
@@ -273,9 +274,9 @@ func pruneAttribution(ctx context.Context, tx *sql.Tx) error {
 		) anchor
 	)
 	DELETE FROM model_attribution_jobs j USING candidates c
-	WHERE j.id = c.id AND NOT EXISTS (
+		WHERE j.id = c.id AND (j.claim_id IS NULL OR j.lease_until <= NOW()) AND NOT EXISTS (
 		SELECT 1 FROM api_key_anchors anchor WHERE anchor.id = j.id
-	)`)
+		) AND j.id IN (SELECT id FROM candidates ORDER BY id LIMIT 1000)`, pq.Array(accountIDs))
 	return err
 }
 
@@ -357,7 +358,11 @@ func (r *attributionRepository) Enqueue(ctx context.Context, ids []int64, manual
 		}
 	}
 	if len(out) > 0 {
-		if err = pruneAttribution(ctx, tx); err != nil {
+		pruneIDs := make([]int64, 0, len(out))
+		for _, job := range out {
+			pruneIDs = append(pruneIDs, job.AccountID)
+		}
+		if err = pruneAttribution(ctx, tx, pruneIDs...); err != nil {
 			return nil, err
 		}
 	}
@@ -452,14 +457,25 @@ func (r *attributionRepository) Claim(ctx context.Context) (*service.Attribution
 	if err != nil {
 		return nil, err
 	}
-	if n > 0 || disabledCount > 0 {
-		if err = pruneAttribution(ctx, tx); err != nil {
-			return nil, err
-		}
+	_ = n
+	_ = disabledCount // History is pruned by account, outside the claim critical section.
+	limit := c.MaxConcurrentJobs
+	if limit == 0 {
+		limit = 8
+	}
+	var executing int
+	if err = tx.QueryRowContext(ctx, `SELECT COUNT(*) FROM model_attribution_jobs WHERE claim_id IS NOT NULL AND lease_until > NOW()`).Scan(&executing); err != nil {
+		return nil, err
+	}
+	if executing >= limit {
+		return nil, tx.Commit()
 	}
 	var jobID int64
 	var firstStart bool
-	err = tx.QueryRowContext(ctx, `SELECT id,status='queued' AND started_at IS NULL FROM model_attribution_jobs WHERE status='queued' OR (status='retry_wait' AND next_attempt_at<=NOW()) ORDER BY COALESCE(next_attempt_at,created_at),id LIMIT 1 FOR UPDATE SKIP LOCKED`).Scan(&jobID, &firstStart)
+	err = tx.QueryRowContext(ctx, `SELECT j.id,j.status='queued' AND j.started_at IS NULL FROM model_attribution_jobs j
+WHERE (j.status='queued' OR (j.status='retry_wait' AND j.next_attempt_at<=NOW()))
+AND NOT EXISTS (SELECT 1 FROM model_attribution_jobs active WHERE active.account_id=j.account_id AND active.id<>j.id AND active.claim_id IS NOT NULL AND active.lease_until>NOW())
+ORDER BY COALESCE(j.next_attempt_at,j.created_at),j.id LIMIT 1 FOR UPDATE OF j SKIP LOCKED`).Scan(&jobID, &firstStart)
 	if errors.Is(err, sql.ErrNoRows) {
 		return nil, tx.Commit()
 	}
@@ -512,12 +528,13 @@ func attributionDaybreakPreferences(ctx context.Context, tx *sql.Tx, accountID i
 }
 
 func (r *attributionRepository) Heartbeat(ctx context.Context, j *service.AttributionJob) (bool, error) {
-	res, err := r.db.ExecContext(ctx, `UPDATE model_attribution_jobs SET lease_until=NOW()+interval '45 seconds' WHERE id=$1 AND claim_id=$2 AND status='running' AND lease_until>NOW()`, j.ID, j.Claim)
-	if err != nil {
-		return false, err
+	var running bool
+	err := r.db.QueryRowContext(ctx, `UPDATE model_attribution_jobs SET lease_until=NOW()+interval '45 seconds'
+WHERE id=$1 AND claim_id=$2 AND status IN ('running','cancelled') AND lease_until>NOW() RETURNING status='running'`, j.ID, j.Claim).Scan(&running)
+	if errors.Is(err, sql.ErrNoRows) {
+		return false, nil
 	}
-	n, err := res.RowsAffected()
-	return n == 1, err
+	return running, err
 }
 func validAttributionSnapshot(old, current service.AttributionSnapshot, skip string) bool {
 	return skip == "" && old.ConfigVersion == current.ConfigVersion && old.Fence == current.Fence && service.SameAttributionDetector(old.Detector, current.Detector)
@@ -675,14 +692,14 @@ func (r *attributionRepository) Cancel(ctx context.Context, id int64) (*service.
 	if err != nil {
 		return nil, err
 	}
-	j, err = scanAttribution(tx.QueryRowContext(ctx, `UPDATE model_attribution_jobs SET status='cancelled',reason='cancelled',result=$2,finished_at=NOW(),checkpoint=NULL,next_attempt_at=NULL,lease_until=NULL,claim_id=NULL WHERE id=$1 RETURNING `+attributionColumns, id, result))
+	j, err = scanAttribution(tx.QueryRowContext(ctx, `UPDATE model_attribution_jobs SET status='cancelled',reason='cancelled',result=$2,finished_at=NOW(),checkpoint=NULL,next_attempt_at=NULL WHERE id=$1 RETURNING `+attributionColumns, id, result))
 	if err != nil {
 		return nil, err
 	}
 	if _, err = tx.ExecContext(ctx, `UPDATE model_attribution_state SET pass_streak=0 WHERE account_id=$1`, j.AccountID); err != nil {
 		return nil, err
 	}
-	if err = pruneAttribution(ctx, tx); err != nil {
+	if err = pruneAttribution(ctx, tx, j.AccountID); err != nil {
 		return nil, err
 	}
 	return j, tx.Commit()
@@ -891,7 +908,7 @@ func (r *attributionRepository) finishAttempt(ctx context.Context, j *service.At
 	if _, err = tx.ExecContext(ctx, `UPDATE model_attribution_jobs SET status=$3,reason=$4,result=$5,finished_at=NOW(),lease_until=NULL,claim_id=NULL,checkpoint=NULL,next_attempt_at=NULL WHERE id=$1 AND claim_id=$2 AND status='running'`, j.ID, j.Claim, j.Status, j.Reason, b); err != nil {
 		return err
 	}
-	if err = pruneAttribution(ctx, tx); err != nil {
+	if err = pruneAttribution(ctx, tx, j.AccountID); err != nil {
 		return err
 	}
 	if err = tx.Commit(); err != nil {

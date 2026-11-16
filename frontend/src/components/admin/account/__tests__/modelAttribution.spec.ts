@@ -556,6 +556,24 @@ describe('attribution account UI', () => {
 })
 
 describe('attribution configuration', () => {
+  it('defaults the cluster concurrency to eight and saves an explicit bounded limit', async () => {
+    api.save.mockImplementation(async (value: AttributionConfig) => ({ ...value, version: value.version + 1 }))
+    const wrapper = mount(ModelAttributionView, { global: { stubs } }); await flushPromises()
+    const input = wrapper.get('[data-testid="attribution-concurrency"]')
+    expect((input.element as HTMLInputElement).value).toBe('8')
+    await input.setValue(16)
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(api.save).toHaveBeenLastCalledWith(expect.objectContaining({ max_concurrent_jobs: 16 }))
+    wrapper.unmount()
+  })
+  it.each([0, 65, 1.5])('rejects invalid cluster concurrency %s before saving', async value => {
+    const wrapper = mount(ModelAttributionView, { global: { stubs } }); await flushPromises()
+    await wrapper.get('[data-testid="attribution-concurrency"]').setValue(value)
+    await wrapper.get('form').trigger('submit'); await flushPromises()
+    expect(api.save).not.toHaveBeenCalled()
+    expect(wrapper.get('[role="alert"]').text()).toBe('attribution.maxConcurrentJobsHelp')
+    wrapper.unmount()
+  })
   it('keeps both action switches off for old configuration and preserves explicit empty mapping and null', async () => {
     api.save.mockImplementation(async (value: AttributionConfig) => ({ ...value, version: value.version + 1 }))
     const wrapper = mount(ModelAttributionView, { global: { stubs } }); await flushPromises()

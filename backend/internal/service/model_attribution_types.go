@@ -180,18 +180,19 @@ func AttributionResultPolicyDigest(snapshot AttributionSnapshot, result Attribut
 }
 
 type AttributionConfig struct {
-	Version         int64                    `json:"version"`
-	Enabled         bool                     `json:"enabled"`
-	BaseURL         string                   `json:"base_url"`
-	Detector        *AttributionDetector     `json:"detector,omitempty"`
-	Default         AttributionPolicy        `json:"default"`
-	Groups          []AttributionGroupPolicy `json:"groups"`
-	GroupPriority   []int64                  `json:"group_priority"`
-	NewAccountTests NewAccountTestConfig     `json:"new_account_tests"`
+	MaxConcurrentJobs int                      `json:"max_concurrent_jobs"`
+	Version           int64                    `json:"version"`
+	Enabled           bool                     `json:"enabled"`
+	BaseURL           string                   `json:"base_url"`
+	Detector          *AttributionDetector     `json:"detector,omitempty"`
+	Default           AttributionPolicy        `json:"default"`
+	Groups            []AttributionGroupPolicy `json:"groups"`
+	GroupPriority     []int64                  `json:"group_priority"`
+	NewAccountTests   NewAccountTestConfig     `json:"new_account_tests"`
 }
 
 func DefaultAttributionConfig() AttributionConfig {
-	return AttributionConfig{Version: 1, Default: AttributionPolicy{Model: AttributionDefaultModel, HighModels: []string{}, LowModels: []string{}}, Groups: []AttributionGroupPolicy{}, GroupPriority: []int64{}, NewAccountTests: NewAccountTestConfig{Attribution: true, Pelican: true, AttributionModel: AttributionDefaultModel, PelicanModel: InitialPelicanDefaultModel}}
+	return AttributionConfig{MaxConcurrentJobs: 8, Version: 1, Default: AttributionPolicy{Model: AttributionDefaultModel, HighModels: []string{}, LowModels: []string{}}, Groups: []AttributionGroupPolicy{}, GroupPriority: []int64{}, NewAccountTests: NewAccountTestConfig{Attribution: true, Pelican: true, AttributionModel: AttributionDefaultModel, PelicanModel: InitialPelicanDefaultModel}}
 }
 
 func AttributionBaseURL(raw string) (string, error) {
@@ -203,6 +204,12 @@ func AttributionBaseURL(raw string) (string, error) {
 }
 
 func NormalizeAttributionConfig(c AttributionConfig) (AttributionConfig, error) {
+	if c.MaxConcurrentJobs == 0 {
+		c.MaxConcurrentJobs = 8
+	}
+	if c.MaxConcurrentJobs < 1 || c.MaxConcurrentJobs > 64 {
+		return c, fmt.Errorf("%w: max_concurrent_jobs must be between 1 and 64", ErrAttributionInvalid)
+	}
 	if c.Version < 1 || len(c.Groups) > 1000 {
 		return c, ErrAttributionInvalid
 	}

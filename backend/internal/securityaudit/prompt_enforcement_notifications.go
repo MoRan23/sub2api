@@ -144,7 +144,7 @@ func (r *PostgreSQLRepository) PruneEnforcementHistory(ctx context.Context, now 
 	if limit <= 0 || limit > 10000 {
 		limit = 1000
 	}
-	res, err := r.db.ExecContext(ctx, `DELETE FROM prompt_audit_enforcement_hits WHERE id IN (SELECT h.id FROM prompt_audit_enforcement_hits h WHERE h.occurred_at<$1 AND NOT EXISTS(SELECT 1 FROM prompt_audit_events e WHERE e.id=h.event_id) ORDER BY h.occurred_at,h.id LIMIT $2)`, now.Add(-maxEnforcementRetention).UTC(), limit)
+	res, err := r.db.ExecContext(ctx, `DELETE FROM prompt_audit_enforcement_hits WHERE id IN (SELECT h.id FROM prompt_audit_enforcement_hits h WHERE h.occurred_at<$1 AND NOT EXISTS(SELECT 1 FROM prompt_audit_events e WHERE e.id=h.event_id) ORDER BY h.occurred_at,h.id LIMIT $2 FOR UPDATE SKIP LOCKED)`, now.Add(-maxEnforcementRetention).UTC(), limit)
 	if err != nil {
 		return 0, err
 	}
@@ -152,6 +152,10 @@ func (r *PostgreSQLRepository) PruneEnforcementHistory(ctx context.Context, now 
 	if err != nil {
 		return 0, err
 	}
-	_, err = r.db.ExecContext(ctx, `DELETE FROM prompt_audit_enforcement_notifications WHERE id IN (SELECT n.id FROM prompt_audit_enforcement_notifications n WHERE n.sent_at<$1 AND NOT EXISTS(SELECT 1 FROM prompt_audit_enforcement_hits h WHERE h.notification_id=n.id) ORDER BY n.sent_at,n.id LIMIT $2)`, now.Add(-maxEnforcementRetention).UTC(), limit)
-	return deleted, err
+	res, err = r.db.ExecContext(ctx, `DELETE FROM prompt_audit_enforcement_notifications WHERE id IN (SELECT n.id FROM prompt_audit_enforcement_notifications n WHERE n.sent_at<$1 AND NOT EXISTS(SELECT 1 FROM prompt_audit_enforcement_hits h WHERE h.notification_id=n.id) ORDER BY n.sent_at,n.id LIMIT $2 FOR UPDATE SKIP LOCKED)`, now.Add(-maxEnforcementRetention).UTC(), limit)
+	if err != nil {
+		return deleted, err
+	}
+	notifications, err := res.RowsAffected()
+	return deleted + notifications, err
 }

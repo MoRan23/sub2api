@@ -17,7 +17,7 @@ export interface AttributionDetector { provider: string; protocol: number; revis
 export interface AttributionConnection { models: string[]; detector: AttributionDetector }
 export interface AttributionProbeModelAccount { account_id: number; account_name: string; models: string[]; status: 'success' | 'partial' | 'error'; error?: string }
 export interface AttributionProbeModels { models: string[]; accounts: AttributionProbeModelAccount[] }
-export interface AttributionConfig { version: number; enabled: boolean; base_url: string; detector?: AttributionDetector; default: AttributionPolicy; groups: AttributionGroup[]; group_priority: number[]; new_account_tests: NewAccountTestConfig }
+export interface AttributionConfig { max_concurrent_jobs?: number; version: number; enabled: boolean; base_url: string; detector?: AttributionDetector; default: AttributionPolicy; groups: AttributionGroup[]; group_priority: number[]; new_account_tests: NewAccountTestConfig }
 export type AttributionStatus = 'queued' | 'running' | 'retry_wait' | 'cancelled' | 'passed' | 'mismatch' | 'abnormal' | 'failed' | 'skipped'
 export interface AttributionJob {
   id: number

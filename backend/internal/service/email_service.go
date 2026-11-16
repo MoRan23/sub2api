@@ -192,7 +192,7 @@ func (s *EmailService) SendEmail(ctx context.Context, to, subject, body string) 
 	if err != nil {
 		return err
 	}
-	return s.SendEmailWithConfig(config, to, subject, body)
+	return s.SendEmailWithConfigAndOptionsContext(ctx, config, to, subject, body, EmailSendOptions{})
 }
 
 // SendEmailWithOptions sends an email through the configured SMTP transport.
@@ -203,7 +203,7 @@ func (s *EmailService) SendEmailWithOptions(ctx context.Context, to, subject, bo
 	if err != nil {
 		return err
 	}
-	return s.SendEmailWithConfigAndOptions(config, to, subject, body, options)
+	return s.SendEmailWithConfigAndOptionsContext(ctx, config, to, subject, body, options)
 }
 
 const smtpDialTimeout = 10 * time.Second
@@ -215,12 +215,19 @@ func (s *EmailService) SendEmailWithConfig(config *SMTPConfig, to, subject, body
 }
 
 func (s *EmailService) SendEmailWithConfigAndOptions(config *SMTPConfig, to, subject, body string, options EmailSendOptions) error {
+	return s.SendEmailWithConfigAndOptionsContext(context.Background(), config, to, subject, body, options)
+}
+
+func (s *EmailService) SendEmailWithConfigAndOptionsContext(ctx context.Context, config *SMTPConfig, to, subject, body string, options EmailSendOptions) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	message, err := buildSMTPMessageWithOptions(config, to, subject, body, options)
 	if err != nil {
 		return err
 	}
 
-	client, err := s.connectSMTP(config)
+	client, err := s.connectSMTPContext(ctx, config)
 	if err != nil {
 		return err
 	}
@@ -272,19 +279,23 @@ func smtpTLSConfig(host string) *tls.Config {
 //   - UseTLS=false：明文连接后若服务器支持 STARTTLS 则机会式升级，
 //     与 smtp.SendMail 的默认行为一致。
 func (s *EmailService) connectSMTP(config *SMTPConfig) (*smtp.Client, error) {
+	return s.connectSMTPContext(context.Background(), config)
+}
+
+func (s *EmailService) connectSMTPContext(ctx context.Context, config *SMTPConfig) (*smtp.Client, error) {
 	addr := fmt.Sprintf("%s:%d", config.Host, config.Port)
 	dialer := &net.Dialer{Timeout: smtpDialTimeout}
 	tlsConfig := smtpTLSConfig(config.Host)
 
 	switch strings.ToLower(strings.TrimSpace(config.TLSMode)) {
 	case "implicit":
-		conn, err := tls.DialWithDialer(dialer, "tcp", addr, tlsConfig)
+		conn, err := (&tls.Dialer{NetDialer: dialer, Config: tlsConfig}).DialContext(ctx, "tcp", addr)
 		if err != nil {
 			return nil, fmt.Errorf("tls dial: %w", err)
 		}
-		return newSMTPClient(conn, config.Host)
+		return newSMTPClientContext(ctx, conn, config.Host)
 	case "starttls":
-		return s.connectSMTPStartTLS(dialer, addr, config.Host, tlsConfig, true)
+		return s.connectSMTPStartTLSContext(ctx, dialer, addr, config.Host, tlsConfig, true)
 	case "":
 		// Keep the existing global SMTP compatibility behavior below.
 	default:
@@ -292,9 +303,9 @@ func (s *EmailService) connectSMTP(config *SMTPConfig) (*smtp.Client, error) {
 	}
 
 	if config.UseTLS {
-		conn, err := tls.DialWithDialer(dialer, "tcp", addr, tlsConfig)
+		conn, err := (&tls.Dialer{NetDialer: dialer, Config: tlsConfig}).DialContext(ctx, "tcp", addr)
 		if err == nil {
-			return newSMTPClient(conn, config.Host)
+			return newSMTPClientContext(ctx, conn, config.Host)
 		}
 		var recordErr tls.RecordHeaderError
 		if !errors.As(err, &recordErr) {
@@ -302,20 +313,24 @@ func (s *EmailService) connectSMTP(config *SMTPConfig) (*smtp.Client, error) {
 		}
 		// SMTP 服务器先发问候语：明文问候会让 TLS 握手立刻返回
 		// RecordHeaderError，据此可靠判定对端期望 STARTTLS。
-		return s.connectSMTPStartTLS(dialer, addr, config.Host, tlsConfig, true)
+		return s.connectSMTPStartTLSContext(ctx, dialer, addr, config.Host, tlsConfig, true)
 	}
 
-	return s.connectSMTPStartTLS(dialer, addr, config.Host, tlsConfig, false)
+	return s.connectSMTPStartTLSContext(ctx, dialer, addr, config.Host, tlsConfig, false)
 }
 
 // connectSMTPStartTLS 建立明文连接并按需升级 STARTTLS。
 // mandatory 为 true 时服务器必须支持 STARTTLS，否则报错。
 func (s *EmailService) connectSMTPStartTLS(dialer *net.Dialer, addr, host string, tlsConfig *tls.Config, mandatory bool) (*smtp.Client, error) {
-	conn, err := dialer.Dial("tcp", addr)
+	return s.connectSMTPStartTLSContext(context.Background(), dialer, addr, host, tlsConfig, mandatory)
+}
+
+func (s *EmailService) connectSMTPStartTLSContext(ctx context.Context, dialer *net.Dialer, addr, host string, tlsConfig *tls.Config, mandatory bool) (*smtp.Client, error) {
+	conn, err := dialer.DialContext(ctx, "tcp", addr)
 	if err != nil {
 		return nil, fmt.Errorf("smtp dial: %w", err)
 	}
-	client, err := newSMTPClient(conn, host)
+	client, err := newSMTPClientContext(ctx, conn, host)
 	if err != nil {
 		return nil, err
 	}
@@ -334,7 +349,26 @@ func (s *EmailService) connectSMTPStartTLS(dialer *net.Dialer, addr, host string
 }
 
 func newSMTPClient(conn net.Conn, host string) (*smtp.Client, error) {
-	_ = conn.SetDeadline(time.Now().Add(smtpIOTimeout))
+	return newSMTPClientContext(context.Background(), conn, host)
+}
+
+type smtpContextConn struct {
+	net.Conn
+	stop func() bool
+}
+
+func (c *smtpContextConn) Close() error { c.stop(); return c.Conn.Close() }
+
+func newSMTPClientContext(ctx context.Context, conn net.Conn, host string) (*smtp.Client, error) {
+	deadline := time.Now().Add(smtpIOTimeout)
+	if d, ok := ctx.Deadline(); ok && d.Before(deadline) {
+		deadline = d
+	}
+	_ = conn.SetDeadline(deadline)
+	// Closing the transport interrupts greeting, STARTTLS, AUTH and DATA reads,
+	// including cancellation without a deadline. No goroutine is retained per mail.
+	rawConn := conn
+	conn = &smtpContextConn{Conn: rawConn, stop: context.AfterFunc(ctx, func() { _ = rawConn.Close() })}
 	client, err := smtp.NewClient(conn, host)
 	if err != nil {
 		_ = conn.Close()

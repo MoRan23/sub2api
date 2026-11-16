@@ -539,7 +539,7 @@ func TestAttributionQueueLeasesRetentionAndRestart(t *testing.T) {
 	for j := range claims {
 		claimed = append(claimed, j)
 	}
-	require.Len(t, claimed, 5, "all accounts are claimed without a global capacity limit")
+	require.Len(t, claimed, 5, "all five accounts fit the default eight-job cluster limit")
 	old := claimed[0]
 	ok, err := r.Heartbeat(ctx, old)
 	require.NoError(t, err)
@@ -577,7 +577,7 @@ func TestAttributionQueueLeasesRetentionAndRestart(t *testing.T) {
 	require.NoError(t, err, "manual jobs do not require automatic detection to be enabled")
 	_, err = r.Claim(ctx)
 	require.NoError(t, err)
-	_, err = integrationDB.ExecContext(ctx, `UPDATE model_attribution_jobs SET status='failed',finished_at=NOW() WHERE status='running'`)
+	_, err = integrationDB.ExecContext(ctx, `UPDATE model_attribution_jobs SET status='failed',finished_at=NOW(),claim_id=NULL,lease_until=NULL WHERE status='running'`)
 	require.NoError(t, err)
 	_, err = integrationDB.ExecContext(ctx, `UPDATE model_attribution_jobs SET status='failed',finished_at=NOW() WHERE status='queued'`)
 	require.NoError(t, err)
@@ -588,7 +588,13 @@ func TestAttributionQueueLeasesRetentionAndRestart(t *testing.T) {
 	require.NoError(t, err)
 	jobs, err := r.Enqueue(ctx, nil, false)
 	require.NoError(t, err)
-	require.Len(t, jobs, 5)
+	queuedAccounts := make(map[int64]bool, len(jobs))
+	for _, job := range jobs {
+		queuedAccounts[job.AccountID] = true
+	}
+	for _, id := range ids {
+		require.True(t, queuedAccounts[id], "eligible fixture account %d should be queued", id)
+	}
 	again, err := r.Enqueue(ctx, nil, false)
 	require.NoError(t, err)
 	require.Empty(t, again)
@@ -601,7 +607,7 @@ func TestAttributionQueueLeasesRetentionAndRestart(t *testing.T) {
 	attributionRun(t, r, a.ID, "abnormal")
 	page, err = r.List(ctx, a.ID, 1, 100)
 	require.NoError(t, err)
-	require.Equal(t, 100, page.Total)
+	require.GreaterOrEqual(t, page.Total, 105, "recent valid detections remain protected beyond the latest 100")
 	var verdict string
 	require.NoError(t, integrationDB.QueryRowContext(ctx, `SELECT verdict FROM model_attribution_state WHERE account_id=$1`, a.ID).Scan(&verdict))
 	require.Equal(t, "passed", verdict)

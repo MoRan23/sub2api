@@ -4,21 +4,17 @@ import (
 	"context"
 	"database/sql"
 	"errors"
-	"fmt"
 	"log"
-	"strconv"
 	"sync"
 	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/pagination"
 	"github.com/google/uuid"
 )
 
 const (
 	subscriptionExpiryReminderSMTPWarningInterval = time.Minute
 	// subscriptionExpiryReminderLeaderLockKey gates the per-cycle reminder scan so
-	// that only one instance walks all active subscriptions and sends reminder
-	// emails, avoiding redundant full scans and duplicate emails.
+	// that only one instance queues due subscriptions per scan cycle.
 	subscriptionExpiryReminderLeaderLockKey = "subscription:expiry:reminder:leader"
 	// subscriptionExpiryReminderLeaderLockTTL bounds crash recovery; the scan can
 	// page through many subscriptions, so keep it comfortably above one cycle.
@@ -35,6 +31,9 @@ type SubscriptionExpiryService struct {
 	interval                 time.Duration
 	stopCh                   chan struct{}
 	stopOnce                 sync.Once
+	startOnce                sync.Once
+	runCtx                   context.Context
+	runCancel                context.CancelFunc
 	wg                       sync.WaitGroup
 
 	lockCache  LeaderLockCache
@@ -46,17 +45,19 @@ type SubscriptionExpiryService struct {
 }
 
 func NewSubscriptionExpiryService(userSubRepo UserSubscriptionRepository, interval time.Duration) *SubscriptionExpiryService {
+	ctx, cancel := context.WithCancel(context.Background())
 	return &SubscriptionExpiryService{
 		userSubRepo: userSubRepo,
 		interval:    interval,
 		stopCh:      make(chan struct{}),
 		instanceID:  uuid.NewString(),
+		runCtx:      ctx,
+		runCancel:   cancel,
 	}
 }
 
-// SetLeaderLock injects the leader-lock cache and DB used to elect a single
-// instance for the periodic expiry-reminder scan. When both are nil the scan runs
-// ungated (single-instance / test behavior).
+// SetLeaderLock injects the reminder outbox DB and the cache used to elect one
+// scanner. Without Redis, scanning uses the database advisory-lock fallback.
 func (s *SubscriptionExpiryService) SetLeaderLock(lockCache LeaderLockCache, db *sql.DB) {
 	if s == nil {
 		return
@@ -77,22 +78,30 @@ func (s *SubscriptionExpiryService) Start() {
 	if s == nil || s.userSubRepo == nil || s.interval <= 0 {
 		return
 	}
-	s.wg.Add(1)
-	go func() {
-		defer s.wg.Done()
-		ticker := time.NewTicker(s.interval)
-		defer ticker.Stop()
-
-		s.runOnce()
-		for {
-			select {
-			case <-ticker.C:
-				s.runOnce()
-			case <-s.stopCh:
-				return
+	s.startOnce.Do(func() {
+		if s.db != nil && s.notificationEmailService != nil {
+			for range 2 {
+				s.wg.Add(1)
+				go s.reminderWorker()
 			}
 		}
-	}()
+		s.wg.Add(1)
+		go func() {
+			defer s.wg.Done()
+			ticker := time.NewTicker(s.interval)
+			defer ticker.Stop()
+
+			s.runOnce()
+			for {
+				select {
+				case <-ticker.C:
+					s.runOnce()
+				case <-s.stopCh:
+					return
+				}
+			}
+		}()
+	})
 }
 
 func (s *SubscriptionExpiryService) Stop() {
@@ -100,26 +109,34 @@ func (s *SubscriptionExpiryService) Stop() {
 		return
 	}
 	s.stopOnce.Do(func() {
+		if s.runCancel != nil {
+			s.runCancel()
+		}
 		close(s.stopCh)
 	})
 	s.wg.Wait()
 }
 
 func (s *SubscriptionExpiryService) runOnce() {
-	ctx, cancel := context.WithTimeout(context.Background(), 10*time.Second)
-	defer cancel()
+	parent := s.runCtx
+	if parent == nil {
+		parent = context.Background()
+	}
+	ctx, cancel := context.WithTimeout(parent, 10*time.Second)
 
 	updated, err := s.userSubRepo.BatchUpdateExpiredStatus(ctx)
+	cancel()
 	if err != nil {
 		log.Printf("[SubscriptionExpiry] Update expired subscriptions failed: %v", err)
-		return
 	}
 	if updated > 0 {
 		log.Printf("[SubscriptionExpiry] Updated %d expired subscriptions", updated)
 	}
-	if !s.cleanupExpiredQuotaEvents(ctx) || ctx.Err() != nil {
-		return
-	}
+	ctx, cancel = context.WithTimeout(parent, 10*time.Second)
+	s.cleanupExpiredQuotaEvents(ctx)
+	cancel()
+	ctx, cancel = context.WithTimeout(parent, 10*time.Second)
+	defer cancel()
 	s.sendExpiryReminders(ctx)
 }
 
@@ -163,29 +180,19 @@ func (s *SubscriptionExpiryService) sendExpiryReminders(ctx context.Context) {
 	if !s.smtpConfigured(ctx) {
 		return
 	}
+	if s.db == nil {
+		return
+	}
 
-	// Multi-instance guard: only the leader walks every active subscription and
-	// sends reminders, avoiding N× full scans and duplicate reminder emails.
+	// Only the leader pages due subscription projections into the durable outbox.
+	// Delivery has independent cluster-wide admission and never holds this lock.
 	release, ok := tryAcquireSingletonLeaderLock(ctx, s.lockCache, s.db, subscriptionExpiryReminderLeaderLockKey, s.instanceID, subscriptionExpiryReminderLeaderLockTTL)
 	if !ok {
 		return
 	}
 	defer release()
-	for page := 1; ; page++ {
-		if ctx.Err() != nil {
-			return
-		}
-		subs, pag, err := s.userSubRepo.List(ctx, pagination.PaginationParams{Page: page, PageSize: 200}, nil, nil, SubscriptionStatusActive, "", "expires_at", "asc")
-		if err != nil {
-			log.Printf("[SubscriptionExpiry] List active subscriptions for reminder failed: %v", err)
-			return
-		}
-		for i := range subs {
-			s.sendExpiryReminderIfDue(ctx, &subs[i])
-		}
-		if pag == nil || page >= pag.Pages || len(subs) == 0 {
-			return
-		}
+	if err := s.enqueueExpiryReminders(ctx, time.Now().UTC()); err != nil {
+		log.Printf("[SubscriptionExpiry] Enqueue reminders failed: %v", err)
 	}
 }
 
@@ -224,30 +231,4 @@ func (s *SubscriptionExpiryService) smtpConfigured(ctx context.Context) bool {
 	}
 	log.Printf("[SubscriptionExpiry] Read SMTP configuration failed; skipping expiry reminders: %v", err)
 	return false
-}
-
-func (s *SubscriptionExpiryService) sendExpiryReminderIfDue(ctx context.Context, sub *UserSubscription) {
-	if sub == nil || sub.ExpiresAt == nil || sub.User == nil || sub.Group == nil || sub.User.Email == "" {
-		return
-	}
-	daysRemaining := sub.DaysRemaining()
-	if daysRemaining != 7 && daysRemaining != 3 && daysRemaining != 1 {
-		return
-	}
-	if err := s.notificationEmailService.Send(ctx, NotificationEmailSendInput{
-		Event:          NotificationEmailEventSubscriptionExpiryReminder,
-		RecipientEmail: sub.User.Email,
-		RecipientName:  firstNonEmpty(sub.User.Username, sub.User.Email),
-		UserID:         sub.UserID,
-		SourceType:     "user_subscription",
-		SourceID:       strconv.FormatInt(sub.ID, 10),
-		ReminderKey:    fmt.Sprintf("%dd", daysRemaining),
-		Variables: map[string]string{
-			"subscription_group": sub.Group.Name,
-			"expiry_time":        sub.ExpiresAt.Format("2006-01-02 15:04"),
-			"days_remaining":     strconv.Itoa(daysRemaining),
-		},
-	}); err != nil {
-		log.Printf("[SubscriptionExpiry] Send expiry reminder failed: subscription=%d user=%d err=%v", sub.ID, sub.UserID, err)
-	}
 }

@@ -93,9 +93,19 @@ func (w *PromptNotificationWorker) run(ctx context.Context, done chan struct{}) 
 			return
 		case <-ticker.C:
 		case <-maintenance.C:
-			cleanup, cancel := context.WithTimeout(ctx, 5*time.Second)
-			_, _ = w.repo.PruneEnforcementHistory(cleanup, time.Now().UTC(), 1000)
-			cancel()
+			w.pruneHistory(ctx)
+		}
+	}
+}
+
+func (w *PromptNotificationWorker) pruneHistory(ctx context.Context) {
+	cleanup, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+	cutoff := time.Now().UTC()
+	for batch := 0; batch < 20 && cleanup.Err() == nil; batch++ {
+		deleted, err := w.repo.PruneEnforcementHistory(cleanup, cutoff, 1000)
+		if err != nil || deleted < 1000 {
+			break
 		}
 	}
 }

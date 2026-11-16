@@ -33,10 +33,17 @@ type ModelAttributionService struct {
 	cancel           context.CancelFunc
 	wg               sync.WaitGroup
 	wake             chan struct{}
+	executionMu      sync.Mutex
+	executions       map[int64]attributionExecution
 	now              func() time.Time
 	wait             func(context.Context, time.Duration) error
 	attemptElapsed   func(time.Time, *CandyTestExecution) time.Duration
 	fetchProbeModels func(context.Context, *Account) (*OpenAIModelsResponse, error)
+}
+
+type attributionExecution struct {
+	claim  string
+	cancel context.CancelFunc
 }
 
 func NewModelAttributionService(repo AttributionRepository, accounts AccountRepository, probe *AccountCandyTestTransport) *ModelAttributionService {
@@ -61,6 +68,8 @@ func (s *ModelAttributionService) Start() {
 		go s.schedule(ctx)
 		s.wg.Add(1)
 		go s.worker(ctx)
+		s.wg.Add(1)
+		go s.maintainHistory(ctx)
 	})
 }
 func (s *ModelAttributionService) Stop() {
@@ -98,8 +107,14 @@ func (s *ModelAttributionService) worker(ctx context.Context) {
 	defer s.wg.Done()
 	ticker := time.NewTicker(2 * time.Second)
 	defer ticker.Stop()
+	slots := make(chan struct{}, 64)
 	for {
 		if ctx.Err() != nil {
+			return
+		}
+		select {
+		case slots <- struct{}{}:
+		case <-ctx.Done():
 			return
 		}
 		j, err := s.repo.Claim(ctx)
@@ -110,10 +125,12 @@ func (s *ModelAttributionService) worker(ctx context.Context) {
 			s.wg.Add(1)
 			go func() {
 				defer s.wg.Done()
+				defer func() { <-slots; s.notify() }()
 				s.execute(ctx, j)
 			}()
 			continue
 		}
+		<-slots
 		select {
 		case <-ctx.Done():
 			return
@@ -138,7 +155,31 @@ func (s *ModelAttributionService) execute(parent context.Context, j *Attribution
 	started := s.attributionNow()
 	previousDuration := j.Result.DurationMS
 	ctx, cancel := context.WithCancel(parent)
+	s.executionMu.Lock()
+	if s.executions == nil {
+		s.executions = make(map[int64]attributionExecution)
+	}
+	s.executions[j.ID] = attributionExecution{claim: j.Claim, cancel: cancel}
+	s.executionMu.Unlock()
+	defer func() {
+		cancel()
+		s.executionMu.Lock()
+		if current, ok := s.executions[j.ID]; ok && current.claim == j.Claim {
+			delete(s.executions, j.ID)
+		}
+		s.executionMu.Unlock()
+		if r, ok := s.repo.(interface {
+			ReleaseExecution(context.Context, *AttributionJob) error
+		}); ok {
+			releaseCtx, releaseCancel := context.WithTimeout(context.Background(), 5*time.Second)
+			defer releaseCancel()
+			if err := r.ReleaseExecution(releaseCtx, j); err != nil {
+				slog.Warn("model_attribution_release_failed", "job_id", j.ID)
+			}
+		}
+	}()
 	done := make(chan struct{})
+	monitorStop := make(chan struct{})
 	var validationFailure error // Read only after the monitor has closed done.
 	claim := *j                 // The monitor only needs the immutable identity and claim.
 	deferred, lostClaim := false, false
@@ -148,19 +189,22 @@ func (s *ModelAttributionService) execute(parent context.Context, j *Attribution
 		defer ticker.Stop()
 		for {
 			select {
-			case <-ctx.Done():
+			case <-monitorStop:
 				return
 			case <-ticker.C:
-				check, release := context.WithTimeout(ctx, 5*time.Second)
+				// Cancellation stops probes immediately, but execution capacity stays
+				// leased until every physical request has drained.
+				check, release := context.WithTimeout(context.Background(), 5*time.Second)
 				ok, err := s.repo.Heartbeat(check, &claim)
-				if err == nil && ok {
+				if err == nil && ok && ctx.Err() == nil {
 					ok, err = s.repo.Validate(check, &claim)
 				}
 				release()
 				if err != nil || !ok {
-					validationFailure = err
+					if validationFailure == nil {
+						validationFailure = err
+					}
 					cancel()
-					return
 				}
 			}
 		}
@@ -173,6 +217,7 @@ func (s *ModelAttributionService) execute(parent context.Context, j *Attribution
 		}
 		contextErr := ctx.Err()
 		cancel()
+		close(monitorStop)
 		<-done
 		if deferred || lostClaim {
 			return
@@ -395,12 +440,15 @@ func (s *ModelAttributionService) Config(ctx context.Context) (AttributionConfig
 	return s.repo.Config(ctx)
 }
 func (s *ModelAttributionService) SaveConfig(ctx context.Context, c AttributionConfig) (AttributionConfig, error) {
-	var err error
-	c, err = NormalizeAttributionConfig(c)
+	previous, err := s.repo.Config(ctx)
 	if err != nil {
 		return c, err
 	}
-	previous, err := s.repo.Config(ctx)
+	// Older management clients omit this field; retain the active cluster limit.
+	if c.MaxConcurrentJobs == 0 {
+		c.MaxConcurrentJobs = previous.MaxConcurrentJobs
+	}
+	c, err = NormalizeAttributionConfig(c)
 	if err != nil {
 		return c, err
 	}
@@ -481,7 +529,51 @@ func (s *ModelAttributionService) Cancel(ctx context.Context, id int64) (*Attrib
 	if id < 1 {
 		return nil, ErrAttributionInvalid
 	}
-	return s.repo.Cancel(ctx, id)
+	j, err := s.repo.Cancel(ctx, id)
+	if err == nil && j != nil && j.Status == "cancelled" {
+		s.executionMu.Lock()
+		if execution, ok := s.executions[id]; ok && execution.claim == j.Claim {
+			execution.cancel()
+		}
+		s.executionMu.Unlock()
+	}
+	return j, err
+}
+
+func (s *ModelAttributionService) maintainHistory(ctx context.Context) {
+	defer s.wg.Done()
+	r, ok := s.repo.(interface {
+		MaintainHistory(context.Context, int64) (int64, error)
+	})
+	if !ok {
+		return
+	}
+	ticker := time.NewTicker(time.Minute)
+	defer ticker.Stop()
+	var cursor int64
+	for {
+		select {
+		case <-ctx.Done():
+			return
+		case <-ticker.C:
+		}
+		maintenance, cancel := context.WithTimeout(ctx, 2*time.Second)
+		for maintenance.Err() == nil {
+			next, err := r.MaintainHistory(maintenance, cursor)
+			if err != nil {
+				if maintenance.Err() == nil {
+					slog.Warn("model_attribution_history_cleanup_failed")
+				}
+				break
+			}
+			previous := cursor
+			cursor = next
+			if next == 0 || next == previous {
+				break
+			}
+		}
+		cancel()
+	}
 }
 func (s *ModelAttributionService) Summaries(ctx context.Context, ids []int64) (map[int64]*AttributionSummary, error) {
 	out, err := s.repo.Summaries(ctx, ids)
