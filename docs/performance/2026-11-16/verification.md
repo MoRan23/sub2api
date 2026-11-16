@@ -83,7 +83,7 @@ The following expanded-regression failures also reproduce on the unchanged basel
 
 An existing cleanup test-stub race was fixed and the final statistics race run passed. Intermediate scheduler logs retain earlier resolved failures. WSL PostgreSQL interrupted an earlier export lifecycle run; the final rerun passed both service and repository checks. The production frontend build succeeded with Browserslist, mixed-import and large-chunk warnings retained in its log.
 
-## 待完成及未执行 / Pending and not executed
+## 交付状态与验证范围 / Delivery status and verification scope
 
 | 项目 / Item | 当前状态 / Current status |
 |---|---|
@@ -91,4 +91,4 @@ An existing cleanup test-stub race was fixed and the final statistics race run p
 | 全仓库全部测试 / Exhaustive repository-wide suites | 未完整执行 / Not run exhaustively；已执行范围是上表定向及记录的扩展回归 |
 | 真实浏览器 CPU／内存和端到端压力 / Browser CPU/memory and end-to-end load | 未执行 / Not executed；已有性能记录使用组件／jsdom、微基准和独立进程场景 |
 | 生产模型、生产数据库、支付、部署 / Production model/database/payment/deployment | 按范围未执行 / Excluded by task scope |
-| 提交、推送及远端 CI / Commit, push and remote CI | **Pending**：已 fetch `origin`，远端无新增提交；推送尚未完成，远端 CI 待推送后核实。本机未安装 `gh` / Origin fetched with no new remote commits; push and CI verification remain pending, and `gh` is unavailable on this host |
+| 提交、推送及远端 CI / Commit, push and remote CI | 已将 7 个分项提交正常推送至 `origin/dev`，代码与验证提交为 `c67655fd8`。推送后 GitHub API 返回 workflow runs 与 check runs 均为 0；本次未执行远端 CI。原始响应：[Actions](raw/remote-actions.json)、[checks](raw/remote-check-runs.json)。本记录的后续提交仅补交付状态。 / Seven implementation/validation commits pushed normally; GitHub returned no workflow or check runs for `c67655fd8`. The follow-up record commit only updates delivery status. |
