@@ -262,6 +262,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		return rebuilt, nil
 	}
 
+	useHTTPBridge := false
 	parseClientPayload := func(turn int, raw []byte) (openAIWSClientPayload, error) {
 		acceptedAt := time.Now()
 		if turn == 1 {
@@ -365,7 +366,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				normalized = next
 			}
 		}
-		accountIdentitySourceRaw := append([]byte(nil), normalized...)
+		var accountIdentitySourceRaw []byte
+		if turn > 1 && useHTTPBridge {
+			accountIdentitySourceRaw = append([]byte(nil), normalized...)
+		}
 		if responsesLite && account.IsOpenAIApiKey() {
 			litePayload, _, liteErr := normalizeOpenAIResponsesLitePayloadForAccount(normalized, account)
 			if liteErr != nil {
@@ -559,7 +563,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		return err
 	}
 
-	useHTTPBridge := forceHTTPBridge || s.shouldBridgeOpenAIWSHTTP(account, firstPayload.payloadBytes, firstPayload.previousResponseID)
+	useHTTPBridge = forceHTTPBridge || s.shouldBridgeOpenAIWSHTTP(account, firstPayload.payloadBytes, firstPayload.previousResponseID)
 	turnState := strings.TrimSpace(c.GetHeader(openAIWSTurnStateHeader))
 	stateStore := s.getOpenAIWSStateStore()
 	groupID := getOpenAIGroupIDFromContext(c)
@@ -1628,6 +1632,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	currentImageSizeTier := firstPayload.imageSizeTier
 	currentImageInputSize := firstPayload.imageInputSize
 	currentPayloadBytes := firstPayload.payloadBytes
+	var comparableCache openAIWSComparableCache
+	setCurrentPayload := func(payload []byte) {
+		currentPayload = payload
+		currentPayloadBytes = len(payload)
+		comparableCache.invalidate()
+	}
 	currentRequestedReasoningEffort := firstPayload.requestedReasoningEffort
 	currentServiceTierPolicy := firstPayload.serviceTierPolicy
 	isStrictAffinityTurn := func(payload []byte) bool {
@@ -1816,8 +1826,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			turn,
 			truncateOpenAIWSLogValue(connID, openAIWSIDValueMaxLen),
 		)
-		currentPayload = updatedWithInput
-		currentPayloadBytes = len(updatedWithInput)
+		setCurrentPayload(updatedWithInput)
 		setOpenAIRequestIntegrityRecovery(c, "previous_response_not_found")
 		resetSessionLease(true)
 		skipBeforeTurn = true
@@ -1871,8 +1880,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			)
 			if strippedCount > 0 {
 				setOpenAIRequestIntegrityRecovery(c, "invalid_encrypted_content")
-				currentPayload = strippedPayload
-				currentPayloadBytes = len(strippedPayload)
+				setCurrentPayload(strippedPayload)
 				neutralItems, _ = stripOpenAIInvalidEncryptedContentFromReplayItems(neutralItems, invalidDigests)
 			}
 			if lastTurnReplayInputExists {
@@ -1891,8 +1899,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			return fmt.Errorf("normalize Codex websocket context-window boundary: %w", boundaryErr)
 		}
 		if contextWindowBoundary.Changed {
-			currentPayload = boundaryPayload
-			currentPayloadBytes = len(boundaryPayload)
+			setCurrentPayload(boundaryPayload)
 			logOpenAIWSModeInfo(
 				"ingress_ws_context_window_changed account_id=%d turn=%d conn_id=%s action=break_previous_response_chain previous_window_id=%s current_window_id=%s previous_response_id_removed=%v",
 				account.ID,
@@ -1940,8 +1947,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					truncateOpenAIWSLogValue(expectedPrev, openAIWSIDValueMaxLen),
 				)
 			} else {
-				currentPayload = updatedPayload
-				currentPayloadBytes = len(updatedPayload)
+				setCurrentPayload(updatedPayload)
 				currentPreviousResponseID = expectedPrev
 				logOpenAIWSModeInfo(
 					"ingress_ws_function_call_output_prev_infer account_id=%d turn=%d conn_id=%s action=set_previous_response_id previous_response_id=%s",
@@ -1992,6 +1998,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					currentPayload,
 					lastTurnResponseID,
 					hasFunctionCallOutput,
+					&comparableCache,
 				)
 			} else {
 				shouldKeepPreviousResponseID, strictReason, strictErr = shouldKeepIngressPreviousResponseID(
@@ -2050,8 +2057,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 							hasFunctionCallOutput,
 						)
 					} else {
-						currentPayload = updatedWithInput
-						currentPayloadBytes = len(updatedWithInput)
+						setCurrentPayload(updatedWithInput)
 						setOpenAIRequestIntegrityRecovery(c, "history_replay")
 						logOpenAIWSModeInfo(
 							"ingress_ws_prev_response_strict_eval account_id=%d turn=%d conn_id=%s action=drop_previous_response_id_full_create reason=%s previous_response_id=%s expected_previous_response_id=%s has_function_call_output=%v",
@@ -2106,8 +2112,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			sessionLease = acquiredLease
 			sessionConnID = strings.TrimSpace(sessionLease.ConnID())
 			pinSessionConn(sessionConnID)
-			currentPayload = fullPayload
-			currentPayloadBytes = len(fullPayload)
+			setCurrentPayload(fullPayload)
 			setOpenAIRequestIntegrityRecovery(c, "history_replay")
 			currentPreviousResponseID = ""
 			forcePreferredConn = false
@@ -2176,8 +2181,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 									hasReplayToolContext,
 								)
 								turnPrevRecoveryTried = true
-								currentPayload = updatedWithInput
-								currentPayloadBytes = len(updatedWithInput)
+								setCurrentPayload(updatedWithInput)
 								setOpenAIRequestIntegrityRecovery(c, "history_replay")
 								resetSessionLease(true)
 								skipBeforeTurn = true
@@ -2261,8 +2265,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			var rejectedFieldErr *openAIWSRejectedFieldRetryError
 			if errors.As(relayErr, &rejectedFieldErr) && rejectedFieldErr != nil && len(rejectedFieldErr.body) > 0 {
 				telemetry.finish(true)
-				currentPayload = append([]byte(nil), rejectedFieldErr.body...)
-				currentPayloadBytes = len(currentPayload)
+				setCurrentPayload(append([]byte(nil), rejectedFieldErr.body...))
 				skipBeforeTurn = true
 				continue
 			}
@@ -2327,7 +2330,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			lastTurnReplayInputExists = true
 		}
 		timezoneReplay.Trim(lastTurnReplayInput)
-		nextStrictState, strictStateErr := buildOpenAIWSIngressPreviousTurnStrictState(currentPayload)
+		nextStrictState, strictStateErr := buildOpenAIWSIngressPreviousTurnStrictState(currentPayload, &comparableCache)
 		if strictStateErr != nil {
 			lastTurnStrictState = nil
 			// strict 状态不可用时保留整份上一轮 payload 供慢路径比较。
@@ -2541,7 +2544,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		s.resetOpenAIWSResidencyHeaders(ctx, account, baseAcquireReq.Headers, wsSessionResolution.ResidencyBeforePolicy)
 		baseAcquireReq.HeadersFactory = s.openAIWSHeadersFactory(ctx, account)
 		baseAcquireReq.ConnectObserver = s.prepareCodexTelemetryConnect(ctx, account, baseAcquireReq.Headers, wsURL, strings.TrimSpace(gjson.GetBytes(nextPayload.payloadRaw, "model").String()))
-		currentPayload = nextPayload.payloadRaw
+		setCurrentPayload(nextPayload.payloadRaw)
 		currentClientPayload = nextPayload.rawForHash
 		currentAccountIdentitySource = nextPayload.accountFailoverSourceRaw
 		currentFrameCapture = frameCapture
@@ -2549,7 +2552,6 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		currentImageBillingModel = nextPayload.imageBillingModel
 		currentImageSizeTier = nextPayload.imageSizeTier
 		currentImageInputSize = nextPayload.imageInputSize
-		currentPayloadBytes = nextPayload.payloadBytes
 		currentRequestedReasoningEffort = nextPayload.requestedReasoningEffort
 		currentServiceTierPolicy = nextPayload.serviceTierPolicy
 		rejectedFieldRetryState = newOpenAIResponsesRejectedFieldRetryState(currentPayload)

@@ -397,6 +397,7 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 
 	// Accumulate the final Anthropic response from streaming events
 	var finalResp *apicompat.AnthropicResponse
+	var content anthropicBufferedContent
 	var usage ClaudeUsage
 	streamStatus := &anthropicCompatStream{body: resp.Body}
 
@@ -435,6 +436,7 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 		// message_start carries the initial response structure
 		if event.Type == "message_start" && event.Message != nil {
 			finalResp = event.Message
+			content.reset(finalResp)
 			mergeAnthropicUsage(&usage, event.Message.Usage)
 		}
 
@@ -450,22 +452,10 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 
 		// Accumulate content blocks
 		if event.Type == "content_block_start" && event.ContentBlock != nil && finalResp != nil {
-			finalResp.Content = append(finalResp.Content, *event.ContentBlock)
+			content.appendBlock(*event.ContentBlock)
 		}
 		if event.Type == "content_block_delta" && event.Delta != nil && finalResp != nil && event.Index != nil {
-			idx := *event.Index
-			if idx >= 0 && idx < len(finalResp.Content) {
-				switch event.Delta.Type {
-				case "text_delta":
-					finalResp.Content[idx].Text += event.Delta.Text
-				case "thinking_delta":
-					finalResp.Content[idx].Thinking += event.Delta.Thinking
-				case "signature_delta":
-					finalResp.Content[idx].Signature += event.Delta.Signature
-				case "input_json_delta":
-					finalResp.Content[idx].Input = appendRawJSON(finalResp.Content[idx].Input, event.Delta.PartialJSON)
-				}
-			}
+			content.applyDelta(*event.Index, event.Delta, true)
 		}
 	}
 
@@ -493,6 +483,7 @@ func (s *GatewayService) handleResponsesBufferedStreamingResponse(
 		writeResponsesError(c, http.StatusBadGateway, "server_error", "Upstream stream ended without a response")
 		return nil, fmt.Errorf("upstream stream ended without response")
 	}
+	content.finalize()
 
 	// Update usage from accumulated delta
 	if usage.InputTokens > 0 || usage.OutputTokens > 0 {
@@ -713,19 +704,6 @@ func (s *GatewayService) handleResponsesStreamingResponse(
 	}
 
 	return finalizeStream()
-}
-
-// appendRawJSON appends a JSON fragment string to existing raw JSON.
-func appendRawJSON(existing json.RawMessage, fragment string) json.RawMessage {
-	// Anthropic initializes tool_use.input to {} in content_block_start, then
-	// streams the actual input through input_json_delta events. Treat that empty
-	// object as a placeholder instead of prefixing it to the streamed JSON.
-	var existingObject map[string]json.RawMessage
-	isEmptyObject := json.Unmarshal(existing, &existingObject) == nil && existingObject != nil && len(existingObject) == 0
-	if len(existing) == 0 || isEmptyObject {
-		return json.RawMessage(fragment)
-	}
-	return json.RawMessage(string(existing) + fragment)
 }
 
 // writeResponsesError writes an error response in OpenAI Responses API format.

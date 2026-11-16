@@ -808,8 +808,8 @@ func normalizeOpenAIWSPayloadWithoutInputAndPreviousResponseID(payload []byte) (
 	if len(payload) == 0 {
 		return nil, errors.New("payload is empty")
 	}
-	var decoded map[string]any
-	if err := decodeOpenAIJSONUseNumber(payload, &decoded); err != nil {
+	decoded, err := decodeOpenAIWSComparableObject(payload)
+	if err != nil {
 		return nil, err
 	}
 	delete(decoded, "input")
@@ -1151,11 +1151,11 @@ type openAIWSIngressPreviousTurnStrictState struct {
 	nonInputComparable []byte
 }
 
-func buildOpenAIWSIngressPreviousTurnStrictState(payload []byte) (*openAIWSIngressPreviousTurnStrictState, error) {
+func buildOpenAIWSIngressPreviousTurnStrictState(payload []byte, caches ...*openAIWSComparableCache) (*openAIWSIngressPreviousTurnStrictState, error) {
 	if len(payload) == 0 {
 		return nil, nil
 	}
-	nonInputComparable, nonInputErr := normalizeOpenAIWSPayloadWithoutInputAndPreviousResponseID(payload)
+	nonInputComparable, nonInputErr := openAIWSComparable(payload, caches...)
 	if nonInputErr != nil {
 		return nil, nonInputErr
 	}
@@ -1169,6 +1169,7 @@ func shouldKeepIngressPreviousResponseIDWithStrictState(
 	currentPayload []byte,
 	lastTurnResponseID string,
 	hasFunctionCallOutput bool,
+	caches ...*openAIWSComparableCache,
 ) (bool, string, error) {
 	if hasFunctionCallOutput {
 		return true, "has_function_call_output", nil
@@ -1188,7 +1189,7 @@ func shouldKeepIngressPreviousResponseIDWithStrictState(
 		return false, "missing_previous_turn_payload", nil
 	}
 
-	currentComparable, currentComparableErr := normalizeOpenAIWSPayloadWithoutInputAndPreviousResponseID(currentPayload)
+	currentComparable, currentComparableErr := openAIWSComparable(currentPayload, caches...)
 	if currentComparableErr != nil {
 		return false, "non_input_compare_error", currentComparableErr
 	}

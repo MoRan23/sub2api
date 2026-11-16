@@ -900,6 +900,14 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 			return []string{block}, dataLine, nil, nil
 		}
 
+		if idx, deltaType, ok := anthropicSSEDeltaView([]byte(dataLine), eventName); ok {
+			observer.ObserveAnthropic([]byte(dataLine))
+			if useNoopDeltaKeepalive && claudeCodeKeepaliveFieldForDeltaType(deltaType) != "" {
+				noopDeltaKeepaliveBlockIndex, noopDeltaKeepaliveDeltaType = idx, deltaType
+			}
+			return []string{"event: content_block_delta\ndata: " + dataLine + "\n\n"}, dataLine, nil, nil
+		}
+
 		var event map[string]any
 		if err := json.Unmarshal([]byte(dataLine), &event); err != nil {
 			// JSON 解析失败，直接透传原始数据

@@ -167,6 +167,7 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 	scanner.Split(newBoundedSSESplit(s.cfg, maxLineSize, nil))
 
 	var finalResp *apicompat.AnthropicResponse
+	var content anthropicBufferedContent
 	var usage ClaudeUsage
 
 	// 读间隔上限：上游挂住 SSE 时中止组装（缓冲路径尚未提交响应头，可回 502）。
@@ -235,6 +236,7 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 
 		if event.Type == "message_start" && event.Message != nil {
 			finalResp = event.Message
+			content.reset(finalResp)
 			mergeAnthropicUsage(&usage, event.Message.Usage)
 		}
 		if event.Type == "message_delta" {
@@ -246,20 +248,10 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 			}
 		}
 		if event.Type == "content_block_start" && event.ContentBlock != nil && finalResp != nil {
-			finalResp.Content = append(finalResp.Content, *event.ContentBlock)
+			content.appendBlock(*event.ContentBlock)
 		}
 		if event.Type == "content_block_delta" && event.Delta != nil && finalResp != nil && event.Index != nil {
-			idx := *event.Index
-			if idx >= 0 && idx < len(finalResp.Content) {
-				switch event.Delta.Type {
-				case "text_delta":
-					finalResp.Content[idx].Text += event.Delta.Text
-				case "thinking_delta":
-					finalResp.Content[idx].Thinking += event.Delta.Thinking
-				case "input_json_delta":
-					finalResp.Content[idx].Input = appendRawJSON(finalResp.Content[idx].Input, event.Delta.PartialJSON)
-				}
-			}
+			content.applyDelta(*event.Index, event.Delta, false)
 		}
 	}
 
@@ -277,6 +269,7 @@ func (s *OpenAIGatewayService) handleCCBufferedFromNativeAnthropic(
 		writeChatCompletionsError(c, http.StatusBadGateway, "server_error", "Upstream stream ended without a response")
 		return nil, fmt.Errorf("upstream stream ended without response")
 	}
+	content.finalize()
 
 	if usage.InputTokens > 0 || usage.OutputTokens > 0 {
 		finalResp.Usage = apicompat.AnthropicUsage{
