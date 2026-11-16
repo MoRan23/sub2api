@@ -1,0 +1,87 @@
+2026/11/16 10:27:31 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestUsageExportDownloadLeaseCloseAndCancellation
+=== RUN   TestUsageExportDownloadLeaseCloseAndCancellation/close
+=== RUN   TestUsageExportDownloadLeaseCloseAndCancellation/cancel
+=== RUN   TestUsageExportDownloadLeaseCloseAndCancellation/expired
+=== RUN   TestUsageExportDownloadLeaseCloseAndCancellation/renew-failed
+--- PASS: TestUsageExportDownloadLeaseCloseAndCancellation (0.01s)
+    --- PASS: TestUsageExportDownloadLeaseCloseAndCancellation/close (0.00s)
+    --- PASS: TestUsageExportDownloadLeaseCloseAndCancellation/cancel (0.00s)
+    --- PASS: TestUsageExportDownloadLeaseCloseAndCancellation/expired (0.00s)
+    --- PASS: TestUsageExportDownloadLeaseCloseAndCancellation/renew-failed (0.00s)
+=== RUN   TestUsageExportOwnerIsolation
+--- PASS: TestUsageExportOwnerIsolation (0.00s)
+=== RUN   TestUsageExportRawUserPasswordChangeRevokesOwner
+--- PASS: TestUsageExportRawUserPasswordChangeRevokesOwner (0.00s)
+=== RUN   TestUsageExportBoundedGeneration
+--- PASS: TestUsageExportBoundedGeneration (0.94s)
+=== RUN   TestUsageExportCancellationStopsQuery
+--- PASS: TestUsageExportCancellationStopsQuery (0.02s)
+=== RUN   TestUsageExportSizeLimitDoesNotProduceTruncatedSuccess
+--- PASS: TestUsageExportSizeLimitDoesNotProduceTruncatedSuccess (0.00s)
+=== RUN   TestUsageExportLostClaimDiscardsOwnFile
+--- PASS: TestUsageExportLostClaimDiscardsOwnFile (0.01s)
+=== RUN   TestUsageExportUncertainFinishRetainsPublishedFile
+2026/11/16 10:27:32 WARN usage export finish uncertain id=job error="connection closed during commit"
+--- PASS: TestUsageExportUncertainFinishRetainsPublishedFile (0.01s)
+=== RUN   TestUsageExportExpiredLeaseCannotStartWriting
+2026/11/16 10:27:32 WARN usage export failed id=expired error="context deadline exceeded"
+--- PASS: TestUsageExportExpiredLeaseCannotStartWriting (0.00s)
+=== RUN   TestUsageExportPreflightRejectsBeforeExactCount
+--- PASS: TestUsageExportPreflightRejectsBeforeExactCount (0.00s)
+=== RUN   TestUsageExportConcurrentCreateDoesNotRepeatCount
+--- PASS: TestUsageExportConcurrentCreateDoesNotRepeatCount (0.00s)
+=== RUN   TestUsageExportWriterStopsAfterCancellation
+--- PASS: TestUsageExportWriterStopsAfterCancellation (0.00s)
+=== RUN   TestUsageExportDownloadAuthorizesBeforeFileTransaction
+--- PASS: TestUsageExportDownloadAuthorizesBeforeFileTransaction (0.00s)
+=== RUN   TestUsageExportXLSXStreamsLiteralCells
+--- PASS: TestUsageExportXLSXStreamsLiteralCells (0.01s)
+=== RUN   TestUsageExportXLSXLimitsAndErrors
+--- PASS: TestUsageExportXLSXLimitsAndErrors (0.01s)
+=== RUN   TestUsageExportRowPreservesColumnsAndBilling
+--- PASS: TestUsageExportRowPreservesColumnsAndBilling (0.00s)
+=== RUN   TestUsageExportPrecisionMatchesBrowser
+--- PASS: TestUsageExportPrecisionMatchesBrowser (0.00s)
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/service	2.105s
+=== RUN   TestUsageExportArtifactQuotaSurvivesLostWorker
+--- PASS: TestUsageExportArtifactQuotaSurvivesLostWorker (0.08s)
+=== RUN   TestUsageExportDeletionRetainsQuotaUntilUnlink
+--- PASS: TestUsageExportDeletionRetainsQuotaUntilUnlink (0.10s)
+=== RUN   TestUsageExportTicketOpenSerializesDeletion
+--- PASS: TestUsageExportTicketOpenSerializesDeletion (0.11s)
+=== RUN   TestUsageExportTicketFailedOpenCanRetry
+--- PASS: TestUsageExportTicketFailedOpenCanRetry (0.07s)
+=== RUN   TestUsageExportDownloadLeaseRetainsQuota
+--- PASS: TestUsageExportDownloadLeaseRetainsQuota (0.09s)
+=== RUN   TestUsageExportOrphanArtifactsKeepReservation
+--- PASS: TestUsageExportOrphanArtifactsKeepReservation (0.08s)
+=== RUN   TestUsageExportUnlinkedQuotaBlocksClaim
+--- PASS: TestUsageExportUnlinkedQuotaBlocksClaim (0.06s)
+=== RUN   TestUsageExportListFiltersBeforeLimit
+--- PASS: TestUsageExportListFiltersBeforeLimit (0.06s)
+=== RUN   TestUsageExportModelCursorMatchesSQLAndIndexes
+    usage_export_artifacts_db_test.go:289: Limit  (cost=0.29..118.30 rows=1000 width=40)
+          ->  Index Scan using idx_usage_logs_export_model_id on usage_logs  (cost=0.29..1011.76 rows=8571 width=40)
+                Index Cond: ((ROW(COALESCE(NULLIF(TRIM(BOTH FROM requested_model), ''::text), model), id) > ROW('model-3'::text, 10000)) AND (id <= 20000))
+        
+    usage_export_artifacts_db_test.go:289: Limit  (cost=0.29..52.98 rows=1000 width=16)
+          ->  Index Only Scan using idx_usage_logs_export_created_id on usage_logs  (cost=0.29..1054.16 rows=20000 width=16)
+                Index Cond: (id <= 20000)
+        
+--- PASS: TestUsageExportModelCursorMatchesSQLAndIndexes (0.15s)
+=== RUN   TestUsageExportDatabaseLeasesAndTickets
+--- PASS: TestUsageExportDatabaseLeasesAndTickets (0.17s)
+=== RUN   TestUsageExportCursorUsesValueBeforeDisplayTrimming
+--- PASS: TestUsageExportCursorUsesValueBeforeDisplayTrimming (0.00s)
+=== RUN   TestUsageExportClaimSerializesCapacityAndQuota
+--- PASS: TestUsageExportClaimSerializesCapacityAndQuota (0.00s)
+=== RUN   TestUsageExportCreationPerUserLimit
+--- PASS: TestUsageExportCreationPerUserLimit (0.00s)
+=== RUN   TestUsageExportHeartbeatCannotReviveExpiredLease
+--- PASS: TestUsageExportHeartbeatCannotReviveExpiredLease (0.00s)
+=== RUN   TestUsageExportSourceKeysetAndIDBoundary
+--- PASS: TestUsageExportSourceKeysetAndIDBoundary (0.00s)
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/repository	2.061s

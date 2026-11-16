@@ -1,0 +1,13 @@
+
+ RUN  v2.1.9 D:/Code/sub2api/frontend
+
+Browserslist: browsers data (caniuse-lite) is 11 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+ ✓ src/views/user/__tests__/DashboardView.initializing.spec.ts (2 tests) 24ms
+
+ Test Files  1 passed (1)
+      Tests  2 passed (2)
+   Start at  17:17:11
+   Duration  2.47s (transform 961ms, setup 89ms, collect 1.32s, tests 24ms, environment 457ms, prepare 87ms)
+

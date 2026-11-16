@@ -1,0 +1,100 @@
+2026/11/16 09:25:08 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkForwardingBufferedText/bytes=65536/legacy=true-4         	     339	   1029413 ns/op	  63.66 MB/s	 9028107 B/op	     255 allocs/op
+BenchmarkForwardingBufferedText/bytes=65536/legacy=true-4         	     343	    986012 ns/op	  66.47 MB/s	 9028109 B/op	     255 allocs/op
+BenchmarkForwardingBufferedText/bytes=65536/legacy=true-4         	     360	   1057713 ns/op	  61.96 MB/s	 9028110 B/op	     255 allocs/op
+BenchmarkForwardingBufferedText/bytes=65536/legacy=false-4        	   10000	     35358 ns/op	1853.50 MB/s	  285672 B/op	      22 allocs/op
+BenchmarkForwardingBufferedText/bytes=65536/legacy=false-4        	   10000	     34181 ns/op	1917.32 MB/s	  285672 B/op	      22 allocs/op
+BenchmarkForwardingBufferedText/bytes=65536/legacy=false-4        	   10000	     35197 ns/op	1861.98 MB/s	  285672 B/op	      22 allocs/op
+BenchmarkForwardingBufferedText/bytes=262144/legacy=true-4        	      22	  15281723 ns/op	  17.15 MB/s	138002994 B/op	    1023 allocs/op
+BenchmarkForwardingBufferedText/bytes=262144/legacy=true-4        	      24	  15899554 ns/op	  16.49 MB/s	138002972 B/op	    1023 allocs/op
+BenchmarkForwardingBufferedText/bytes=262144/legacy=true-4        	      24	  14473796 ns/op	  18.11 MB/s	138003023 B/op	    1023 allocs/op
+BenchmarkForwardingBufferedText/bytes=262144/legacy=false-4       	    2665	    129130 ns/op	2030.08 MB/s	 1186792 B/op	      27 allocs/op
+BenchmarkForwardingBufferedText/bytes=262144/legacy=false-4       	    2382	    128071 ns/op	2046.86 MB/s	 1186792 B/op	      27 allocs/op
+BenchmarkForwardingBufferedText/bytes=262144/legacy=false-4       	    2916	    133133 ns/op	1969.04 MB/s	 1186792 B/op	      27 allocs/op
+BenchmarkForwardingBufferedText/bytes=1048576/legacy=true-4       	       2	 219779400 ns/op	   4.77 MB/s	2163851776 B/op	    4095 allocs/op
+BenchmarkForwardingBufferedText/bytes=1048576/legacy=true-4       	       2	 214077500 ns/op	   4.90 MB/s	2163851776 B/op	    4095 allocs/op
+BenchmarkForwardingBufferedText/bytes=1048576/legacy=true-4       	       2	 242983850 ns/op	   4.32 MB/s	2163854016 B/op	    4115 allocs/op
+BenchmarkForwardingBufferedText/bytes=1048576/legacy=false-4      	     747	    526292 ns/op	1992.39 MB/s	 5241832 B/op	      33 allocs/op
+BenchmarkForwardingBufferedText/bytes=1048576/legacy=false-4      	     750	    566368 ns/op	1851.41 MB/s	 5241833 B/op	      33 allocs/op
+BenchmarkForwardingBufferedText/bytes=1048576/legacy=false-4      	     681	    548969 ns/op	1910.08 MB/s	 5241832 B/op	      33 allocs/op
+BenchmarkForwardingWSComparable/bytes=512/escaped=false/legacy=true-4         	   92877	      3570 ns/op	 158.54 MB/s	    4043 B/op	      36 allocs/op
+BenchmarkForwardingWSComparable/bytes=512/escaped=false/legacy=true-4         	   95742	      3805 ns/op	 148.76 MB/s	    4043 B/op	      36 allocs/op
+BenchmarkForwardingWSComparable/bytes=512/escaped=false/legacy=true-4         	  101398	      3891 ns/op	 145.45 MB/s	    4043 B/op	      36 allocs/op
+BenchmarkForwardingWSComparable/bytes=512/escaped=false/legacy=false-4        	   98640	      3259 ns/op	 173.69 MB/s	    2233 B/op	      38 allocs/op
+BenchmarkForwardingWSComparable/bytes=512/escaped=false/legacy=false-4        	  105832	      3204 ns/op	 176.64 MB/s	    2233 B/op	      38 allocs/op
+BenchmarkForwardingWSComparable/bytes=512/escaped=false/legacy=false-4        	  125504	      3299 ns/op	 171.59 MB/s	    2233 B/op	      38 allocs/op
+BenchmarkForwardingWSComparable/bytes=512/escaped=true/legacy=true-4          	   62114	      6288 ns/op	  90.01 MB/s	    4107 B/op	      36 allocs/op
+BenchmarkForwardingWSComparable/bytes=512/escaped=true/legacy=true-4          	   48159	      6600 ns/op	  85.76 MB/s	    4106 B/op	      36 allocs/op
+BenchmarkForwardingWSComparable/bytes=512/escaped=true/legacy=true-4          	   57865	      6291 ns/op	  89.97 MB/s	    4107 B/op	      36 allocs/op
+BenchmarkForwardingWSComparable/bytes=512/escaped=true/legacy=false-4         	   95017	      3700 ns/op	 152.97 MB/s	    2233 B/op	      38 allocs/op
+BenchmarkForwardingWSComparable/bytes=512/escaped=true/legacy=false-4         	  100776	      3976 ns/op	 142.36 MB/s	    2233 B/op	      38 allocs/op
+BenchmarkForwardingWSComparable/bytes=512/escaped=true/legacy=false-4         	   98299	      3562 ns/op	 158.90 MB/s	    2233 B/op	      38 allocs/op
+BenchmarkForwardingWSComparable/bytes=65536/escaped=false/legacy=true-4       	    3766	     99818 ns/op	 657.09 MB/s	  329338 B/op	      43 allocs/op
+BenchmarkForwardingWSComparable/bytes=65536/escaped=false/legacy=true-4       	    3835	    100223 ns/op	 654.44 MB/s	  329315 B/op	      43 allocs/op
+BenchmarkForwardingWSComparable/bytes=65536/escaped=false/legacy=true-4       	    4076	     99902 ns/op	 656.54 MB/s	  329325 B/op	      43 allocs/op
+BenchmarkForwardingWSComparable/bytes=65536/escaped=false/legacy=false-4      	    8144	     47439 ns/op	1382.62 MB/s	    2235 B/op	      38 allocs/op
+BenchmarkForwardingWSComparable/bytes=65536/escaped=false/legacy=false-4      	    6711	     50298 ns/op	1304.03 MB/s	    2235 B/op	      38 allocs/op
+BenchmarkForwardingWSComparable/bytes=65536/escaped=false/legacy=false-4      	    6627	     49250 ns/op	1331.77 MB/s	    2235 B/op	      38 allocs/op
+BenchmarkForwardingWSComparable/bytes=65536/escaped=true/legacy=true-4        	     892	    406215 ns/op	 161.47 MB/s	  370290 B/op	      44 allocs/op
+BenchmarkForwardingWSComparable/bytes=65536/escaped=true/legacy=true-4        	     920	    406248 ns/op	 161.45 MB/s	  370346 B/op	      44 allocs/op
+BenchmarkForwardingWSComparable/bytes=65536/escaped=true/legacy=true-4        	     960	    401704 ns/op	 163.28 MB/s	  370324 B/op	      44 allocs/op
+BenchmarkForwardingWSComparable/bytes=65536/escaped=true/legacy=false-4       	    4100	     87826 ns/op	 746.82 MB/s	    2235 B/op	      38 allocs/op
+BenchmarkForwardingWSComparable/bytes=65536/escaped=true/legacy=false-4       	    5763	     90597 ns/op	 723.97 MB/s	    2234 B/op	      38 allocs/op
+BenchmarkForwardingWSComparable/bytes=65536/escaped=true/legacy=false-4       	    3372	     97018 ns/op	 676.06 MB/s	    2236 B/op	      38 allocs/op
+BenchmarkForwardingWSComparable/bytes=1048576/escaped=false/legacy=true-4     	     213	   1618697 ns/op	 647.82 MB/s	 5245825 B/op	      53 allocs/op
+BenchmarkForwardingWSComparable/bytes=1048576/escaped=false/legacy=true-4     	     230	   1559231 ns/op	 672.53 MB/s	 5246176 B/op	      54 allocs/op
+BenchmarkForwardingWSComparable/bytes=1048576/escaped=false/legacy=true-4     	     226	   1574731 ns/op	 665.91 MB/s	 5245967 B/op	      53 allocs/op
+BenchmarkForwardingWSComparable/bytes=1048576/escaped=false/legacy=false-4    	     528	    712913 ns/op	1470.91 MB/s	    2245 B/op	      38 allocs/op
+BenchmarkForwardingWSComparable/bytes=1048576/escaped=false/legacy=false-4    	     513	    747641 ns/op	1402.58 MB/s	    2246 B/op	      38 allocs/op
+BenchmarkForwardingWSComparable/bytes=1048576/escaped=false/legacy=false-4    	     486	    690839 ns/op	1517.91 MB/s	    2248 B/op	      38 allocs/op
+BenchmarkForwardingWSComparable/bytes=1048576/escaped=true/legacy=true-4      	      55	   6480376 ns/op	 161.82 MB/s	 5779706 B/op	      58 allocs/op
+BenchmarkForwardingWSComparable/bytes=1048576/escaped=true/legacy=true-4      	      80	   6212908 ns/op	 168.78 MB/s	 5779128 B/op	      56 allocs/op
+BenchmarkForwardingWSComparable/bytes=1048576/escaped=true/legacy=true-4      	      85	   5743135 ns/op	 182.59 MB/s	 5779645 B/op	      58 allocs/op
+BenchmarkForwardingWSComparable/bytes=1048576/escaped=true/legacy=false-4     	     261	   1308192 ns/op	 801.59 MB/s	    2238 B/op	      38 allocs/op
+BenchmarkForwardingWSComparable/bytes=1048576/escaped=true/legacy=false-4     	     286	   1309340 ns/op	 800.88 MB/s	    2257 B/op	      38 allocs/op
+BenchmarkForwardingWSComparable/bytes=1048576/escaped=true/legacy=false-4     	     259	   1261602 ns/op	 831.19 MB/s	    2238 B/op	      38 allocs/op
+BenchmarkForwardingWSComparable/bytes=16777216/escaped=false/legacy=true-4    	      14	  21855564 ns/op	 767.64 MB/s	83892558 B/op	      69 allocs/op
+BenchmarkForwardingWSComparable/bytes=16777216/escaped=false/legacy=true-4    	      13	  23593954 ns/op	 711.08 MB/s	83893152 B/op	      69 allocs/op
+BenchmarkForwardingWSComparable/bytes=16777216/escaped=false/legacy=true-4    	      15	  24429047 ns/op	 686.78 MB/s	83893805 B/op	      72 allocs/op
+BenchmarkForwardingWSComparable/bytes=16777216/escaped=false/legacy=false-4   	      33	  11283279 ns/op	1486.91 MB/s	    2453 B/op	      38 allocs/op
+BenchmarkForwardingWSComparable/bytes=16777216/escaped=false/legacy=false-4   	      34	  11620244 ns/op	1443.80 MB/s	    2447 B/op	      38 allocs/op
+BenchmarkForwardingWSComparable/bytes=16777216/escaped=false/legacy=false-4   	      32	  11440369 ns/op	1466.50 MB/s	    2461 B/op	      38 allocs/op
+BenchmarkForwardingWSComparable/bytes=16777216/escaped=true/legacy=true-4     	       4	 105312725 ns/op	 159.31 MB/s	92290530 B/op	      74 allocs/op
+BenchmarkForwardingWSComparable/bytes=16777216/escaped=true/legacy=true-4     	       3	 102585867 ns/op	 163.54 MB/s	92290130 B/op	      74 allocs/op
+BenchmarkForwardingWSComparable/bytes=16777216/escaped=true/legacy=true-4     	       3	 115835000 ns/op	 144.84 MB/s	92290130 B/op	      74 allocs/op
+BenchmarkForwardingWSComparable/bytes=16777216/escaped=true/legacy=false-4    	      12	  34487058 ns/op	 486.48 MB/s	    2364 B/op	      38 allocs/op
+BenchmarkForwardingWSComparable/bytes=16777216/escaped=true/legacy=false-4    	      14	  23243800 ns/op	 721.80 MB/s	    2345 B/op	      38 allocs/op
+BenchmarkForwardingWSComparable/bytes=16777216/escaped=true/legacy=false-4    	      14	  23393321 ns/op	 717.18 MB/s	    2755 B/op	      39 allocs/op
+BenchmarkForwardingBufferedToolJSON/bytes=65536/legacy=true-4                 	      40	   8784782 ns/op	   7.46 MB/s	18329184 B/op	    3352 allocs/op
+BenchmarkForwardingBufferedToolJSON/bytes=65536/legacy=true-4                 	      39	   8861249 ns/op	   7.40 MB/s	18329200 B/op	    3351 allocs/op
+BenchmarkForwardingBufferedToolJSON/bytes=65536/legacy=true-4                 	      43	   8938033 ns/op	   7.33 MB/s	18329180 B/op	    3352 allocs/op
+BenchmarkForwardingBufferedToolJSON/bytes=65536/legacy=false-4                	    8389	     40942 ns/op	1600.72 MB/s	  285810 B/op	      19 allocs/op
+BenchmarkForwardingBufferedToolJSON/bytes=65536/legacy=false-4                	    9176	     40656 ns/op	1611.98 MB/s	  285810 B/op	      19 allocs/op
+BenchmarkForwardingBufferedToolJSON/bytes=65536/legacy=false-4                	   10000	     43520 ns/op	1505.87 MB/s	  285810 B/op	      19 allocs/op
+BenchmarkForwardingBufferedToolJSON/bytes=262144/legacy=true-4                	       3	 135704700 ns/op	   1.93 MB/s	277075973 B/op	   13401 allocs/op
+BenchmarkForwardingBufferedToolJSON/bytes=262144/legacy=true-4                	       3	 125488633 ns/op	   2.09 MB/s	277077232 B/op	   13404 allocs/op
+BenchmarkForwardingBufferedToolJSON/bytes=262144/legacy=true-4                	       3	 134051467 ns/op	   1.96 MB/s	277076317 B/op	   13403 allocs/op
+BenchmarkForwardingBufferedToolJSON/bytes=262144/legacy=false-4               	    2854	    171382 ns/op	1529.59 MB/s	 1186931 B/op	      24 allocs/op
+BenchmarkForwardingBufferedToolJSON/bytes=262144/legacy=false-4               	    2143	    152099 ns/op	1723.51 MB/s	 1186931 B/op	      24 allocs/op
+BenchmarkForwardingBufferedToolJSON/bytes=262144/legacy=false-4               	    2832	    143857 ns/op	1822.25 MB/s	 1186931 B/op	      24 allocs/op
+BenchmarkForwardingBufferedToolJSON/bytes=1048576/legacy=true-4               	       1	2190186400 ns/op	   0.48 MB/s	4332150816 B/op	   54311 allocs/op
+BenchmarkForwardingBufferedToolJSON/bytes=1048576/legacy=true-4               	       1	2065954500 ns/op	   0.51 MB/s	4332130144 B/op	   54234 allocs/op
+BenchmarkForwardingBufferedToolJSON/bytes=1048576/legacy=true-4               	       1	2183303400 ns/op	   0.48 MB/s	4332131944 B/op	   54243 allocs/op
+BenchmarkForwardingBufferedToolJSON/bytes=1048576/legacy=false-4              	     664	    527105 ns/op	1989.31 MB/s	 5241975 B/op	      30 allocs/op
+BenchmarkForwardingBufferedToolJSON/bytes=1048576/legacy=false-4              	     652	    534781 ns/op	1960.76 MB/s	 5241975 B/op	      30 allocs/op
+BenchmarkForwardingBufferedToolJSON/bytes=1048576/legacy=false-4              	     592	    525131 ns/op	1996.79 MB/s	 5241975 B/op	      30 allocs/op
+BenchmarkForwardingSSEDeltaView/legacy=true-4                                 	  196351	      1580 ns/op	     864 B/op	      18 allocs/op
+BenchmarkForwardingSSEDeltaView/legacy=true-4                                 	  229963	      1805 ns/op	     864 B/op	      18 allocs/op
+BenchmarkForwardingSSEDeltaView/legacy=true-4                                 	  196646	      1711 ns/op	     864 B/op	      18 allocs/op
+BenchmarkForwardingSSEDeltaView/legacy=false-4                                	 1266842	       305.9 ns/op	       0 B/op	       0 allocs/op
+BenchmarkForwardingSSEDeltaView/legacy=false-4                                	 1225726	       288.7 ns/op	       0 B/op	       0 allocs/op
+BenchmarkForwardingSSEDeltaView/legacy=false-4                                	 1000000	       302.2 ns/op	       0 B/op	       0 allocs/op
+BenchmarkUsageExportXLSX-4                                                    	      50	   6666944 ns/op	 2345653 B/op	   40057 allocs/op
+BenchmarkUsageExportXLSX-4                                                    	      45	   7157329 ns/op	 2324137 B/op	   40057 allocs/op
+BenchmarkUsageExportXLSX-4                                                    	      56	   6655954 ns/op	 2343346 B/op	   40057 allocs/op
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/service	53.476s

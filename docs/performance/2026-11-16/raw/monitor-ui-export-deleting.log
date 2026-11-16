@@ -1,0 +1,10 @@
+
+ RUN  v2.1.9 D:/Code/sub2api/frontend
+
+ ✓ src/components/admin/usage/__tests__/UsageExportTasks.spec.ts (6 tests) 122ms
+
+ Test Files  1 passed (1)
+      Tests  6 passed (6)
+   Start at  18:31:21
+   Duration  1.64s (transform 148ms, setup 98ms, collect 150ms, tests 122ms, environment 697ms, prepare 101ms)
+

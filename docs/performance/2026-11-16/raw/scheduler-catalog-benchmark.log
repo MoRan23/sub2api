@@ -1,0 +1,19 @@
+2026/11/16 09:34:37 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkCompositeOwnershipComparison/baseline_scan_2000-4         	     516	   1142825 ns/op	 2480002 B/op	    8000 allocs/op
+BenchmarkCompositeOwnershipComparison/baseline_scan_2000-4         	     547	   1169376 ns/op	 2480000 B/op	    8000 allocs/op
+BenchmarkCompositeOwnershipComparison/baseline_scan_2000-4         	     519	   1142528 ns/op	 2480000 B/op	    8000 allocs/op
+BenchmarkCompositeOwnershipComparison/bounded_index_2000-4         	31095816	        20.06 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCompositeOwnershipComparison/bounded_index_2000-4         	31473592	        23.11 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCompositeOwnershipComparison/bounded_index_2000-4         	31737802	        20.16 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGroupCatalogRepresentationComparison/baseline_rebuild-4   	     212	   2579785 ns/op	 1464656 B/op	      85 allocs/op
+BenchmarkGroupCatalogRepresentationComparison/baseline_rebuild-4   	     224	   2705084 ns/op	 1464619 B/op	      84 allocs/op
+BenchmarkGroupCatalogRepresentationComparison/baseline_rebuild-4   	     219	   2655655 ns/op	 1464551 B/op	      84 allocs/op
+BenchmarkGroupCatalogRepresentationComparison/cached_304-4         	   17505	     35362 ns/op	   27340 B/op	      39 allocs/op
+BenchmarkGroupCatalogRepresentationComparison/cached_304-4         	   18566	     35308 ns/op	   27330 B/op	      39 allocs/op
+BenchmarkGroupCatalogRepresentationComparison/cached_304-4         	   16894	     33378 ns/op	   27341 B/op	      39 allocs/op
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/service	9.815s

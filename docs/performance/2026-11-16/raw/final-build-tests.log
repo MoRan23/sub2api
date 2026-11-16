@@ -1,0 +1,12 @@
+=== RUN   TestUsageExportTicketOpenSerializesDeletion
+--- PASS: TestUsageExportTicketOpenSerializesDeletion (0.11s)
+=== RUN   TestUsageExportDownloadLeaseRetainsQuota
+--- PASS: TestUsageExportDownloadLeaseRetainsQuota (0.11s)
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/repository	1.285s
+ok  	github.com/Wei-Shaw/sub2api/internal/config	0.005s [no tests to run]
+ok  	github.com/Wei-Shaw/sub2api/internal/pkg/adminaccess	0.005s
+ok  	github.com/Wei-Shaw/sub2api/internal/server/middleware	0.018s
+ok  	github.com/Wei-Shaw/sub2api/internal/handler/admin	0.020s
+ok  	github.com/Wei-Shaw/sub2api/internal/handler	0.022s
+ok  	github.com/Wei-Shaw/sub2api/internal/server/routes	0.019s [no tests to run]

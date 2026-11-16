@@ -1,0 +1,42 @@
+2026/11/16 09:46:02 Timezone initialized: UTC (UTC offset: +00:00)
+2026/11/16 09:46:02 github.com/testcontainers/testcontainers-go - Connected to docker: 
+  Server Version: 29.4.0
+  API Version: 1.51
+  Operating System: Ubuntu 24.04.3 LTS
+  Total Memory: 32099 MB
+  Testcontainers for Go Version: v0.40.0
+  Resolved Docker Host: unix:///var/run/docker.sock
+  Resolved Docker Socket Path: /var/run/docker.sock
+  Test SessionID: d33a9d5ccf396ba66d2b1b14c6c5de77cc800670afe893d06de2350721b73b8d
+  Test ProcessID: 00d8a112-3f5a-4670-a2ef-7a1dd240cef5
+2026/11/16 09:46:03 🐳 Creating container for image postgres:18.1-alpine3.23
+2026/11/16 09:46:03 🐳 Creating container for image testcontainers/ryuk:0.13.0
+2026/11/16 09:46:03 ✅ Container created: b2ab31b9bf0d
+2026/11/16 09:46:03 🐳 Starting container: b2ab31b9bf0d
+2026/11/16 09:46:04 ✅ Container started: b2ab31b9bf0d
+2026/11/16 09:46:04 ⏳ Waiting for container id b2ab31b9bf0d image: testcontainers/ryuk:0.13.0. Waiting for: port 8080/tcp to be listening
+2026/11/16 09:46:04 Shell not found in container
+2026/11/16 09:46:04 🔔 Container is ready: b2ab31b9bf0d
+2026/11/16 09:46:04 ✅ Container created: 897865efd74a
+2026/11/16 09:46:04 🐳 Starting container: 897865efd74a
+2026/11/16 09:46:04 ✅ Container started: 897865efd74a
+2026/11/16 09:46:04 ⏳ Waiting for container id 897865efd74a image: postgres:18.1-alpine3.23. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2), port 5432/tcp to be listening]
+2026/11/16 09:46:05 🔔 Container is ready: 897865efd74a
+2026/11/16 09:46:05 🐳 Creating container for image redis:8.4-alpine
+2026/11/16 09:46:05 ✅ Container created: 76e6390b0f1f
+2026/11/16 09:46:05 🐳 Starting container: 76e6390b0f1f
+2026/11/16 09:46:06 ✅ Container started: 76e6390b0f1f
+2026/11/16 09:46:06 ⏳ Waiting for container id 76e6390b0f1f image: redis:8.4-alpine. Waiting for: all of: [port 6379/tcp to be listening, log message "* Ready to accept connections"]
+2026/11/16 09:46:06 🔔 Container is ready: 76e6390b0f1f
+=== RUN   TestChannelMonitorV2OverviewAttributionPruningPreservesHistoryIntegration
+--- PASS: TestChannelMonitorV2OverviewAttributionPruningPreservesHistoryIntegration (0.22s)
+=== RUN   TestAttributionLocalPruneAndMaintenanceProtectLeases
+--- PASS: TestAttributionLocalPruneAndMaintenanceProtectLeases (0.06s)
+=== RUN   TestAttributionCapacityLeaseSurvivesCancellation
+--- PASS: TestAttributionCapacityLeaseSurvivesCancellation (0.09s)
+=== RUN   TestAttributionCancelledLeasePreservesAccountExclusion
+--- PASS: TestAttributionCancelledLeasePreservesAccountExclusion (0.08s)
+=== RUN   TestAttributionQueueLeasesRetentionAndRestart
+--- PASS: TestAttributionQueueLeasesRetentionAndRestart (0.58s)
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/repository	6.231s

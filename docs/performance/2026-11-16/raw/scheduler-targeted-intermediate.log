@@ -1,0 +1,26 @@
+ok  	github.com/Wei-Shaw/sub2api/internal/pkg/sharedflight	0.026s
+ok  	github.com/Wei-Shaw/sub2api/internal/service	0.513s
+--- FAIL: TestSchedulerCacheSnapshotMemoDeleteAccountMisses (0.00s)
+    scheduler_cache_snapshot_memo_unit_test.go:320: 
+        	Error Trace:	D:/Code/sub2api/backend/internal/repository/scheduler_cache_snapshot_memo_unit_test.go:320
+        	Error:      	Should be zero, but was 1
+        	Test:       	TestSchedulerCacheSnapshotMemoDeleteAccountMisses
+2026/11/16 17:50:07 WARN scheduler cache removes account with unencodable payload account_id=52 error="Time.MarshalJSON: year outside of range [0,9999]"
+2026/11/16 17:50:07 WARN scheduler cache skips account with unencodable payload account_id=171 error="marshal account: json: error calling MarshalJSON for type *time.Time: year outside of range [0,9999]"
+2026/11/16 17:50:07 WARN scheduler cache removes account with unencodable payload account_id=239 error="Time.MarshalJSON: year outside of range [0,9999]"
+2026/11/16 17:50:07 WARN scheduler cache skips account with unencodable payload account_id=112 error="marshal account: json: error calling MarshalJSON for type *time.Time: year outside of range [0,9999]"
+2026/11/16 17:50:07 WARN scheduler cache skips account with unencodable payload account_id=113 error="marshal account: json: error calling MarshalJSON for type *time.Time: year outside of range [0,9999]"
+2026/11/16 17:50:07 WARN scheduler cache removes account with unencodable payload account_id=114 error="Time.MarshalJSON: year outside of range [0,9999]"
+2026/11/16 17:50:07 WARN scheduler cache skips account with unencodable payload account_id=799 error="marshal account: json: error calling MarshalJSON for type *time.Time: year outside of range [0,9999]"
+2026/11/16 17:50:07 WARN scheduler cache skips account with unencodable payload account_id=799 error="marshal account: json: error calling MarshalJSON for type *time.Time: year outside of range [0,9999]"
+2026/11/16 17:50:07 WARN scheduler cache skips account with unencodable payload account_id=799 error="marshal account: json: error calling MarshalJSON for type *time.Time: year outside of range [0,9999]"
+2026/11/16 17:50:07 WARN scheduler cache skips account with unencodable payload account_id=811 error="marshal account: json: error calling MarshalJSON for type *time.Time: year outside of range [0,9999]"
+2026/11/16 17:50:08 INFO account_scheduling_threshold_temp_unschedulable account_id=3 platform=anthropic window=5h scope="" threshold_percent=60 used_percent=60 until=2026-11-16T10:50:08.000Z
+2026/11/16 17:50:08 INFO account_scheduling_threshold_temp_unschedulable account_id=3 platform=anthropic window=5h scope="" threshold_percent=60 used_percent=60 until=2026-11-16T10:50:08.000Z
+2026/11/16 17:50:08 INFO account_scheduling_threshold_temp_unschedulable account_id=3 platform=anthropic window=7d scope="" threshold_percent=60 used_percent=66 until=2026-11-16T10:50:08.000Z
+2026/11/16 17:50:08 INFO account_scheduling_threshold_temp_unschedulable account_id=3 platform=anthropic window=7d scope="" threshold_percent=60 used_percent=66 until=2026-11-16T10:50:08.000Z
+2026/11/16 17:50:08 INFO anthropic_fable_scheduling_threshold_model_limited account_id=3 scope=claude-fable-5 threshold_percent=60 used_percent=75 until=2026-11-16T10:50:08.000Z
+2026/11/16 17:50:08 INFO anthropic_fable_scheduling_threshold_model_limited account_id=3 scope=claude-fable-5 threshold_percent=60 used_percent=75 until=2026-11-16T10:50:08.000Z
+FAIL
+FAIL	github.com/Wei-Shaw/sub2api/internal/repository	4.725s
+FAIL

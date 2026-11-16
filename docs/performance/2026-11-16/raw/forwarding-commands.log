@@ -1,0 +1,22 @@
+Environment: Windows amd64; Go 1.27.3; AMD Ryzen 7 9700X.
+Working directory: backend
+GOEXPERIMENT=greenteagc,jsonv2 GOMAXPROCS=4; package build concurrency -p 2.
+
+forwarding-unit.log (also includes XLSX tests):
+GOEXPERIMENT=greenteagc,jsonv2 GOMAXPROCS=4 go test -p 2 -tags unit ./internal/service -run 'Test(AnthropicBuffered|WSComparable|AnthropicSSEDelta|AppendRawJSON|ShouldKeepIngress|NormalizeOpenAIWSPayload|HandleResponsesBufferedStreamingResponse|HandleCCBufferedFromAnthropic|Claude55ResponsesSignedThinking|AnthropicNative|GatewayService_Streaming|HandleStreamingResponse|UsageExport)' -count=1
+
+forwarding-bench.log (also includes BenchmarkUsageExportXLSX):
+GOEXPERIMENT=greenteagc,jsonv2 GOMAXPROCS=4 go test -p 2 -tags unit ./internal/service -run '^$' -bench 'Benchmark(Forwarding|UsageExportXLSX)' -benchmem -benchtime=300ms -count=3
+
+forwarding-race.log (also includes XLSX tests):
+CGO_ENABLED=1 GOEXPERIMENT=greenteagc,jsonv2 GOMAXPROCS=4 go test -p 2 -race -tags unit ./internal/service -run 'Test(AnthropicBuffered|WSComparable|AnthropicSSEDelta|AppendRawJSON|ShouldKeepIngress|NormalizeOpenAIWSPayload|HandleResponsesBufferedStreamingResponse|HandleCCBufferedFromAnthropic|Claude55ResponsesSignedThinking|AnthropicNative|GatewayService_Streaming|HandleStreamingResponse|UsageExport)' -count=1
+
+Benchmarks compare the previous algorithms retained in test-only helpers against
+the new production implementations, using identical inputs in the same binary.
+legacy=true is the previous implementation, legacy=false is the new implementation.
+Three rounds per case. Tool/text benchmark fragments are 256 bytes.
+XLSX benchmark writes 1,000 rows to io.Discard per operation, including ZIP close.
+
+The WSL-based initial test command could not start because WSL was unavailable;
+it was cancelled before execution. The same Go version/experiments were used on
+Windows. No production upstream/model, database, or Engine was used in these tests.

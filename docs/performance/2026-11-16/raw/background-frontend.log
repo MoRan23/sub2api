@@ -1,0 +1,14 @@
+
+ RUN  v2.1.9 D:/Code/sub2api/frontend
+
+ ✓ src/api/admin/__tests__/modelAttribution.spec.ts (5 tests) 4ms
+Browserslist: browsers data (caniuse-lite) is 11 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+ ✓ src/components/admin/account/__tests__/modelAttribution.spec.ts (89 tests) 604ms
+
+ Test Files  2 passed (2)
+      Tests  94 passed (94)
+   Start at  17:21:48
+   Duration  3.04s (transform 1.10s, setup 174ms, collect 1.53s, tests 608ms, environment 809ms, prepare 169ms)
+

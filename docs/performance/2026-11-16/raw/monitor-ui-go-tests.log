@@ -1,0 +1,4 @@
+ok  	github.com/Wei-Shaw/sub2api/internal/service	2.665s
+ok  	github.com/Wei-Shaw/sub2api/internal/repository	0.683s
+ok  	github.com/Wei-Shaw/sub2api/internal/handler	0.125s
+ok  	github.com/Wei-Shaw/sub2api/internal/handler/admin	7.556s

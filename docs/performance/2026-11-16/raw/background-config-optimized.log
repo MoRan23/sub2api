@@ -1,0 +1,12 @@
+2026/11/16 17:35:50 INFO prompt_guard.config_loaded config_version=1 status=loaded
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/securityaudit
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkPromptConfigUnchangedReload-4   	 1808803	       615.4 ns/op	    1392 B/op	       4 allocs/op
+BenchmarkPromptConfigUnchangedReload-4   	2026/11/16 17:35:51 INFO prompt_guard.config_loaded config_version=1 status=loaded
+ 2396462	       520.3 ns/op	    1392 B/op	       4 allocs/op
+BenchmarkPromptConfigUnchangedReload-4   	2026/11/16 17:35:53 INFO prompt_guard.config_loaded config_version=1 status=loaded
+ 2506290	       484.9 ns/op	    1392 B/op	       4 allocs/op
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/securityaudit	3.633s

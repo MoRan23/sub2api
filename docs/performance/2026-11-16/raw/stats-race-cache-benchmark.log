@@ -1,0 +1,12 @@
+ok  	github.com/Wei-Shaw/sub2api/internal/repository	1.125s
+ok  	github.com/Wei-Shaw/sub2api/internal/service	1.169s
+2026/11/16 09:30:41 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkUsageStatsCacheHit-4   	 2961489	       369.9 ns/op	     304 B/op	       4 allocs/op
+BenchmarkUsageStatsCacheHit-4   	 2924900	       490.4 ns/op	     304 B/op	       4 allocs/op
+BenchmarkUsageStatsCacheHit-4   	 2669378	       389.5 ns/op	     304 B/op	       4 allocs/op
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/service	4.971s

@@ -1,0 +1,63 @@
+
+ RUN  v2.1.9 D:/Code/sub2api/frontend
+
+ ✓ src/api/__tests__/admin.groups.usage-summary.spec.ts (2 tests) 7ms
+Browserslist: browsers data (caniuse-lite) is 11 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+ ✓ src/components/admin/usage/__tests__/UsageExportTasks.spec.ts (5 tests) 96ms
+ ✓ src/api/__tests__/channelMonitorV2.spec.ts (2 tests) 5ms
+ ✓ src/components/admin/account/__tests__/ScheduledTestsPanel.results.spec.ts (4 tests) 127ms
+ ✓ src/components/admin/account/__tests__/ReAuthAccountModal.osAuthorization.spec.ts (2 tests) 66ms
+ ✓ src/components/admin/account/__tests__/AccountTestModal.spec.ts (11 tests) 215ms
+ ✓ src/api/__tests__/admin.usageExports.spec.ts (2 tests) 6ms
+ ✓ src/views/user/__tests__/ChannelStatusV2View.overview.spec.ts (1 test) 32ms
+ ✓ src/views/user/__tests__/ChannelStatusV1View.refresh.spec.ts (5 tests) 106ms
+ ✓ src/views/user/__tests__/ChannelStatusV1View.details.spec.ts (6 tests) 121ms
+ ✓ src/views/admin/__tests__/GroupsView.columnSettings.spec.ts (8 tests) 153ms
+stdout | src/views/admin/__tests__/UsersView.spec.ts > admin UsersView > keeps group tooltip DOM bounded for 100 users and 1,000 groups (round 1)
+monitor_ui_dom_benchmark {"round":1,"users":100,"groups":1000,"initialNodes":3244,"openedNodes":3745,"elapsed_ms":315.84929999999986}
+
+ ✓ src/views/admin/__tests__/UsageView.spec.ts (15 tests) 370ms
+ ✓ src/views/admin/__tests__/AccountsView.bulkEdit.spec.ts (7 tests) 192ms
+stdout | src/views/admin/__tests__/UsersView.spec.ts > admin UsersView > keeps group tooltip DOM bounded for 100 users and 1,000 groups (round 2)
+monitor_ui_dom_benchmark {"round":2,"users":100,"groups":1000,"initialNodes":3244,"openedNodes":3745,"elapsed_ms":213.85620000000017}
+
+ ✓ src/views/admin/__tests__/AccountsView.lite.spec.ts (16 tests) 323ms
+stdout | src/views/admin/__tests__/UsersView.spec.ts > admin UsersView > keeps group tooltip DOM bounded for 100 users and 1,000 groups (round 3)
+monitor_ui_dom_benchmark {"round":3,"users":100,"groups":1000,"initialNodes":3244,"openedNodes":3745,"elapsed_ms":212.51209999999992}
+
+stderr | src/views/admin/__tests__/UsersView.spec.ts > admin UsersView > deletes across pages and retains failures: '43'
+Error deleting user: Error: Cannot delete user
+    at Object.<anonymous> (D:\Code\sub2api\frontend\src\views\admin\__tests__\UsersView.spec.ts:264:41)
+    at Object.mockCall (file:///D:/Code/sub2api/frontend/node_modules/.pnpm/@vitest+spy@2.1.9/node_modules/@vitest/spy/dist/index.js:61:17)
+    at Object.spy [as delete] (file:///D:/Code/sub2api/frontend/node_modules/.pnpm/tinyspy@3.0.2/node_modules/tinyspy/dist/index.js:45:80)
+    at confirmBulkDelete (D:\Code\sub2api\frontend\src\views\admin\UsersView.vue:1863:28)
+
+stderr | src/views/admin/__tests__/UsersView.spec.ts > admin UsersView > deletes across pages and retains failures: '42,43'
+Error deleting user: Error: Cannot delete user
+    at Object.<anonymous> (D:\Code\sub2api\frontend\src\views\admin\__tests__\UsersView.spec.ts:264:41)
+    at Object.mockCall (file:///D:/Code/sub2api/frontend/node_modules/.pnpm/@vitest+spy@2.1.9/node_modules/@vitest/spy/dist/index.js:61:17)
+    at Object.spy [as delete] (file:///D:/Code/sub2api/frontend/node_modules/.pnpm/tinyspy@3.0.2/node_modules/tinyspy/dist/index.js:45:80)
+    at confirmBulkDelete (D:\Code\sub2api\frontend\src\views\admin\UsersView.vue:1863:28)
+    at callWithErrorHandling (D:\Code\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:200:19)
+    at callWithAsyncErrorHandling (D:\Code\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:207:17)
+    at emit (D:\Code\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:4545:5)
+    at onClick (eval at compileToFunction (D:\Code\sub2api\frontend\node_modules\.pnpm\vue@3.5.43_typescript@5.6.3\node_modules\vue\dist\vue.cjs.js:71:18), <anonymous>:22:33)
+    at callWithErrorHandling (D:\Code\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:200:19)
+    at Object.callWithAsyncErrorHandling (D:\Code\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:207:17)
+Error deleting user: Error: Cannot delete user
+    at Object.<anonymous> (D:\Code\sub2api\frontend\src\views\admin\__tests__\UsersView.spec.ts:264:41)
+    at Object.mockCall (file:///D:/Code/sub2api/frontend/node_modules/.pnpm/@vitest+spy@2.1.9/node_modules/@vitest/spy/dist/index.js:61:17)
+    at Object.spy [as delete] (file:///D:/Code/sub2api/frontend/node_modules/.pnpm/tinyspy@3.0.2/node_modules/tinyspy/dist/index.js:45:80)
+    at confirmBulkDelete (D:\Code\sub2api\frontend\src\views\admin\UsersView.vue:1863:28)
+
+ ✓ src/views/admin/__tests__/UsersView.spec.ts (15 tests) 989ms
+   ✓ admin UsersView > keeps group tooltip DOM bounded for 100 users and 1,000 groups (round 1) 337ms
+ ✓ src/components/account/__tests__/CreateAccountModal.spec.ts (74 tests) 2605ms
+
+ Test Files  16 passed (16)
+      Tests  175 passed (175)
+   Start at  17:56:05
+   Duration  6.99s (transform 13.78s, setup 3.60s, collect 40.55s, tests 5.41s, environment 13.80s, prepare 2.23s)
+

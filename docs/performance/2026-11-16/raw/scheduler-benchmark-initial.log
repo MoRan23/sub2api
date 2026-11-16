@@ -1,0 +1,16 @@
+# github.com/Wei-Shaw/sub2api/internal/repository [github.com/Wei-Shaw/sub2api/internal/service.test]
+internal\repository\usage_export_source.go:9:2: could not import github.com/Wei-Shaw/sub2api/ent/mixins (open : The system cannot find the file specified.)
+FAIL	github.com/Wei-Shaw/sub2api/internal/service [build failed]
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/repository
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkSchedulerMGetComparison/baseline_serial_16_commands-4         	      73	   8137340 ns/op	  183991 B/op	    6050 allocs/op
+BenchmarkSchedulerMGetComparison/baseline_serial_16_commands-4         	      72	   8568121 ns/op	  183991 B/op	    6050 allocs/op
+BenchmarkSchedulerMGetComparison/baseline_serial_16_commands-4         	      74	   7493742 ns/op	  183991 B/op	    6050 allocs/op
+BenchmarkSchedulerMGetComparison/pipeline_2_waves-4                    	     322	   1679936 ns/op	  184721 B/op	    6070 allocs/op
+BenchmarkSchedulerMGetComparison/pipeline_2_waves-4                    	     349	   1612108 ns/op	  184721 B/op	    6070 allocs/op
+BenchmarkSchedulerMGetComparison/pipeline_2_waves-4                    	     370	   1624119 ns/op	  184720 B/op	    6070 allocs/op
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/repository	4.171s
+FAIL

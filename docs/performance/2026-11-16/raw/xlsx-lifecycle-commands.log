@@ -1,0 +1,21 @@
+Environment: Windows amd64, Go 1.27.3, GOEXPERIMENT=greenteagc,jsonv2, GOMAXPROCS=4.
+Working directory: backend.
+USAGE_EXPORT_TEST_DSN points only to the isolated local PostgreSQL test service on 127.0.0.1:55435.
+
+Initial lifecycle unit / database run:
+go test -p 2 ./internal/service ./internal/repository -run 'TestUsageExport' -count=1 -v
+Log: xlsx-lifecycle-unit.log
+Result: service and repository passed, including database lease, quota, deletion, ticket, owner filtering and keyset index tests.
+
+First lifecycle race run:
+go test -race -p 2 ./internal/service ./internal/repository -run 'TestUsageExport' -count=1 -v
+Log: xlsx-lifecycle-race.log
+Result: service passed. Repository database checks encountered repeated local PostgreSQL TCP connection closures while WSL was unavailable; retained the complete original failure output.
+
+Changes added after the initial runs require the final integrated rerun:
+- Independent artifact worker lease, including orphan-owner cleanup and cluster execution capacity.
+- Download file lease, close-before-release, cancellation, failed renewal and deadline checks.
+- Exact raw model cursor captured before display normalization.
+- Authorization before the download file transaction to avoid connection-pool nesting.
+
+Final verification is run serially by the coordinating task using the same TestUsageExport command and isolated database.

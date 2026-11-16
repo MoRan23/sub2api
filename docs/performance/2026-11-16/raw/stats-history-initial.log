@@ -1,0 +1,10 @@
+2026/11/16 09:33:19 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/repository
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkUserDashboardHistory-4   	      20	   4128960 ns/op	   15216 B/op	     221 allocs/op
+BenchmarkUserDashboardHistory-4   	      20	   4002087 ns/op	   15042 B/op	     221 allocs/op
+BenchmarkUserDashboardHistory-4   	      20	   4604258 ns/op	   15026 B/op	     221 allocs/op
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/repository	50.851s

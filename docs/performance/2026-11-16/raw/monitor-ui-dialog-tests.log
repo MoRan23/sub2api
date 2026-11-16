@@ -1,0 +1,126 @@
+
+ RUN  v2.1.9 D:/Code/sub2api/frontend
+
+ ✓ src/components/admin/account/__tests__/ReAuthAccountModal.grok.spec.ts (4 tests) 3ms
+Browserslist: browsers data (caniuse-lite) is 11 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+ ✓ src/components/admin/account/__tests__/ReAuthAccountModal.osAuthorization.spec.ts (2 tests) 55ms
+ ✓ src/components/admin/account/__tests__/ScheduledTestsPanel.results.spec.ts (4 tests) 108ms
+ ✓ src/components/account/__tests__/AccountTestModal.spec.ts (2 tests) 63ms
+ ❯ src/components/admin/account/__tests__/AccountTestModal.spec.ts (10 tests | 2 failed) 150ms
+   × AccountTestModal > does not gate tests on obsolete per-system authorization summaries 41ms
+     → expected "spy" to be called with arguments: [ 42, 'windows' ]
+
+Received: 
+
+  1st spy call:
+
+  Array [
+    42,
+    "windows",
++   Object {
++     "signal": AbortSignal {},
++   },
+  ]
+
+
+Number of calls: 1
+
+   × AccountTestModal > uses any selected identity system for model lookup and the SSE test 15ms
+     → expected last "spy" call to have been called with [ 42, 'linux' ]
+stdout | src/views/admin/__tests__/UsersView.spec.ts > admin UsersView > keeps group tooltip DOM bounded for 100 users and 1,000 groups (round 1)
+monitor_ui_dom_benchmark {"round":1,"users":100,"groups":1000,"initialNodes":3244,"openedNodes":3745,"elapsed_ms":248.9755}
+
+stdout | src/views/admin/__tests__/UsersView.spec.ts > admin UsersView > keeps group tooltip DOM bounded for 100 users and 1,000 groups (round 2)
+monitor_ui_dom_benchmark {"round":2,"users":100,"groups":1000,"initialNodes":3244,"openedNodes":3745,"elapsed_ms":167.64030000000002}
+
+stdout | src/views/admin/__tests__/UsersView.spec.ts > admin UsersView > keeps group tooltip DOM bounded for 100 users and 1,000 groups (round 3)
+monitor_ui_dom_benchmark {"round":3,"users":100,"groups":1000,"initialNodes":3244,"openedNodes":3745,"elapsed_ms":130.23230000000012}
+
+stderr | src/views/admin/__tests__/UsersView.spec.ts > admin UsersView > deletes across pages and retains failures: '43'
+Error deleting user: Error: Cannot delete user
+    at Object.<anonymous> (D:\Code\sub2api\frontend\src\views\admin\__tests__\UsersView.spec.ts:264:41)
+    at Object.mockCall (file:///D:/Code/sub2api/frontend/node_modules/.pnpm/@vitest+spy@2.1.9/node_modules/@vitest/spy/dist/index.js:61:17)
+    at Object.spy [as delete] (file:///D:/Code/sub2api/frontend/node_modules/.pnpm/tinyspy@3.0.2/node_modules/tinyspy/dist/index.js:45:80)
+    at confirmBulkDelete (D:\Code\sub2api\frontend\src\views\admin\UsersView.vue:1863:28)
+
+stderr | src/views/admin/__tests__/UsersView.spec.ts > admin UsersView > deletes across pages and retains failures: '42,43'
+Error deleting user: Error: Cannot delete user
+    at Object.<anonymous> (D:\Code\sub2api\frontend\src\views\admin\__tests__\UsersView.spec.ts:264:41)
+    at Object.mockCall (file:///D:/Code/sub2api/frontend/node_modules/.pnpm/@vitest+spy@2.1.9/node_modules/@vitest/spy/dist/index.js:61:17)
+    at Object.spy [as delete] (file:///D:/Code/sub2api/frontend/node_modules/.pnpm/tinyspy@3.0.2/node_modules/tinyspy/dist/index.js:45:80)
+    at confirmBulkDelete (D:\Code\sub2api\frontend\src\views\admin\UsersView.vue:1863:28)
+    at callWithErrorHandling (D:\Code\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:200:19)
+    at callWithAsyncErrorHandling (D:\Code\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:207:17)
+    at emit (D:\Code\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:4545:5)
+    at onClick (eval at compileToFunction (D:\Code\sub2api\frontend\node_modules\.pnpm\vue@3.5.43_typescript@5.6.3\node_modules\vue\dist\vue.cjs.js:71:18), <anonymous>:22:33)
+    at callWithErrorHandling (D:\Code\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:200:19)
+    at Object.callWithAsyncErrorHandling (D:\Code\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:207:17)
+Error deleting user: Error: Cannot delete user
+    at Object.<anonymous> (D:\Code\sub2api\frontend\src\views\admin\__tests__\UsersView.spec.ts:264:41)
+    at Object.mockCall (file:///D:/Code/sub2api/frontend/node_modules/.pnpm/@vitest+spy@2.1.9/node_modules/@vitest/spy/dist/index.js:61:17)
+    at Object.spy [as delete] (file:///D:/Code/sub2api/frontend/node_modules/.pnpm/tinyspy@3.0.2/node_modules/tinyspy/dist/index.js:45:80)
+    at confirmBulkDelete (D:\Code\sub2api\frontend\src\views\admin\UsersView.vue:1863:28)
+
+ ✓ src/views/admin/__tests__/UsersView.spec.ts (15 tests) 754ms
+
+⎯⎯⎯⎯⎯⎯⎯ Failed Tests 2 ⎯⎯⎯⎯⎯⎯⎯
+
+ FAIL  src/components/admin/account/__tests__/AccountTestModal.spec.ts > AccountTestModal > does not gate tests on obsolete per-system authorization summaries
+AssertionError: expected "spy" to be called with arguments: [ 42, 'windows' ]
+
+Received: 
+
+  1st spy call:
+
+  Array [
+    42,
+    "windows",
++   Object {
++     "signal": AbortSignal {},
++   },
+  ]
+
+
+Number of calls: 1
+
+ ❯ src/components/admin/account/__tests__/AccountTestModal.spec.ts:131:32
+    129|     await wrapper.setProps({ show: true })
+    130|     await flushPromises()
+    131|     expect(getAvailableModels).toHaveBeenCalledWith(42, 'windows')
+       |                                ^
+    132|     const start = wrapper.findAll('button').find(button => button.text…
+    133|     expect(start.attributes('disabled')).toBeUndefined()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[1/2]⎯
+
+ FAIL  src/components/admin/account/__tests__/AccountTestModal.spec.ts > AccountTestModal > uses any selected identity system for model lookup and the SSE test
+AssertionError: expected last "spy" call to have been called with [ 42, 'linux' ]
+
+- Expected
++ Received
+
+  Array [
+    42,
+    "linux",
++   Object {
++     "signal": AbortSignal {},
++   },
+  ]
+
+ ❯ src/components/admin/account/__tests__/AccountTestModal.spec.ts:146:32
+    144|     await wrapper.get('[data-testid="openai-oauth-os-select"]').setVal…
+    145|     await flushPromises()
+    146|     expect(getAvailableModels).toHaveBeenLastCalledWith(42, 'linux')
+       |                                ^
+    147|     await wrapper.findAll('button').find(button => button.text().inclu…
+    148|     await flushPromises()
+
+⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯⎯[2/2]⎯
+
+ Test Files  1 failed | 5 passed (6)
+      Tests  2 failed | 35 passed (37)
+   Start at  17:42:41
+   Duration  4.27s (transform 3.20s, setup 696ms, collect 5.78s, tests 1.13s, environment 4.96s, prepare 616ms)
+

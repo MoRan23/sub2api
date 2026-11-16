@@ -1,0 +1,130 @@
+2026/11/16 10:14:54 Timezone initialized: UTC (UTC offset: +00:00)
+2026/11/16 10:14:54 github.com/testcontainers/testcontainers-go - Connected to docker: 
+  Server Version: 29.4.0
+  API Version: 1.51
+  Operating System: Ubuntu 24.04.3 LTS
+  Total Memory: 32099 MB
+  Testcontainers for Go Version: v0.40.0
+  Resolved Docker Host: unix:///var/run/docker.sock
+  Resolved Docker Socket Path: /var/run/docker.sock
+  Test SessionID: bb59a4a7f1edd58674570fbc27028382c658b6da09f0de7dcd45821720554a7e
+  Test ProcessID: 5e998259-ca14-441c-af71-9aa9879eb30c
+2026/11/16 10:14:54 🐳 Creating container for image postgres:17-alpine
+2026/11/16 10:14:55 🐳 Creating container for image testcontainers/ryuk:0.13.0
+2026/11/16 10:14:56 ✅ Container created: fada7cce6602
+2026/11/16 10:14:56 🐳 Starting container: fada7cce6602
+2026/11/16 10:14:56 ✅ Container started: fada7cce6602
+2026/11/16 10:14:56 ⏳ Waiting for container id fada7cce6602 image: testcontainers/ryuk:0.13.0. Waiting for: port 8080/tcp to be listening
+2026/11/16 10:14:56 Shell not found in container
+2026/11/16 10:14:56 🔔 Container is ready: fada7cce6602
+2026/11/16 10:14:56 ✅ Container created: 812ae90437c9
+2026/11/16 10:14:56 🐳 Starting container: 812ae90437c9
+2026/11/16 10:14:56 ✅ Container started: 812ae90437c9
+2026/11/16 10:14:56 ⏳ Waiting for container id 812ae90437c9 image: postgres:17-alpine. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2), port 5432/tcp to be listening]
+2026/11/16 10:14:58 🔔 Container is ready: 812ae90437c9
+2026/11/16 10:14:58 🐳 Creating container for image redis:8.4-alpine
+2026/11/16 10:14:58 ✅ Container created: 824ca0c80406
+2026/11/16 10:14:58 🐳 Starting container: 824ca0c80406
+2026/11/16 10:14:58 ✅ Container started: 824ca0c80406
+2026/11/16 10:14:58 ⏳ Waiting for container id 824ca0c80406 image: redis:8.4-alpine. Waiting for: all of: [port 6379/tcp to be listening, log message "* Ready to accept connections"]
+2026/11/16 10:14:59 🔔 Container is ready: 824ca0c80406
+=== RUN   TestGroupUsageRollupTriggerInvalidatesCascadedHistoricalDelete
+=== RUN   TestGroupUsageRollupTriggerInvalidatesCascadedHistoricalDelete/ordinary
+=== RUN   TestGroupUsageRollupTriggerInvalidatesCascadedHistoricalDelete/partitioned
+--- PASS: TestGroupUsageRollupTriggerInvalidatesCascadedHistoricalDelete (0.10s)
+    --- PASS: TestGroupUsageRollupTriggerInvalidatesCascadedHistoricalDelete/ordinary (0.04s)
+    --- PASS: TestGroupUsageRollupTriggerInvalidatesCascadedHistoricalDelete/partitioned (0.06s)
+=== RUN   TestGroupUsageRollupTriggerSerializesLateHistoricalInsertWithPublish
+--- PASS: TestGroupUsageRollupTriggerSerializesLateHistoricalInsertWithPublish (0.08s)
+=== RUN   TestGroupUsageRollupTriggerSerializesInsertTransactionAcrossMidnight
+--- PASS: TestGroupUsageRollupTriggerSerializesInsertTransactionAcrossMidnight (0.08s)
+=== RUN   TestGroupUsageRollupTriggerKeepsWatermarkForTodayInsert
+--- PASS: TestGroupUsageRollupTriggerKeepsWatermarkForTodayInsert (0.04s)
+=== RUN   TestGroupUsageRollupTriggerUsesSessionTimezoneAcrossDST
+--- PASS: TestGroupUsageRollupTriggerUsesSessionTimezoneAcrossDST (0.04s)
+=== RUN   TestSubjectDailyRollupsPreserveMetricsAndLateChanges
+--- PASS: TestSubjectDailyRollupsPreserveMetricsAndLateChanges (0.26s)
+=== RUN   TestSubjectRollupLateInsertFencesPreparedBuild
+--- PASS: TestSubjectRollupLateInsertFencesPreparedBuild (0.10s)
+=== RUN   TestSubjectRollupRetentionFencesUnchangedWatermark
+--- PASS: TestSubjectRollupRetentionFencesUnchangedWatermark (0.10s)
+=== RUN   TestUsageRollupHistoryScanDoesNotBlockCurrentWrites
+    usage_subject_rollup_integration_test.go:170: current insert while historical stage build is blocked: 8.340313ms
+--- PASS: TestUsageRollupHistoryScanDoesNotBlockCurrentWrites (0.18s)
+=== RUN   TestSubjectDashboardQueryPlan
+    usage_subject_rollup_query_plan_integration_test.go:29: source rows=100000; published user day buckets=120; tail rows=0; raw tail starts=2026-11-16T00:00:00Z
+    usage_subject_rollup_query_plan_integration_test.go:37: raw history aggregate
+    usage_subject_rollup_query_plan_integration_test.go:43: Finalize Aggregate  (cost=20550.25..20550.26 rows=1 width=136) (actual time=30.278..37.841 rows=1 loops=1)
+    usage_subject_rollup_query_plan_integration_test.go:43:   Buffers: shared hit=10799 read=6560 written=152
+    usage_subject_rollup_query_plan_integration_test.go:43:   ->  Gather  (cost=20549.98..20550.19 rows=2 width=136) (actual time=30.005..37.822 rows=3 loops=1)
+    usage_subject_rollup_query_plan_integration_test.go:43:         Workers Planned: 2
+    usage_subject_rollup_query_plan_integration_test.go:43:         Workers Launched: 2
+    usage_subject_rollup_query_plan_integration_test.go:43:         Buffers: shared hit=10799 read=6560 written=152
+    usage_subject_rollup_query_plan_integration_test.go:43:         ->  Partial Aggregate  (cost=19549.98..19549.99 rows=1 width=136) (actual time=22.605..22.607 rows=1 loops=3)
+    usage_subject_rollup_query_plan_integration_test.go:43:               Buffers: shared hit=10799 read=6560 written=152
+    usage_subject_rollup_query_plan_integration_test.go:43:               ->  Parallel Bitmap Heap Scan on usage_logs  (cost=1248.60..19020.29 rows=42375 width=29) (actual time=2.485..18.367 rows=33333 loops=3)
+    usage_subject_rollup_query_plan_integration_test.go:43:                     Recheck Cond: (user_id = '1'::bigint)
+    usage_subject_rollup_query_plan_integration_test.go:43:                     Heap Blocks: exact=7969
+    usage_subject_rollup_query_plan_integration_test.go:43:                     Buffers: shared hit=10799 read=6560 written=152
+    usage_subject_rollup_query_plan_integration_test.go:43:                     ->  Bitmap Index Scan on usage_user_created  (cost=0.00..1223.17 rows=101700 width=0) (actual time=5.646..5.647 rows=100000 loops=1)
+    usage_subject_rollup_query_plan_integration_test.go:43:                           Index Cond: (user_id = '1'::bigint)
+    usage_subject_rollup_query_plan_integration_test.go:43:                           Buffers: shared hit=3 read=114 written=2
+    usage_subject_rollup_query_plan_integration_test.go:43: Planning:
+    usage_subject_rollup_query_plan_integration_test.go:43:   Buffers: shared hit=29 read=4
+    usage_subject_rollup_query_plan_integration_test.go:43: Planning Time: 0.278 ms
+    usage_subject_rollup_query_plan_integration_test.go:43: Execution Time: 37.918 ms
+    usage_subject_rollup_query_plan_integration_test.go:37: published day buckets and bounded raw tail
+    usage_subject_rollup_query_plan_integration_test.go:43: GroupAggregate  (cost=53.84..61.25 rows=2 width=708) (actual time=0.375..0.379 rows=2 loops=1)
+    usage_subject_rollup_query_plan_integration_test.go:43:   Group Key: (CASE WHEN (g.platform = 'composite'::text) THEN a.platform ELSE COALESCE(NULLIF(g.platform, ''::text), a.platform) END)
+    usage_subject_rollup_query_plan_integration_test.go:43:   Group Key: ()
+    usage_subject_rollup_query_plan_integration_test.go:43:   Buffers: shared hit=22 read=11
+    usage_subject_rollup_query_plan_integration_test.go:43:   ->  Sort  (cost=53.84..54.15 rows=121 width=345) (actual time=0.298..0.303 rows=120 loops=1)
+    usage_subject_rollup_query_plan_integration_test.go:43:         Sort Key: (CASE WHEN (g.platform = 'composite'::text) THEN a.platform ELSE COALESCE(NULLIF(g.platform, ''::text), a.platform) END)
+    usage_subject_rollup_query_plan_integration_test.go:43:         Sort Method: quicksort  Memory: 40kB
+    usage_subject_rollup_query_plan_integration_test.go:43:         Buffers: shared hit=22 read=11
+    usage_subject_rollup_query_plan_integration_test.go:43:         ->  Hash Left Join  (cost=7.85..49.66 rows=121 width=345) (actual time=0.093..0.259 rows=120 loops=1)
+    usage_subject_rollup_query_plan_integration_test.go:43:               Hash Cond: ("*SELECT* 1".account_id = a.id)
+    usage_subject_rollup_query_plan_integration_test.go:43:               Buffers: shared hit=22 read=11
+    usage_subject_rollup_query_plan_integration_test.go:43:               ->  Hash Left Join  (cost=6.83..48.31 rows=121 width=328) (actual time=0.068..0.216 rows=120 loops=1)
+    usage_subject_rollup_query_plan_integration_test.go:43:                     Hash Cond: ("*SELECT* 1".group_id = g.id)
+    usage_subject_rollup_query_plan_integration_test.go:43:                     Buffers: shared hit=22 read=10
+    usage_subject_rollup_query_plan_integration_test.go:43:                     ->  Append  (cost=5.81..45.75 rows=121 width=329) (actual time=0.032..0.166 rows=120 loops=1)
+    usage_subject_rollup_query_plan_integration_test.go:43:                           Buffers: shared hit=22 read=9
+    usage_subject_rollup_query_plan_integration_test.go:43:                           ->  Subquery Scan on "*SELECT* 1"  (cost=5.81..36.61 rows=120 width=229) (actual time=0.032..0.131 rows=120 loops=1)
+    usage_subject_rollup_query_plan_integration_test.go:43:                                 Buffers: shared hit=19 read=9
+    usage_subject_rollup_query_plan_integration_test.go:43:                                 ->  Bitmap Heap Scan on usage_subject_daily_rollups  (cost=5.81..33.91 rows=120 width=109) (actual time=0.029..0.105 rows=120 loops=1)
+    usage_subject_rollup_query_plan_integration_test.go:43:                                       Recheck Cond: ((user_id = '1'::bigint) AND (bucket_date >= '2026-07-19'::date) AND (bucket_date < '2026-11-16'::date))
+    usage_subject_rollup_query_plan_integration_test.go:43:                                       Heap Blocks: exact=26
+    usage_subject_rollup_query_plan_integration_test.go:43:                                       Buffers: shared hit=19 read=9
+    usage_subject_rollup_query_plan_integration_test.go:43:                                       ->  Bitmap Index Scan on usage_subject_rollup_user_date  (cost=0.00..5.78 rows=120 width=0) (actual time=0.021..0.021 rows=120 loops=1)
+    usage_subject_rollup_query_plan_integration_test.go:43:                                             Index Cond: ((user_id = '1'::bigint) AND (bucket_date >= '2026-07-19'::date) AND (bucket_date < '2026-11-16'::date))
+    usage_subject_rollup_query_plan_integration_test.go:43:                                             Buffers: shared hit=2
+    usage_subject_rollup_query_plan_integration_test.go:43:                           ->  Subquery Scan on "*SELECT* 2"  (cost=8.44..8.53 rows=1 width=329) (actual time=0.027..0.028 rows=0 loops=1)
+    usage_subject_rollup_query_plan_integration_test.go:43:                                 Buffers: shared hit=3
+    usage_subject_rollup_query_plan_integration_test.go:43:                                 ->  GroupAggregate  (cost=8.44..8.53 rows=1 width=345) (actual time=0.027..0.027 rows=0 loops=1)
+    usage_subject_rollup_query_plan_integration_test.go:43:                                       Group Key: usage_logs.group_id, usage_logs.account_id, ((usage_logs.created_at >= '2026-11-16 00:00:00+00'::timestamp with time zone))
+    usage_subject_rollup_query_plan_integration_test.go:43:                                       Buffers: shared hit=3
+    usage_subject_rollup_query_plan_integration_test.go:43:                                       ->  Sort  (cost=8.44..8.45 rows=1 width=99) (actual time=0.026..0.027 rows=0 loops=1)
+    usage_subject_rollup_query_plan_integration_test.go:43:                                             Sort Key: usage_logs.group_id, usage_logs.account_id, ((usage_logs.created_at >= '2026-11-16 00:00:00+00'::timestamp with time zone))
+    usage_subject_rollup_query_plan_integration_test.go:43:                                             Sort Method: quicksort  Memory: 25kB
+    usage_subject_rollup_query_plan_integration_test.go:43:                                             Buffers: shared hit=3
+    usage_subject_rollup_query_plan_integration_test.go:43:                                             ->  Index Scan using usage_user_created on usage_logs  (cost=0.42..8.43 rows=1 width=99) (actual time=0.011..0.011 rows=0 loops=1)
+    usage_subject_rollup_query_plan_integration_test.go:43:                                                   Index Cond: ((user_id = '1'::bigint) AND (created_at >= '2026-11-16 00:00:00+00'::timestamp with time zone))
+    usage_subject_rollup_query_plan_integration_test.go:43:                                                   Buffers: shared hit=3
+    usage_subject_rollup_query_plan_integration_test.go:43:                     ->  Hash  (cost=1.01..1.01 rows=1 width=15) (actual time=0.021..0.022 rows=1 loops=1)
+    usage_subject_rollup_query_plan_integration_test.go:43:                           Buckets: 1024  Batches: 1  Memory Usage: 9kB
+    usage_subject_rollup_query_plan_integration_test.go:43:                           Buffers: shared read=1
+    usage_subject_rollup_query_plan_integration_test.go:43:                           ->  Seq Scan on groups g  (cost=0.00..1.01 rows=1 width=15) (actual time=0.015..0.015 rows=1 loops=1)
+    usage_subject_rollup_query_plan_integration_test.go:43:                                 Buffers: shared read=1
+    usage_subject_rollup_query_plan_integration_test.go:43:               ->  Hash  (cost=1.01..1.01 rows=1 width=15) (actual time=0.010..0.011 rows=1 loops=1)
+    usage_subject_rollup_query_plan_integration_test.go:43:                     Buckets: 1024  Batches: 1  Memory Usage: 9kB
+    usage_subject_rollup_query_plan_integration_test.go:43:                     Buffers: shared read=1
+    usage_subject_rollup_query_plan_integration_test.go:43:                     ->  Seq Scan on accounts a  (cost=0.00..1.01 rows=1 width=15) (actual time=0.006..0.006 rows=1 loops=1)
+    usage_subject_rollup_query_plan_integration_test.go:43:                           Buffers: shared read=1
+    usage_subject_rollup_query_plan_integration_test.go:43: Planning:
+    usage_subject_rollup_query_plan_integration_test.go:43:   Buffers: shared hit=124 read=7
+    usage_subject_rollup_query_plan_integration_test.go:43: Planning Time: 1.643 ms
+    usage_subject_rollup_query_plan_integration_test.go:43: Execution Time: 0.676 ms
+--- PASS: TestSubjectDashboardQueryPlan (11.48s)
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/repository	19.670s

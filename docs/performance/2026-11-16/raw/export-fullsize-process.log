@@ -1,0 +1,18 @@
+round=
+2026/11/16 10:39:09 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestPerformanceProcessSample
+    performance_process_linux_test.go:151: {"allocs_per_op":8000068,"bytes_per_op":453484858,"cpu_ms_per_op":1085.861,"go_version":"go1.27.3","iterations":3,"legacy":false,"p95_ms":961.093,"peak_rss_bytes":111185920,"scenario":"xlsx_200000","stable_heap_bytes":6932064,"wall_ms_per_op":935.3246666666668}
+--- PASS: TestPerformanceProcessSample (3.75s)
+PASS
+round=
+2026/11/16 10:39:13 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestPerformanceProcessSample
+    performance_process_linux_test.go:151: {"allocs_per_op":8000066,"bytes_per_op":453484634,"cpu_ms_per_op":1109.1556666666668,"go_version":"go1.27.3","iterations":3,"legacy":false,"p95_ms":996.079,"peak_rss_bytes":109608960,"scenario":"xlsx_200000","stable_heap_bytes":6933456,"wall_ms_per_op":960.4}
+--- PASS: TestPerformanceProcessSample (3.87s)
+PASS
+round=
+2026/11/16 10:39:17 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestPerformanceProcessSample
+    performance_process_linux_test.go:151: {"allocs_per_op":8000068,"bytes_per_op":453484848,"cpu_ms_per_op":1102.285,"go_version":"go1.27.3","iterations":3,"legacy":false,"p95_ms":960.512,"peak_rss_bytes":109629440,"scenario":"xlsx_200000","stable_heap_bytes":6938744,"wall_ms_per_op":950.0390000000001}
+--- PASS: TestPerformanceProcessSample (3.79s)
+PASS

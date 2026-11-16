@@ -1,0 +1,17 @@
+The streaming XLSX implementation was tested in the same package invocations as
+the forwarding changes. Raw output is shared to avoid duplicating logs:
+
+Unit: forwarding-unit.log; selector includes TestUsageExport*.
+Race: forwarding-race.log; selector includes TestUsageExport*.
+Three benchmark rounds: forwarding-bench.log, BenchmarkUsageExportXLSX-4.
+Exact commands and environment: forwarding-commands.log.
+
+XLSX coverage: valid ZIP/XML parts, 37 columns, English/Chinese headings, original
+RFC3339Nano times, reasoning labels and requested/effective effort fallback,
+six/eight-decimal costs and fixed safety fee isolation, four-significant-digit
+multipliers, literal formula-like strings, XML/SpreadsheetML escaping, UTF-16
+cell limits, writer errors, close idempotency and writes after close.
+
+Each benchmark operation streams 1,000 rows using one 64 KiB buffered worksheet
+writer, without a shared string table or retained worksheet rows. Reported B/op
+is cumulative allocation, not retained heap or process RSS.

@@ -1,0 +1,15 @@
+
+ RUN  v2.1.9 D:/Code/sub2api/frontend
+
+Browserslist: browsers data (caniuse-lite) is 11 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+ ✓ src/components/admin/account/__tests__/ScheduledTestsPanel.results.spec.ts (5 tests) 131ms
+ ✓ src/views/user/__tests__/ChannelStatusV1View.refresh.spec.ts (5 tests) 120ms
+ ✓ src/views/user/__tests__/ChannelStatusV1View.details.spec.ts (7 tests) 138ms
+
+ Test Files  3 passed (3)
+      Tests  17 passed (17)
+   Start at  18:02:08
+   Duration  3.36s (transform 1.44s, setup 354ms, collect 4.12s, tests 389ms, environment 1.82s, prepare 307ms)
+

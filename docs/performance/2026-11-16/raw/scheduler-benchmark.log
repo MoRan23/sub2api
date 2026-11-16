@@ -1,0 +1,31 @@
+2026/11/16 09:50:25 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkCompositeOwnershipComparison/baseline_scan_2000-4         	     415	   1290955 ns/op	 2480000 B/op	    8000 allocs/op
+BenchmarkCompositeOwnershipComparison/baseline_scan_2000-4         	     500	   1088590 ns/op	 2480001 B/op	    8000 allocs/op
+BenchmarkCompositeOwnershipComparison/baseline_scan_2000-4         	     489	   1183570 ns/op	 2480000 B/op	    8000 allocs/op
+BenchmarkCompositeOwnershipComparison/bounded_index_2000-4         	29519277	        19.68 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCompositeOwnershipComparison/bounded_index_2000-4         	30409616	        27.40 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCompositeOwnershipComparison/bounded_index_2000-4         	25683612	        19.74 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGroupCatalogRepresentationComparison/baseline_rebuild-4   	     211	   2964613 ns/op	 1464720 B/op	      85 allocs/op
+BenchmarkGroupCatalogRepresentationComparison/baseline_rebuild-4   	     217	   3007162 ns/op	 1464675 B/op	      85 allocs/op
+BenchmarkGroupCatalogRepresentationComparison/baseline_rebuild-4   	     175	   3250999 ns/op	 1464575 B/op	      84 allocs/op
+BenchmarkGroupCatalogRepresentationComparison/cached_304-4         	   19161	     31336 ns/op	   27340 B/op	      39 allocs/op
+BenchmarkGroupCatalogRepresentationComparison/cached_304-4         	   15886	     36624 ns/op	   27345 B/op	      39 allocs/op
+BenchmarkGroupCatalogRepresentationComparison/cached_304-4         	   19300	     31773 ns/op	   27342 B/op	      39 allocs/op
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/service	10.284s
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/repository
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkSchedulerMGetComparison/baseline_serial_16_commands-4         	      79	   6727816 ns/op	  183991 B/op	    6050 allocs/op
+BenchmarkSchedulerMGetComparison/baseline_serial_16_commands-4         	      90	   6867390 ns/op	  183992 B/op	    6050 allocs/op
+BenchmarkSchedulerMGetComparison/baseline_serial_16_commands-4         	      88	   6957700 ns/op	  183987 B/op	    6050 allocs/op
+BenchmarkSchedulerMGetComparison/pipeline_2_waves-4                    	     364	   1625067 ns/op	  184722 B/op	    6070 allocs/op
+BenchmarkSchedulerMGetComparison/pipeline_2_waves-4                    	     380	   1607396 ns/op	  184722 B/op	    6070 allocs/op
+BenchmarkSchedulerMGetComparison/pipeline_2_waves-4                    	     352	   1618362 ns/op	  184721 B/op	    6070 allocs/op
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/repository	4.944s

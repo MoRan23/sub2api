@@ -1,0 +1,108 @@
+round=1
+2026/11/16 10:18:12 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestPerformanceProcessSample
+    performance_process_linux_test.go:147: {"allocs_per_op":4123,"bytes_per_op":2163854929,"cpu_ms_per_op":754.09546875,"go_version":"go1.27.3","iterations":32,"legacy":true,"p95_ms":481.068,"peak_rss_bytes":125362176,"scenario":"text_1m","stable_heap_bytes":5881464,"wall_ms_per_op":332.38765625}
+--- PASS: TestPerformanceProcessSample (10.98s)
+PASS
+2026/11/16 10:18:23 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestPerformanceProcessSample
+    performance_process_linux_test.go:147: {"allocs_per_op":33,"bytes_per_op":5241843,"cpu_ms_per_op":1.9432187499999998,"go_version":"go1.27.3","iterations":32,"legacy":false,"p95_ms":2.118,"peak_rss_bytes":102227968,"scenario":"text_1m","stable_heap_bytes":5856120,"wall_ms_per_op":0.92109375}
+--- PASS: TestPerformanceProcessSample (0.04s)
+PASS
+2026/11/16 10:18:23 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestPerformanceProcessSample
+    performance_process_linux_test.go:147: {"allocs_per_op":54325,"bytes_per_op":4332152697,"cpu_ms_per_op":2930.3753125,"go_version":"go1.27.3","iterations":32,"legacy":true,"p95_ms":2095.995,"peak_rss_bytes":117551104,"scenario":"tool_1m","stable_heap_bytes":5877688,"wall_ms_per_op":1744.5789375}
+--- PASS: TestPerformanceProcessSample (58.04s)
+PASS
+2026/11/16 10:19:21 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestPerformanceProcessSample
+    performance_process_linux_test.go:147: {"allocs_per_op":30,"bytes_per_op":5241988,"cpu_ms_per_op":1.4072187499999997,"go_version":"go1.27.3","iterations":32,"legacy":false,"p95_ms":1.745,"peak_rss_bytes":105689088,"scenario":"tool_1m","stable_heap_bytes":5850144,"wall_ms_per_op":0.6933125}
+--- PASS: TestPerformanceProcessSample (0.03s)
+PASS
+2026/11/16 10:19:21 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestPerformanceProcessSample
+    performance_process_linux_test.go:147: {"allocs_per_op":68,"bytes_per_op":83892461,"cpu_ms_per_op":25.771812500000003,"go_version":"go1.27.3","iterations":32,"legacy":true,"p95_ms":27.957,"peak_rss_bytes":247697408,"scenario":"ws_16m","stable_heap_bytes":5857608,"wall_ms_per_op":21.4508125}
+--- PASS: TestPerformanceProcessSample (0.73s)
+PASS
+2026/11/16 10:19:22 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestPerformanceProcessSample
+    performance_process_linux_test.go:147: {"allocs_per_op":38,"bytes_per_op":2461,"cpu_ms_per_op":10.337031249999999,"go_version":"go1.27.3","iterations":32,"legacy":false,"p95_ms":12.589,"peak_rss_bytes":115060736,"scenario":"ws_16m","stable_heap_bytes":5857320,"wall_ms_per_op":10.47825}
+--- PASS: TestPerformanceProcessSample (0.36s)
+PASS
+2026/11/16 10:19:22 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestPerformanceProcessSample
+    performance_process_linux_test.go:147: {"allocs_per_op":40057,"bytes_per_op":2355337,"cpu_ms_per_op":7.3183125,"go_version":"go1.27.3","iterations":32,"legacy":false,"p95_ms":7.949,"peak_rss_bytes":90030080,"scenario":"xlsx_1000","stable_heap_bytes":6929856,"wall_ms_per_op":6.33803125}
+--- PASS: TestPerformanceProcessSample (0.21s)
+PASS
+round=2
+2026/11/16 10:19:22 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestPerformanceProcessSample
+    performance_process_linux_test.go:147: {"allocs_per_op":4121,"bytes_per_op":2163854698,"cpu_ms_per_op":605.108625,"go_version":"go1.27.3","iterations":32,"legacy":true,"p95_ms":307.293,"peak_rss_bytes":114298880,"scenario":"text_1m","stable_heap_bytes":5868896,"wall_ms_per_op":265.583625}
+--- PASS: TestPerformanceProcessSample (8.82s)
+PASS
+2026/11/16 10:19:31 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestPerformanceProcessSample
+    performance_process_linux_test.go:147: {"allocs_per_op":33,"bytes_per_op":5241850,"cpu_ms_per_op":1.1538437500000003,"go_version":"go1.27.3","iterations":32,"legacy":false,"p95_ms":1.256,"peak_rss_bytes":98562048,"scenario":"text_1m","stable_heap_bytes":5855592,"wall_ms_per_op":0.5543125}
+--- PASS: TestPerformanceProcessSample (0.02s)
+PASS
+2026/11/16 10:19:31 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestPerformanceProcessSample
+    performance_process_linux_test.go:147: {"allocs_per_op":54342,"bytes_per_op":4332156662,"cpu_ms_per_op":3457.944125,"go_version":"go1.27.3","iterations":32,"legacy":true,"p95_ms":3250.016,"peak_rss_bytes":149258240,"scenario":"tool_1m","stable_heap_bytes":5876080,"wall_ms_per_op":2174.68959375}
+--- PASS: TestPerformanceProcessSample (71.17s)
+PASS
+2026/11/16 10:20:43 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestPerformanceProcessSample
+    performance_process_linux_test.go:147: {"allocs_per_op":30,"bytes_per_op":5241984,"cpu_ms_per_op":1.1874687499999999,"go_version":"go1.27.3","iterations":32,"legacy":false,"p95_ms":1.436,"peak_rss_bytes":94572544,"scenario":"tool_1m","stable_heap_bytes":5851008,"wall_ms_per_op":0.57146875}
+--- PASS: TestPerformanceProcessSample (0.02s)
+PASS
+2026/11/16 10:20:43 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestPerformanceProcessSample
+    performance_process_linux_test.go:147: {"allocs_per_op":67,"bytes_per_op":83891975,"cpu_ms_per_op":23.335906249999997,"go_version":"go1.27.3","iterations":32,"legacy":true,"p95_ms":29.406,"peak_rss_bytes":240812032,"scenario":"ws_16m","stable_heap_bytes":5862864,"wall_ms_per_op":19.14165625}
+--- PASS: TestPerformanceProcessSample (0.67s)
+PASS
+2026/11/16 10:20:43 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestPerformanceProcessSample
+    performance_process_linux_test.go:147: {"allocs_per_op":38,"bytes_per_op":2461,"cpu_ms_per_op":9.24271875,"go_version":"go1.27.3","iterations":32,"legacy":false,"p95_ms":9.59,"peak_rss_bytes":105545728,"scenario":"ws_16m","stable_heap_bytes":5856920,"wall_ms_per_op":9.1525625}
+--- PASS: TestPerformanceProcessSample (0.32s)
+PASS
+2026/11/16 10:20:44 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestPerformanceProcessSample
+    performance_process_linux_test.go:147: {"allocs_per_op":40057,"bytes_per_op":2355323,"cpu_ms_per_op":5.496531249999999,"go_version":"go1.27.3","iterations":32,"legacy":false,"p95_ms":5.384,"peak_rss_bytes":81653760,"scenario":"xlsx_1000","stable_heap_bytes":6928912,"wall_ms_per_op":4.760875}
+--- PASS: TestPerformanceProcessSample (0.16s)
+PASS
+round=3
+2026/11/16 10:20:44 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestPerformanceProcessSample
+    performance_process_linux_test.go:147: {"allocs_per_op":4123,"bytes_per_op":2163854936,"cpu_ms_per_op":528.9907812499999,"go_version":"go1.27.3","iterations":32,"legacy":true,"p95_ms":249.163,"peak_rss_bytes":112906240,"scenario":"text_1m","stable_heap_bytes":5869392,"wall_ms_per_op":232.23621875}
+--- PASS: TestPerformanceProcessSample (7.69s)
+PASS
+2026/11/16 10:20:52 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestPerformanceProcessSample
+    performance_process_linux_test.go:147: {"allocs_per_op":33,"bytes_per_op":5241850,"cpu_ms_per_op":1.1976875000000002,"go_version":"go1.27.3","iterations":32,"legacy":false,"p95_ms":1.385,"peak_rss_bytes":100282368,"scenario":"text_1m","stable_heap_bytes":5850736,"wall_ms_per_op":0.60696875}
+--- PASS: TestPerformanceProcessSample (0.02s)
+PASS
+2026/11/16 10:20:52 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestPerformanceProcessSample
+    performance_process_linux_test.go:147: {"allocs_per_op":54315,"bytes_per_op":4332147825,"cpu_ms_per_op":2469.95759375,"go_version":"go1.27.3","iterations":32,"legacy":true,"p95_ms":1632.556,"peak_rss_bytes":99672064,"scenario":"tool_1m","stable_heap_bytes":5877248,"wall_ms_per_op":1533.1669375}
+--- PASS: TestPerformanceProcessSample (50.58s)
+PASS
+2026/11/16 10:21:42 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestPerformanceProcessSample
+    performance_process_linux_test.go:147: {"allocs_per_op":30,"bytes_per_op":5241990,"cpu_ms_per_op":1.27775,"go_version":"go1.27.3","iterations":32,"legacy":false,"p95_ms":1.292,"peak_rss_bytes":94384128,"scenario":"tool_1m","stable_heap_bytes":5849248,"wall_ms_per_op":0.6050625}
+--- PASS: TestPerformanceProcessSample (0.03s)
+PASS
+2026/11/16 10:21:42 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestPerformanceProcessSample
+    performance_process_linux_test.go:147: {"allocs_per_op":66,"bytes_per_op":83891762,"cpu_ms_per_op":23.819125,"go_version":"go1.27.3","iterations":32,"legacy":true,"p95_ms":29.778,"peak_rss_bytes":239534080,"scenario":"ws_16m","stable_heap_bytes":5858152,"wall_ms_per_op":19.51475}
+--- PASS: TestPerformanceProcessSample (0.68s)
+PASS
+2026/11/16 10:21:43 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestPerformanceProcessSample
+    performance_process_linux_test.go:147: {"allocs_per_op":38,"bytes_per_op":2281,"cpu_ms_per_op":9.837625000000001,"go_version":"go1.27.3","iterations":32,"legacy":false,"p95_ms":13.326,"peak_rss_bytes":105316352,"scenario":"ws_16m","stable_heap_bytes":5857288,"wall_ms_per_op":9.770875}
+--- PASS: TestPerformanceProcessSample (0.34s)
+PASS
+2026/11/16 10:21:43 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestPerformanceProcessSample
+    performance_process_linux_test.go:147: {"allocs_per_op":40057,"bytes_per_op":2355337,"cpu_ms_per_op":5.955343750000001,"go_version":"go1.27.3","iterations":32,"legacy":false,"p95_ms":6.948,"peak_rss_bytes":81301504,"scenario":"xlsx_1000","stable_heap_bytes":6930352,"wall_ms_per_op":5.11690625}
+--- PASS: TestPerformanceProcessSample (0.17s)
+PASS
