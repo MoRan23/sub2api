@@ -1425,22 +1425,29 @@ func setOpenAIOAuthIdentityCaptureCallerSeed(c *gin.Context, callerSeed string) 
 // the bytes that will actually be sent. The returned bytes are borrowed and
 // must not be modified; body rewrites must allocate their own result.
 func openAIUpstreamRequestBodySnapshot(req *http.Request, fallback []byte) []byte {
-	if req == nil || req.GetBody == nil {
-		return fallback
-	}
-	reader, err := req.GetBody()
-	if err != nil {
-		return fallback
-	}
-	defer func() { _ = reader.Close() }()
-	if snapshot, ok := reader.(*openAIRequestBodySnapshotReader); ok {
-		return snapshot.snapshot
-	}
-	body, err := io.ReadAll(reader)
+	body, err := readOpenAIUpstreamRequestBodySnapshot(req)
 	if err != nil {
 		return fallback
 	}
 	return body
+}
+
+// readOpenAIUpstreamRequestBodySnapshot preserves read errors for observers
+// that must distinguish an unavailable snapshot from a valid empty body.
+// Returned bytes have the same borrowed, immutable ownership as the wrapper.
+func readOpenAIUpstreamRequestBodySnapshot(req *http.Request) ([]byte, error) {
+	if req == nil || req.GetBody == nil {
+		return nil, errors.New("upstream request body snapshot unavailable")
+	}
+	reader, err := req.GetBody()
+	if err != nil {
+		return nil, err
+	}
+	defer func() { _ = reader.Close() }()
+	if snapshot, ok := reader.(*openAIRequestBodySnapshotReader); ok {
+		return snapshot.snapshot, nil
+	}
+	return io.ReadAll(reader)
 }
 
 type openAIUpstreamRequestBuildOptions struct {

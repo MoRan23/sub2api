@@ -29,14 +29,10 @@ func (s *OpenAIGatewayService) beginCodexTelemetryHTTPRequest(request *http.Requ
 	if !ok {
 		return nil
 	}
-	// Read a separate final request snapshot. The inference body is not consumed
-	// or replaced, and Begin retains only the extracted scalar identity metadata.
-	reader, err := request.GetBody()
-	if err != nil {
-		return nil
-	}
-	body, err := io.ReadAll(reader)
-	_ = reader.Close()
+	// Borrow the finalizer's immutable wire snapshot for this synchronous
+	// projection. Compatibility requests still use a separate reader; neither
+	// path consumes the inference body. Begin retains only extracted metadata.
+	body, err := readOpenAIUpstreamRequestBodySnapshot(request)
 	if err != nil {
 		return nil
 	}
