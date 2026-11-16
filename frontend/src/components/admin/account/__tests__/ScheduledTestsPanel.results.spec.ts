@@ -83,4 +83,22 @@ describe('scheduled test result selection', () => {
     await flushPromises()
     expect(wrapper.html()).toBe(current)
   })
+
+  it('cancels plans when switching accounts and ignores late results after close', async () => {
+    const old = deferred<unknown[]>()
+    const next = deferred<unknown[]>()
+    listByAccount.mockReturnValueOnce(old.promise).mockReturnValueOnce(next.promise)
+    const wrapper = await openPanel()
+    const oldSignal = listByAccount.mock.calls[0][1] as AbortSignal
+    await wrapper.setProps({ accountId: 2 })
+    expect(oldSignal.aborted).toBe(true)
+    const nextSignal = listByAccount.mock.calls[1][1] as AbortSignal
+    await wrapper.setProps({ show: false })
+    expect(nextSignal.aborted).toBe(true)
+    old.resolve([{ id: 1, model_id: 'old-model' }])
+    next.resolve([{ id: 2, model_id: 'closed-model' }])
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('old-model')
+    expect(wrapper.text()).not.toContain('closed-model')
+  })
 })

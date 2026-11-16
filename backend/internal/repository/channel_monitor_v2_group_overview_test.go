@@ -125,6 +125,23 @@ func TestChannelMonitorV2GroupAttributionOverviewEmptyScope(t *testing.T) {
 	require.Empty(t, got)
 }
 
+func TestChannelMonitorV2GroupOverviewSkipsLegacyQuery(t *testing.T) {
+	db, mock, err := sqlmock.New()
+	require.NoError(t, err)
+	defer db.Close()
+	asOf := time.Now().UTC()
+	mock.ExpectQuery(regexp.QuoteMeta(channelMonitorV2GroupAttributionOverviewSQL)).WithArgs(pq.Array([]int64{1}), asOf).
+		WillReturnRows(sqlmock.NewRows([]string{"group_id", "enabled", "sample", "state", "probe_model"}).AddRow(1, true, 20, "passed", "probe"))
+	r := &channelMonitorV2Repository{db: db}
+	got, err := r.GetGroupAttributionOverviewWithLegacy(context.Background(), []int64{1}, asOf, false)
+	require.NoError(t, err)
+	require.Equal(t, "passed", got[1].SummaryState)
+	require.Len(t, got[1].History, 20)
+	require.Empty(t, got[1].Recent)
+	require.Nil(t, got[1].Latest)
+	require.NoError(t, mock.ExpectationsWereMet())
+}
+
 func TestChannelMonitorV2GroupAttributionOverviewReadErrors(t *testing.T) {
 	for _, kind := range []string{"query", "scan", "iterate", "sample", "group", "legacy"} {
 		t.Run(kind, func(t *testing.T) {

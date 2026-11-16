@@ -70,10 +70,10 @@ function mountModal(account: Record<string, unknown> = {
   platform: 'gemini',
   type: 'apikey',
   status: 'active'
-}) {
+}, show = false) {
   return mount(AccountTestModal, {
     props: {
-      show: false,
+      show,
       account: account.platform === 'openai' && !('openai_oauth_os_profiles' in account)
         ? { ...account, openai_oauth_os_profiles: { default_os: 'windows', profiles: { windows: { authorization: { status: 'authorized' } }, macos: { authorization: { status: 'unauthorized' } }, linux: { authorization: { status: 'authorized' } } } } }
         : account
@@ -124,11 +124,28 @@ describe('AccountTestModal', () => {
     vi.restoreAllMocks()
   })
 
+  it('initializes an initially open dialog and discards a model response after closing', async () => {
+    let resolve: (value: unknown) => void = () => {}
+    getAvailableModels.mockImplementationOnce(() => new Promise(done => { resolve = done }))
+    const wrapper = mountModal(undefined, true)
+    await flushPromises()
+    expect(getAvailableModels).toHaveBeenCalledTimes(1)
+    const signal = getAvailableModels.mock.calls[0][2].signal as AbortSignal
+    await wrapper.setProps({ show: false })
+    expect(signal.aborted).toBe(true)
+    await wrapper.setProps({ show: true })
+    await flushPromises()
+    resolve([{ id: 'stale-model', display_name: 'Stale' }])
+    await flushPromises()
+    expect((wrapper.vm as any).availableModels.some((model: { id: string }) => model.id === 'stale-model')).toBe(false)
+    wrapper.unmount()
+  })
+
   it('does not gate tests on obsolete per-system authorization summaries', async () => {
     const wrapper = mountModal({ id: 42, name: 'Shared authorization', platform: 'openai', type: 'oauth', status: 'active', openai_oauth_os_profiles: { default_os: 'windows', authorization: { status: 'authorized' }, profiles: { windows: { installation_id: 'installed-only', authorization: { status: 'unauthorized' } } } } })
     await wrapper.setProps({ show: true })
     await flushPromises()
-    expect(getAvailableModels).toHaveBeenCalledWith(42, 'windows')
+    expect(getAvailableModels).toHaveBeenCalledWith(42, 'windows', { signal: expect.any(AbortSignal) })
     const start = wrapper.findAll('button').find(button => button.text().includes('admin.accounts.startTest'))!
     expect(start.attributes('disabled')).toBeUndefined()
     await start.trigger('click')
@@ -143,7 +160,7 @@ describe('AccountTestModal', () => {
     await flushPromises()
     await wrapper.get('[data-testid="openai-oauth-os-select"]').setValue('linux')
     await flushPromises()
-    expect(getAvailableModels).toHaveBeenLastCalledWith(42, 'linux')
+    expect(getAvailableModels).toHaveBeenLastCalledWith(42, 'linux', { signal: expect.any(AbortSignal) })
     await wrapper.findAll('button').find(button => button.text().includes('admin.accounts.startTest'))!.trigger('click')
     await flushPromises()
     expect(JSON.parse(vi.mocked(global.fetch).mock.calls[0]![1]!.body as string).os).toBe('linux')

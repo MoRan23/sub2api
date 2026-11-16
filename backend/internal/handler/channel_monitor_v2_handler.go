@@ -58,7 +58,15 @@ func (h *ChannelMonitorV2Handler) GroupOverview(c *gin.Context) {
 		response.ErrorFrom(c, err)
 		return
 	}
-	result, err := h.service.GetGroupOverviewForViewer(c.Request.Context(), filter, groups, rates, channelMonitorV2IsAdmin(c))
+	includeLegacy := true
+	if raw, exists := c.GetQuery("include_legacy_attribution"); exists {
+		if raw != "true" && raw != "false" {
+			response.BadRequest(c, "invalid include_legacy_attribution")
+			return
+		}
+		includeLegacy = raw == "true"
+	}
+	result, err := h.service.GetGroupOverviewWithOptions(c.Request.Context(), filter, groups, rates, channelMonitorV2IsAdmin(c), includeLegacy)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

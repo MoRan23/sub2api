@@ -40,6 +40,56 @@ function mountView() {
 }
 
 describe('channel monitor automatic detail refresh', () => {
+  it('uses the selected batch window and never requests details from a current server', async () => {
+    mocks.list.mockImplementation(async () => ({ items: [{ id: 1, name: 'Monitor', primary_model: 'model', primary_status: 'operational', availability_7d: 99, availability_15d: 95, availability_30d: 91 }] }))
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('.fifteen').trigger('click')
+    await flushPromises()
+    expect(mocks.list).toHaveBeenLastCalledWith({ window: '15d', signal: expect.any(AbortSignal) })
+    expect(wrapper.get('output').text()).toBe('95')
+    await wrapper.get('.thirty').trigger('click')
+    await flushPromises()
+    expect(wrapper.get('output').text()).toBe('91')
+    expect(mocks.status).not.toHaveBeenCalled()
+  })
+
+  it('bounds legacy fanout to four and cancels it when the window changes', async () => {
+    mocks.list.mockResolvedValue({ items: Array.from({ length: 20 }, (_, index) => ({ id: index + 1, primary_model: 'model', primary_status: 'operational', availability_7d: 99 })) })
+    const resolves: Array<() => void> = []
+    mocks.status.mockImplementation((id: number) => new Promise(resolve => resolves.push(() => resolve({ id, ...detail(98) }))))
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('.fifteen').trigger('click')
+    await flushPromises()
+    expect(mocks.status).toHaveBeenCalledTimes(4)
+    const signals = mocks.status.mock.calls.map(call => call[1].signal as AbortSignal)
+    await wrapper.get('.thirty').trigger('click')
+    await flushPromises()
+    expect(signals.every(signal => signal.aborted)).toBe(true)
+    expect(mocks.status).toHaveBeenCalledTimes(8)
+    wrapper.unmount()
+    for (const resolve of resolves) resolve()
+    await flushPromises()
+    expect(mocks.status).toHaveBeenCalledTimes(8)
+  })
+
+  it('reuses an in-flight legacy refresh for the same selected window', async () => {
+    let finish: (value: unknown) => void = () => {}
+    mocks.status.mockImplementation(() => new Promise(resolve => { finish = resolve }))
+    const wrapper = mountView()
+    await flushPromises()
+    await wrapper.get('.fifteen').trigger('click')
+    await flushPromises()
+    await wrapper.get('.refresh').trigger('click')
+    await flushPromises()
+    expect(mocks.list).toHaveBeenCalledTimes(2)
+    expect(mocks.status).toHaveBeenCalledTimes(1)
+    finish(detail(97))
+    await flushPromises()
+    expect(wrapper.get('output').text()).toBe('97')
+  })
+
   it.each(['fifteen', 'thirty'])('refreshes the cached %s-day availability on timer ticks', async (tab) => {
     const wrapper = mountView()
     await flushPromises()

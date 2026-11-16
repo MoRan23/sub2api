@@ -56,6 +56,15 @@ func (s *ChannelMonitorService) BatchMonitorStatusSummary(
 //	1 次批量 7d availability；
 //	1 次批量 timeline（主模型最近 N 条）。
 func (s *ChannelMonitorService) ListUserView(ctx context.Context) ([]*UserMonitorView, error) {
+	return s.ListUserViewWithWindow(ctx, monitorAvailability7Days)
+}
+
+// ListUserViewWithWindow adds the selected availability window in one batch, so
+// clients do not need a separate detail request for every displayed monitor.
+func (s *ChannelMonitorService) ListUserViewWithWindow(ctx context.Context, windowDays int) ([]*UserMonitorView, error) {
+	if windowDays != 7 && windowDays != 15 && windowDays != 30 {
+		return nil, fmt.Errorf("unsupported monitor window: %d", windowDays)
+	}
 	monitors, err := s.repo.ListEnabled(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("list enabled monitors: %w", err)
@@ -65,14 +74,34 @@ func (s *ChannelMonitorService) ListUserView(ctx context.Context) ([]*UserMonito
 	}
 
 	ids, primaryByID, extrasByID := collectMonitorIndexes(monitors)
-	summaries := s.BatchMonitorStatusSummary(ctx, ids, primaryByID, extrasByID)
 	latestMap := s.batchLatest(ctx, ids)
+	availMap, err := s.repo.ComputeAvailabilityForMonitors(ctx, ids, monitorAvailability7Days)
+	if err != nil {
+		slog.Warn("channel_monitor: user view availability failed", "error", err)
+	}
+	var windowMap map[int64][]*ChannelMonitorAvailability
+	if windowDays != monitorAvailability7Days {
+		windowMap, err = s.repo.ComputeAvailabilityForMonitors(ctx, ids, windowDays)
+		if err != nil {
+			slog.Warn("channel_monitor: user view window availability failed", "error", err)
+		}
+	}
 	timelineMap := s.batchTimeline(ctx, ids, primaryByID)
 
 	views := make([]*UserMonitorView, 0, len(monitors))
 	for _, m := range monitors {
 		primaryLatest := pickLatest(latestMap[m.ID], m.PrimaryModel)
-		views = append(views, buildUserViewFromSummary(m, summaries[m.ID], primaryLatest, timelineMap[m.ID]))
+		summary := buildStatusSummary(indexLatestByModel(latestMap[m.ID]), indexAvailabilityByModel(availMap[m.ID]), m.PrimaryModel, extrasByID[m.ID])
+		view := buildUserViewFromSummary(m, summary, primaryLatest, timelineMap[m.ID])
+		if windowDays != monitorAvailability7Days {
+			selected := buildStatusSummary(nil, indexAvailabilityByModel(windowMap[m.ID]), m.PrimaryModel, nil).Availability7d
+			if windowDays == 15 {
+				view.Availability15d = &selected
+			} else {
+				view.Availability30d = &selected
+			}
+		}
+		views = append(views, view)
 	}
 	return views, nil
 }

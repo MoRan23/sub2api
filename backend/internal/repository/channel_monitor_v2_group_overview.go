@@ -176,6 +176,10 @@ LEFT JOIN group_enabled e ON e.group_id = g.group_id
 ORDER BY g.group_id, b.sample`
 
 func (r *channelMonitorV2Repository) GetGroupAttributionOverview(ctx context.Context, groupIDs []int64, asOf time.Time) (map[int64]service.ChannelMonitorV2OverviewAttribution, error) {
+	return r.GetGroupAttributionOverviewWithLegacy(ctx, groupIDs, asOf, true)
+}
+
+func (r *channelMonitorV2Repository) GetGroupAttributionOverviewWithLegacy(ctx context.Context, groupIDs []int64, asOf time.Time, includeLegacy bool) (map[int64]service.ChannelMonitorV2OverviewAttribution, error) {
 	out := make(map[int64]service.ChannelMonitorV2OverviewAttribution, len(groupIDs))
 	if len(groupIDs) == 0 {
 		return out, nil
@@ -218,6 +222,9 @@ func (r *channelMonitorV2Repository) GetGroupAttributionOverview(ctx context.Con
 		return nil, fmt.Errorf("close group attribution overview: %w", err)
 	}
 	// Retain the old latest/recent projection for clients that still display it.
+	if !includeLegacy {
+		return out, nil
+	}
 	// These bounded display rows never feed the summary or its timeline.
 	histories, err := r.getGroupAttributionHistoryAt(ctx, groupIDs, asOf)
 	if err != nil {

@@ -366,7 +366,7 @@
 </template>
 
 <script setup lang="ts">
-import { computed, ref, watch, nextTick } from 'vue'
+import { computed, ref, watch, nextTick, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
@@ -739,26 +739,6 @@ const pickDefaultModelForMode = () => {
   selectedModelId.value = opts[0].id
 }
 
-watch(
-  () => props.show,
-  async (newVal) => {
-    if (newVal && props.account) {
-      selectedOS.value = defaultOpenAIOS(props.account)
-      testPrompt.value = ''
-      testMode.value = 'default'
-      grokTestMode.value = 'text'
-      resetState()
-      await loadAvailableModels()
-      if (isGrokAccount.value) {
-        pickDefaultModelForMode()
-        applyDefaultPromptForMode()
-      }
-    } else {
-      abortStream()
-    }
-  }
-)
-
 watch(grokTestMode, () => {
   if (!isGrokAccount.value) return
   testPrompt.value = ''
@@ -776,22 +756,27 @@ const selectTestOS = (os: OpenAIOAuthOS) => {
 }
 
 let modelsLoadVersion = 0
+let modelsController: AbortController | null = null
 
 const loadAvailableModels = async () => {
   const version = ++modelsLoadVersion
-  if (!props.account) return
+  modelsController?.abort()
+  const account = props.account
+  if (!account) return
+  const controller = new AbortController()
+  modelsController = controller
 
   loadingModels.value = true
   selectedModelId.value = '' // Reset selection before loading
   try {
-    const models = await adminAPI.accounts.getAvailableModels(props.account.id, usesOSIdentity.value ? selectedOS.value : undefined)
-    if (version !== modelsLoadVersion) return
-    availableModels.value = props.account.platform === 'gemini' || props.account.platform === 'antigravity'
+    const models = await adminAPI.accounts.getAvailableModels(account.id, usesOSIdentity.value ? selectedOS.value : undefined, { signal: controller.signal })
+    if (controller.signal.aborted || version !== modelsLoadVersion) return
+    availableModels.value = account.platform === 'gemini' || account.platform === 'antigravity'
       ? sortTestModels(models)
       : models
     // Default selection by platform
     if (availableModels.value.length > 0) {
-      if (props.account.platform === 'gemini') {
+      if (account.platform === 'gemini') {
         selectedModelId.value = availableModels.value[0].id
       } else {
         // Try to select Sonnet as default, otherwise use first model
@@ -800,13 +785,14 @@ const loadAvailableModels = async () => {
       }
     }
   } catch (error) {
-    if (version !== modelsLoadVersion) return
+    if (controller.signal.aborted || version !== modelsLoadVersion) return
     console.error('Failed to load available models:', error)
     // Fallback to empty list
     availableModels.value = []
     selectedModelId.value = ''
   } finally {
     if (version === modelsLoadVersion) loadingModels.value = false
+    if (modelsController === controller) modelsController = null
   }
 }
 
@@ -1095,6 +1081,32 @@ const copyOutput = () => {
   const text = outputLines.value.map((l) => l.text).join('\n')
   copyToClipboard(text, t('admin.accounts.outputCopied'))
 }
+watch(
+  () => [props.show, props.account?.id] as const,
+  async ([open, accountID], _, onCleanup) => {
+    onCleanup(() => { modelsController?.abort(); modelsLoadVersion++; abortStream() })
+    if (open && props.account) {
+      selectedOS.value = defaultOpenAIOS(props.account)
+      testPrompt.value = ''
+      testMode.value = 'default'
+      grokTestMode.value = 'text'
+      resetState()
+      await loadAvailableModels()
+      if (!props.show || props.account?.id !== accountID) return
+      if (isGrokAccount.value) {
+        pickDefaultModelForMode()
+        applyDefaultPromptForMode()
+      }
+    } else {
+      modelsLoadVersion++
+      modelsController?.abort()
+      loadingModels.value = false
+      abortStream()
+    }
+  },
+  { immediate: true }
+)
+onBeforeUnmount(() => { modelsController?.abort(); abortStream() })
 </script>
 
 <style>

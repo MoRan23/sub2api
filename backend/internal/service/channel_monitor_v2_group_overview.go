@@ -110,6 +110,10 @@ func (s *ChannelMonitorV2Service) GetGroupOverview(ctx context.Context, filter C
 // GetGroupOverviewForViewer only uses admin to control throughput visibility;
 // the caller must always supply the current viewer's authorized group scope.
 func (s *ChannelMonitorV2Service) GetGroupOverviewForViewer(ctx context.Context, filter ChannelMonitorV2Filter, groups []Group, userRates map[int64]float64, admin bool) (*ChannelMonitorV2GroupOverview, error) {
+	return s.GetGroupOverviewWithOptions(ctx, filter, groups, userRates, admin, true)
+}
+
+func (s *ChannelMonitorV2Service) GetGroupOverviewWithOptions(ctx context.Context, filter ChannelMonitorV2Filter, groups []Group, userRates map[int64]float64, admin, includeLegacy bool) (*ChannelMonitorV2GroupOverview, error) {
 	cfg, err := s.getEnabledConfig(ctx)
 	if err != nil {
 		return nil, err
@@ -143,25 +147,20 @@ func (s *ChannelMonitorV2Service) GetGroupOverviewForViewer(ctx context.Context,
 	if !ok {
 		return nil, errors.New("group monitoring data unavailable")
 	}
-	matrix, err := metricsReader.GetGroupOverviewMetrics(ctx, filter, *cfg)
+	data, err := s.loadOverviewCached(ctx, filter, *cfg, metricsReader, includeLegacy)
 	if err != nil {
 		return nil, err
 	}
+	matrix := data.matrix
 	if matrix == nil {
 		return nil, errors.New("group monitoring data unavailable")
 	}
 	out.Coverage = matrix.Coverage
-	reader, ok := s.repo.(channelMonitorV2GroupAttributionReader)
-	if !ok {
-		return nil, errors.New("group attribution history unavailable")
-	}
+	out.Coverage.Bootstrap = cloneOverviewScalar(matrix.Coverage.Bootstrap)
 	// The monitor filter ends at an aligned bucket boundary, which can be hours
 	// old. Attribution always evaluates against a single current clock reading.
-	asOf := s.now().UTC()
-	attributions, err := reader.GetGroupAttributionOverview(ctx, filter.AllowedGroupIDs, asOf)
-	if err != nil {
-		return nil, err
-	}
+	asOf := data.asOf
+	attributions := data.attributions
 	rows := make(map[int64]*ChannelMonitorV2MatrixRow, len(matrix.Items))
 	for i := range matrix.Items {
 		if id := matrix.Items[i].GroupID; id != nil {
@@ -199,16 +198,16 @@ func (s *ChannelMonitorV2Service) GetGroupOverviewForViewer(ctx context.Context,
 			item.MetricStates.Availability = item.State
 		}
 		if monitored && out.Coverage.AvailabilityReady {
-			item.Metrics.AvailabilityRate = metric.AvailabilityRate
+			item.Metrics.AvailabilityRate = cloneOverviewScalar(metric.AvailabilityRate)
 		}
 		if monitored {
 			if metric.CacheRateDenominator > 0 {
 				rate := metric.CacheRate
 				item.Metrics.CacheRate = &rate
 			}
-			item.Metrics.TTFTP50Ms = metric.TTFT.P50Ms
-			item.Metrics.TTFTAvgMs = metric.TTFT.AvgMs
-			item.Metrics.TTFTP90Ms = metric.TTFT.P90Ms
+			item.Metrics.TTFTP50Ms = cloneOverviewScalar(metric.TTFT.P50Ms)
+			item.Metrics.TTFTAvgMs = cloneOverviewScalar(metric.TTFT.AvgMs)
+			item.Metrics.TTFTP90Ms = cloneOverviewScalar(metric.TTFT.P90Ms)
 			// The repository computes TPM over the effective covered interval. Do
 			// not divide again by the requested window, which may include gaps.
 			if out.ShowThroughput && metric.RequestCount > 0 && metric.TPM >= 0 && !math.IsInf(metric.TPM, 0) && !math.IsNaN(metric.TPM) {
@@ -222,17 +221,30 @@ func (s *ChannelMonitorV2Service) GetGroupOverviewForViewer(ctx context.Context,
 			ready := out.Coverage.AvailabilityReady || (out.Coverage.AvailabilityVersion >= ChannelMonitorV2AvailabilitySchemaVersion && !out.Coverage.AvailabilityStart.IsZero() && !at.Before(out.Coverage.AvailabilityStart))
 			bucket := ChannelMonitorV2OverviewBucket{BucketStart: at, State: channelMonitorV2OverviewState(m, monitored, ready, cfg.HealthThresholds)}
 			if monitored && ready {
-				bucket.AvailabilityRate = m.AvailabilityRate
+				bucket.AvailabilityRate = cloneOverviewScalar(m.AvailabilityRate)
 			}
 			item.Buckets = append(item.Buckets, bucket)
 		}
 		item.Attribution = attributions[group.ID]
+		item.Attribution.Latest = cloneOverviewScalar(item.Attribution.Latest)
+		item.Attribution.Recent = append([]ChannelMonitorV2AttributionEntry{}, item.Attribution.Recent...)
+		item.Attribution.History = append([]ChannelMonitorV2AttributionBucket(nil), item.Attribution.History...)
 		if item.Attribution.History == nil {
 			item.Attribution = NewChannelMonitorV2OverviewAttribution(asOf)
 		}
 		out.Items = append(out.Items, item)
 	}
 	return out, nil
+}
+
+// Only the small response leaves get ownership; the cached aggregate remains
+// immutable and contains no viewer identity, personalized rates or credentials.
+func cloneOverviewScalar[T any](value *T) *T {
+	if value == nil {
+		return nil
+	}
+	copy := *value
+	return &copy
 }
 
 func channelMonitorV2GroupMonitored(group Group, cfg ChannelMonitorV2Config) bool {

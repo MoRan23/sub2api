@@ -61,6 +61,8 @@ type channelMonitorUserListItem struct {
 	PrimaryLatencyMs     *int                                 `json:"primary_latency_ms"`
 	PrimaryPingLatencyMs *int                                 `json:"primary_ping_latency_ms"`
 	Availability7d       float64                              `json:"availability_7d"`
+	Availability15d      *float64                             `json:"availability_15d,omitempty"`
+	Availability30d      *float64                             `json:"availability_30d,omitempty"`
 	ExtraModels          []dto.ChannelMonitorExtraModelStatus `json:"extra_models"`
 	Timeline             []channelMonitorUserTimelinePoint    `json:"timeline"`
 	// LatestQuota 主模型最近配额快照；channel_monitor_show_quota=false 时
@@ -123,6 +125,8 @@ func userMonitorViewToItem(v *service.UserMonitorView, includeQuota bool) channe
 		PrimaryLatencyMs:     v.PrimaryLatencyMs,
 		PrimaryPingLatencyMs: v.PrimaryPingLatencyMs,
 		Availability7d:       v.Availability7d,
+		Availability15d:      v.Availability15d,
+		Availability30d:      v.Availability30d,
 		ExtraModels:          extras,
 		Timeline:             timeline,
 	}
@@ -162,7 +166,18 @@ func (h *ChannelMonitorUserHandler) List(c *gin.Context) {
 		response.Success(c, gin.H{"items": []channelMonitorUserListItem{}})
 		return
 	}
-	views, err := h.monitorService.ListUserView(c.Request.Context())
+	windowDays := 7
+	switch c.DefaultQuery("window", "7d") {
+	case "7d":
+	case "15d":
+		windowDays = 15
+	case "30d":
+		windowDays = 30
+	default:
+		response.BadRequest(c, "window must be 7d, 15d or 30d")
+		return
+	}
+	views, err := h.monitorService.ListUserViewWithWindow(c.Request.Context(), windowDays)
 	if err != nil {
 		response.ErrorFrom(c, err)
 		return

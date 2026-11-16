@@ -16,9 +16,10 @@ import type {
  * @param accountId - Account ID
  * @returns List of scheduled test plans
  */
-export async function listByAccount(accountId: number): Promise<ScheduledTestPlan[]> {
+export async function listByAccount(accountId: number, signal?: AbortSignal): Promise<ScheduledTestPlan[]> {
   const { data } = await apiClient.get<ScheduledTestPlan[]>(
-    `/admin/accounts/${accountId}/scheduled-test-plans`
+    `/admin/accounts/${accountId}/scheduled-test-plans`,
+    signal ? { signal } : undefined
   )
   return data ?? []
 }
@@ -64,11 +65,12 @@ export async function deletePlan(id: number): Promise<void> {
  * @param limit - Optional max number of results to return
  * @returns List of test results
  */
-export async function listResults(planId: number, limit?: number): Promise<ScheduledTestResult[]> {
+export async function listResults(planId: number, limit?: number, signal?: AbortSignal): Promise<ScheduledTestResult[]> {
   const { data } = await apiClient.get<ScheduledTestResult[]>(
     `/admin/scheduled-test-plans/${planId}/results`,
     {
-      params: limit ? { limit } : undefined
+      params: limit ? { limit } : undefined,
+      ...(signal ? { signal } : {})
     }
   )
   return data ?? []

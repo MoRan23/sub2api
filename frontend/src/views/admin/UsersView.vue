@@ -348,21 +348,16 @@
               <span
                 v-if="getUserGroups(row).exclusive.length > 0"
                 class="group/ex relative inline-flex cursor-pointer items-center gap-1 whitespace-nowrap text-xs"
+                tabindex="0"
+                @mouseenter="showGroupsTooltip(row, 'exclusive', $event)"
+                @mouseleave="groupTooltip = null"
+                @focus="showGroupsTooltip(row, 'exclusive', $event)"
+                @blur="groupTooltip = null"
                 @click.stop="toggleExpandedGroup(row.id)"
               >
                 <Icon name="shield" size="xs" class="h-3.5 w-3.5 text-purple-500 dark:text-purple-400" />
                 <span class="font-medium text-purple-600 dark:text-purple-400">{{ getUserGroups(row).exclusive.length }}</span>
                 <span class="text-gray-500 dark:text-dark-400">{{ t('admin.users.exclusiveLabel') }}</span>
-                <!-- Hover tooltip（操作菜单未打开时显示） -->
-                <div
-                  v-if="expandedGroupUserId !== row.id"
-                  class="pointer-events-none absolute left-0 top-full z-50 mt-1.5 rounded bg-gray-900 px-2.5 py-1.5 text-xs text-white opacity-0 shadow-lg transition-opacity duration-75 group-hover/ex:opacity-100 dark:bg-dark-600"
-                >
-                  <div class="absolute left-4 bottom-full border-4 border-transparent border-b-gray-900 dark:border-b-dark-600"></div>
-                  <div class="flex flex-col gap-0.5 whitespace-nowrap">
-                    <span v-for="g in getUserGroups(row).exclusive" :key="g.id">{{ g.name }}</span>
-                  </div>
-                </div>
                 <!-- 点击展开分组操作菜单 -->
                 <div
                   v-if="expandedGroupUserId === row.id"
@@ -386,17 +381,15 @@
               <span
                 v-if="getUserGroups(row).publicGroups.length > 0"
                 class="group/pub relative inline-flex cursor-default items-center gap-1 whitespace-nowrap text-xs"
+                tabindex="0"
+                @mouseenter="showGroupsTooltip(row, 'publicGroups', $event)"
+                @mouseleave="groupTooltip = null"
+                @focus="showGroupsTooltip(row, 'publicGroups', $event)"
+                @blur="groupTooltip = null"
               >
                 <Icon name="globe" size="xs" class="h-3.5 w-3.5 text-gray-400 dark:text-dark-500" />
                 <span class="font-medium text-gray-600 dark:text-dark-300">{{ getUserGroups(row).publicGroups.length }}</span>
                 <span class="text-gray-400 dark:text-dark-500">{{ t('admin.users.publicLabel') }}</span>
-                <!-- Tooltip: 向下弹出 -->
-                <div class="pointer-events-none absolute left-0 top-full z-50 mt-1.5 rounded bg-gray-900 px-2.5 py-1.5 text-xs text-white opacity-0 shadow-lg transition-opacity duration-75 group-hover/pub:opacity-100 dark:bg-dark-600">
-                  <div class="absolute left-4 bottom-full border-4 border-transparent border-b-gray-900 dark:border-b-dark-600"></div>
-                  <div class="flex flex-col gap-0.5 whitespace-nowrap">
-                    <span v-for="g in getUserGroups(row).publicGroups" :key="g.id">{{ g.name }}</span>
-                  </div>
-                </div>
               </span>
               <!-- 都没有 -->
               <span
@@ -791,6 +784,16 @@
     <UserBalanceHistoryModal :show="showBalanceHistoryModal" :user="balanceHistoryUser" @close="closeBalanceHistoryModal" @deposit="handleDepositFromHistory" @withdraw="handleWithdrawFromHistory" />
     <GroupReplaceModal :show="showGroupReplaceModal" :user="groupReplaceUser" :old-group="groupReplaceOldGroup" :all-groups="allGroups" @close="closeGroupReplaceModal" @success="loadUsers" />
     <UserAttributesConfigModal :show="showAttributesModal" @close="handleAttributesModalClose" />
+    <Teleport to="body">
+      <div
+        v-if="groupTooltip && tooltipGroups.length"
+        role="tooltip"
+        class="pointer-events-none fixed z-[100] max-h-[60vh] max-w-sm overflow-hidden rounded bg-gray-900 px-2.5 py-1.5 text-xs text-white shadow-lg dark:bg-dark-600"
+        :style="{ left: `${groupTooltip.x}px`, top: `${groupTooltip.y}px` }"
+      >
+        <div v-for="group in tooltipGroups" :key="group.id" class="truncate">{{ group.name }}</div>
+      </div>
+    </Teleport>
   </AppLayout>
 </template>
 
@@ -1088,21 +1091,42 @@ const loadAllGroupsForApiKeyFilter = async () => {
     console.error('Failed to load groups for API key filter:', e)
   }
 }
-// Resolve user's accessible groups: exclusive groups first, then public groups
-const getUserGroups = (user: AdminUser) => {
-  const exclusive: AdminGroup[] = []
+// Compute the shared public list once and index exclusive groups for this page.
+const visibleGroupIndex = computed(() => {
+  const exclusive = new Map<number, { group: AdminGroup; order: number }>()
   const publicGroups: AdminGroup[] = []
-  for (const g of allGroups.value) {
+  for (const [order, g] of allGroups.value.entries()) {
     if (g.status !== 'active' || g.subscription_type !== 'standard') continue
-    if (g.is_exclusive) {
-      if (user.allowed_groups?.includes(g.id)) {
-        exclusive.push(g)
-      }
-    } else {
-      publicGroups.push(g)
-    }
+    if (g.is_exclusive) exclusive.set(g.id, { group: g, order })
+    else publicGroups.push(g)
   }
   return { exclusive, publicGroups }
+})
+const userGroupCache = computed(() => {
+  const index = visibleGroupIndex.value
+  return new Map(users.value.map(user => {
+    const exclusive = [...new Set(user.allowed_groups ?? [])]
+      .flatMap(id => index.exclusive.get(id) ?? [])
+      .sort((a, b) => a.order - b.order)
+      .map(entry => entry.group)
+    return [user.id, { exclusive, publicGroups: index.publicGroups }] as const
+  }))
+})
+const noUserGroups = { exclusive: [] as AdminGroup[], publicGroups: [] as AdminGroup[] }
+const getUserGroups = (user: AdminUser) => userGroupCache.value.get(user.id) ?? noUserGroups
+const groupTooltip = ref<{ userID: number; kind: 'exclusive' | 'publicGroups'; x: number; y: number } | null>(null)
+const tooltipGroups = computed(() => {
+  const active = groupTooltip.value
+  return active ? userGroupCache.value.get(active.userID)?.[active.kind] ?? [] : []
+})
+const showGroupsTooltip = (user: AdminUser, kind: 'exclusive' | 'publicGroups', event: Event) => {
+  if (kind === 'exclusive' && expandedGroupUserId.value === user.id) return
+  const rect = (event.currentTarget as HTMLElement).getBoundingClientRect()
+  groupTooltip.value = {
+    userID: user.id, kind,
+    x: Math.max(8, Math.min(rect.left, window.innerWidth - 320)),
+    y: Math.min(rect.bottom + 6, window.innerHeight - 80)
+  }
 }
 
 // Group filter options: "All Groups" + active exclusive groups (value = group name for fuzzy match)
@@ -1551,6 +1575,7 @@ const allowedGroupsUser = ref<AdminUser | null>(null)
 // Expanded group dropdown state (click to show exclusive groups list)
 const expandedGroupUserId = ref<number | null>(null)
 const toggleExpandedGroup = (userId: number) => {
+  groupTooltip.value = null
   expandedGroupUserId.value = expandedGroupUserId.value === userId ? null : userId
 }
 
@@ -1592,6 +1617,7 @@ const handleAttributesModalClose = async () => {
 }
 
 const loadUsers = async () => {
+  groupTooltip.value = null
   abortController?.abort()
   const currentAbortController = new AbortController()
   abortController = currentAbortController
@@ -1894,6 +1920,7 @@ const handleWithdrawFromHistory = () => {
 
 // 滚动时关闭菜单
 const handleScroll = () => {
+  groupTooltip.value = null
   closeActionMenu()
 }
 

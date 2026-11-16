@@ -297,7 +297,7 @@ const requestConfig = (filter: MonitorFilter, signal?: AbortSignal, extraParams:
 function base(admin: boolean) { return admin ? '/admin/channel-monitor-v2' : '/channel-monitor-v2' }
 
 export async function getGroupOverview(range: MonitorRange, signal?: AbortSignal) {
-  const { data } = await apiClient.get<GroupOverviewResponse>('/channel-monitor-v2/group-overview', { params: { range }, signal })
+  const { data } = await apiClient.get<GroupOverviewResponse>('/channel-monitor-v2/group-overview', { params: { range, include_legacy_attribution: false }, signal })
   return data
 }
 

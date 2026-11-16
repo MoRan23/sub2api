@@ -436,9 +436,10 @@ export async function applyOAuthCredentials(
  * @param days - Number of days (default: 30)
  * @returns Account usage statistics with history, summary, and models
  */
-export async function getStats(id: number, days: number = 30): Promise<AccountUsageStatsResponse> {
+export async function getStats(id: number, days: number = 30, options?: { signal?: AbortSignal }): Promise<AccountUsageStatsResponse> {
   const { data } = await apiClient.get<AccountUsageStatsResponse>(`/admin/accounts/${id}/stats`, {
-    params: { days }
+    params: { days },
+    ...(options?.signal ? { signal: options.signal } : {})
   })
   return data
 }
@@ -685,8 +686,9 @@ export async function setSchedulable(id: number, schedulable: boolean): Promise<
  * @param id - Account ID
  * @returns List of available models for this account
  */
-export async function getAvailableModels(id: number, os?: OpenAIOAuthOS): Promise<ClaudeModel[]> {
-  const { data } = await apiClient.get<ClaudeModel[]>(`/admin/accounts/${id}/models`, os ? { params: { os } } : undefined)
+export async function getAvailableModels(id: number, os?: OpenAIOAuthOS, options?: { signal?: AbortSignal }): Promise<ClaudeModel[]> {
+  const config = os || options?.signal ? { ...(os ? { params: { os } } : {}), ...(options?.signal ? { signal: options.signal } : {}) } : undefined
+  const { data } = await apiClient.get<ClaudeModel[]>(`/admin/accounts/${id}/models`, config)
   return data
 }
 

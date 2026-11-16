@@ -350,11 +350,12 @@ watch(
     } else {
       resetState()
     }
-  }
+  },
+  { immediate: true }
 )
 
 // Methods
-const resetState = () => {
+function resetState() {
   addMethod.value = 'oauth'
   geminiOAuthType.value = 'code_assist'
   claudeOAuth.resetState()

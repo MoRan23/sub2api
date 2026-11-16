@@ -395,9 +395,10 @@ func ChannelMonitorV2BootstrapProgress(now, coveredFrom time.Time, hasData bool)
 }
 
 type ChannelMonitorV2Service struct {
-	repo     ChannelMonitorV2Repository
-	settings channelMonitorRuntimeReader
-	now      func() time.Time
+	repo          ChannelMonitorV2Repository
+	settings      channelMonitorRuntimeReader
+	now           func() time.Time
+	overviewCache channelOverviewCache
 }
 
 func NewChannelMonitorV2Service(repo ChannelMonitorV2Repository) *ChannelMonitorV2Service {

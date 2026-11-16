@@ -498,12 +498,15 @@ const plans = ref<ScheduledTestPlan[]>([])
 const results = ref<ScheduledTestResult[]>([])
 const expandedPlanId = ref<number | null>(null)
 let resultsRequestId = 0
+let plansController: AbortController | null = null
+let resultsController: AbortController | null = null
 watch(expandedPlanId, () => {
+  resultsController?.abort()
   resultsRequestId++
   results.value = []
   loadingResults.value = false
 }, { flush: 'sync' })
-onBeforeUnmount(() => { resultsRequestId++ })
+onBeforeUnmount(() => { resultsRequestId++; plansController?.abort(); resultsController?.abort() })
 const expandedResultIds = reactive(new Set<number>())
 const showAddForm = ref(false)
 const showDeleteConfirm = ref(false)
@@ -536,8 +539,12 @@ const resetNewPlan = () => {
 
 // Load plans when dialog opens
 watch(
-  () => props.show,
-  async (visible) => {
+  () => [props.show, props.accountId] as const,
+  async ([visible]) => {
+    plansController?.abort()
+    resultsController?.abort()
+    resultsRequestId++
+    expandedPlanId.value = null
     if (visible && props.accountId) {
       await loadPlans()
     } else {
@@ -548,18 +555,24 @@ watch(
       showAddForm.value = false
       showDeleteConfirm.value = false
     }
-  }
+  },
+  { immediate: true }
 )
 
-const loadPlans = async () => {
-  if (!props.accountId) return
+async function loadPlans() {
+  if (!props.show || !props.accountId) return
+  plansController?.abort()
+  const controller = new AbortController()
+  plansController = controller
+  const accountId = props.accountId
   loading.value = true
   try {
-    plans.value = await adminAPI.scheduledTests.listByAccount(props.accountId)
+    const data = await adminAPI.scheduledTests.listByAccount(accountId, controller.signal)
+    if (!controller.signal.aborted && plansController === controller) plans.value = data
   } catch (error: any) {
-    appStore.showError(error?.message || 'Failed to load plans')
+    if (!controller.signal.aborted && plansController === controller) appStore.showError(error?.message || 'Failed to load plans')
   } finally {
-    loading.value = false
+    if (plansController === controller) loading.value = false
   }
 }
 
@@ -672,8 +685,10 @@ const toggleExpand = async (planId: number) => {
   expandedResultIds.clear()
   loadingResults.value = true
   const requestId = resultsRequestId
+  const controller = new AbortController()
+  resultsController = controller
   try {
-    const data = await adminAPI.scheduledTests.listResults(planId, 20)
+    const data = await adminAPI.scheduledTests.listResults(planId, 20, controller.signal)
     if (requestId !== resultsRequestId) return
     results.value = data
   } catch (error: any) {

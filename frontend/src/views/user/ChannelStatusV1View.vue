@@ -61,6 +61,7 @@ const showDetail = ref(false)
 const detailTarget = ref<UserMonitorView | null>(null)
 
 let abortController: AbortController | null = null
+let inFlight: { window: MonitorWindow; promise: Promise<void> } | null = null
 
 const autoRefresh = useAutoRefresh({
   storageKey: 'channel-status-auto-refresh',
@@ -87,16 +88,28 @@ const detailTitle = computed(() => {
 })
 
 // ── Loaders ──
-async function reload(silent = false) {
+function reload(silent = false): Promise<void> {
+  const selectedWindow = currentWindow.value
+  if (inFlight?.window === selectedWindow) return inFlight.promise
+  const promise = loadWindow(selectedWindow, silent).finally(() => {
+    if (inFlight?.promise === promise) inFlight = null
+  })
+  inFlight = { window: selectedWindow, promise }
+  return promise
+}
+
+async function loadWindow(selectedWindow: MonitorWindow, silent: boolean) {
   if (abortController) abortController.abort()
   const ctrl = new AbortController()
   abortController = ctrl
   if (!silent) loading.value = true
   try {
-    const res = await listChannelMonitorViews({ signal: ctrl.signal })
+    const res = await listChannelMonitorViews({ signal: ctrl.signal, window: selectedWindow })
     if (ctrl.signal.aborted || abortController !== ctrl) return
     items.value = res.items || []
+    await loadLegacyDetails(items.value, selectedWindow, ctrl)
   } catch (err: unknown) {
+    if (ctrl.signal.aborted || abortController !== ctrl) return
     const e = err as { name?: string; code?: string }
     if (e?.name === 'AbortError' || e?.code === 'ERR_CANCELED') return
     appStore.showError(extractApiErrorMessage(err, t('channelStatus.loadError')))
@@ -111,31 +124,36 @@ async function reload(silent = false) {
 
 async function refresh(silent = false) {
   await reload(silent)
-  // After base reload, refresh any cached detail records so non-7d availability
-  // values stay in sync without forcing the user to switch tabs again.
-  if (currentWindow.value !== '7d') {
-    await Promise.all(items.value.map(it => loadDetail(it.id, true)))
-  }
 }
 
-async function loadDetail(id: number, force = false) {
-  if (!force && detailCache[id]) return
-  try {
-    detailCache[id] = await fetchChannelMonitorDetail(id)
-  } catch (err: unknown) {
-    appStore.showError(extractApiErrorMessage(err, t('channelStatus.detailLoadError')))
+// Compatibility with an older server: at most four detail requests in flight.
+// The current server returns the selected window in the list response.
+async function loadLegacyDetails(rows: UserMonitorView[], window: MonitorWindow, ctrl: AbortController) {
+  if (window === '7d') return
+  const field = window === '15d' ? 'availability_15d' : 'availability_30d'
+  const ids = [...new Set(rows.filter(row => row[field] === undefined).map(row => row.id))]
+  let next = 0
+  let failed = false
+  const worker = async () => {
+    while (!ctrl.signal.aborted && abortController === ctrl && next < ids.length) {
+      const id = ids[next++]
+      try {
+        const detail = await fetchChannelMonitorDetail(id, { signal: ctrl.signal })
+        if (!ctrl.signal.aborted && abortController === ctrl) detailCache[id] = detail
+      } catch (err: unknown) {
+        if (ctrl.signal.aborted || abortController !== ctrl || failed) continue
+        failed = true
+        appStore.showError(extractApiErrorMessage(err, t('channelStatus.detailLoadError')))
+      }
+    }
   }
-}
-
-async function ensureDetailsForWindow() {
-  if (currentWindow.value === '7d') return
-  await Promise.all(items.value.map(it => loadDetail(it.id)))
+  await Promise.all(Array.from({ length: Math.min(4, ids.length) }, worker))
 }
 
 // ── Handlers ──
 async function handleWindowChange(value: MonitorWindow) {
   currentWindow.value = value
-  await ensureDetailsForWindow()
+  await reload()
 }
 
 function openDetail(row: UserMonitorView) {
@@ -147,10 +165,6 @@ function closeDetail() {
   showDetail.value = false
   detailTarget.value = null
 }
-
-watch(items, () => {
-  void ensureDetailsForWindow()
-})
 
 watch(
   () => appStore.cachedPublicSettings?.channel_monitor_enabled,

@@ -5254,35 +5254,6 @@ const canExchangeCode = computed(() => {
   return authCode.trim() && oauth.sessionId.value && !oauth.loading.value
 })
 
-// Watchers
-watch(
-  () => props.show,
-  (newVal) => {
-    if (newVal) {
-      // Load TLS fingerprint profiles
-      adminAPI.tlsFingerprintProfiles.list()
-        .then(profiles => { tlsFingerprintProfiles.value = profiles.map(p => ({ id: p.id, name: p.name })) })
-        .catch(() => { tlsFingerprintProfiles.value = [] })
-      // Modal opened - fill related models
-      allowedModels.value = [...getModelsByPlatform(form.platform)]
-      // Antigravity: 默认使用映射模式并填充默认映射
-      if (form.platform === 'antigravity') {
-        antigravityModelRestrictionMode.value = 'mapping'
-        fetchAntigravityDefaultMappings().then(mappings => {
-          antigravityModelMappings.value = [...mappings]
-        })
-        antigravityWhitelistModels.value = []
-      } else {
-        antigravityWhitelistModels.value = []
-        antigravityModelMappings.value = []
-        antigravityModelRestrictionMode.value = 'mapping'
-      }
-    } else {
-      resetForm()
-    }
-  }
-)
-
 // Only ordinary API Key creation can submit Daybreak preferences.
 watch(isOpenAIAPIKeyDaybreak, (enabled) => {
   if (!enabled) {
@@ -7711,4 +7682,25 @@ const handleCookieAuth = async (sessionKey: string) => {
     oauth.loading.value = false
   }
 }
+// Registered after all form helpers so an initially open async dialog initializes
+// exactly as a previously mounted dialog does.
+watch(() => props.show, (open, previous) => {
+  if (!open) {
+    if (previous) resetForm()
+    return
+  }
+  adminAPI.tlsFingerprintProfiles.list()
+    .then(profiles => { tlsFingerprintProfiles.value = profiles.map(p => ({ id: p.id, name: p.name })) })
+    .catch(() => { tlsFingerprintProfiles.value = [] })
+  allowedModels.value = [...getModelsByPlatform(form.platform)]
+  antigravityWhitelistModels.value = []
+  antigravityModelRestrictionMode.value = 'mapping'
+  if (form.platform === 'antigravity') {
+    fetchAntigravityDefaultMappings().then(mappings => {
+      antigravityModelMappings.value = [...mappings]
+    })
+  } else {
+    antigravityModelMappings.value = []
+  }
+}, { immediate: true })
 </script>

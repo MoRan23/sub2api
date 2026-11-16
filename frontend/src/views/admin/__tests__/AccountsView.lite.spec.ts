@@ -384,7 +384,7 @@ describe('admin AccountsView lite account list', () => {
     await flushPromises()
 
     expect(showError).toHaveBeenCalledWith('detail failed')
-    expect(wrapper.get('[data-test="edit-account"]').text()).toBe('')
+    expect(wrapper.find('[data-test="edit-account"]').exists()).toBe(false)
     consoleError.mockRestore()
     wrapper.unmount()
   })

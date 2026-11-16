@@ -489,23 +489,25 @@
       <template #pagination><Pagination v-if="pagination.total > 0" :page="pagination.page" :total="pagination.total" :page-size="pagination.page_size" @update:page="handlePageChange" @update:pageSize="handlePageSizeChange" /></template>
     </TablePageLayout>
     <AccountDailyFixedRootsModal
+      v-if="mountedDialogs.AccountDailyFixedRootsModal"
       :show="dailyFixedRootAccount !== null"
       :account-name="dailyFixedRootAccount?.name ?? ''"
       :pool="selectedDailyFixedRootPool"
       @close="dailyFixedRootAccount = null"
     />
-    <CreateAccountModal :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" />
-    <EditAccountModal :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" />
-    <ReAuthAccountModal :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
-    <AccountTestModal :show="showTest" :account="testingAcc" @close="closeTestModal" />
-    <AccountStatsModal :show="showStats" :account="statsAcc" @close="closeStatsModal" />
-    <ScheduledTestsPanel :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
-    <AccountCandyTestModal :show="showCandyTest" :account-ids="candyTestAccountIds" :accounts="accounts" @close="showCandyTest = false" @updated="reload" />
+    <CreateAccountModal v-if="mountedDialogs.CreateAccountModal" :show="showCreate" :proxies="proxies" :groups="groups" @close="showCreate = false" @created="reload" />
+    <EditAccountModal v-if="mountedDialogs.EditAccountModal" :show="showEdit" :account="edAcc" :proxies="proxies" :groups="groups" @close="showEdit = false" @updated="handleAccountUpdated" />
+    <ReAuthAccountModal v-if="mountedDialogs.ReAuthAccountModal" :show="showReAuth" :account="reAuthAcc" @close="closeReAuthModal" @reauthorized="handleAccountUpdated" />
+    <AccountTestModal v-if="mountedDialogs.AccountTestModal" :show="showTest" :account="testingAcc" @close="closeTestModal" />
+    <AccountStatsModal v-if="mountedDialogs.AccountStatsModal" :show="showStats" :account="statsAcc" @close="closeStatsModal" />
+    <ScheduledTestsPanel v-if="mountedDialogs.ScheduledTestsPanel" :show="showSchedulePanel" :account-id="scheduleAcc?.id ?? null" :model-options="scheduleModelOptions" @close="closeSchedulePanel" />
+    <AccountCandyTestModal v-if="mountedDialogs.AccountCandyTestModal" :show="showCandyTest" :account-ids="candyTestAccountIds" :accounts="accounts" @close="showCandyTest = false" @updated="reload" />
     <AttributionModal v-if="showAttribution" :show="showAttribution" :account-ids="attributionAccountIds" @close="showAttribution = false" @updated="reload" />
     <AccountActionMenu :show="menu.show" :account="menu.acc" :anchor-rect="menu.anchorRect" :codex-auth-exporting="codexAuthExporting || exportingData" @close="menu.show = false" @test="handleTest" @stats="handleViewStats" @schedule="handleSchedule" @duplicate="handleDuplicateAccount" @reauth="handleReAuth" @refresh-token="handleRefresh" @recover-state="handleRecoverState" @reset-quota="handleResetQuota" @set-privacy="handleSetPrivacy" @create-spark-shadow="handleCreateSparkShadow" @candy-test="openCandyTest([$event.id])" @export-codex-auth="handleExportCodexAuth" @open-auth-parent="handleOpenAuthParent" />
-    <SyncFromCrsModal :show="showSync" @close="showSync = false" @synced="reload" />
-    <ImportDataModal :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
+    <SyncFromCrsModal v-if="mountedDialogs.SyncFromCrsModal" :show="showSync" @close="showSync = false" @synced="reload" />
+    <ImportDataModal v-if="mountedDialogs.ImportDataModal" :show="showImportData" @close="showImportData = false" @imported="handleDataImported" />
     <BulkEditAccountModal
+      v-if="mountedDialogs.BulkEditAccountModal"
       :show="showBulkEdit"
       :account-ids="selIds"
       :selected-platforms="selPlatforms"
@@ -516,7 +518,7 @@
       @close="showBulkEdit = false"
       @updated="handleBulkUpdated"
     />
-    <TempUnschedStatusModal :show="showTempUnsched" :account="tempUnschedAcc" @close="showTempUnsched = false" @reset="handleTempUnschedReset" />
+    <TempUnschedStatusModal v-if="mountedDialogs.TempUnschedStatusModal" :show="showTempUnsched" :account="tempUnschedAcc" @close="showTempUnsched = false" @reset="handleTempUnschedReset" />
     <ConfirmDialog :show="showDeleteDialog" :title="t('admin.accounts.deleteAccount')" :message="t('admin.accounts.deleteConfirm', { name: deletingAcc?.name })" :confirm-text="t('common.delete')" :cancel-text="t('common.cancel')" :danger="true" @confirm="confirmDelete" @cancel="showDeleteDialog = false" />
     <ConfirmDialog :show="showCreateShadowDialog" :title="t('admin.accounts.createSparkShadow')" :message="t('admin.accounts.createSparkShadowConfirm', { name: creatingShadowAcc?.name })" @confirm="confirmCreateSparkShadow" @cancel="showCreateShadowDialog = false" />
     <ConfirmDialog :show="showExportDataDialog" :title="t('admin.accounts.dataExport')" :message="t('admin.accounts.dataExportConfirmMessage')" :confirm-text="t('admin.accounts.dataExportConfirm')" :cancel-text="t('common.cancel')" @confirm="handleExportData" @cancel="showExportDataDialog = false">
@@ -525,8 +527,8 @@
         <span>{{ t('admin.accounts.dataExportIncludeProxies') }}</span>
       </label>
     </ConfirmDialog>
-    <ErrorPassthroughRulesModal :show="showErrorPassthrough" @close="showErrorPassthrough = false" />
-    <TLSFingerprintProfilesModal :show="showTLSFingerprintProfiles" @close="showTLSFingerprintProfiles = false" />
+    <ErrorPassthroughRulesModal v-if="mountedDialogs.ErrorPassthroughRulesModal" :show="showErrorPassthrough" @close="showErrorPassthrough = false" />
+    <TLSFingerprintProfilesModal v-if="mountedDialogs.TLSFingerprintProfilesModal" :show="showTLSFingerprintProfiles" @close="showTLSFingerprintProfiles = false" />
     <BaseDialog :show="codexAuthExportAccount !== null" :title="t('admin.accounts.codexAuth.export')" width="normal" @close="codexAuthExportAccount = null">
       <p class="mb-3 text-sm">{{ codexAuthExportAccount?.name }}</p>
       <p class="mb-3 text-xs text-gray-500">{{ t('admin.accounts.openai.exportOSDescription') }}</p>
@@ -540,7 +542,7 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted, onUnmounted, provide, toRaw, watch } from 'vue'
+import { ref, reactive, computed, onMounted, onUnmounted, provide, toRaw, watch, watchEffect, defineAsyncComponent } from 'vue'
 import { useIntervalFn } from '@vueuse/core'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
@@ -560,23 +562,14 @@ import DataTable from '@/components/common/DataTable.vue'
 import HelpTooltip from '@/components/common/HelpTooltip.vue'
 import Pagination from '@/components/common/Pagination.vue'
 import ConfirmDialog from '@/components/common/ConfirmDialog.vue'
-import { CreateAccountModal, EditAccountModal, BulkEditAccountModal, SyncFromCrsModal, TempUnschedStatusModal } from '@/components/account'
 import AccountTableActions from '@/components/admin/account/AccountTableActions.vue'
-import AccountDailyFixedRootsModal from '@/components/admin/account/AccountDailyFixedRootsModal.vue'
-import AccountCandyTestModal from '@/components/admin/account/AccountCandyTestModal.vue'
 import AccountCandyTestCell from '@/components/admin/account/AccountCandyTestCell.vue'
 import AccountAttributionCell from '@/components/admin/account/AccountAttributionCell.vue'
-import AttributionModal from '@/components/admin/account/AttributionModal.vue'
 import { createPelicanThumbnailLayout, pelicanThumbnailLayoutKey } from '@/components/admin/account/pelicanThumbnailLayout'
 import { supportsManagedOpenAIOAuthIdentity } from '@/components/account/openaiOAuthOS'
 import AccountTableFilters from '@/components/admin/account/AccountTableFilters.vue'
 import AccountBulkActionsBar from '@/components/admin/account/AccountBulkActionsBar.vue'
 import AccountActionMenu from '@/components/admin/account/AccountActionMenu.vue'
-import ImportDataModal from '@/components/admin/account/ImportDataModal.vue'
-import ReAuthAccountModal from '@/components/admin/account/ReAuthAccountModal.vue'
-import AccountTestModal from '@/components/admin/account/AccountTestModal.vue'
-import AccountStatsModal from '@/components/admin/account/AccountStatsModal.vue'
-import ScheduledTestsPanel from '@/components/admin/account/ScheduledTestsPanel.vue'
 import type { SelectOption } from '@/components/common/Select.vue'
 import AccountStatusIndicator from '@/components/account/AccountStatusIndicator.vue'
 import AccountUsageCell from '@/components/account/AccountUsageCell.vue'
@@ -587,8 +580,6 @@ import UpstreamBillingRateCell from '@/components/account/UpstreamBillingRateCel
 import AccountPriorityCell from '@/components/account/AccountPriorityCell.vue'
 import PlatformTypeBadge from '@/components/common/PlatformTypeBadge.vue'
 import Icon from '@/components/icons/Icon.vue'
-import ErrorPassthroughRulesModal from '@/components/admin/ErrorPassthroughRulesModal.vue'
-import TLSFingerprintProfilesModal from '@/components/admin/TLSFingerprintProfilesModal.vue'
 import { fetchAllAccountIds } from '@/utils/accountSelection'
 import { buildGrokUsageRefreshKey, buildOpenAIUsageRefreshKey } from '@/utils/accountUsageRefresh'
 import { formatDateTime, formatRelativeTime } from '@/utils/format'
@@ -598,6 +589,22 @@ import { sanitizeUrl } from '@/utils/url'
 import { getFloatingPanelPosition } from '@/utils/floatingPanel'
 import { formatMultiplier } from '@/utils/formatters'
 import type { Account, AccountListItem, AccountPlatform, AccountSchedulerGroupScore, AccountType, AccountUsageInfo, Proxy as AccountProxy, AdminGroup, WindowStats, ClaudeModel, UpstreamBillingProbeSnapshot } from '@/types'
+
+const CreateAccountModal = defineAsyncComponent(() => import('@/components/account/CreateAccountModal.vue'))
+const EditAccountModal = defineAsyncComponent(() => import('@/components/account/EditAccountModal.vue'))
+const BulkEditAccountModal = defineAsyncComponent(() => import('@/components/account/BulkEditAccountModal.vue'))
+const SyncFromCrsModal = defineAsyncComponent(() => import('@/components/account/SyncFromCrsModal.vue'))
+const TempUnschedStatusModal = defineAsyncComponent(() => import('@/components/account/TempUnschedStatusModal.vue'))
+const AccountDailyFixedRootsModal = defineAsyncComponent(() => import('@/components/admin/account/AccountDailyFixedRootsModal.vue'))
+const AccountCandyTestModal = defineAsyncComponent(() => import('@/components/admin/account/AccountCandyTestModal.vue'))
+const AttributionModal = defineAsyncComponent(() => import('@/components/admin/account/AttributionModal.vue'))
+const ImportDataModal = defineAsyncComponent(() => import('@/components/admin/account/ImportDataModal.vue'))
+const ReAuthAccountModal = defineAsyncComponent(() => import('@/components/admin/account/ReAuthAccountModal.vue'))
+const AccountTestModal = defineAsyncComponent(() => import('@/components/admin/account/AccountTestModal.vue'))
+const AccountStatsModal = defineAsyncComponent(() => import('@/components/admin/account/AccountStatsModal.vue'))
+const ScheduledTestsPanel = defineAsyncComponent(() => import('@/components/admin/account/ScheduledTestsPanel.vue'))
+const ErrorPassthroughRulesModal = defineAsyncComponent(() => import('@/components/admin/ErrorPassthroughRulesModal.vue'))
+const TLSFingerprintProfilesModal = defineAsyncComponent(() => import('@/components/admin/TLSFingerprintProfilesModal.vue'))
 
 const { t } = useI18n()
 provide(pelicanThumbnailLayoutKey, createPelicanThumbnailLayout())
@@ -2878,6 +2885,30 @@ onUnmounted(() => {
   }
   desktopViewportListener = null
   desktopViewportMediaQuery = null
+})
+// Mount expensive forms only on their first open; keep their existing close /
+// reopen lifecycle afterwards (including persisted preferences).
+const mountedDialogs = reactive<Record<string, boolean>>({})
+watchEffect(() => {
+  const visible: Record<string, boolean> = {
+    CreateAccountModal: showCreate.value,
+    EditAccountModal: showEdit.value,
+    BulkEditAccountModal: showBulkEdit.value,
+    SyncFromCrsModal: showSync.value,
+    TempUnschedStatusModal: showTempUnsched.value,
+    AccountDailyFixedRootsModal: dailyFixedRootAccount.value !== null,
+    AccountCandyTestModal: showCandyTest.value,
+    ImportDataModal: showImportData.value,
+    ReAuthAccountModal: showReAuth.value,
+    AccountTestModal: showTest.value,
+    AccountStatsModal: showStats.value,
+    ScheduledTestsPanel: showSchedulePanel.value,
+    ErrorPassthroughRulesModal: showErrorPassthrough.value,
+    TLSFingerprintProfilesModal: showTLSFingerprintProfiles.value
+  }
+  for (const [name, open] of Object.entries(visible)) {
+    if (open) mountedDialogs[name] = true
+  }
 })
 </script>
 

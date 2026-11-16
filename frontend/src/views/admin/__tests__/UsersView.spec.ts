@@ -109,6 +109,7 @@ const DataTableStub = {
       <div v-for="row in data" :key="row.id">
         <slot name="cell-last_used_at" :value="row.last_used_at" :row="row" />
         <slot name="cell-balance" :value="row.balance" :row="row" />
+        <slot name="cell-groups" :row="row" />
         <div :data-test="'actions-' + row.id"><slot name="cell-actions" :row="row" /></div>
       </div>
     </div>
@@ -208,6 +209,29 @@ describe('admin UsersView', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  it.each([1, 2, 3])('keeps group tooltip DOM bounded for 100 users and 1,000 groups (round %s)', async (round) => {
+    localStorage.setItem('user-hidden-columns', JSON.stringify(['notes', 'subscriptions', 'usage', 'concurrency', 'usage_anthropic', 'usage_openai', 'usage_gemini', 'usage_antigravity', 'balance_platform_quota']))
+    const ids = Array.from({ length: 1000 }, (_, i) => i + 1)
+    listUsers.mockResolvedValue({ items: Array.from({ length: 100 }, (_, i) => createAdminUser({ id: i + 1, allowed_groups: ids })), total: 100, page: 1, page_size: 100, pages: 1 })
+    getAllGroups.mockResolvedValue(ids.map(id => ({ id, name: `group-${id}`, status: 'active', subscription_type: 'standard', is_exclusive: id % 2 === 0 })))
+    const start = performance.now()
+    const wrapper = mountBulkDeleteView()
+    await flushPromises()
+    expect(wrapper.findAll('[role="tooltip"]')).toHaveLength(0)
+    const initialNodes = wrapper.findAll('*').length
+    expect(initialNodes).toBeLessThan(10000)
+    const targets = wrapper.findAll('[tabindex="0"]')
+    await targets[0].trigger('mouseenter')
+    expect(wrapper.findAll('[role="tooltip"]')).toHaveLength(1)
+    expect(wrapper.get('[role="tooltip"]').findAll('div')).toHaveLength(500)
+    await targets[2].trigger('mouseenter')
+    expect(wrapper.findAll('[role="tooltip"]')).toHaveLength(1)
+    const openedNodes = wrapper.findAll('*').length
+    expect(openedNodes - initialNodes).toBe(501)
+    console.info('monitor_ui_dom_benchmark', JSON.stringify({ round, users: 100, groups: 1000, initialNodes, openedNodes, elapsed_ms: performance.now() - start }))
+    wrapper.unmount()
   })
 
   it('cancels bulk deletion without deleting or clearing selected users', async () => {

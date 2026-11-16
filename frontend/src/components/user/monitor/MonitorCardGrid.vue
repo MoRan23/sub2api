@@ -72,6 +72,8 @@ function resolveAvailability(item: UserMonitorView): number | null {
   if (props.window === '7d') {
     return item.availability_7d ?? null
   }
+  const selected = props.window === '15d' ? item.availability_15d : item.availability_30d
+  if (selected !== undefined) return selected
   const detail = props.detailCache[item.id]
   if (!detail) return null
   const primary = detail.models.find(m => m.model === item.primary_model)

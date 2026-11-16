@@ -314,7 +314,8 @@ watch(
       form.password = ''
       form.sync_proxies = true
     }
-  }
+  },
+  { immediate: true }
 )
 
 const handleClose = () => {

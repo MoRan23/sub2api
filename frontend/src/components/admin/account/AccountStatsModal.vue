@@ -644,27 +644,31 @@ const lineChartOptions = computed(() => ({
 
 // Load stats when modal opens
 watch(
-  () => props.show,
-  async (newVal) => {
-    if (newVal && props.account) {
-      await loadStats()
+  () => [props.show, props.account?.id] as const,
+  async ([open, accountID], _, onCleanup) => {
+    const controller = new AbortController()
+    onCleanup(() => controller.abort())
+    if (open && accountID) {
+      await loadStats(accountID, controller.signal)
     } else {
       stats.value = null
+      loading.value = false
     }
-  }
+  },
+  { immediate: true }
 )
 
-const loadStats = async () => {
-  if (!props.account) return
-
+async function loadStats(accountID: number, signal: AbortSignal) {
   loading.value = true
   try {
-    stats.value = await adminAPI.accounts.getStats(props.account.id, 30)
+    const result = await adminAPI.accounts.getStats(accountID, 30, { signal })
+    if (!signal.aborted) stats.value = result
   } catch (error) {
+    if (signal.aborted) return
     console.error('Failed to load account stats:', error)
     stats.value = null
   } finally {
-    loading.value = false
+    if (!signal.aborted) loading.value = false
   }
 }
 
