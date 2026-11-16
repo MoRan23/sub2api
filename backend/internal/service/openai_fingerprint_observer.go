@@ -723,7 +723,11 @@ func buildFingerprintObservationEntry(c *gin.Context, account *Account, pin inst
 		GuardianRequest:              observeOpenAIGuardianRequest(account, outbound, nil),
 		ServiceTierPolicy:            policy,
 	}
-	populateFingerprintObservationMetadata(&entry, outbound, body)
+	bodyView := parseFingerprintObservationBodyView(body)
+	carriers := fingerprintFinalMetadataCarriersFromView(outbound, bodyView)
+	profile := finalFingerprintCodexWireProfileFromView(outbound, bodyView, carriers)
+	populateFingerprintObservationMetadataFromCarriers(&entry, carriers)
+	populateFingerprintObservationBodyMetadataFromView(&entry, bodyView, profile)
 	if !pin.Enabled {
 		// Without installation pinning the client-reported value is forwarded
 		// unchanged, including body-only client_metadata values. Preserve the old
@@ -735,7 +739,6 @@ func buildFingerprintObservationEntry(c *gin.Context, account *Account, pin inst
 	parentHeaderPresent := false
 	forkHeaderPresent := false
 	{
-		profile := finalFingerprintCodexWireProfile(outbound, body)
 		entry.WindowID = profile.WindowID
 		entry.WindowNumber = profile.WindowNumber
 		entry.ContextWindowID = profile.ContextWindowID
@@ -813,7 +816,7 @@ func buildFingerprintObservationEntry(c *gin.Context, account *Account, pin inst
 		entry.OutboundInstallationID = fingerprintObservationTurnMetadataHeaderInstallationID(outbound)
 	}
 	if hasTrustedIdentity && len(body) > 0 {
-		bodyIdentity := parseFingerprintObservationBodyIdentity(body)
+		bodyIdentity := parseFingerprintObservationBodyIdentityFromView(bodyView)
 		if entry.SessionID == "" && !sessionHeaderPresent {
 			entry.SessionID, _ = bodyIdentity.uuid(trustedIdentity.SessionID, "session_id", "session_id")
 		}
@@ -853,11 +856,16 @@ func buildFingerprintObservationEntry(c *gin.Context, account *Account, pin inst
 }
 
 func finalFingerprintCodexWireProfile(outbound http.Header, body []byte) CodexWireProfile {
+	view := parseFingerprintObservationBodyView(body)
+	return finalFingerprintCodexWireProfileFromView(outbound, view, fingerprintFinalMetadataCarriersFromView(outbound, view))
+}
+
+func finalFingerprintCodexWireProfileFromView(outbound http.Header, view fingerprintObservationBodyView, carriers []fingerprintMetadataCarrier) CodexWireProfile {
 	profile := newCodexWireProfile()
 	// Final observations use canonical body metadata, compatibility body metadata,
 	// then the physical header. Flat aliases can fill only fields absent from all
 	// nested wire carriers; request capture retains its own inbound precedence.
-	for _, carrier := range fingerprintFinalMetadataCarriers(outbound, body) {
+	for _, carrier := range carriers {
 		if carrier.valid {
 			mergeCodexWireProfileMissing(&profile, parseCodexWireMetadataObject(carrier.fields))
 		}
@@ -866,8 +874,7 @@ func finalFingerprintCodexWireProfile(outbound http.Header, body []byte) CodexWi
 		WindowID:       firstValidOpenAIOutboundSessionHeader(outbound, []string{"x-codex-window-id"}),
 		SubagentHeader: firstValidOpenAIOutboundSessionHeader(outbound, []string{"x-openai-subagent"}),
 	})
-	var root map[string]json.RawMessage
-	if len(body) > 0 && json.Unmarshal(body, &root) == nil {
+	if root := view.root; view.validObject {
 		var clientMetadata map[string]json.RawMessage
 		if json.Unmarshal(root["client_metadata"], &clientMetadata) == nil {
 			mergeCodexWireProfileMissing(&profile, parseCodexWireFlatMetadata(clientMetadata))
@@ -1263,12 +1270,15 @@ type fingerprintObservationBodyIdentity struct {
 }
 
 func parseFingerprintObservationBodyIdentity(body []byte) fingerprintObservationBodyIdentity {
-	var root map[string]any
-	if len(body) == 0 || json.Unmarshal(body, &root) != nil || root == nil {
+	return parseFingerprintObservationBodyIdentityFromView(parseFingerprintObservationBodyView(body))
+}
+
+func parseFingerprintObservationBodyIdentityFromView(view fingerprintObservationBodyView) fingerprintObservationBodyIdentity {
+	if !view.validObject {
 		return fingerprintObservationBodyIdentity{}
 	}
-	metadata, ok := root["client_metadata"].(map[string]any)
-	if !ok || metadata == nil {
+	var metadata map[string]any
+	if json.Unmarshal(view.root["client_metadata"], &metadata) != nil || metadata == nil {
 		return fingerprintObservationBodyIdentity{}
 	}
 	parsed := fingerprintObservationBodyIdentity{metadata: metadata}

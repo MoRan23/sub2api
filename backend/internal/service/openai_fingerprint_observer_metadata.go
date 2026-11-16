@@ -81,29 +81,29 @@ type fingerprintMetadataCarrier struct {
 // then final-header precedence. Unlike its permissive profile merger, presence
 // of malformed data is retained so the UI cannot report a fallback as valid.
 func fingerprintFinalMetadataCarriers(headers http.Header, body []byte) []fingerprintMetadataCarrier {
+	return fingerprintFinalMetadataCarriersFromView(headers, parseFingerprintObservationBodyView(body))
+}
+
+func fingerprintFinalMetadataCarriersFromView(headers http.Header, view fingerprintObservationBodyView) []fingerprintMetadataCarrier {
 	var carriers []fingerprintMetadataCarrier
 	appendCarrier := func(raw json.RawMessage, requireString bool) {
 		_, fields, valid := decodeCodexWireNestedCarrier(raw, requireString)
 		carriers = append(carriers, fingerprintMetadataCarrier{fields: fields, valid: valid})
 	}
-	if len(body) > 0 {
-		var root struct {
-			ClientMetadata json.RawMessage `json:"client_metadata"`
-			TurnMetadata   json.RawMessage `json:"x-codex-turn-metadata"`
-		}
-		if !utf8.Valid(body) || json.Unmarshal(body, &root) != nil {
+	if view.present {
+		if !view.validCarrier {
 			return []fingerprintMetadataCarrier{{}}
 		}
-		if len(root.ClientMetadata) > 0 && string(root.ClientMetadata) != "null" {
+		if len(view.clientCarrier) > 0 && string(view.clientCarrier) != "null" {
 			var client map[string]json.RawMessage
-			if json.Unmarshal(root.ClientMetadata, &client) != nil {
+			if json.Unmarshal(view.clientCarrier, &client) != nil {
 				carriers = append(carriers, fingerprintMetadataCarrier{})
 			} else if raw, present := client[openAIWSTurnMetadataHeader]; present {
 				appendCarrier(raw, true)
 			}
 		}
-		if len(root.TurnMetadata) > 0 {
-			appendCarrier(root.TurnMetadata, false)
+		if len(view.turnCarrier) > 0 {
+			appendCarrier(view.turnCarrier, false)
 		}
 	}
 	for _, value := range headerValuesCaseInsensitive(headers, openAIWSTurnMetadataHeader) {
@@ -125,9 +125,11 @@ func fingerprintMetadataField(carriers []fingerprintMetadataCarrier, field strin
 }
 
 func populateFingerprintObservationMetadata(entry *FingerprintObservationEntry, headers http.Header, body []byte) {
-	carriers := fingerprintFinalMetadataCarriers(headers, body)
+	view := parseFingerprintObservationBodyView(body)
+	carriers := fingerprintFinalMetadataCarriersFromView(headers, view)
+	profile := finalFingerprintCodexWireProfileFromView(headers, view, carriers)
 	populateFingerprintObservationMetadataFromCarriers(entry, carriers)
-	populateFingerprintObservationBodyMetadata(entry, headers, body)
+	populateFingerprintObservationBodyMetadataFromView(entry, view, profile)
 }
 
 func populateFingerprintObservationMetadataFromCarriers(entry *FingerprintObservationEntry, carriers []fingerprintMetadataCarrier) {
@@ -223,13 +225,19 @@ func copyFingerprintObservationSafeMetadata(safe map[string]any, metadata map[st
 }
 
 func populateFingerprintObservationBodyMetadata(entry *FingerprintObservationEntry, headers http.Header, body []byte) {
-	if len(body) == 0 {
+	view := parseFingerprintObservationBodyView(body)
+	profile := finalFingerprintCodexWireProfileFromView(headers, view, fingerprintFinalMetadataCarriersFromView(headers, view))
+	populateFingerprintObservationBodyMetadataFromView(entry, view, profile)
+}
+
+func populateFingerprintObservationBodyMetadataFromView(entry *FingerprintObservationEntry, view fingerprintObservationBodyView, profile CodexWireProfile) {
+	if !view.present {
 		return // A handshake has no body and supplies no cache/attribution evidence.
 	}
 	entry.MCPAttribution = &FingerprintMCPAttribution{Type: "missing", Status: fingerprintMetadataMissing}
 	entry.PromptCacheKey = &FingerprintPromptCacheKey{Strategy: "absent"}
-	root, valid := fingerprintMetadataObject(body)
-	if !utf8.Valid(body) || !valid {
+	root := view.root
+	if !view.validCarrier || !view.validObject {
 		entry.MCPAttribution.Type, entry.MCPAttribution.Status = "unavailable", fingerprintMetadataInvalid
 		entry.PromptCacheKey.Strategy = "invalid"
 		return
@@ -246,7 +254,7 @@ func populateFingerprintObservationBodyMetadata(entry *FingerprintObservationEnt
 		var key string
 		if json.Unmarshal(raw, &key) != nil || strings.TrimSpace(key) == "" {
 			entry.PromptCacheKey.Strategy = "invalid"
-		} else if key == finalFingerprintCodexWireProfile(headers, body).SessionID {
+		} else if key == profile.SessionID {
 			entry.PromptCacheKey.Strategy = "session"
 		} else {
 			entry.PromptCacheKey.Strategy = "override"
