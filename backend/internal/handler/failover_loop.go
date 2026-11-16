@@ -55,6 +55,52 @@ const (
 // 语义上等同于「无可用账号」：候选账号都不满足分组的利润约束。
 const profitVetoExhaustedMessage = "No available accounts: all candidates rejected by group profit control"
 
+// One request (or WS turn) owns these deadline-based 429 windows. Account health
+// may recover or be reset by another request, but must not renew this budget.
+// The map is allocated only when an uncapped 429 opts into a deadline. Errors
+// with their own count cap keep their independent per-error policy.
+type sameAccountRetryWindows map[int64]time.Time
+
+func (w *sameAccountRetryWindows) allow(accountID int64, err *service.UpstreamFailoverError, count, limit int) bool {
+	if err == nil || !err.RetryableOnSameAccount {
+		return false
+	}
+	if err.StatusCode != http.StatusTooManyRequests || err.SameAccountRetryMax > 0 {
+		return sameAccountRetryAllowed(err, count, limit)
+	}
+	deadline, known := (*w)[accountID]
+	if !err.SameAccountRetryDeadline.IsZero() {
+		if !known || err.SameAccountRetryDeadline.Before(deadline) {
+			deadline = err.SameAccountRetryDeadline
+			if *w == nil {
+				*w = make(sameAccountRetryWindows)
+			}
+			(*w)[accountID] = deadline
+		}
+		err.SameAccountRetryDeadline = deadline
+	} else if known {
+		// A concurrent success can clear the service deadline between its retry
+		// decision and reading that deadline. Keep the request's original bound.
+		err.SameAccountRetryDeadline = deadline
+	}
+	return sameAccountRetryAllowed(err, count, limit)
+}
+
+// A deadline is checked both before sleeping and after wakeup. In particular,
+// Retry-After must not schedule one final upstream call after the window ends.
+func waitSameAccountRetry(ctx context.Context, err *service.UpstreamFailoverError, delay time.Duration) bool {
+	if ctx == nil {
+		ctx = context.Background()
+	}
+	if ctx.Err() != nil || !sameAccountRetryDeadlineAllows(err) {
+		return false
+	}
+	if err != nil && !err.SameAccountRetryDeadline.IsZero() {
+		delay = min(delay, max(time.Until(err.SameAccountRetryDeadline), 0))
+	}
+	return sleepWithContext(ctx, delay) && ctx.Err() == nil && sameAccountRetryDeadlineAllows(err)
+}
+
 func sameAccountRetryDelayFor(failoverErr *service.UpstreamFailoverError, retryCount int) time.Duration {
 	if failoverErr == nil {
 		return sameAccountRetryDelay
@@ -127,6 +173,7 @@ type FailoverState struct {
 	MaxSwitches           int
 	FailedAccountIDs      map[int64]struct{}
 	SameAccountRetryCount map[int64]int
+	sameAccountWindows    sameAccountRetryWindows
 	LastFailoverErr       *service.UpstreamFailoverError
 	ForceCacheBilling     bool
 	hasBoundSession       bool
@@ -210,7 +257,7 @@ func (s *FailoverState) HandleFailoverError(
 
 	// 同账号重试不算切换账号，粘性会话仅在实际切换时强制缓存计费。
 	retryCount := s.SameAccountRetryCount[accountID]
-	sameAccountRetry := sameAccountRetryAllowed(failoverErr, retryCount, retryLimit)
+	sameAccountRetry := s.sameAccountWindows.allow(accountID, failoverErr, retryCount, retryLimit)
 	if needForceCacheBilling(s.hasBoundSession, failoverErr, sameAccountRetry) {
 		s.ForceCacheBilling = true
 	}
@@ -227,10 +274,15 @@ func (s *FailoverState) HandleFailoverError(
 			zap.Int("same_account_retry_max", retryLimit),
 			zap.Duration("retry_delay", retryDelay),
 		)
-		if !sleepWithContext(ctx, retryDelay) {
+		if waitSameAccountRetry(ctx, failoverErr, retryDelay) {
+			return FailoverContinue
+		}
+		if ctx != nil && ctx.Err() != nil {
 			return FailoverCanceled
 		}
-		return FailoverContinue
+		if needForceCacheBilling(s.hasBoundSession, failoverErr, false) {
+			s.ForceCacheBilling = true
+		}
 	}
 
 	// 同账号重试用尽，执行临时封禁

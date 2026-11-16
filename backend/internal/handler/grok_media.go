@@ -211,6 +211,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 	profitVetoCount := 0
 	failedAccountIDs := make(map[int64]struct{})
 	sameAccountRetryCount := make(map[int64]int)
+	var sameAccountWindows sameAccountRetryWindows
 	var lastFailoverErr *service.UpstreamFailoverError
 	var oauth429FailoverState service.OpenAIOAuth429FailoverState
 	mediaEligibilityRejected := false
@@ -435,7 +436,7 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 				}
 				if failoverErr.RetryableOnSameAccount {
 					retryLimit := effectiveSameAccountRetryLimit(failoverErr, account)
-					if sameAccountRetryAllowed(failoverErr, sameAccountRetryCount[account.ID], retryLimit) {
+					if sameAccountWindows.allow(account.ID, failoverErr, sameAccountRetryCount[account.ID], retryLimit) {
 						sameAccountRetryCount[account.ID]++
 						retryDelay := sameAccountRetryDelayFor(failoverErr, sameAccountRetryCount[account.ID])
 						reqLog.Warn("grok_media.pool_mode_same_account_retry",
@@ -445,12 +446,12 @@ func (h *OpenAIGatewayHandler) handleGrokMedia(c *gin.Context, endpoint service.
 							zap.Int("retry_count", sameAccountRetryCount[account.ID]),
 							zap.Duration("retry_delay", retryDelay),
 						)
-						select {
-						case <-requestCtx.Done():
-							return
-						case <-time.After(retryDelay):
+						if waitSameAccountRetry(requestCtx, failoverErr, retryDelay) {
+							continue
 						}
-						continue
+						if requestCtx.Err() != nil {
+							return
+						}
 					}
 				}
 				h.gatewayService.RecordOpenAIAccountSwitch()
