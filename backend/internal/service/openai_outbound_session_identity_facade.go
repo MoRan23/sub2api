@@ -1466,7 +1466,9 @@ func applyOpenAICodexContextWindowBody(body []byte, plan OpenAIOAuthIdentityPlan
 		ValidateOpenAICodexWindowSnapshot(plan.Window) != nil || !gjson.ValidBytes(body) {
 		return body, nil
 	}
-	input := gjson.GetBytes(body, "input")
+	// The input view is used synchronously against immutable ingress bytes. It
+	// must not copy image/tool payloads merely to inspect developer text.
+	input := parseRawJSONView(body).Get("input")
 	if !input.IsArray() {
 		return body, nil
 	}
@@ -1483,28 +1485,42 @@ func applyOpenAICodexContextWindowBody(body []byte, plan OpenAIOAuthIdentityPlan
 		out, err = sjson.SetBytes(out, path, updated)
 		return err
 	}
-	for i, item := range input.Array() {
+	var spliceErr error
+	i := -1
+	input.ForEach(func(_, item gjson.Result) bool {
+		i++
+		// Most large items belong to users or tools. Check their role before
+		// looking for an optional type, which may require scanning the whole item.
+		if !item.IsObject() || item.Get("role").String() != "developer" {
+			return true
+		}
 		typ := item.Get("type")
-		if !item.IsObject() || item.Get("role").String() != "developer" ||
-			(typ.Exists() && (typ.Type != gjson.String || typ.String() != "message")) {
-			continue
+		if typ.Exists() && (typ.Type != gjson.String || typ.String() != "message") {
+			return true
 		}
 		content := item.Get("content")
 		path := "input." + strconv.Itoa(i) + ".content"
 		if content.Type == gjson.String {
-			if err := splice(path, content); err != nil {
-				return body, fmt.Errorf("splice OpenAI Codex context window text: %w", err)
-			}
+			spliceErr = splice(path, content)
 		} else if content.IsArray() {
-			for j, part := range content.Array() {
-				if !part.IsObject() || (part.Get("type").String() != "input_text" && part.Get("type").String() != "text") {
-					continue
+			j := -1
+			content.ForEach(func(_, part gjson.Result) bool {
+				j++
+				if !part.IsObject() {
+					return true
 				}
-				if err := splice(path+"."+strconv.Itoa(j)+".text", part.Get("text")); err != nil {
-					return body, fmt.Errorf("splice OpenAI Codex context window text: %w", err)
+				partType := part.Get("type").String()
+				if partType != "input_text" && partType != "text" {
+					return true
 				}
-			}
+				spliceErr = splice(path+"."+strconv.Itoa(j)+".text", part.Get("text"))
+				return spliceErr == nil
+			})
 		}
+		return spliceErr == nil
+	})
+	if spliceErr != nil {
+		return body, fmt.Errorf("splice OpenAI Codex context window text: %w", spliceErr)
 	}
 	return out, nil
 }

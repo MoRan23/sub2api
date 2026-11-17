@@ -720,7 +720,7 @@ func applyOpenAICodexPromptCacheKeyBody(body []byte, plan OpenAIOAuthIdentityPla
 		!openAICodexProjectionCarriesPromptCacheKey(plan.ProjectionMode) || len(body) == 0 {
 		return body, nil
 	}
-	if !utf8.Valid(body) || !gjson.ParseBytes(body).IsObject() {
+	if !utf8.Valid(body) || !parseRawJSONView(body).IsObject() {
 		return body, nil
 	}
 	var out []byte
@@ -1211,7 +1211,7 @@ func putCodexFlatString(metadata map[string]json.RawMessage, key, value string) 
 // an existing top-level turn-metadata carrier may change; all other bytes are
 // left as produced by the passthrough normalizer.
 func mergeOpenAIOAuthPassthroughIdentityBody(body []byte, plan OpenAIOAuthIdentityPlan) ([]byte, error) {
-	if len(body) == 0 || !utf8.Valid(body) || !gjson.ParseBytes(body).IsObject() {
+	if len(body) == 0 || !utf8.Valid(body) || !parseRawJSONView(body).IsObject() {
 		return body, nil
 	}
 
