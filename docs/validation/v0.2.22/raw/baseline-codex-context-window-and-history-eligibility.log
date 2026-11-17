@@ -1,0 +1,143 @@
+2026/11/17 15:39:15 Timezone initialized: UTC (UTC offset: +00:00)
+--- FAIL: TestCodexContextWindowSyncRoundTrip (0.01s)
+    --- FAIL: TestCodexContextWindowSyncRoundTrip/distinct_windows (0.00s)
+        openai_codex_context_window_test.go:45: 
+            	Error Trace:	C:/Users/Admin/AppData/Local/Temp/sub2-v022-baseline.1aE8h9/backend/internal/service/openai_codex_context_window_test.go:45
+            	Error:      	Received unexpected error:
+            	            	OpenAI model sync authorization is unavailable: error: code=404 reason="ACCOUNT_NOT_FOUND" message="account not found" metadata=map[]
+            	Test:       	TestCodexContextWindowSyncRoundTrip/distinct_windows
+    --- FAIL: TestCodexContextWindowSyncRoundTrip/equal_windows (0.00s)
+        openai_codex_context_window_test.go:45: 
+            	Error Trace:	C:/Users/Admin/AppData/Local/Temp/sub2-v022-baseline.1aE8h9/backend/internal/service/openai_codex_context_window_test.go:45
+            	Error:      	Received unexpected error:
+            	            	OpenAI model sync authorization is unavailable: error: code=404 reason="ACCOUNT_NOT_FOUND" message="account not found" metadata=map[]
+            	Test:       	TestCodexContextWindowSyncRoundTrip/equal_windows
+    --- FAIL: TestCodexContextWindowSyncRoundTrip/default_only (0.00s)
+        openai_codex_context_window_test.go:45: 
+            	Error Trace:	C:/Users/Admin/AppData/Local/Temp/sub2-v022-baseline.1aE8h9/backend/internal/service/openai_codex_context_window_test.go:45
+            	Error:      	Received unexpected error:
+            	            	OpenAI model sync authorization is unavailable: error: code=404 reason="ACCOUNT_NOT_FOUND" message="account not found" metadata=map[]
+            	Test:       	TestCodexContextWindowSyncRoundTrip/default_only
+    --- FAIL: TestCodexContextWindowSyncRoundTrip/maximum_only (0.00s)
+        openai_codex_context_window_test.go:45: 
+            	Error Trace:	C:/Users/Admin/AppData/Local/Temp/sub2-v022-baseline.1aE8h9/backend/internal/service/openai_codex_context_window_test.go:45
+            	Error:      	Received unexpected error:
+            	            	OpenAI model sync authorization is unavailable: error: code=404 reason="ACCOUNT_NOT_FOUND" message="account not found" metadata=map[]
+            	Test:       	TestCodexContextWindowSyncRoundTrip/maximum_only
+    --- FAIL: TestCodexContextWindowSyncRoundTrip/registry_style_limit (0.00s)
+        openai_codex_context_window_test.go:45: 
+            	Error Trace:	C:/Users/Admin/AppData/Local/Temp/sub2-v022-baseline.1aE8h9/backend/internal/service/openai_codex_context_window_test.go:45
+            	Error:      	Received unexpected error:
+            	            	OpenAI model sync authorization is unavailable: error: code=404 reason="ACCOUNT_NOT_FOUND" message="account not found" metadata=map[]
+            	Test:       	TestCodexContextWindowSyncRoundTrip/registry_style_limit
+    --- FAIL: TestCodexContextWindowSyncRoundTrip/zero_maximum (0.00s)
+        openai_codex_context_window_test.go:45: 
+            	Error Trace:	C:/Users/Admin/AppData/Local/Temp/sub2-v022-baseline.1aE8h9/backend/internal/service/openai_codex_context_window_test.go:45
+            	Error:      	Received unexpected error:
+            	            	OpenAI model sync authorization is unavailable: error: code=404 reason="ACCOUNT_NOT_FOUND" message="account not found" metadata=map[]
+            	Test:       	TestCodexContextWindowSyncRoundTrip/zero_maximum
+    --- FAIL: TestCodexContextWindowSyncRoundTrip/negative_maximum (0.00s)
+        openai_codex_context_window_test.go:45: 
+            	Error Trace:	C:/Users/Admin/AppData/Local/Temp/sub2-v022-baseline.1aE8h9/backend/internal/service/openai_codex_context_window_test.go:45
+            	Error:      	Received unexpected error:
+            	            	OpenAI model sync authorization is unavailable: error: code=404 reason="ACCOUNT_NOT_FOUND" message="account not found" metadata=map[]
+            	Test:       	TestCodexContextWindowSyncRoundTrip/negative_maximum
+    --- FAIL: TestCodexContextWindowSyncRoundTrip/maximum_below_default (0.00s)
+        openai_codex_context_window_test.go:45: 
+            	Error Trace:	C:/Users/Admin/AppData/Local/Temp/sub2-v022-baseline.1aE8h9/backend/internal/service/openai_codex_context_window_test.go:45
+            	Error:      	Received unexpected error:
+            	            	OpenAI model sync authorization is unavailable: error: code=404 reason="ACCOUNT_NOT_FOUND" message="account not found" metadata=map[]
+            	Test:       	TestCodexContextWindowSyncRoundTrip/maximum_below_default
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+2026/11/17 15:39:15 WARN openai_codex_turn_identity_fallback reason=primary_store_unavailable mapping=session mapping_digest=215a96613d02
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+--- FAIL: TestForwardCodexHistoryNotesRevalidatesEligibilityAfterTokenResolution (0.01s)
+    --- FAIL: TestForwardCodexHistoryNotesRevalidatesEligibilityAfterTokenResolution/still_paid_and_active (0.01s)
+        openai_codex_history_notes_eligibility_test.go:353: 
+            	Error Trace:	C:/Users/Admin/AppData/Local/Temp/sub2-v022-baseline.1aE8h9/backend/internal/service/openai_codex_history_notes_eligibility_test.go:353
+            	Error:      	Not equal: 
+            	            	expected: 1
+            	            	actual  : 2
+            	Test:       	TestForwardCodexHistoryNotesRevalidatesEligibilityAfterTokenResolution/still_paid_and_active
+            	Messages:   	the current account must be checked after the provider returns its token
+    --- FAIL: TestForwardCodexHistoryNotesRevalidatesEligibilityAfterTokenResolution/subscription_became_free (0.00s)
+        openai_codex_history_notes_eligibility_test.go:353: 
+            	Error Trace:	C:/Users/Admin/AppData/Local/Temp/sub2-v022-baseline.1aE8h9/backend/internal/service/openai_codex_history_notes_eligibility_test.go:353
+            	Error:      	Not equal: 
+            	            	expected: 1
+            	            	actual  : 2
+            	Test:       	TestForwardCodexHistoryNotesRevalidatesEligibilityAfterTokenResolution/subscription_became_free
+            	Messages:   	the current account must be checked after the provider returns its token
+    --- FAIL: TestForwardCodexHistoryNotesRevalidatesEligibilityAfterTokenResolution/subscription_expired (0.00s)
+        openai_codex_history_notes_eligibility_test.go:353: 
+            	Error Trace:	C:/Users/Admin/AppData/Local/Temp/sub2-v022-baseline.1aE8h9/backend/internal/service/openai_codex_history_notes_eligibility_test.go:353
+            	Error:      	Not equal: 
+            	            	expected: 1
+            	            	actual  : 2
+            	Test:       	TestForwardCodexHistoryNotesRevalidatesEligibilityAfterTokenResolution/subscription_expired
+            	Messages:   	the current account must be checked after the provider returns its token
+    --- FAIL: TestForwardCodexHistoryNotesRevalidatesEligibilityAfterTokenResolution/subscription_expiry_disappeared (0.00s)
+        openai_codex_history_notes_eligibility_test.go:353: 
+            	Error Trace:	C:/Users/Admin/AppData/Local/Temp/sub2-v022-baseline.1aE8h9/backend/internal/service/openai_codex_history_notes_eligibility_test.go:353
+            	Error:      	Not equal: 
+            	            	expected: 1
+            	            	actual  : 2
+            	Test:       	TestForwardCodexHistoryNotesRevalidatesEligibilityAfterTokenResolution/subscription_expiry_disappeared
+            	Messages:   	the current account must be checked after the provider returns its token
+    --- FAIL: TestForwardCodexHistoryNotesRevalidatesEligibilityAfterTokenResolution/account_disabled (0.00s)
+        openai_codex_history_notes_eligibility_test.go:353: 
+            	Error Trace:	C:/Users/Admin/AppData/Local/Temp/sub2-v022-baseline.1aE8h9/backend/internal/service/openai_codex_history_notes_eligibility_test.go:353
+            	Error:      	Not equal: 
+            	            	expected: 1
+            	            	actual  : 2
+            	Test:       	TestForwardCodexHistoryNotesRevalidatesEligibilityAfterTokenResolution/account_disabled
+            	Messages:   	the current account must be checked after the provider returns its token
+    --- FAIL: TestForwardCodexHistoryNotesRevalidatesEligibilityAfterTokenResolution/account_no_longer_schedulable (0.00s)
+        openai_codex_history_notes_eligibility_test.go:353: 
+            	Error Trace:	C:/Users/Admin/AppData/Local/Temp/sub2-v022-baseline.1aE8h9/backend/internal/service/openai_codex_history_notes_eligibility_test.go:353
+            	Error:      	Not equal: 
+            	            	expected: 1
+            	            	actual  : 2
+            	Test:       	TestForwardCodexHistoryNotesRevalidatesEligibilityAfterTokenResolution/account_no_longer_schedulable
+            	Messages:   	the current account must be checked after the provider returns its token
+    --- FAIL: TestForwardCodexHistoryNotesRevalidatesEligibilityAfterTokenResolution/without_refresh_provider_uses_captured_account (0.00s)
+        openai_codex_history_notes_eligibility_test.go:345: 
+            	Error Trace:	C:/Users/Admin/AppData/Local/Temp/sub2-v022-baseline.1aE8h9/backend/internal/service/openai_codex_history_notes_eligibility_test.go:345
+            	Error:      	Received unexpected error:
+            	            	account reload unavailable
+            	Test:       	TestForwardCodexHistoryNotesRevalidatesEligibilityAfterTokenResolution/without_refresh_provider_uses_captured_account
+FAIL

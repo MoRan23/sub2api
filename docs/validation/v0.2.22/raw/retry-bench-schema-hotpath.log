@@ -1,0 +1,18 @@
+2026/11/17 14:29:05 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkOpenAIResponsesToolSchemasCPU/image/1MiB/repair=false/current-4         	     294	   2963208 ns/op	 353.95 MB/s	      20 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/1MiB/repair=false/current-4         	     373	   1657690 ns/op	 632.70 MB/s	      19 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/1MiB/repair=false/current-4         	     409	   1409752 ns/op	 743.97 MB/s	      18 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/1MiB/repair=false/current-4          	     362	   1678578 ns/op	 624.82 MB/s	      34 B/op	       2 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/1MiB/repair=false/current-4          	     397	   2640748 ns/op	 397.16 MB/s	      34 B/op	       2 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/1MiB/repair=false/current-4          	     259	   2530688 ns/op	 414.44 MB/s	      35 B/op	       2 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/8MiB/repair=false/current-4         	      20	  27470585 ns/op	 305.38 MB/s	      42 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/8MiB/repair=false/current-4         	      36	  21652867 ns/op	 387.42 MB/s	      30 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/8MiB/repair=false/current-4         	      43	  12957091 ns/op	 647.43 MB/s	      35 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/8MiB/repair=false/current-4          	      40	  13470695 ns/op	 622.75 MB/s	      53 B/op	       2 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/8MiB/repair=false/current-4          	      49	  13624906 ns/op	 615.70 MB/s	      49 B/op	       2 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/8MiB/repair=false/current-4          	      48	  18117144 ns/op	 463.03 MB/s	      49 B/op	       2 allocs/op
+PASS

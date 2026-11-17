@@ -1,0 +1,21 @@
+File: service-baseline.test.exe
+Build ID: C:\Users\Admin\AppData\Local\Temp\sub2-v022-baseline.1aE8h9\service-baseline.test.exe2026-11-17 13:59:35.847551 +0000 UTC
+Type: cpu
+Time: 2026-11-17 23:17:09 CST
+Duration: 4.04s, Total samples = 5.02s (124.32%)
+Showing nodes accounting for 4.25s, 84.66% of 5.02s total
+Dropped 85 nodes (cum <= 0.03s)
+Showing top 12 nodes out of 94
+      flat  flat%   sum%        cum   cum%
+     1.81s 36.06% 36.06%      1.89s 37.65%  encoding/json/internal/jsonwire.ConsumeSimpleString
+     0.60s 11.95% 48.01%      0.60s 11.95%  encoding/json/internal/jsonwire.ConsumeStringResumable.func1 (inline)
+     0.50s  9.96% 57.97%      1.10s 21.91%  encoding/json/internal/jsonwire.ConsumeStringResumable
+     0.33s  6.57% 64.54%      0.33s  6.57%  runtime.memmove
+     0.28s  5.58% 70.12%      0.28s  5.58%  runtime.memclrNoHeapPointers
+     0.21s  4.18% 74.30%      0.39s  7.77%  runtime.scanObject
+     0.17s  3.39% 77.69%      0.17s  3.39%  runtime.preemptM
+     0.08s  1.59% 79.28%      0.08s  1.59%  indexbytebody
+     0.08s  1.59% 80.88%      0.08s  1.59%  runtime.asyncPreempt
+     0.08s  1.59% 82.47%      0.11s  2.19%  runtime.lock2
+     0.06s  1.20% 83.67%      0.06s  1.20%  unicode/utf8.Valid
+     0.05s     1% 84.66%      0.12s  2.39%  runtime.tryDeferToSpanScan

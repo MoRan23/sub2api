@@ -1,0 +1,66 @@
+2026/11/17 15:50:11 Timezone initialized: UTC (UTC offset: +00:00)
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+2026/11/17 15:50:11 WARN openai_codex_turn_identity_fallback reason=hmac_secret_unavailable mapping=session mapping_digest=215c6694636b
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+2026/11/17 15:50:11 WARN openai_codex_turn_identity_fallback reason=hmac_secret_unavailable mapping=session mapping_digest=215c6694636b
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+2026/11/17 15:50:11 WARN openai_codex_turn_identity_fallback reason=hmac_secret_unavailable mapping=session mapping_digest=215c6694636b
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+2026/11/17 15:50:11 WARN openai_codex_turn_identity_fallback reason=hmac_secret_unavailable mapping=session mapping_digest=215c6694636b
+--- FAIL: TestForwardAsAnthropic_AstraContinuationRestoresHistoryAndDisablesUnsupportedSession (0.03s)
+    --- FAIL: TestForwardAsAnthropic_AstraContinuationRestoresHistoryAndDisablesUnsupportedSession/previous_response_id_is_not_available_for_this_user (0.03s)
+        openai_compat_model_test.go:2445: 
+            	Error Trace:	C:/Users/Admin/AppData/Local/Temp/sub2-v022-baseline.1aE8h9/backend/internal/service/openai_compat_model_test.go:2445
+            	Error:      	Not equal: 
+            	            	expected: "astra-session"
+            	            	actual  : "01a1ea33-9650-7d55-9a2b-858e20efc7d9"
+            	            	
+            	            	Diff:
+            	            	--- Expected
+            	            	+++ Actual
+            	            	@@ -1 +1 @@
+            	            	-astra-session
+            	            	+01a1ea33-9650-7d55-9a2b-858e20efc7d9
+            	Test:       	TestForwardAsAnthropic_AstraContinuationRestoresHistoryAndDisablesUnsupportedSession/previous_response_id_is_not_available_for_this_user
+    --- FAIL: TestForwardAsAnthropic_AstraContinuationRestoresHistoryAndDisablesUnsupportedSession/previous_response_id_requires_an_OpenAI_API-key_account_for_HTTP_requests (0.00s)
+        openai_compat_model_test.go:2445: 
+            	Error Trace:	C:/Users/Admin/AppData/Local/Temp/sub2-v022-baseline.1aE8h9/backend/internal/service/openai_compat_model_test.go:2445
+            	Error:      	Not equal: 
+            	            	expected: "astra-session"
+            	            	actual  : "01a1ea33-9650-7d55-9a2b-858e20efc7d9"
+            	            	
+            	            	Diff:
+            	            	--- Expected
+            	            	+++ Actual
+            	            	@@ -1 +1 @@
+            	            	-astra-session
+            	            	+01a1ea33-9650-7d55-9a2b-858e20efc7d9
+            	Test:       	TestForwardAsAnthropic_AstraContinuationRestoresHistoryAndDisablesUnsupportedSession/previous_response_id_requires_an_OpenAI_API-key_account_for_HTTP_requests
+2026/11/17 15:50:11 WARN openai_codex_turn_identity_fallback reason=hmac_secret_unavailable mapping=session mapping_digest=22ca94ab357b
+--- FAIL: TestForwardAsAnthropic_ResponsesSupportedAccountStillUsesResponsesEndpoint (0.00s)
+    openai_gateway_messages_chat_fallback_test.go:485: 
+        	Error Trace:	C:/Users/Admin/AppData/Local/Temp/sub2-v022-baseline.1aE8h9/backend/internal/service/openai_gateway_messages_chat_fallback_test.go:485
+        	Error:      	Not equal: 
+        	            	expected: "third-party-client/1.0.0"
+        	            	actual  : "codex-tui/0.169.0 (Ubuntu 24.4.0; x86_64) xterm-256color (codex-tui; 0.169.0)"
+        	            	
+        	            	Diff:
+        	            	--- Expected
+        	            	+++ Actual
+        	            	@@ -1 +1 @@
+        	            	-third-party-client/1.0.0
+        	            	+codex-tui/0.169.0 (Ubuntu 24.4.0; x86_64) xterm-256color (codex-tui; 0.169.0)
+        	Test:       	TestForwardAsAnthropic_ResponsesSupportedAccountStillUsesResponsesEndpoint
+FAIL

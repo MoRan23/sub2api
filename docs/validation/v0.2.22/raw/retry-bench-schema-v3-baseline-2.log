@@ -1,0 +1,14 @@
+2026/11/17 15:13:21 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkOpenAIResponsesToolSchemasCPU/image/1MiB/repair=false/current-4         	     882	    684799 ns/op	1531.56 MB/s	      17 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/1MiB/repair=true/current-4          	     160	   5615859 ns/op	 186.76 MB/s	 2113941 B/op	      12 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/1MiB/repair=false/current-4          	     392	   1474077 ns/op	 711.50 MB/s	      34 B/op	       2 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/1MiB/repair=true/current-4           	     140	   5329093 ns/op	 196.81 MB/s	 2113940 B/op	      12 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/8MiB/repair=false/current-4         	      87	   7312620 ns/op	1147.17 MB/s	      21 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/8MiB/repair=true/current-4          	      22	  28187850 ns/op	 297.61 MB/s	16794263 B/op	      13 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/8MiB/repair=false/current-4          	      51	  12041539 ns/op	 696.66 MB/s	      48 B/op	       2 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/8MiB/repair=true/current-4           	      24	  26969283 ns/op	 311.05 MB/s	16794216 B/op	      13 allocs/op
+PASS

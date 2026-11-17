@@ -1,0 +1,46 @@
+2026/11/17 14:01:11 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestSchedulerSnapshotConfiguredMembership
+=== RUN   TestSchedulerSnapshotConfiguredMembership/openai
+=== RUN   TestSchedulerSnapshotConfiguredMembership/openai/simple/forced=false
+=== RUN   TestSchedulerSnapshotConfiguredMembership/openai/simple/forced=true
+=== RUN   TestSchedulerSnapshotConfiguredMembership/openai/group/forced=false
+=== RUN   TestSchedulerSnapshotConfiguredMembership/openai/group/forced=true
+=== RUN   TestSchedulerSnapshotConfiguredMembership/openai/ungrouped/forced=false
+=== RUN   TestSchedulerSnapshotConfiguredMembership/openai/ungrouped/forced=true
+=== RUN   TestSchedulerSnapshotConfiguredMembership/anthropic
+=== RUN   TestSchedulerSnapshotConfiguredMembership/anthropic/simple/forced=false
+=== RUN   TestSchedulerSnapshotConfiguredMembership/anthropic/simple/forced=true
+=== RUN   TestSchedulerSnapshotConfiguredMembership/anthropic/group/forced=false
+=== RUN   TestSchedulerSnapshotConfiguredMembership/anthropic/group/forced=true
+=== RUN   TestSchedulerSnapshotConfiguredMembership/anthropic/ungrouped/forced=false
+=== RUN   TestSchedulerSnapshotConfiguredMembership/anthropic/ungrouped/forced=true
+=== RUN   TestSchedulerSnapshotConfiguredMembership/gemini
+=== RUN   TestSchedulerSnapshotConfiguredMembership/gemini/simple/forced=false
+=== RUN   TestSchedulerSnapshotConfiguredMembership/gemini/simple/forced=true
+=== RUN   TestSchedulerSnapshotConfiguredMembership/gemini/group/forced=false
+=== RUN   TestSchedulerSnapshotConfiguredMembership/gemini/group/forced=true
+=== RUN   TestSchedulerSnapshotConfiguredMembership/gemini/ungrouped/forced=false
+=== RUN   TestSchedulerSnapshotConfiguredMembership/gemini/ungrouped/forced=true
+--- PASS: TestSchedulerSnapshotConfiguredMembership (0.86s)
+    --- PASS: TestSchedulerSnapshotConfiguredMembership/openai (0.41s)
+        --- PASS: TestSchedulerSnapshotConfiguredMembership/openai/simple/forced=false (0.16s)
+        --- PASS: TestSchedulerSnapshotConfiguredMembership/openai/simple/forced=true (0.03s)
+        --- PASS: TestSchedulerSnapshotConfiguredMembership/openai/group/forced=false (0.02s)
+        --- PASS: TestSchedulerSnapshotConfiguredMembership/openai/group/forced=true (0.02s)
+        --- PASS: TestSchedulerSnapshotConfiguredMembership/openai/ungrouped/forced=false (0.03s)
+        --- PASS: TestSchedulerSnapshotConfiguredMembership/openai/ungrouped/forced=true (0.02s)
+    --- PASS: TestSchedulerSnapshotConfiguredMembership/anthropic (0.20s)
+        --- PASS: TestSchedulerSnapshotConfiguredMembership/anthropic/simple/forced=false (0.03s)
+        --- PASS: TestSchedulerSnapshotConfiguredMembership/anthropic/simple/forced=true (0.03s)
+        --- PASS: TestSchedulerSnapshotConfiguredMembership/anthropic/group/forced=false (0.02s)
+        --- PASS: TestSchedulerSnapshotConfiguredMembership/anthropic/group/forced=true (0.03s)
+        --- PASS: TestSchedulerSnapshotConfiguredMembership/anthropic/ungrouped/forced=false (0.01s)
+        --- PASS: TestSchedulerSnapshotConfiguredMembership/anthropic/ungrouped/forced=true (0.01s)
+    --- PASS: TestSchedulerSnapshotConfiguredMembership/gemini (0.25s)
+        --- PASS: TestSchedulerSnapshotConfiguredMembership/gemini/simple/forced=false (0.02s)
+        --- PASS: TestSchedulerSnapshotConfiguredMembership/gemini/simple/forced=true (0.02s)
+        --- PASS: TestSchedulerSnapshotConfiguredMembership/gemini/group/forced=false (0.02s)
+        --- PASS: TestSchedulerSnapshotConfiguredMembership/gemini/group/forced=true (0.04s)
+        --- PASS: TestSchedulerSnapshotConfiguredMembership/gemini/ungrouped/forced=false (0.02s)
+        --- PASS: TestSchedulerSnapshotConfiguredMembership/gemini/ungrouped/forced=true (0.02s)
+PASS

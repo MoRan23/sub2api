@@ -1,0 +1,87 @@
+2026/11/17 14:03:44 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestGroupUsageRollupMergeMigrationRepairsUpgradeWindow
+2026/11/17 22:03:54 Timezone initialized: Asia/Shanghai (UTC offset: +08:00)
+=== RUN   TestGroupUsageRollupMergeMigrationRepairsUpgradeWindow/old_build_in_progress
+=== RUN   TestGroupUsageRollupMergeMigrationRepairsUpgradeWindow/old_build_already_published
+2026/11/17 14:03:55 Timezone initialized: UTC (UTC offset: +00:00)
+--- PASS: TestGroupUsageRollupMergeMigrationRepairsUpgradeWindow (0.72s)
+    --- PASS: TestGroupUsageRollupMergeMigrationRepairsUpgradeWindow/old_build_in_progress (0.39s)
+    --- PASS: TestGroupUsageRollupMergeMigrationRepairsUpgradeWindow/old_build_already_published (0.31s)
+=== RUN   TestGroupUsageRollupSyncDoesNotBlockUsageWritesDuringBuild
+2026/11/17 22:03:55 Timezone initialized: Asia/Shanghai (UTC offset: +08:00)
+2026/11/17 14:03:55 Timezone initialized: UTC (UTC offset: +00:00)
+--- PASS: TestGroupUsageRollupSyncDoesNotBlockUsageWritesDuringBuild (0.49s)
+=== RUN   TestGroupUsageRollupRetentionCleanupKeepsPublishedWatermark
+2026/11/17 22:03:55 Timezone initialized: Asia/Shanghai (UTC offset: +08:00)
+2026/11/17 14:03:56 Timezone initialized: UTC (UTC offset: +00:00)
+--- PASS: TestGroupUsageRollupRetentionCleanupKeepsPublishedWatermark (0.54s)
+=== RUN   TestGroupUsageRollupTriggersIgnoreRowsBeforeExpiredFloor
+=== RUN   TestGroupUsageRollupTriggersIgnoreRowsBeforeExpiredFloor/ordinary
+=== RUN   TestGroupUsageRollupTriggersIgnoreRowsBeforeExpiredFloor/partitioned
+--- PASS: TestGroupUsageRollupTriggersIgnoreRowsBeforeExpiredFloor (0.37s)
+    --- PASS: TestGroupUsageRollupTriggersIgnoreRowsBeforeExpiredFloor/ordinary (0.17s)
+    --- PASS: TestGroupUsageRollupTriggersIgnoreRowsBeforeExpiredFloor/partitioned (0.19s)
+=== RUN   TestGroupUsageRollupTriggersFenceHistoricalChangesDuringBuild
+--- PASS: TestGroupUsageRollupTriggersFenceHistoricalChangesDuringBuild (0.19s)
+=== RUN   TestGroupUsageRollupBuildKeyShareDoesNotBlockLateWrites
+--- PASS: TestGroupUsageRollupBuildKeyShareDoesNotBlockLateWrites (0.26s)
+=== RUN   TestGroupUsageRollupSyncSkipsWhileAnotherBuildHoldsLock
+2026/11/17 22:03:56 Timezone initialized: Asia/Shanghai (UTC offset: +08:00)
+2026/11/17 14:03:57 Timezone initialized: UTC (UTC offset: +00:00)
+--- PASS: TestGroupUsageRollupSyncSkipsWhileAnotherBuildHoldsLock (0.23s)
+=== RUN   TestGroupUsageRollupSyncRecoversFromInterruptedBuild
+2026/11/17 22:03:57 Timezone initialized: Asia/Shanghai (UTC offset: +08:00)
+2026/11/17 14:03:57 Timezone initialized: UTC (UTC offset: +00:00)
+--- PASS: TestGroupUsageRollupSyncRecoversFromInterruptedBuild (0.33s)
+=== RUN   TestGroupUsageRollupBulkDeleteDuringBuildWritesStateOnce
+--- PASS: TestGroupUsageRollupBulkDeleteDuringBuildWritesStateOnce (0.71s)
+=== RUN   TestGroupUsageRollupInvalidateAtStartsFromExpiredFloor
+--- PASS: TestGroupUsageRollupInvalidateAtStartsFromExpiredFloor (0.22s)
+=== RUN   TestGroupUsageRollupSyncKeepsPreviousDayBucketAcrossMidnightDSTGap
+2026/11/17 11:03:58 Timezone initialized: America/Santiago (UTC offset: -03:00)
+2026/11/17 14:03:58 Timezone initialized: UTC (UTC offset: +00:00)
+--- PASS: TestGroupUsageRollupSyncKeepsPreviousDayBucketAcrossMidnightDSTGap (0.37s)
+=== RUN   TestGroupUsageRollupRetentionCleanupSkipsPartitionDropOnLockTimeout
+2026/11/17 22:03:58 Timezone initialized: Asia/Shanghai (UTC offset: +08:00)
+2026/11/17 22:04:04 [DashboardAggregation] 删除分区 usage_logs_202605 等待锁超时，本次改为按行删除
+2026/11/17 14:04:04 Timezone initialized: UTC (UTC offset: +00:00)
+--- PASS: TestGroupUsageRollupRetentionCleanupSkipsPartitionDropOnLockTimeout (6.04s)
+=== RUN   TestGroupUsageRollupInstallOrdersPublishIdenticalFunctions
+=== RUN   TestGroupUsageRollupInstallOrdersPublishIdenticalFunctions/fresh
+=== RUN   TestGroupUsageRollupInstallOrdersPublishIdenticalFunctions/upgrade
+--- PASS: TestGroupUsageRollupInstallOrdersPublishIdenticalFunctions (0.37s)
+    --- PASS: TestGroupUsageRollupInstallOrdersPublishIdenticalFunctions/fresh (0.20s)
+    --- PASS: TestGroupUsageRollupInstallOrdersPublishIdenticalFunctions/upgrade (0.17s)
+=== RUN   TestGroupUsageRollupTriggerInvalidatesCascadedHistoricalDelete
+=== RUN   TestGroupUsageRollupTriggerInvalidatesCascadedHistoricalDelete/ordinary
+=== RUN   TestGroupUsageRollupTriggerInvalidatesCascadedHistoricalDelete/partitioned
+--- PASS: TestGroupUsageRollupTriggerInvalidatesCascadedHistoricalDelete (0.42s)
+    --- PASS: TestGroupUsageRollupTriggerInvalidatesCascadedHistoricalDelete/ordinary (0.18s)
+    --- PASS: TestGroupUsageRollupTriggerInvalidatesCascadedHistoricalDelete/partitioned (0.23s)
+=== RUN   TestGroupUsageRollupTriggerSerializesLateHistoricalInsertWithPublish
+--- PASS: TestGroupUsageRollupTriggerSerializesLateHistoricalInsertWithPublish (0.25s)
+=== RUN   TestGroupUsageRollupTriggerSerializesInsertTransactionAcrossMidnight
+--- PASS: TestGroupUsageRollupTriggerSerializesInsertTransactionAcrossMidnight (0.23s)
+=== RUN   TestGroupUsageRollupTriggerKeepsWatermarkForTodayInsert
+--- PASS: TestGroupUsageRollupTriggerKeepsWatermarkForTodayInsert (0.16s)
+=== RUN   TestGroupUsageRollupTriggerUsesSessionTimezoneAcrossDST
+--- PASS: TestGroupUsageRollupTriggerUsesSessionTimezoneAcrossDST (0.17s)
+=== RUN   TestGroupUsageSummaryIncludesYesterdayAcrossWatermark
+2026/11/17 22:04:06 Timezone initialized: Asia/Shanghai (UTC offset: +08:00)
+=== RUN   TestGroupUsageSummaryIncludesYesterdayAcrossWatermark/closed_rollup
+=== RUN   TestGroupUsageSummaryIncludesYesterdayAcrossWatermark/raw_tail
+2026/11/17 14:04:06 Timezone initialized: UTC (UTC offset: +00:00)
+--- PASS: TestGroupUsageSummaryIncludesYesterdayAcrossWatermark (0.36s)
+    --- PASS: TestGroupUsageSummaryIncludesYesterdayAcrossWatermark/closed_rollup (0.19s)
+    --- PASS: TestGroupUsageSummaryIncludesYesterdayAcrossWatermark/raw_tail (0.16s)
+=== RUN   TestGroupUsageRollupSyncRebuildsAfterTimezoneChange
+2026/11/17 09:04:06 Timezone initialized: America/New_York (UTC offset: -05:00)
+2026/11/17 14:04:07 Timezone initialized: UTC (UTC offset: +00:00)
+--- PASS: TestGroupUsageRollupSyncRebuildsAfterTimezoneChange (0.24s)
+=== RUN   TestGroupUsageSummaryUsesConfiguredDSTBoundaries
+2026/11/17 09:04:07 Timezone initialized: America/New_York (UTC offset: -05:00)
+2026/11/17 14:04:07 Timezone initialized: UTC (UTC offset: +00:00)
+--- PASS: TestGroupUsageSummaryUsesConfiguredDSTBoundaries (0.17s)
+=== RUN   TestGroupUsageSummaryFiltersHistoryTailAndOutput
+--- PASS: TestGroupUsageSummaryFiltersHistoryTailAndOutput (0.00s)
+PASS

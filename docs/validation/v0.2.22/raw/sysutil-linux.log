@@ -1,0 +1,25 @@
+=== RUN   TestCgroupMemoryLimit
+=== RUN   TestCgroupMemoryLimit/v2_namespaced_root
+=== RUN   TestCgroupMemoryLimit/v2_tightest_limit_along_the_path
+=== RUN   TestCgroupMemoryLimit/v2_unlimited
+=== RUN   TestCgroupMemoryLimit/v1_limit_and_unlimited_sentinel
+=== RUN   TestCgroupMemoryLimit/v1_tightest_limit_along_the_memory_controller_path
+=== RUN   TestCgroupMemoryLimit/v1_combined_controller_list
+=== RUN   TestCgroupMemoryLimit/host_path_not_visible_in_container_mount_falls_back_to_root
+=== RUN   TestCgroupMemoryLimit/cgroup_path_cannot_escape_the_mount
+=== RUN   TestCgroupMemoryLimit/unavailable
+--- PASS: TestCgroupMemoryLimit (0.08s)
+    --- PASS: TestCgroupMemoryLimit/v2_namespaced_root (0.02s)
+    --- PASS: TestCgroupMemoryLimit/v2_tightest_limit_along_the_path (0.00s)
+    --- PASS: TestCgroupMemoryLimit/v2_unlimited (0.00s)
+    --- PASS: TestCgroupMemoryLimit/v1_limit_and_unlimited_sentinel (0.00s)
+    --- PASS: TestCgroupMemoryLimit/v1_tightest_limit_along_the_memory_controller_path (0.00s)
+    --- PASS: TestCgroupMemoryLimit/v1_combined_controller_list (0.00s)
+    --- PASS: TestCgroupMemoryLimit/host_path_not_visible_in_container_mount_falls_back_to_root (0.01s)
+    --- PASS: TestCgroupMemoryLimit/cgroup_path_cannot_escape_the_mount (0.01s)
+    --- PASS: TestCgroupMemoryLimit/unavailable (0.00s)
+=== RUN   TestGoMemoryLimit
+--- PASS: TestGoMemoryLimit (0.00s)
+=== RUN   TestMinPositive
+--- PASS: TestMinPositive (0.00s)
+PASS

@@ -1,0 +1,38 @@
+=== RUN   TestGrokOAuthHandlerQueryQuotaProbesUpstream
+    grok_oauth_handler_test.go:182: 
+        	Error Trace:	D:/Code/sub2api/backend/internal/handler/admin/grok_oauth_handler_test.go:182
+        	Error:      	Condition never satisfied
+        	Test:       	TestGrokOAuthHandlerQueryQuotaProbesUpstream
+--- FAIL: TestGrokOAuthHandlerQueryQuotaProbesUpstream (1.01s)
+=== RUN   TestUpdateSettingsResponseIncludesReadOnlyBuiltinCodexVersion
+2026/11/17 22:13:51 INFO settings updated audit=true user_id=0 role="" changed="[oidc_connect_use_pkce oidc_connect_validate_id_token risk_control_enabled]"
+    setting_handler_partial_payload_test.go:59: 
+        	Error Trace:	D:/Code/sub2api/backend/internal/handler/admin/setting_handler_partial_payload_test.go:59
+        	Error:      	Not equal: 
+        	            	expected: "0.152.0"
+        	            	actual  : "0.169.0"
+        	            	
+        	            	Diff:
+        	            	--- Expected
+        	            	+++ Actual
+        	            	@@ -1 +1 @@
+        	            	-0.152.0
+        	            	+0.169.0
+        	Test:       	TestUpdateSettingsResponseIncludesReadOnlyBuiltinCodexVersion
+--- FAIL: TestUpdateSettingsResponseIncludesReadOnlyBuiltinCodexVersion (0.00s)
+=== RUN   TestUserBalanceGiftSubtractIdempotencyAndScopedResponse
+2026/11/17 22:13:51 [IdempotencyMetric] name=idempotency_claim_total endpoint=/users/:id/balance scope=admin.users.balance.update value=1 mode=new_claim
+2026/11/17 22:13:51 [IdempotencyAudit] endpoint=/users/:id/balance scope=admin.users.balance.update key_hash=9ab1f481194247fa0e0585e1e92dc2ab7f679e73e0b72108305f29ae9cd5eab2 state_transition=none->processing replayed=false claim_mode=new
+2026/11/17 22:13:51 [IdempotencyAudit] endpoint=/users/:id/balance scope=admin.users.balance.update key_hash=9ab1f481194247fa0e0585e1e92dc2ab7f679e73e0b72108305f29ae9cd5eab2 state_transition=processing->succeeded replayed=false
+2026/11/17 22:13:51 [IdempotencyMetric] name=idempotency_processing_duration_ms endpoint=/users/:id/balance scope=admin.users.balance.update value=0.000
+2026/11/17 22:13:51 [IdempotencyMetric] name=idempotency_conflict_total endpoint=/users/:id/balance scope=admin.users.balance.update value=1 reason=fingerprint_mismatch
+2026/11/17 22:13:51 [IdempotencyAudit] endpoint=/users/:id/balance scope=admin.users.balance.update key_hash=9ab1f481194247fa0e0585e1e92dc2ab7f679e73e0b72108305f29ae9cd5eab2 state_transition=existing->fingerprint_mismatch replayed=false
+    user_balance_gift_subtract_test.go:112: 
+        	Error Trace:	D:/Code/sub2api/backend/internal/handler/admin/user_balance_gift_subtract_test.go:112
+        	Error:      	Not equal: 
+        	            	expected: 200
+        	            	actual  : 409
+        	Test:       	TestUserBalanceGiftSubtractIdempotencyAndScopedResponse
+        	Messages:   	{"code":409,"message":"idempotency key reused with different payload","reason":"IDEMPOTENCY_KEY_CONFLICT"}
+--- FAIL: TestUserBalanceGiftSubtractIdempotencyAndScopedResponse (0.00s)
+FAIL

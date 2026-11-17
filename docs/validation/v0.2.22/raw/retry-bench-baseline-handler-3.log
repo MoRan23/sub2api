@@ -1,0 +1,14 @@
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/handler
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkOpenAIResponsesRetryPreparation/64KiB/1attempts/after-4         	     214	   2737136 ns/op	  24.01 MB/s	 2496737 B/op	     515 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/64KiB/5attempts/after-4         	     212	   3126615 ns/op	  21.02 MB/s	 2497394 B/op	     516 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/64KiB/15attempts/after-4        	     213	   2708184 ns/op	  24.27 MB/s	 2496717 B/op	     516 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/1024KiB/1attempts/after-4       	      16	  37079131 ns/op	  28.28 MB/s	38936453 B/op	     596 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/1024KiB/5attempts/after-4       	      16	  35381244 ns/op	  29.64 MB/s	38938508 B/op	     603 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/1024KiB/15attempts/after-4      	      16	  36375825 ns/op	  28.83 MB/s	38937393 B/op	     600 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/8192KiB/1attempts/after-4       	       3	 219524767 ns/op	  38.21 MB/s	302128290 B/op	     633 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/8192KiB/5attempts/after-4       	       3	 225296567 ns/op	  37.23 MB/s	302128738 B/op	     637 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/8192KiB/15attempts/after-4      	       3	 212721633 ns/op	  39.44 MB/s	302128960 B/op	     638 allocs/op
+PASS

@@ -1,0 +1,57 @@
+2026/11/17 14:17:56 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestInflightEstimate_AccountMappingNoDBAndBoundedMemory
+2026/11/17 14:17:56 [Billing] Using fallback pricing for model: claude-sonnet-4-5
+2026/11/17 14:17:56 Warning: inflight reservation cannot price model="rand-0-1794925076222842300" group=40; request admitted without reservation (fail-open, throttled log)
+--- PASS: TestInflightEstimate_AccountMappingNoDBAndBoundedMemory (0.27s)
+=== RUN   TestPersistWhitelistAuditLog_CreateBeforeEmailUsesSourceIDAndPatchesStatus
+2026/11/17 14:17:56 WARN content_moderation.email_failed user_id=1001 email=user@example.com error="context canceled"
+    content_moderation_test.go:2386: 
+        	Error Trace:	C:/Users/Admin/AppData/Local/Temp/sub2-v022-baseline.1aE8h9/backend/internal/service/content_moderation_test.go:2386
+        	Error:      	Not equal: 
+        	            	expected: []string{"create", "update_email_sent"}
+        	            	actual  : []string{"create"}
+        	            	
+        	            	Diff:
+        	            	--- Expected
+        	            	+++ Actual
+        	            	@@ -1,4 +1,3 @@
+        	            	-([]string) (len=2) {
+        	            	- (string) (len=6) "create",
+        	            	- (string) (len=17) "update_email_sent"
+        	            	+([]string) (len=1) {
+        	            	+ (string) (len=6) "create"
+        	            	 }
+        	Test:       	TestPersistWhitelistAuditLog_CreateBeforeEmailUsesSourceIDAndPatchesStatus
+--- FAIL: TestPersistWhitelistAuditLog_CreateBeforeEmailUsesSourceIDAndPatchesStatus (0.02s)
+=== RUN   TestFilterThinkingBlocksSignedHistorySkipsDecode
+--- PASS: TestFilterThinkingBlocksSignedHistorySkipsDecode (0.01s)
+=== RUN   TestGrokQuotaBillingStillRejectsUnavailableCredentialsDuringCooldown
+=== RUN   TestGrokQuotaBillingStillRejectsUnavailableCredentialsDuringCooldown/missing_refresh_token
+=== RUN   TestGrokQuotaBillingStillRejectsUnavailableCredentialsDuringCooldown/expired_access_token_without_refresh_service
+=== RUN   TestGrokQuotaBillingStillRejectsUnavailableCredentialsDuringCooldown/missing_configured_proxy
+    grok_quota_cooldown_test.go:78: 
+        	Error Trace:	C:/Users/Admin/AppData/Local/Temp/sub2-v022-baseline.1aE8h9/backend/internal/service/grok_quota_cooldown_test.go:78
+        	Error:      	Error "error: code=503 reason=\"ACCOUNT_PROXY_UNAVAILABLE\" message=\"configured account proxy is unavailable\" metadata=map[]" does not contain "GROK_QUOTA_TOKEN_UNAVAILABLE"
+        	Test:       	TestGrokQuotaBillingStillRejectsUnavailableCredentialsDuringCooldown/missing_configured_proxy
+--- FAIL: TestGrokQuotaBillingStillRejectsUnavailableCredentialsDuringCooldown (0.00s)
+    --- PASS: TestGrokQuotaBillingStillRejectsUnavailableCredentialsDuringCooldown/missing_refresh_token (0.00s)
+    --- PASS: TestGrokQuotaBillingStillRejectsUnavailableCredentialsDuringCooldown/expired_access_token_without_refresh_service (0.00s)
+    --- FAIL: TestGrokQuotaBillingStillRejectsUnavailableCredentialsDuringCooldown/missing_configured_proxy (0.00s)
+=== RUN   TestLiveCreateUsesSharedAuthorizationAndRequestedOSIdentity
+    openai_aux_os_authorization_test.go:28: 
+        	Error Trace:	C:/Users/Admin/AppData/Local/Temp/sub2-v022-baseline.1aE8h9/backend/internal/service/openai_aux_os_authorization_test.go:28
+        	Error:      	Expected error with "error: code=400 reason=\"OPENAI_OAUTH_OS_UNAUTHORIZED\" message=\"OpenAI OAuth account authorization is unavailable\" metadata=map[]" in chain but got nil.
+        	Test:       	TestLiveCreateUsesSharedAuthorizationAndRequestedOSIdentity
+--- FAIL: TestLiveCreateUsesSharedAuthorizationAndRequestedOSIdentity (0.00s)
+=== RUN   TestUsageProbeSkipsUnavailableSharedGrant
+2026/11/17 14:17:56 WARN openai_codex_turn_identity_fallback reason=hmac_secret_unavailable mapping=session mapping_digest=4b8f4c4bb375
+    openai_aux_os_authorization_test.go:142: 
+        	Error Trace:	C:/Users/Admin/AppData/Local/Temp/sub2-v022-baseline.1aE8h9/backend/internal/service/openai_aux_os_authorization_test.go:142
+        	Error:      	Target error should be in err chain:
+        	            	expected: "error: code=400 reason=\"OPENAI_OAUTH_OS_UNAUTHORIZED\" message=\"OpenAI OAuth account authorization is unavailable\" metadata=map[]"
+        	            	in chain: "openai codex probe request failed: Post \"https://chatgpt.com/backend-api/codex/responses\": net/http: TLS handshake timeout"
+        	            		"Post \"https://chatgpt.com/backend-api/codex/responses\": net/http: TLS handshake timeout"
+        	            		"net/http: TLS handshake timeout"
+        	Test:       	TestUsageProbeSkipsUnavailableSharedGrant
+--- FAIL: TestUsageProbeSkipsUnavailableSharedGrant (5.05s)
+FAIL

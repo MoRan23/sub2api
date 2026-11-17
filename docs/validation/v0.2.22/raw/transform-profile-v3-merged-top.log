@@ -1,0 +1,21 @@
+File: .tmp-merge-service.test-v3.exe
+Build ID: C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\backend\.tmp-merge-service.test-v3.exe2026-11-17 15:11:58.8838795 +0000 UTC
+Type: cpu
+Time: 2026-11-17 23:17:18 CST
+Duration: 3.30s, Total samples = 4230ms (128.14%)
+Showing nodes accounting for 3540ms, 83.69% of 4230ms total
+Dropped 95 nodes (cum <= 21.15ms)
+Showing top 12 nodes out of 80
+      flat  flat%   sum%        cum   cum%
+    1430ms 33.81% 33.81%     1470ms 34.75%  encoding/json/internal/jsonwire.ConsumeSimpleString
+     410ms  9.69% 43.50%      430ms 10.17%  encoding/json/internal/jsonwire.ConsumeStringResumable.func1 (inline)
+     410ms  9.69% 53.19%      410ms  9.69%  runtime.memmove
+     390ms  9.22% 62.41%      820ms 19.39%  encoding/json/internal/jsonwire.ConsumeStringResumable
+     210ms  4.96% 67.38%      210ms  4.96%  runtime.memclrNoHeapPointers
+     210ms  4.96% 72.34%      420ms  9.93%  runtime.scanObject
+     130ms  3.07% 75.41%      140ms  3.31%  runtime.preemptM
+     100ms  2.36% 77.78%      180ms  4.26%  runtime.lock2
+      70ms  1.65% 79.43%       70ms  1.65%  runtime.semasleep
+      60ms  1.42% 80.85%       60ms  1.42%  indexbytebody
+      60ms  1.42% 82.27%       60ms  1.42%  internal/runtime/gc/scan.scanSpanPackedAVX512
+      60ms  1.42% 83.69%       60ms  1.42%  runtime.asyncPreempt

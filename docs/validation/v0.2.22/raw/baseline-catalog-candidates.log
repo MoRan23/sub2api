@@ -1,0 +1,24 @@
+2026/11/17 14:17:59 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestAccountConfigurationExplicitIntentIsScopedAndCopied
+    account_configuration_intent_test.go:55: 
+        	Error Trace:	C:/Users/Admin/AppData/Local/Temp/sub2-v022-baseline.1aE8h9/backend/internal/service/account_configuration_intent_test.go:55
+        	Error:      	"codex-tui/0.154.0 (old environment)" does not contain "Ubuntu"
+        	Test:       	TestAccountConfigurationExplicitIntentIsScopedAndCopied
+--- FAIL: TestAccountConfigurationExplicitIntentIsScopedAndCopied (0.00s)
+=== RUN   TestFetchOpenAIAccountModelsMappingChangesReuseRawCache
+    account_test_models_test.go:330: 
+        	Error Trace:	C:/Users/Admin/AppData/Local/Temp/sub2-v022-baseline.1aE8h9/backend/internal/service/account_test_models_test.go:330
+        	Error:      	Not equal: 
+        	            	expected: int(123)
+        	            	actual  : int64(0)
+        	Test:       	TestFetchOpenAIAccountModelsMappingChangesReuseRawCache
+--- FAIL: TestFetchOpenAIAccountModelsMappingChangesReuseRawCache (0.00s)
+=== RUN   TestInflightEstimate_AccountMappingUsesCandidateViews
+=== RUN   TestInflightEstimate_AccountMappingUsesCandidateViews/openai=false
+=== RUN   TestInflightEstimate_AccountMappingUsesCandidateViews/openai=true
+--- PASS: TestInflightEstimate_AccountMappingUsesCandidateViews (0.00s)
+    --- PASS: TestInflightEstimate_AccountMappingUsesCandidateViews/openai=false (0.00s)
+    --- PASS: TestInflightEstimate_AccountMappingUsesCandidateViews/openai=true (0.00s)
+=== RUN   TestGeminiExplicitCacheExclusionsWithoutCandidateSecrets
+--- PASS: TestGeminiExplicitCacheExclusionsWithoutCandidateSecrets (0.00s)
+FAIL

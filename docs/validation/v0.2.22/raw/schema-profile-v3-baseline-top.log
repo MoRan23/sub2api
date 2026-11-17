@@ -1,0 +1,21 @@
+File: service-baseline.test.exe
+Build ID: C:\Users\Admin\AppData\Local\Temp\sub2-v022-baseline.1aE8h9\service-baseline.test.exe2026-11-17 13:59:35.847551 +0000 UTC
+Type: cpu
+Time: 2026-11-17 23:17:04 CST
+Duration: 4.54s, Total samples = 4.47s (98.36%)
+Showing nodes accounting for 4.41s, 98.66% of 4.47s total
+Dropped 29 nodes (cum <= 0.02s)
+Showing top 12 nodes out of 36
+      flat  flat%   sum%        cum   cum%
+     3.86s 86.35% 86.35%      3.86s 86.35%  encoding/json/internal/jsonwire.ConsumeSimpleString (inline)
+     0.38s  8.50% 94.85%      0.38s  8.50%  indexbytebody
+     0.08s  1.79% 96.64%      0.11s  2.46%  unicode/utf8.Valid
+     0.05s  1.12% 97.76%      0.05s  1.12%  runtime.memmove
+     0.03s  0.67% 98.43%      0.03s  0.67%  unicode/utf8.word[go.shape.[]uint8] (inline)
+     0.01s  0.22% 98.66%      0.23s  5.15%  bytes.Index
+         0     0% 98.66%      0.23s  5.15%  bytes.Contains
+         0     0% 98.66%      0.38s  8.50%  bytes.IndexByte (inline)
+         0     0% 98.66%      3.87s 86.58%  encoding/json.Valid
+         0     0% 98.66%      3.87s 86.58%  encoding/json.checkValid
+         0     0% 98.66%      3.86s 86.35%  encoding/json/jsontext.(*Decoder).ReadValue (inline)
+         0     0% 98.66%      3.86s 86.35%  encoding/json/jsontext.(*decoderState).ReadValue

@@ -1,0 +1,50 @@
+=== RUN   TestCodexEngineWSCyberAuditUsesCurrentTurnRequestID
+=== RUN   TestCodexEngineWSCyberAuditUsesCurrentTurnRequestID/explicit_round_id
+2026/11/17 22:09:01 [OpenAI WS Mode][openai_ws_mode=true] bootstrap enabled=false oauth_enabled=false apikey_enabled=false force_http=false responses_websockets_v2=false responses_websockets=false payload_log_sample_rate=0.000 event_flush_batch_size=0 event_flush_interval_ms=0 prewarm_cooldown_ms=0 retry_backoff_initial_ms=0 retry_backoff_max_ms=0 retry_jitter_ratio=0.000 retry_total_budget_ms=0 ws_read_limit_bytes=16777216
+2026-11-17T22:09:01.633+0800	INFO	handler/openai_gateway_handler.go:2652	openai.websocket_ingress_started	{"service": "sub2api", "env": "production", "component": "handler.openai_gateway.responses_ws", "user_id": 100, "api_key_id": 99, "group_id": 3132, "openai_ws_mode": true}
+2026-11-17T22:09:01.635+0800	WARN	slog	logger/slog_handler.go:55	Codex-Engine delivery outcome save failed	{"service": "sub2api", "env": "production", "job_id": 1, "account_id": 1}
+2026-11-17T22:09:01.635+0800	WARN	handler/openai_gateway_handler.go:3615	openai.websocket_proxy_failed	{"service": "sub2api", "env": "production", "component": "handler.openai_gateway.responses_ws", "user_id": 100, "api_key_id": 99, "group_id": 3132, "openai_ws_mode": true, "ws_ingress": true, "session_initial_model": "gpt-5.1", "has_previous_response_id": false, "previous_response_id_kind": "empty", "account_id": 1, "error": "openai ws client close: 1008 websocket authorization is no longer valid, please reconnect", "close_status": "-", "close_reason": "-"}
+    openai_codex_engine_cyber_usage_test.go:114: 
+        	Error Trace:	C:/Users/Admin/AppData/Local/Temp/sub2-v022-baseline.1aE8h9/backend/internal/handler/openai_codex_engine_cyber_usage_test.go:114
+        	Error:      	Received unexpected error:
+        	            	failed to get reader: failed to read frame header: EOF
+        	Test:       	TestCodexEngineWSCyberAuditUsesCurrentTurnRequestID/explicit_round_id
+=== RUN   TestCodexEngineWSCyberAuditUsesCurrentTurnRequestID/missing_round_id
+2026-11-17T22:09:01.636+0800	INFO	service/openai_ws_forwarder_logutil.go:539	[OpenAI WS Mode][openai_ws_mode=true] bootstrap enabled=false oauth_enabled=false apikey_enabled=false force_http=false responses_websockets_v2=false responses_websockets=false payload_log_sample_rate=0.000 event_flush_batch_size=0 event_flush_interval_ms=0 prewarm_cooldown_ms=0 retry_backoff_initial_ms=0 retry_backoff_max_ms=0 retry_jitter_ratio=0.000 retry_total_budget_ms=0 ws_read_limit_bytes=16777216	{"service": "sub2api", "env": "production", "component": "service.openai_gateway", "legacy_printf": true}
+2026-11-17T22:09:01.639+0800	INFO	handler/openai_gateway_handler.go:2652	openai.websocket_ingress_started	{"service": "sub2api", "env": "production", "component": "handler.openai_gateway.responses_ws", "user_id": 100, "api_key_id": 99, "group_id": 3132, "openai_ws_mode": true}
+2026-11-17T22:09:01.640+0800	WARN	slog	logger/slog_handler.go:55	Codex-Engine delivery outcome save failed	{"service": "sub2api", "env": "production", "job_id": 1, "account_id": 1}
+    openai_codex_engine_cyber_usage_test.go:114: 
+        	Error Trace:	C:/Users/Admin/AppData/Local/Temp/sub2-v022-baseline.1aE8h9/backend/internal/handler/openai_codex_engine_cyber_usage_test.go:114
+        	Error:      	Received unexpected error:
+        	            	failed to get reader: failed to read frame header: EOF
+        	Test:       	TestCodexEngineWSCyberAuditUsesCurrentTurnRequestID/missing_round_id
+2026-11-17T22:09:01.640+0800	WARN	handler/openai_gateway_handler.go:3615	openai.websocket_proxy_failed	{"service": "sub2api", "env": "production", "component": "handler.openai_gateway.responses_ws", "user_id": 100, "api_key_id": 99, "group_id": 3132, "openai_ws_mode": true, "ws_ingress": true, "session_initial_model": "gpt-5.1", "has_previous_response_id": false, "previous_response_id_kind": "empty", "account_id": 1, "error": "openai ws client close: 1008 websocket authorization is no longer valid, please reconnect", "close_status": "-", "close_reason": "-"}
+--- FAIL: TestCodexEngineWSCyberAuditUsesCurrentTurnRequestID (0.02s)
+    --- FAIL: TestCodexEngineWSCyberAuditUsesCurrentTurnRequestID/explicit_round_id (0.01s)
+    --- FAIL: TestCodexEngineWSCyberAuditUsesCurrentTurnRequestID/missing_round_id (0.00s)
+=== RUN   TestResolveOpenAIMessagesDispatchMappedModel
+=== RUN   TestResolveOpenAIMessagesDispatchMappedModel/exact_claude_model_override_wins
+=== RUN   TestResolveOpenAIMessagesDispatchMappedModel/uses_family_default_when_no_override
+    openai_gateway_handler_test.go:717: 
+        	Error Trace:	C:/Users/Admin/AppData/Local/Temp/sub2-v022-baseline.1aE8h9/backend/internal/handler/openai_gateway_handler_test.go:717
+        	Error:      	Not equal: 
+        	            	expected: "gpt-5.4"
+        	            	actual  : "gpt-5.6-sol"
+        	            	
+        	            	Diff:
+        	            	--- Expected
+        	            	+++ Actual
+        	            	@@ -1 +1 @@
+        	            	-gpt-5.4
+        	            	+gpt-5.6-sol
+        	Test:       	TestResolveOpenAIMessagesDispatchMappedModel/uses_family_default_when_no_override
+=== RUN   TestResolveOpenAIMessagesDispatchMappedModel/returns_empty_for_non_claude_or_missing_group
+=== RUN   TestResolveOpenAIMessagesDispatchMappedModel/grok_group_maps_claude_cli_model_to_grok_default
+=== RUN   TestResolveOpenAIMessagesDispatchMappedModel/does_not_fall_back_to_group_default_mapped_model
+--- FAIL: TestResolveOpenAIMessagesDispatchMappedModel (0.00s)
+    --- PASS: TestResolveOpenAIMessagesDispatchMappedModel/exact_claude_model_override_wins (0.00s)
+    --- FAIL: TestResolveOpenAIMessagesDispatchMappedModel/uses_family_default_when_no_override (0.00s)
+    --- PASS: TestResolveOpenAIMessagesDispatchMappedModel/returns_empty_for_non_claude_or_missing_group (0.00s)
+    --- PASS: TestResolveOpenAIMessagesDispatchMappedModel/grok_group_maps_claude_cli_model_to_grok_default (0.00s)
+    --- PASS: TestResolveOpenAIMessagesDispatchMappedModel/does_not_fall_back_to_group_default_mapped_model (0.00s)
+FAIL

@@ -1,0 +1,26 @@
+2026/11/17 14:24:48 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkCodexTransformRetryCPU/1MiB/image_false/attempts_1/sparse-4         	     145	   4226712 ns/op	 248.12 MB/s	 5246571 B/op	      77 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_false/attempts_5/sparse-4         	      25	  22591048 ns/op	 232.11 MB/s	26231800 B/op	     384 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_false/attempts_15/sparse-4        	       8	  70222512 ns/op	 224.01 MB/s	78698537 B/op	    1163 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_true/attempts_1/sparse-4          	     100	   5306173 ns/op	 197.65 MB/s	 5254724 B/op	      78 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_true/attempts_5/sparse-4          	      33	  17706309 ns/op	 296.15 MB/s	26273828 B/op	     395 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_true/attempts_15/sparse-4         	      10	  60205520 ns/op	 261.29 MB/s	78819657 B/op	    1180 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_false/attempts_1/sparse-4         	      22	  36485391 ns/op	 229.92 MB/s	41948786 B/op	      88 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_false/attempts_5/sparse-4         	       5	 120155120 ns/op	 349.08 MB/s	209736676 B/op	     414 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_false/attempts_15/sparse-4        	       2	 373083000 ns/op	 337.27 MB/s	629217072 B/op	    1271 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_true/attempts_1/sparse-4          	      26	  20540362 ns/op	 408.40 MB/s	41956294 B/op	      86 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_true/attempts_5/sparse-4          	       5	 123899340 ns/op	 338.53 MB/s	209779876 B/op	     429 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_true/attempts_15/sparse-4         	       2	 444496500 ns/op	 283.09 MB/s	629337384 B/op	    1280 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/1MiB/repair=false/current-4     	     674	    804638 ns/op	1303.46 MB/s	      17 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/1MiB/repair=true/current-4      	     172	   4020920 ns/op	 260.85 MB/s	 2113897 B/op	      12 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/1MiB/repair=false/current-4      	     376	   2129440 ns/op	 492.53 MB/s	      34 B/op	       2 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/1MiB/repair=true/current-4       	     172	   3488512 ns/op	 300.66 MB/s	 2113901 B/op	      12 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/8MiB/repair=false/current-4     	     105	   5775142 ns/op	1452.58 MB/s	      24 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/8MiB/repair=true/current-4      	      21	  30757300 ns/op	 272.74 MB/s	16794134 B/op	      13 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/8MiB/repair=false/current-4      	      52	  12166698 ns/op	 689.49 MB/s	      48 B/op	       2 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/8MiB/repair=true/current-4       	      22	  35733214 ns/op	 234.76 MB/s	16794092 B/op	      12 allocs/op
+PASS

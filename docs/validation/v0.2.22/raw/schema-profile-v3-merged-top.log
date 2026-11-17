@@ -1,0 +1,21 @@
+File: .tmp-merge-service.test-v3.exe
+Build ID: C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\backend\.tmp-merge-service.test-v3.exe2026-11-17 15:11:58.8838795 +0000 UTC
+Type: cpu
+Time: 2026-11-17 23:17:13 CST
+Duration: 4.57s, Total samples = 4.50s (98.52%)
+Showing nodes accounting for 4.41s, 98.00% of 4.50s total
+Dropped 30 nodes (cum <= 0.02s)
+Showing top 12 nodes out of 31
+      flat  flat%   sum%        cum   cum%
+     3.95s 87.78% 87.78%      3.95s 87.78%  github.com/tidwall/gjson.validstring
+     0.31s  6.89% 94.67%      0.31s  6.89%  indexbytebody
+     0.11s  2.44% 97.11%      0.11s  2.44%  unicode/utf8.Valid
+     0.02s  0.44% 97.56%      0.04s  0.89%  runtime.scanObject
+     0.01s  0.22% 97.78%      0.14s  3.11%  github.com/Wei-Shaw/sub2api/internal/service.(*openAIResponsesToolSchemaParser).parseObject
+     0.01s  0.22% 98.00%      0.14s  3.11%  github.com/Wei-Shaw/sub2api/internal/service.(*openAIResponsesToolSchemaParser).parseValue
+         0     0% 98.00%      0.19s  4.22%  bytes.Contains
+         0     0% 98.00%      0.19s  4.22%  bytes.Index
+         0     0% 98.00%      0.31s  6.89%  bytes.IndexByte (inline)
+         0     0% 98.00%      0.14s  3.11%  github.com/Wei-Shaw/sub2api/internal/service.(*openAIResponsesToolSchemaParser).parseArray
+         0     0% 98.00%      0.12s  2.67%  github.com/Wei-Shaw/sub2api/internal/service.(*openAIResponsesToolSchemaParser).parseString
+         0     0% 98.00%      0.03s  0.67%  github.com/Wei-Shaw/sub2api/internal/service.BenchmarkOpenAIResponsesToolSchemasCPU

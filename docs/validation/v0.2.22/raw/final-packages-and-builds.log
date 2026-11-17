@@ -1,0 +1,11 @@
+Final package statuses extracted from .tmp-merge-final-unit.log. Service failed separately as documented.
+ok  	github.com/Wei-Shaw/sub2api/internal/handler	66.245s
+ok  	github.com/Wei-Shaw/sub2api/internal/repository	17.698s
+ok  	github.com/Wei-Shaw/sub2api/internal/server	4.521s
+ok  	github.com/Wei-Shaw/sub2api/cmd/server	0.088s
+ok  	github.com/Wei-Shaw/sub2api/internal/server/middleware	5.257s
+ok  	github.com/Wei-Shaw/sub2api/migrations	0.035s
+
+Windows embed build: exit 0 (j-m9y5g9).
+Linux amd64 embed build: exit 0 (j-82ya3r).
+Both build commands produced no stdout.

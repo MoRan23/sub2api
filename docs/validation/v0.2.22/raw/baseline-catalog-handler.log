@@ -1,0 +1,53 @@
+=== RUN   TestCodexModelsFailsOverFromRetryableUpstreamStatus
+=== RUN   TestCodexModelsFailsOverFromRetryableUpstreamStatus/Too_Many_Requests
+2026/11/17 22:09:54 [OpenAI WS Mode][openai_ws_mode=true] bootstrap enabled=false oauth_enabled=false apikey_enabled=false force_http=false responses_websockets_v2=false responses_websockets=false payload_log_sample_rate=0.000 event_flush_batch_size=0 event_flush_interval_ms=0 prewarm_cooldown_ms=0 retry_backoff_initial_ms=0 retry_backoff_max_ms=0 retry_jitter_ratio=0.000 retry_total_budget_ms=0 ws_read_limit_bytes=16777216
+    openai_codex_models_handler_test.go:443: supported_reasoning_levels must be populated: <nil>
+=== RUN   TestCodexModelsFailsOverFromRetryableUpstreamStatus/Internal_Server_Error
+2026/11/17 22:09:54 [OpenAI WS Mode][openai_ws_mode=true] bootstrap enabled=false oauth_enabled=false apikey_enabled=false force_http=false responses_websockets_v2=false responses_websockets=false payload_log_sample_rate=0.000 event_flush_batch_size=0 event_flush_interval_ms=0 prewarm_cooldown_ms=0 retry_backoff_initial_ms=0 retry_backoff_max_ms=0 retry_jitter_ratio=0.000 retry_total_budget_ms=0 ws_read_limit_bytes=16777216
+    openai_codex_models_handler_test.go:443: supported_reasoning_levels must be populated: <nil>
+=== RUN   TestCodexModelsFailsOverFromRetryableUpstreamStatus/Bad_Gateway
+2026/11/17 22:09:54 [OpenAI WS Mode][openai_ws_mode=true] bootstrap enabled=false oauth_enabled=false apikey_enabled=false force_http=false responses_websockets_v2=false responses_websockets=false payload_log_sample_rate=0.000 event_flush_batch_size=0 event_flush_interval_ms=0 prewarm_cooldown_ms=0 retry_backoff_initial_ms=0 retry_backoff_max_ms=0 retry_jitter_ratio=0.000 retry_total_budget_ms=0 ws_read_limit_bytes=16777216
+    openai_codex_models_handler_test.go:443: supported_reasoning_levels must be populated: <nil>
+=== RUN   TestCodexModelsFailsOverFromRetryableUpstreamStatus/Service_Unavailable
+2026/11/17 22:09:54 [OpenAI WS Mode][openai_ws_mode=true] bootstrap enabled=false oauth_enabled=false apikey_enabled=false force_http=false responses_websockets_v2=false responses_websockets=false payload_log_sample_rate=0.000 event_flush_batch_size=0 event_flush_interval_ms=0 prewarm_cooldown_ms=0 retry_backoff_initial_ms=0 retry_backoff_max_ms=0 retry_jitter_ratio=0.000 retry_total_budget_ms=0 ws_read_limit_bytes=16777216
+    openai_codex_models_handler_test.go:443: supported_reasoning_levels must be populated: <nil>
+=== RUN   TestCodexModelsFailsOverFromRetryableUpstreamStatus/Gateway_Timeout
+2026/11/17 22:09:54 [OpenAI WS Mode][openai_ws_mode=true] bootstrap enabled=false oauth_enabled=false apikey_enabled=false force_http=false responses_websockets_v2=false responses_websockets=false payload_log_sample_rate=0.000 event_flush_batch_size=0 event_flush_interval_ms=0 prewarm_cooldown_ms=0 retry_backoff_initial_ms=0 retry_backoff_max_ms=0 retry_jitter_ratio=0.000 retry_total_budget_ms=0 ws_read_limit_bytes=16777216
+    openai_codex_models_handler_test.go:443: supported_reasoning_levels must be populated: <nil>
+--- FAIL: TestCodexModelsFailsOverFromRetryableUpstreamStatus (0.06s)
+    --- FAIL: TestCodexModelsFailsOverFromRetryableUpstreamStatus/Too_Many_Requests (0.01s)
+    --- FAIL: TestCodexModelsFailsOverFromRetryableUpstreamStatus/Internal_Server_Error (0.01s)
+    --- FAIL: TestCodexModelsFailsOverFromRetryableUpstreamStatus/Bad_Gateway (0.01s)
+    --- FAIL: TestCodexModelsFailsOverFromRetryableUpstreamStatus/Service_Unavailable (0.01s)
+    --- FAIL: TestCodexModelsFailsOverFromRetryableUpstreamStatus/Gateway_Timeout (0.01s)
+=== RUN   TestCodexModelsFailsOverFromInvalidManifestEnvelope
+2026/11/17 22:09:54 [OpenAI WS Mode][openai_ws_mode=true] bootstrap enabled=false oauth_enabled=false apikey_enabled=false force_http=false responses_websockets_v2=false responses_websockets=false payload_log_sample_rate=0.000 event_flush_batch_size=0 event_flush_interval_ms=0 prewarm_cooldown_ms=0 retry_backoff_initial_ms=0 retry_backoff_max_ms=0 retry_jitter_ratio=0.000 retry_total_budget_ms=0 ws_read_limit_bytes=16777216
+    openai_codex_models_handler_test.go:493: supported_reasoning_levels must be populated: <nil>
+--- FAIL: TestCodexModelsFailsOverFromInvalidManifestEnvelope (0.01s)
+=== RUN   TestPinnedModelsAllowlistExpandsWildcardsForBothRepresentations
+=== RUN   TestPinnedModelsAllowlistExpandsWildcardsForBothRepresentations/ordinary
+2026/11/17 22:09:54 [OpenAI WS Mode][openai_ws_mode=true] bootstrap enabled=false oauth_enabled=false apikey_enabled=false force_http=false responses_websockets_v2=false responses_websockets=false payload_log_sample_rate=0.000 event_flush_batch_size=0 event_flush_interval_ms=0 prewarm_cooldown_ms=0 retry_backoff_initial_ms=0 retry_backoff_max_ms=0 retry_jitter_ratio=0.000 retry_total_budget_ms=0 ws_read_limit_bytes=16777216
+=== RUN   TestPinnedModelsAllowlistExpandsWildcardsForBothRepresentations/codex
+2026/11/17 22:09:54 [OpenAI WS Mode][openai_ws_mode=true] bootstrap enabled=false oauth_enabled=false apikey_enabled=false force_http=false responses_websockets_v2=false responses_websockets=false payload_log_sample_rate=0.000 event_flush_batch_size=0 event_flush_interval_ms=0 prewarm_cooldown_ms=0 retry_backoff_initial_ms=0 retry_backoff_max_ms=0 retry_jitter_ratio=0.000 retry_total_budget_ms=0 ws_read_limit_bytes=16777216
+    openai_models_handler_test.go:169: 
+        	Error Trace:	C:/Users/Admin/AppData/Local/Temp/sub2-v022-baseline.1aE8h9/backend/internal/handler/openai_models_handler_test.go:169
+        	Error:      	"{\"models\":[{\"context_window\":424242,\"display_name\":\"public-b\",\"shell_type\":\"unified_exec\",\"slug\":\"public-b\"},{\"context_window\":424242,\"display_name\":\"public-a\",\"shell_type\":\"unified_exec\",\"slug\":\"public-a\"}]}" does not contain "\"context_window\":272000"
+        	Test:       	TestPinnedModelsAllowlistExpandsWildcardsForBothRepresentations/codex
+        	Messages:   	known model metadata comes from the official catalog
+--- FAIL: TestPinnedModelsAllowlistExpandsWildcardsForBothRepresentations (0.02s)
+    --- PASS: TestPinnedModelsAllowlistExpandsWildcardsForBothRepresentations/ordinary (0.01s)
+    --- FAIL: TestPinnedModelsAllowlistExpandsWildcardsForBothRepresentations/codex (0.01s)
+=== RUN   TestPinnedModelsMappingFollowsUpstreamDiscoveryForBothRepresentations
+=== RUN   TestPinnedModelsMappingFollowsUpstreamDiscoveryForBothRepresentations/ordinary
+2026/11/17 22:09:54 [OpenAI WS Mode][openai_ws_mode=true] bootstrap enabled=false oauth_enabled=false apikey_enabled=false force_http=false responses_websockets_v2=false responses_websockets=false payload_log_sample_rate=0.000 event_flush_batch_size=0 event_flush_interval_ms=0 prewarm_cooldown_ms=0 retry_backoff_initial_ms=0 retry_backoff_max_ms=0 retry_jitter_ratio=0.000 retry_total_budget_ms=0 ws_read_limit_bytes=16777216
+=== RUN   TestPinnedModelsMappingFollowsUpstreamDiscoveryForBothRepresentations/codex
+2026/11/17 22:09:54 [OpenAI WS Mode][openai_ws_mode=true] bootstrap enabled=false oauth_enabled=false apikey_enabled=false force_http=false responses_websockets_v2=false responses_websockets=false payload_log_sample_rate=0.000 event_flush_batch_size=0 event_flush_interval_ms=0 prewarm_cooldown_ms=0 retry_backoff_initial_ms=0 retry_backoff_max_ms=0 retry_jitter_ratio=0.000 retry_total_budget_ms=0 ws_read_limit_bytes=16777216
+    openai_models_handler_test.go:211: 
+        	Error Trace:	C:/Users/Admin/AppData/Local/Temp/sub2-v022-baseline.1aE8h9/backend/internal/handler/openai_models_handler_test.go:211
+        	Error:      	"{\"models\":[{\"context_window\":424242,\"display_name\":\"custom-concrete\",\"shell_type\":\"unified_exec\",\"slug\":\"custom-concrete\"},{\"context_window\":424242,\"display_name\":\"public-alias\",\"shell_type\":\"unified_exec\",\"slug\":\"public-alias\"}]}" does not contain "\"context_window\":272000"
+        	Test:       	TestPinnedModelsMappingFollowsUpstreamDiscoveryForBothRepresentations/codex
+        	Messages:   	known model metadata comes from the official catalog
+--- FAIL: TestPinnedModelsMappingFollowsUpstreamDiscoveryForBothRepresentations (0.02s)
+    --- PASS: TestPinnedModelsMappingFollowsUpstreamDiscoveryForBothRepresentations/ordinary (0.01s)
+    --- FAIL: TestPinnedModelsMappingFollowsUpstreamDiscoveryForBothRepresentations/codex (0.01s)
+FAIL

@@ -1,0 +1,8 @@
+Affinity mask: 0x55; GOMAXPROCS=4; order=['merged', 'baseline']; round=2
+2026/11/17 15:29:04 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkCodexTransformRetryCPU/8MiB/image_false/attempts_15/sparse-4         	      14	 240181443 ns/op	 523.90 MB/s	629205411 B/op	    1226 allocs/op
+PASS

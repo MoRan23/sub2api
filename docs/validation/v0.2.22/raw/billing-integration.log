@@ -1,0 +1,110 @@
+2026/11/17 13:48:31 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestCodexEngineBillingRecoveryPreservesTotalQuotaAdmissionIntegration
+=== RUN   TestCodexEngineBillingRecoveryPreservesTotalQuotaAdmissionIntegration/expired_admission_batch
+2026/11/17 13:48:39 [OpenAI WS Mode][openai_ws_mode=true] bootstrap enabled=false oauth_enabled=false apikey_enabled=false force_http=false responses_websockets_v2=false responses_websockets=false payload_log_sample_rate=0.000 event_flush_batch_size=0 event_flush_interval_ms=0 prewarm_cooldown_ms=0 retry_backoff_initial_ms=0 retry_backoff_max_ms=0 retry_jitter_ratio=0.000 retry_total_budget_ms=0 ws_read_limit_bytes=16777216
+2026/11/17 13:48:39 [Billing] Using fallback pricing for model: gpt-5.1
+2026/11/17 13:48:39 [OpenAI WS Mode][openai_ws_mode=true] bootstrap enabled=false oauth_enabled=false apikey_enabled=false force_http=false responses_websockets_v2=false responses_websockets=false payload_log_sample_rate=0.000 event_flush_batch_size=0 event_flush_interval_ms=0 prewarm_cooldown_ms=0 retry_backoff_initial_ms=0 retry_backoff_max_ms=0 retry_jitter_ratio=0.000 retry_total_budget_ms=0 ws_read_limit_bytes=16777216
+2026/11/17 13:48:39 [Billing] Using fallback pricing for model: gpt-5.1
+=== RUN   TestCodexEngineBillingRecoveryPreservesTotalQuotaAdmissionIntegration/permanent_credit_appended_after_admission
+2026/11/17 13:48:39 [OpenAI WS Mode][openai_ws_mode=true] bootstrap enabled=false oauth_enabled=false apikey_enabled=false force_http=false responses_websockets_v2=false responses_websockets=false payload_log_sample_rate=0.000 event_flush_batch_size=0 event_flush_interval_ms=0 prewarm_cooldown_ms=0 retry_backoff_initial_ms=0 retry_backoff_max_ms=0 retry_jitter_ratio=0.000 retry_total_budget_ms=0 ws_read_limit_bytes=16777216
+2026/11/17 13:48:39 [Billing] Using fallback pricing for model: gpt-5.1
+2026/11/17 13:48:39 [OpenAI WS Mode][openai_ws_mode=true] bootstrap enabled=false oauth_enabled=false apikey_enabled=false force_http=false responses_websockets_v2=false responses_websockets=false payload_log_sample_rate=0.000 event_flush_batch_size=0 event_flush_interval_ms=0 prewarm_cooldown_ms=0 retry_backoff_initial_ms=0 retry_backoff_max_ms=0 retry_jitter_ratio=0.000 retry_total_budget_ms=0 ws_read_limit_bytes=16777216
+2026/11/17 13:48:39 [Billing] Using fallback pricing for model: gpt-5.1
+=== RUN   TestCodexEngineBillingRecoveryPreservesTotalQuotaAdmissionIntegration/undelivered_expired_admission_batch
+2026/11/17 13:48:39 [OpenAI WS Mode][openai_ws_mode=true] bootstrap enabled=false oauth_enabled=false apikey_enabled=false force_http=false responses_websockets_v2=false responses_websockets=false payload_log_sample_rate=0.000 event_flush_batch_size=0 event_flush_interval_ms=0 prewarm_cooldown_ms=0 retry_backoff_initial_ms=0 retry_backoff_max_ms=0 retry_jitter_ratio=0.000 retry_total_budget_ms=0 ws_read_limit_bytes=16777216
+2026/11/17 13:48:39 [Billing] Using fallback pricing for model: gpt-5.1
+2026/11/17 13:48:39 [OpenAI WS Mode][openai_ws_mode=true] bootstrap enabled=false oauth_enabled=false apikey_enabled=false force_http=false responses_websockets_v2=false responses_websockets=false payload_log_sample_rate=0.000 event_flush_batch_size=0 event_flush_interval_ms=0 prewarm_cooldown_ms=0 retry_backoff_initial_ms=0 retry_backoff_max_ms=0 retry_jitter_ratio=0.000 retry_total_budget_ms=0 ws_read_limit_bytes=16777216
+2026/11/17 13:48:39 [Billing] Using fallback pricing for model: gpt-5.1
+=== RUN   TestCodexEngineBillingRecoveryPreservesTotalQuotaAdmissionIntegration/undelivered_with_new_permanent_credit
+2026/11/17 13:48:39 [OpenAI WS Mode][openai_ws_mode=true] bootstrap enabled=false oauth_enabled=false apikey_enabled=false force_http=false responses_websockets_v2=false responses_websockets=false payload_log_sample_rate=0.000 event_flush_batch_size=0 event_flush_interval_ms=0 prewarm_cooldown_ms=0 retry_backoff_initial_ms=0 retry_backoff_max_ms=0 retry_jitter_ratio=0.000 retry_total_budget_ms=0 ws_read_limit_bytes=16777216
+2026/11/17 13:48:39 [Billing] Using fallback pricing for model: gpt-5.1
+2026/11/17 13:48:39 [OpenAI WS Mode][openai_ws_mode=true] bootstrap enabled=false oauth_enabled=false apikey_enabled=false force_http=false responses_websockets_v2=false responses_websockets=false payload_log_sample_rate=0.000 event_flush_batch_size=0 event_flush_interval_ms=0 prewarm_cooldown_ms=0 retry_backoff_initial_ms=0 retry_backoff_max_ms=0 retry_jitter_ratio=0.000 retry_total_budget_ms=0 ws_read_limit_bytes=16777216
+2026/11/17 13:48:39 [Billing] Using fallback pricing for model: gpt-5.1
+--- PASS: TestCodexEngineBillingRecoveryPreservesTotalQuotaAdmissionIntegration (0.34s)
+    --- PASS: TestCodexEngineBillingRecoveryPreservesTotalQuotaAdmissionIntegration/expired_admission_batch (0.14s)
+    --- PASS: TestCodexEngineBillingRecoveryPreservesTotalQuotaAdmissionIntegration/permanent_credit_appended_after_admission (0.09s)
+    --- PASS: TestCodexEngineBillingRecoveryPreservesTotalQuotaAdmissionIntegration/undelivered_expired_admission_batch (0.05s)
+    --- PASS: TestCodexEngineBillingRecoveryPreservesTotalQuotaAdmissionIntegration/undelivered_with_new_permanent_credit (0.06s)
+=== RUN   TestGrokSafetyBillingAtomicity
+=== RUN   TestGrokSafetyBillingAtomicity/concurrent_duplicate_commits_once
+=== RUN   TestGrokSafetyBillingAtomicity/bill_failure_rolls_back_all_effects_and_receipt
+=== RUN   TestGrokSafetyBillingAtomicity/zero_cost_still_persists_a_refusal
+--- PASS: TestGrokSafetyBillingAtomicity (0.12s)
+    --- PASS: TestGrokSafetyBillingAtomicity/concurrent_duplicate_commits_once (0.07s)
+    --- PASS: TestGrokSafetyBillingAtomicity/bill_failure_rolls_back_all_effects_and_receipt (0.03s)
+    --- PASS: TestGrokSafetyBillingAtomicity/zero_cost_still_persists_a_refusal (0.01s)
+=== RUN   TestGrokSafetySubscriptionBilling
+=== RUN   TestGrokSafetySubscriptionBilling/periodic
+=== RUN   TestGrokSafetySubscriptionBilling/finite-total
+=== RUN   TestGrokSafetySubscriptionBilling/permanent-total
+--- PASS: TestGrokSafetySubscriptionBilling (0.05s)
+    --- PASS: TestGrokSafetySubscriptionBilling/periodic (0.02s)
+    --- PASS: TestGrokSafetySubscriptionBilling/finite-total (0.01s)
+    --- PASS: TestGrokSafetySubscriptionBilling/permanent-total (0.01s)
+=== RUN   TestUsageBillingRepositoryApplyBatch_DualWalletMatchesSequential
+=== RUN   TestUsageBillingRepositoryApplyBatch_DualWalletMatchesSequential/2
+=== RUN   TestUsageBillingRepositoryApplyBatch_DualWalletMatchesSequential/-2
+--- PASS: TestUsageBillingRepositoryApplyBatch_DualWalletMatchesSequential (0.08s)
+    --- PASS: TestUsageBillingRepositoryApplyBatch_DualWalletMatchesSequential/2 (0.04s)
+    --- PASS: TestUsageBillingRepositoryApplyBatch_DualWalletMatchesSequential/-2 (0.04s)
+=== RUN   TestUsageBillingRepositoryApplyBatch_PerCommandQuotaSnapshot
+--- PASS: TestUsageBillingRepositoryApplyBatch_PerCommandQuotaSnapshot (0.03s)
+=== RUN   TestUsageBillingRepositoryApplyBatch_DifferentSnapshotsConcurrentWithSingle
+--- PASS: TestUsageBillingRepositoryApplyBatch_DifferentSnapshotsConcurrentWithSingle (0.21s)
+=== RUN   TestUsageBillingRepositoryApplyBatch_MatchesSequentialApply
+--- PASS: TestUsageBillingRepositoryApplyBatch_MatchesSequentialApply (0.10s)
+=== RUN   TestUsageBillingRepositoryApplyBatch_DuplicateAndConflictingRequests
+--- PASS: TestUsageBillingRepositoryApplyBatch_DuplicateAndConflictingRequests (0.02s)
+=== RUN   TestUsageBillingRepositoryApplyBatch_ArchivedRequestsAreNotReapplied
+--- PASS: TestUsageBillingRepositoryApplyBatch_ArchivedRequestsAreNotReapplied (0.01s)
+=== RUN   TestUsageBillingRepositoryApplyBatch_RollsBackWholeBatchOnError
+=== RUN   TestUsageBillingRepositoryApplyBatch_RollsBackWholeBatchOnError/deleted_user
+=== RUN   TestUsageBillingRepositoryApplyBatch_RollsBackWholeBatchOnError/missing_subscription
+=== RUN   TestUsageBillingRepositoryApplyBatch_RollsBackWholeBatchOnError/invalid_batches
+--- PASS: TestUsageBillingRepositoryApplyBatch_RollsBackWholeBatchOnError (0.06s)
+    --- PASS: TestUsageBillingRepositoryApplyBatch_RollsBackWholeBatchOnError/deleted_user (0.02s)
+    --- PASS: TestUsageBillingRepositoryApplyBatch_RollsBackWholeBatchOnError/missing_subscription (0.01s)
+    --- PASS: TestUsageBillingRepositoryApplyBatch_RollsBackWholeBatchOnError/invalid_batches (0.02s)
+=== RUN   TestUsageBillingRepositoryApplyBatch_RejectsNonFiniteAmounts
+--- PASS: TestUsageBillingRepositoryApplyBatch_RejectsNonFiniteAmounts (0.02s)
+=== RUN   TestUsageBillingRepositoryApply_UsesBothWalletsAndReportsCombinedBalance
+--- PASS: TestUsageBillingRepositoryApply_UsesBothWalletsAndReportsCombinedBalance (0.01s)
+=== RUN   TestUsageBillingRepositoryApply_DeduplicatesBalanceBilling
+--- PASS: TestUsageBillingRepositoryApply_DeduplicatesBalanceBilling (0.01s)
+=== RUN   TestUsageBillingRepositoryApply_DeduplicatesSubscriptionBilling
+--- PASS: TestUsageBillingRepositoryApply_DeduplicatesSubscriptionBilling (0.01s)
+=== RUN   TestUsageBillingRepositoryApply_TotalQuotaSubscriptionFIFO
+--- PASS: TestUsageBillingRepositoryApply_TotalQuotaSubscriptionFIFO (0.01s)
+=== RUN   TestUsageBillingRepositoryApply_TotalQuotaSubscriptionAllowsOverflow
+--- PASS: TestUsageBillingRepositoryApply_TotalQuotaSubscriptionAllowsOverflow (0.01s)
+=== RUN   TestUsageBillingRepositoryApply_TotalQuotaSubscriptionUsesAdmissionSnapshotAfterExpiry
+--- PASS: TestUsageBillingRepositoryApply_TotalQuotaSubscriptionUsesAdmissionSnapshotAfterExpiry (0.01s)
+=== RUN   TestUsageBillingRepositoryApply_RequestFingerprintConflict
+--- PASS: TestUsageBillingRepositoryApply_RequestFingerprintConflict (0.01s)
+=== RUN   TestUsageBillingRepositoryApply_DeletedAPIKeyStillBillsBalance
+--- PASS: TestUsageBillingRepositoryApply_DeletedAPIKeyStillBillsBalance (0.01s)
+=== RUN   TestUsageBillingRepositoryApply_DeletedAccountStillBillsBalance
+--- PASS: TestUsageBillingRepositoryApply_DeletedAccountStillBillsBalance (0.01s)
+=== RUN   TestUsageBillingRepositoryApply_UpdatesAccountQuota
+--- PASS: TestUsageBillingRepositoryApply_UpdatesAccountQuota (0.01s)
+=== RUN   TestUsageBillingRepositoryApply_UpdatesServiceAccountQuota
+--- PASS: TestUsageBillingRepositoryApply_UpdatesServiceAccountQuota (0.01s)
+=== RUN   TestUsageBillingRepositoryApply_EnqueuesSchedulerOutboxOnQuotaCrossing
+=== RUN   TestUsageBillingRepositoryApply_EnqueuesSchedulerOutboxOnQuotaCrossing/daily_first_crossing_enqueues
+=== RUN   TestUsageBillingRepositoryApply_EnqueuesSchedulerOutboxOnQuotaCrossing/weekly_first_crossing_enqueues
+=== RUN   TestUsageBillingRepositoryApply_EnqueuesSchedulerOutboxOnQuotaCrossing/total_first_crossing_enqueues
+--- PASS: TestUsageBillingRepositoryApply_EnqueuesSchedulerOutboxOnQuotaCrossing (0.06s)
+    --- PASS: TestUsageBillingRepositoryApply_EnqueuesSchedulerOutboxOnQuotaCrossing/daily_first_crossing_enqueues (0.02s)
+    --- PASS: TestUsageBillingRepositoryApply_EnqueuesSchedulerOutboxOnQuotaCrossing/weekly_first_crossing_enqueues (0.02s)
+    --- PASS: TestUsageBillingRepositoryApply_EnqueuesSchedulerOutboxOnQuotaCrossing/total_first_crossing_enqueues (0.02s)
+=== RUN   TestUsageBillingRepositoryApply_DeduplicatesAgainstArchivedKey
+--- PASS: TestUsageBillingRepositoryApply_DeduplicatesAgainstArchivedKey (0.01s)
+=== RUN   TestUsageBillingRepositoryApply_TotalQuotaExhaustsHistoricalDust
+=== RUN   TestUsageBillingRepositoryApply_TotalQuotaExhaustsHistoricalDust/current_batches
+=== RUN   TestUsageBillingRepositoryApply_TotalQuotaExhaustsHistoricalDust/admission_snapshot
+--- PASS: TestUsageBillingRepositoryApply_TotalQuotaExhaustsHistoricalDust (0.06s)
+    --- PASS: TestUsageBillingRepositoryApply_TotalQuotaExhaustsHistoricalDust/current_batches (0.03s)
+    --- PASS: TestUsageBillingRepositoryApply_TotalQuotaExhaustsHistoricalDust/admission_snapshot (0.02s)
+=== RUN   TestTotalQuotaRetirementPreservesSpendableTailAndLateSnapshot
+--- PASS: TestTotalQuotaRetirementPreservesSpendableTailAndLateSnapshot (0.02s)
+PASS

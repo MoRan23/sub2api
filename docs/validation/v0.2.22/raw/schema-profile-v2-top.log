@@ -1,0 +1,50 @@
+File: .tmp-merge-service.test-v2.exe
+Build ID: C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\backend\.tmp-merge-service.test-v2.exe2026-11-17 14:35:53.3648852 +0000 UTC
+Type: cpu
+Time: 2026-11-17 22:56:47 CST
+Duration: 3.94s, Total samples = 3.88s (98.47%)
+Showing nodes accounting for 3.84s, 98.97% of 3.88s total
+Dropped 9 nodes (cum <= 0.02s)
+      flat  flat%   sum%        cum   cum%
+     3.34s 86.08% 86.08%      3.35s 86.34%  encoding/json/internal/jsonwire.ConsumeSimpleString (inline)
+     0.39s 10.05% 96.13%      0.39s 10.05%  indexbytebody
+     0.05s  1.29% 97.42%      0.05s  1.29%  unicode/utf8.Valid
+     0.03s  0.77% 98.20%      0.03s  0.77%  runtime.memmove
+     0.02s  0.52% 98.71%      0.02s  0.52%  runtime.procyieldAsm
+     0.01s  0.26% 98.97%      0.02s  0.52%  runtime.scanObject
+         0     0% 98.97%      0.20s  5.15%  bytes.Contains (inline)
+         0     0% 98.97%      0.20s  5.15%  bytes.Index
+         0     0% 98.97%      0.39s 10.05%  bytes.IndexByte (inline)
+         0     0% 98.97%      3.35s 86.34%  encoding/json.Valid (inline)
+         0     0% 98.97%      3.35s 86.34%  encoding/json.checkValid
+         0     0% 98.97%      3.35s 86.34%  encoding/json/jsontext.(*Decoder).ReadValue (inline)
+         0     0% 98.97%      3.35s 86.34%  encoding/json/jsontext.(*decoderState).ReadValue
+         0     0% 98.97%      3.35s 86.34%  encoding/json/jsontext.(*decoderState).consumeArray
+         0     0% 98.97%      3.35s 86.34%  encoding/json/jsontext.(*decoderState).consumeObject
+         0     0% 98.97%      3.35s 86.34%  encoding/json/jsontext.(*decoderState).consumeValue
+         0     0% 98.97%      0.19s  4.90%  github.com/Wei-Shaw/sub2api/internal/service.(*openAIResponsesToolSchemaParser).parseArray
+         0     0% 98.97%      0.19s  4.90%  github.com/Wei-Shaw/sub2api/internal/service.(*openAIResponsesToolSchemaParser).parseObject
+         0     0% 98.97%      0.19s  4.90%  github.com/Wei-Shaw/sub2api/internal/service.(*openAIResponsesToolSchemaParser).parseString
+         0     0% 98.97%      0.19s  4.90%  github.com/Wei-Shaw/sub2api/internal/service.(*openAIResponsesToolSchemaParser).parseValue
+         0     0% 98.97%      0.03s  0.77%  github.com/Wei-Shaw/sub2api/internal/service.BenchmarkOpenAIResponsesToolSchemasCPU
+         0     0% 98.97%      3.79s 97.68%  github.com/Wei-Shaw/sub2api/internal/service.BenchmarkOpenAIResponsesToolSchemasCPU.func1
+         0     0% 98.97%      0.03s  0.77%  github.com/Wei-Shaw/sub2api/internal/service.buildRequestPredicatesCPUBody
+         0     0% 98.97%      0.20s  5.15%  github.com/Wei-Shaw/sub2api/internal/service.openAIResponsesBodyMayContainUnsupportedRegex
+         0     0% 98.97%      3.59s 92.53%  github.com/Wei-Shaw/sub2api/internal/service.sanitizeOpenAIResponsesToolParameterTypes
+         0     0% 98.97%      0.20s  5.15%  github.com/Wei-Shaw/sub2api/internal/service.sanitizeOpenAIResponsesToolSchemaPatterns
+         0     0% 98.97%      3.59s 92.53%  github.com/Wei-Shaw/sub2api/internal/service.sanitizeOpenAIResponsesToolSchemas
+         0     0% 98.97%      3.79s 97.68%  github.com/Wei-Shaw/sub2api/internal/service.sanitizeOpenAIResponsesToolSchemasForPlatform
+         0     0% 98.97%      0.05s  1.29%  runtime.gcBgMarkWorker
+         0     0% 98.97%      0.06s  1.55%  runtime.gcBgMarkWorker.func2
+         0     0% 98.97%      0.06s  1.55%  runtime.gcDrain
+         0     0% 98.97%      0.05s  1.29%  runtime.gcDrainMarkWorkerIdle (inline)
+         0     0% 98.97%      0.03s  0.77%  runtime.markroot
+         0     0% 98.97%      0.03s  0.77%  runtime.markroot.func1
+         0     0% 98.97%      0.02s  0.52%  runtime.procyield (inline)
+         0     0% 98.97%      0.03s  0.77%  runtime.suspendG
+         0     0% 98.97%      0.06s  1.55%  runtime.systemstack
+         0     0% 98.97%      0.02s  0.52%  strings.(*Builder).WriteString (inline)
+         0     0% 98.97%      0.02s  0.52%  strings.Repeat
+         0     0% 98.97%      3.78s 97.42%  testing.(*B).launch
+         0     0% 98.97%      0.04s  1.03%  testing.(*B).run1.func1
+         0     0% 98.97%      3.82s 98.45%  testing.(*B).runN

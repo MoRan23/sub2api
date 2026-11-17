@@ -1,0 +1,6 @@
+2026/11/17 13:54:23 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestAccountRepoSuite
+=== RUN   TestAccountRepoSuite/TestPassthroughFilterAdminIntentAndStaleWriters
+--- PASS: TestAccountRepoSuite (0.80s)
+    --- PASS: TestAccountRepoSuite/TestPassthroughFilterAdminIntentAndStaleWriters (0.77s)
+PASS
