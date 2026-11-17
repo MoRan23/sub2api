@@ -463,13 +463,17 @@ func isCodexTelemetryRuntimeKind(kind string) bool {
 const codexTelemetryRuntimeActive = `COALESCE(a.state->'sealed','false'::jsonb) <> 'true'::jsonb
 	AND COALESCE(a.state->'incomplete','false'::jsonb) <> 'true'::jsonb`
 
+// Both callers bind the current pool as $1. Keep that parameter inside the
+// parent lookup too. OFFSET 0 keeps the EXISTS lookup correlated, so generic
+// plans seek one parent by its primary key instead of hashing/decompressing all
+// turns in this pool (or every pool) for a small eviction.
 const codexTelemetryRuntimeCompleted = `(a.kind='sampling'
 	OR (a.kind='turn' AND (a.state->'sealed'='true'::jsonb OR a.state->'incomplete'='true'::jsonb))
 	OR (a.kind='attempt' AND (a.state->'finished'='true'::jsonb OR NOT EXISTS (
-		SELECT 1 FROM codex_telemetry_activities parent WHERE parent.pool_id=a.pool_id AND parent.kind='turn'
+		SELECT 1 FROM codex_telemetry_activities parent WHERE parent.pool_id=$1::uuid AND parent.pool_id=a.pool_id AND parent.kind='turn'
 		AND parent.activity_key=COALESCE(a.state->>'turn_key','')
 		AND COALESCE(parent.state->'sealed','false'::jsonb) <> 'true'::jsonb
-		AND COALESCE(parent.state->'incomplete','false'::jsonb) <> 'true'::jsonb))))`
+		AND COALESCE(parent.state->'incomplete','false'::jsonb) <> 'true'::jsonb OFFSET 0))))`
 
 func (a *codexTelemetryActivityTransaction) validateRuntime() error {
 	_, err := a.RuntimeOccupancy()
