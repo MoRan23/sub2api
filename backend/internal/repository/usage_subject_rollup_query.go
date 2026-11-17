@@ -71,8 +71,8 @@ func (r *usageLogRepository) getSubjectDashboardStats(ctx context.Context, id in
 	}
 	today := service.GroupUsageTodayStart(time.Now())
 	var closed, stateTZ string
-	var retained time.Time
-	err = scanSingleRow(ctx, q, "SELECT closed_before::text,retained_from,timezone_name FROM usage_subject_rollup_state WHERE id=1", nil, &closed, &retained, &stateTZ)
+	var retained, expiredBefore time.Time
+	err = scanSingleRow(ctx, q, "SELECT closed_before::text,retained_from,timezone_name,expired_before FROM usage_subject_rollup_state WHERE id=1", nil, &closed, &retained, &stateTZ, &expiredBefore)
 	if err != nil {
 		if errors.Is(err, sql.ErrNoRows) {
 			return nil, service.ErrUsageStatsInitializing
@@ -82,6 +82,12 @@ func (r *usageLogRepository) getSubjectDashboardStats(ctx context.Context, id in
 	tail, e := subjectRollupTailStart(closed, stateTZ, today)
 	if e != nil {
 		return nil, e
+	}
+	if expiredBefore.After(tail) {
+		tail = expiredBefore
+	}
+	if expiredBefore.After(retained) {
+		retained = expiredBefore
 	}
 	query := userSubjectDashboardQuery
 	if byKey {

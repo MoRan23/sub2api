@@ -92,3 +92,35 @@ func TestPromptPageContextOnlyRecognizesStandaloneDesktopOutputs(t *testing.T) {
 		})
 	}
 }
+
+func TestPreparedPromptAdditionalContextIsOwnedAndNotUserIntent(t *testing.T) {
+	cfg, err := ActiveFromStorage(storageConfig{KeywordAllGroups: true,
+		CombinationPolicies: []CombinationPolicy{{ID: "garden", Name: "garden", Enabled: true, TopicRules: []string{"orchid"}, IntentRules: []string{"prune"}}},
+	}, true, prefixEncryptor{})
+	require.NoError(t, err)
+	for _, name := range []string{"browser_info", "goal_objective", "untrusted_context"} {
+		for _, user := range []string{"prune it", "read context", ""} {
+			t.Run(name+"/"+user, func(t *testing.T) {
+				items := []any{}
+				if user != "" {
+					items = append(items, map[string]any{"role": "user", "content": user})
+				}
+				items = append(items, map[string]any{"type": "function_call_output", "namespace": "agent", "name": name, "output": "orchid prune"})
+				req := preparePromptRequest(Request{Protocol: "responses", Body: pageAuditBody(t, items...)})
+				scan, err := req.prepared.scanText(req)
+				require.NoError(t, err)
+				require.Contains(t, scan, "orchid prune")
+				for i := range req.Body {
+					req.Body[i] = '!'
+				}
+				req.Body = nil
+				match, err := cfg.MatchCombination(req)
+				require.NoError(t, err)
+				require.Equal(t, user == "prune it", match != nil)
+				snapshot, err := req.prepared.snapshot(req, false)
+				require.NoError(t, err)
+				require.Contains(t, snapshot.FullPrompt, "orchid prune")
+			})
+		}
+	}
+}

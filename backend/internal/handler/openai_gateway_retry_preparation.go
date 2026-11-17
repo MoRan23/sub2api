@@ -32,7 +32,7 @@ func (p *openAIResponsesRetryPreparation) forAccount(h *OpenAIGatewayHandler, c 
 		if !valid {
 			return nil, false
 		}
-		body, _ = normalizeCodexPageContext(body)
+		body, _ = normalizeCodexUntrustedContext(body)
 		body, _ = normalizeCodexAutomationBootstrap(body)
 		body, _ = normalizeCodexDelegationBootstrap(body)
 		if !h.validateFunctionCallOutputRequest(c, body, reqLog) {

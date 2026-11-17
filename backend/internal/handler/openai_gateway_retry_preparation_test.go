@@ -26,7 +26,7 @@ func uncachedOpenAIResponsesPreparation(h *OpenAIGatewayHandler, c *gin.Context,
 	if !valid {
 		return nil, false
 	}
-	body, _ = normalizeCodexPageContext(body)
+	body, _ = normalizeCodexUntrustedContext(body)
 	body, _ = normalizeCodexAutomationBootstrap(body)
 	body, _ = normalizeCodexDelegationBootstrap(body)
 	return body, h.validateFunctionCallOutputRequest(c, body, logger)
@@ -38,6 +38,7 @@ func TestOpenAIResponsesRetryPreparationMixedEngine(t *testing.T) {
 	oauth := &service.Account{Platform: service.PlatformOpenAI, Type: service.AccountTypeOAuth}
 	for _, fixture := range []struct{ name, body string }{
 		{"page", `{"model":"gpt-6-astra","stream":false,"unknown":9007199254740993123,"input":[{"type":"function_call_output","namespace":"agent","name":"codex_apps_open_page","output":"{\"page_id\":null}"},{"role":"user","content":"hello"}]}`},
+		{"external_context", `{"model":"gpt-6-astra","stream":true,"input":[{"type":"function_call_output","namespace":"agent","name":"browser_info","output":"tab details"},{"type":"function_call_output","namespace":"agent","name":"goal_objective","output":"finish"},{"type":"function_call_output","namespace":"agent","name":"untrusted_context","output":"external text"},{"role":"user","content":"hello"}]}`},
 		{"compact", `{"model":"gpt-6-astra","stream":false,"unknown":9007199254740993123,"prompt_cache_key":"original-seed","input":[{"role":"user","content":"hello"},{"type":"compaction_trigger"}]}`},
 		{"native_v2", `{"model":"gpt-6-astra","stream":true,"input":[{"type":"compaction_trigger"},{"role":"user","content":"hello"}]}`},
 	} {

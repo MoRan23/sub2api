@@ -991,6 +991,9 @@ func (s *AuthService) shouldApplyEmailFirstBindDefaults(
 	identity *dbent.AuthIdentity,
 	created bool,
 ) bool {
+	if identity == nil {
+		return false
+	}
 	source := emailAuthIdentitySource(identity.Metadata)
 	if source == "auth_service_login_backfill" {
 		return false
@@ -998,7 +1001,7 @@ func (s *AuthService) shouldApplyEmailFirstBindDefaults(
 	if created {
 		return true
 	}
-	if s == nil || s.entClient == nil || userID <= 0 || identity == nil || identity.UserID != userID {
+	if s == nil || s.entClient == nil || userID <= 0 || identity.UserID != userID {
 		return false
 	}
 	if source != "auth_service_dual_write" {

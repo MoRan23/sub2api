@@ -92,6 +92,13 @@ func TestCodexEngineWSCyberAuditUsesCurrentTurnRequestID(t *testing.T) {
 			authContext, _ := newAstraProFailoverContext(t, `{}`)
 			key, ok := middleware.GetAPIKeyFromContext(authContext)
 			require.True(t, ok)
+			// Subsequent inference turns revalidate the handshake identity. Give
+			// this transport/audit fixture the same valid identity and lookup.
+			key.UserID = key.User.ID
+			key.Key = "sk-engine-cyber-audit-test"
+			key.Status = service.StatusActive
+			key.User.Status = service.StatusActive
+			h.apiKeyService = service.NewAPIKeyService(&wsTurnAuthorizationStaticRepo{key: key}, nil, nil, nil, nil, nil, h.cfg)
 			done := make(chan string, 1)
 			router := gin.New()
 			router.GET("/v1/responses", func(c *gin.Context) {

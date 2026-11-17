@@ -34,6 +34,18 @@ type codexModelsVisibilityAccountRepo struct {
 	byGroup map[int64][]Account
 }
 
+func (r codexModelsVisibilityAccountRepo) GetByID(_ context.Context, id int64) (*Account, error) {
+	for _, accounts := range r.byGroup {
+		for i := range accounts {
+			if accounts[i].ID == id {
+				account := accounts[i]
+				return &account, nil
+			}
+		}
+	}
+	return nil, ErrAccountNotFound
+}
+
 func (r codexModelsVisibilityAccountRepo) ListSchedulableByGroupID(_ context.Context, groupID int64) ([]Account, error) {
 	accounts := r.byGroup[groupID]
 	return append([]Account(nil), accounts...), nil

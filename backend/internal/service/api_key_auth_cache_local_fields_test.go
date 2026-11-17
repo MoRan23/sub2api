@@ -8,7 +8,7 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func TestAPIKeyAuthSnapshotV28LocalFieldsAndModelAllowlistRoundtrip(t *testing.T) {
+func TestAPIKeyAuthSnapshotV30LocalFieldsAndModelAllowlistRoundtrip(t *testing.T) {
 	for _, limit := range []*float64{nil, new(float64), new(125.5)} {
 		apiKey := profitAuthTestAPIKey()
 		apiKey.User.Balance = 1.25
@@ -25,7 +25,7 @@ func TestAPIKeyAuthSnapshotV28LocalFieldsAndModelAllowlistRoundtrip(t *testing.T
 		apiKey.Group.MaxReasoningEffortOverLimit = ReasoningEffortOverLimitDeny
 		svc := &APIKeyService{}
 		snapshot := svc.snapshotFromAPIKey(context.Background(), apiKey)
-		require.Equal(t, 28, snapshot.Version)
+		require.Equal(t, 30, snapshot.Version)
 		// The merged schema scopes a cached override to its original group.
 		snapshot.User.UserGroupRPMOverride = new(17)
 		snapshot.User.UserGroupRPMOverrideGroupID = apiKey.Group.ID
@@ -54,12 +54,12 @@ func TestAPIKeyAuthSnapshotV28LocalFieldsAndModelAllowlistRoundtrip(t *testing.T
 	}
 }
 
-func TestAPIKeyAuthSnapshotRejectsPreV28MergeSchemas(t *testing.T) {
-	for _, version := range []int{26, 27} {
+func TestAPIKeyAuthSnapshotRejectsPreV30MergeSchemas(t *testing.T) {
+	for _, version := range []int{26, 27, 28, 29} {
 		svc := &APIKeyService{}
 		snapshot := svc.snapshotFromAPIKey(context.Background(), profitAuthTestAPIKey())
 		snapshot.Version = version
-		restored, used, err := svc.applyAuthCacheEntry("pre-v28-merge", &APIKeyAuthCacheEntry{Snapshot: snapshot})
+		restored, used, err := svc.applyAuthCacheEntry("pre-v30-merge", &APIKeyAuthCacheEntry{Snapshot: snapshot})
 		require.NoError(t, err)
 		require.False(t, used)
 		require.Nil(t, restored)

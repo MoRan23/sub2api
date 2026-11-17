@@ -26,6 +26,11 @@ var (
 )
 
 const (
+	// schedulerSharedFallbackTimeout 是合并回源在未配置 db_fallback_timeout_seconds 时的时长上限；合并回源不随单个调用方取消。
+	schedulerSharedFallbackTimeout = 30 * time.Second
+)
+
+const (
 	outboxEventTimeout                    = 2 * time.Minute
 	schedulerOutboxCleanupBatch           = 5000
 	schedulerGroupLifecycleTimeout        = 30 * time.Second
@@ -1493,42 +1498,28 @@ func (s *SchedulerSnapshotService) loadAccountsFromDB(ctx context.Context, bucke
 	if s.accountRepo == nil {
 		return nil, ErrSchedulerCacheNotReady
 	}
-	groupID := bucket.GroupID
-	if s.isRunModeSimple() {
-		groupID = 0
+	var groupID *int64
+	if !s.isRunModeSimple() && bucket.GroupID > 0 {
+		groupID = &bucket.GroupID
 	}
-
+	platforms := []string{bucket.Platform}
 	if useMixed {
-		platforms := []string{bucket.Platform, PlatformAntigravity}
-		var accounts []Account
-		var err error
-		if groupID > 0 {
-			accounts, err = s.accountRepo.ListSchedulableByGroupIDAndPlatforms(ctx, groupID, platforms)
-		} else if s.isRunModeSimple() {
-			accounts, err = s.accountRepo.ListSchedulableByPlatforms(ctx, platforms)
-		} else {
-			accounts, err = s.accountRepo.ListSchedulableUngroupedByPlatforms(ctx, platforms)
-		}
-		if err != nil {
-			return nil, err
-		}
-		filtered := make([]Account, 0, len(accounts))
-		for _, acc := range accounts {
-			if acc.Platform == PlatformAntigravity && !acc.IsMixedSchedulingEnabled() {
-				continue
-			}
-			filtered = append(filtered, acc)
-		}
-		return filtered, nil
+		platforms = append(platforms, PlatformAntigravity)
 	}
-
-	if groupID > 0 {
-		return s.accountRepo.ListSchedulableByGroupIDAndPlatform(ctx, groupID, bucket.Platform)
+	// Cache the configured pool, as model availability does. Time-based blocks
+	// must be checked on each read so expiry needs no write or outbox event.
+	accounts, err := s.accountRepo.ListModelAvailabilityCandidates(ctx, groupID, platforms, s.isRunModeSimple())
+	if err != nil || !useMixed {
+		return accounts, err
 	}
-	if s.isRunModeSimple() {
-		return s.accountRepo.ListSchedulableByPlatform(ctx, bucket.Platform)
+	filtered := make([]Account, 0, len(accounts))
+	for _, acc := range accounts {
+		if acc.Platform == PlatformAntigravity && !acc.IsMixedSchedulingEnabled() {
+			continue
+		}
+		filtered = append(filtered, acc)
 	}
-	return s.accountRepo.ListSchedulableUngroupedByPlatform(ctx, bucket.Platform)
+	return filtered, nil
 }
 
 func (s *SchedulerSnapshotService) loadAccountsForRebuild(
@@ -1635,6 +1626,15 @@ func (s *SchedulerSnapshotService) withFallbackTimeout(ctx context.Context) (con
 	return context.WithTimeout(ctx, timeout)
 }
 
+// withSharedFallbackTimeout 为合并回源设置时长上限：db_fallback_timeout_seconds 为正时取该值，否则取 schedulerSharedFallbackTimeout。
+func (s *SchedulerSnapshotService) withSharedFallbackTimeout(ctx context.Context) (context.Context, context.CancelFunc) {
+	timeout := schedulerSharedFallbackTimeout
+	if s.cfg != nil && s.cfg.Gateway.Scheduling.DbFallbackTimeoutSeconds > 0 {
+		timeout = time.Duration(s.cfg.Gateway.Scheduling.DbFallbackTimeoutSeconds) * time.Second
+	}
+	return context.WithTimeout(ctx, timeout)
+}
+
 func (s *SchedulerSnapshotService) isRunModeSimple() bool {
 	return s.cfg != nil && s.cfg.RunMode == config.RunModeSimple
 }
@@ -1671,20 +1671,6 @@ func dedupeBuckets(in []SchedulerBucket) []SchedulerBucket {
 		}
 		seen[key] = struct{}{}
 		out = append(out, bucket)
-	}
-	return out
-}
-
-func derefAccounts(accounts []*Account) []Account {
-	if len(accounts) == 0 {
-		return []Account{}
-	}
-	out := make([]Account, 0, len(accounts))
-	for _, account := range accounts {
-		if account == nil {
-			continue
-		}
-		out = append(out, *account)
 	}
 	return out
 }

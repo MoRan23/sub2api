@@ -515,7 +515,7 @@ func TestGetFallbackPricing_FamilyMatching(t *testing.T) {
 		{name: "openai gpt5.4 mini", model: "gpt-5.4-mini", expectedInput: 7.5e-7},
 		{name: "openai gpt5.3 codex", model: "gpt-5.3-codex", expectedInput: 1.5e-6},
 		{name: "openai gpt5.3 codex spark", model: "gpt-5.3-codex-spark", expectedInput: 1.5e-6},
-		{name: "openai legacy gpt5.1 falls back to gpt5.4", model: "gpt-5.1", expectedInput: 2.5e-6},
+		{name: "openai legacy gpt5.1 falls back to gpt5.6 sol", model: "gpt-5.1", expectedInput: 5e-6},
 		{name: "openai legacy gpt5.1 codex falls back to gpt5.3 codex", model: "gpt-5.1-codex", expectedInput: 1.5e-6},
 		{name: "openai legacy codex mini latest falls back to gpt5.3 codex", model: "codex-mini-latest", expectedInput: 1.5e-6},
 		{name: "openai unknown no fallback", model: "gpt-unknown-model", expectNilPricing: true},
@@ -844,6 +844,70 @@ func TestGetFallbackPricing_FamilyMatching(t *testing.T) {
 			expectedCacheRead: floatPtr(0.03e-6),
 		},
 
+		// ---- 硅基流动 Qwen3-Embedding 系列（纯文本向量化，仅输入计费）----
+		{
+			name:           "qwen3 embedding 8b vendor prefix",
+			model:          "Qwen/Qwen3-Embedding-8B",
+			expectedInput:  0.04e-6,
+			expectedOutput: floatPtr(0),
+		},
+		{
+			name:           "qwen3 embedding 8b bare",
+			model:          "qwen3-embedding-8b",
+			expectedInput:  0.04e-6,
+			expectedOutput: floatPtr(0),
+		},
+		{
+			name:           "qwen3 embedding 4b vendor prefix",
+			model:          "Qwen/Qwen3-Embedding-4B",
+			expectedInput:  0.02e-6,
+			expectedOutput: floatPtr(0),
+		},
+		{
+			name:           "qwen3 embedding 0.6b vendor prefix",
+			model:          "Qwen/Qwen3-Embedding-0.6B",
+			expectedInput:  0.01e-6,
+			expectedOutput: floatPtr(0),
+		},
+		{
+			name:           "qwen3 embedding 0.6b dash alias",
+			model:          "qwen3-embedding-0-6b",
+			expectedInput:  0.01e-6,
+			expectedOutput: floatPtr(0),
+		},
+
+		// ---- 硅基流动 Qwen3-Reranker 系列（文本重排序，仅输入计费）----
+		{
+			name:           "qwen3 reranker 8b vendor prefix",
+			model:          "Qwen/Qwen3-Reranker-8B",
+			expectedInput:  0.04e-6,
+			expectedOutput: floatPtr(0),
+		},
+		{
+			name:           "qwen3 reranker 8b bare",
+			model:          "qwen3-reranker-8b",
+			expectedInput:  0.04e-6,
+			expectedOutput: floatPtr(0),
+		},
+		{
+			name:           "qwen3 reranker 4b vendor prefix",
+			model:          "Qwen/Qwen3-Reranker-4B",
+			expectedInput:  0.02e-6,
+			expectedOutput: floatPtr(0),
+		},
+		{
+			name:           "qwen3 reranker 0.6b vendor prefix",
+			model:          "Qwen/Qwen3-Reranker-0.6B",
+			expectedInput:  0.01e-6,
+			expectedOutput: floatPtr(0),
+		},
+		{
+			name:           "qwen3 reranker 0.6b dash alias",
+			model:          "qwen3-reranker-0-6b",
+			expectedInput:  0.01e-6,
+			expectedOutput: floatPtr(0),
+		},
+
 		// ---- 火山方舟 豆包 Embedding（多模态向量化）----
 		{
 			name:           "doubao embedding vision text rate",
@@ -859,6 +923,10 @@ func TestGetFallbackPricing_FamilyMatching(t *testing.T) {
 
 		// ---- 负向用例 ----
 		{name: "qwen unknown no fallback", model: "qwen-max", expectNilPricing: true},
+		// qwen3-embedding 仅白名单 8b / 4b / 0.6b 三个官方档位；未知档位不回退。
+		{name: "qwen3 embedding unknown size no fallback", model: "Qwen/Qwen3-Embedding-2B", expectNilPricing: true},
+		// qwen3-reranker 同样仅白名单 8b / 4b / 0.6b；qwen3-vl-reranker-8b 与 bge-reranker 不在白名单，不回退。
+		{name: "qwen3 reranker unknown size no fallback", model: "Qwen/Qwen3-Reranker-2B", expectNilPricing: true},
 		// doubao-pro / doubao-embedding（纯文本）不在白名单，不回退；仅 doubao-embedding-vision 显式命中。
 		{name: "doubao unknown no fallback", model: "doubao-pro", expectNilPricing: true},
 		{name: "doubao text embedding no fallback", model: "doubao-embedding-text-240515", expectNilPricing: true},
@@ -902,6 +970,58 @@ func TestGetFallbackPricing_FamilyMatching(t *testing.T) {
 				require.InDelta(t, *tt.expectedCacheRead, pricing.CacheReadPricePerToken, 1e-14,
 					"CacheReadPricePerToken mismatch for %s", tt.model)
 			}
+		})
+	}
+}
+
+// 硅基流动 Qwen3-Embedding 系列（纯文本向量化）：只按输入计费，输出价为 0。
+// 验证 GetModelPricing 能解出带厂商前缀 / 裸名 / 0.6B 连字符别名的拼法。
+func TestGetModelPricing_Qwen3EmbeddingFallback(t *testing.T) {
+	svc := newTestBillingService()
+
+	tests := []struct {
+		model string
+		input float64
+	}{
+		{model: "Qwen/Qwen3-Embedding-8B", input: 0.04e-6},
+		{model: "qwen3-embedding-8b", input: 0.04e-6},
+		{model: "Qwen/Qwen3-Embedding-4B", input: 0.02e-6},
+		{model: "Qwen/Qwen3-Embedding-0.6B", input: 0.01e-6},
+		{model: "qwen3-embedding-0-6b", input: 0.01e-6},
+	}
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			pricing, err := svc.GetModelPricing(tt.model)
+			require.NoError(t, err, "model %s should resolve fallback pricing", tt.model)
+			require.NotNil(t, pricing)
+			require.InDelta(t, tt.input, pricing.InputPricePerToken, 1e-12, "input rate for %s", tt.model)
+			require.Zero(t, pricing.OutputPricePerToken, "embedding has no output cost for %s", tt.model)
+		})
+	}
+}
+
+// 硅基流动 Qwen3-Reranker 系列（文本重排序）：只按输入计费，输出价为 0。
+// 验证 GetModelPricing 能解出带厂商前缀 / 裸名 / 0.6B 连字符别名的拼法。
+func TestGetModelPricing_Qwen3RerankerFallback(t *testing.T) {
+	svc := newTestBillingService()
+
+	tests := []struct {
+		model string
+		input float64
+	}{
+		{model: "Qwen/Qwen3-Reranker-8B", input: 0.04e-6},
+		{model: "qwen3-reranker-8b", input: 0.04e-6},
+		{model: "Qwen/Qwen3-Reranker-4B", input: 0.02e-6},
+		{model: "Qwen/Qwen3-Reranker-0.6B", input: 0.01e-6},
+		{model: "qwen3-reranker-0-6b", input: 0.01e-6},
+	}
+	for _, tt := range tests {
+		t.Run(tt.model, func(t *testing.T) {
+			pricing, err := svc.GetModelPricing(tt.model)
+			require.NoError(t, err, "model %s should resolve fallback pricing", tt.model)
+			require.NotNil(t, pricing)
+			require.InDelta(t, tt.input, pricing.InputPricePerToken, 1e-12, "input rate for %s", tt.model)
+			require.Zero(t, pricing.OutputPricePerToken, "rerank has no output cost for %s", tt.model)
 		})
 	}
 }
@@ -2232,13 +2352,48 @@ func TestAstraUltrafastPricingUsesSixTimesStandard(t *testing.T) {
 	require.Equal(t, 2.0, configuredServiceTierMultiplier("ultrafast", p))
 }
 
+// Model price rules do not authorize forcing a service tier; upstream catalog
+// declarations independently control that request policy.
+func TestOpenAIUltrafastModelPricing(t *testing.T) {
+	svc := newTestBillingService()
+	for _, tt := range []struct {
+		model string
+		want  float64
+	}{
+		{model: "gpt-6-astra", want: 6},
+		{model: "gpt-6.1-sol", want: 6},
+		{model: "gpt-6.1-sol-high", want: 6},
+		{model: "gpt-6.1-terra", want: 2},
+		{model: "gpt-6-sol", want: 2},
+		{model: "gpt-5.6-sol", want: 2},
+	} {
+		pricing, err := svc.GetModelPricing(tt.model)
+		require.NoError(t, err, tt.model)
+		require.Equal(t, tt.want, configuredServiceTierMultiplier(OpenAIFastTierUltrafast, pricing), tt.model)
+		tokens := UsageTokens{InputTokens: 1000, OutputTokens: 500, CacheReadTokens: 200, CacheCreationTokens: 100}
+		standard, err := svc.CalculateCostWithServiceTier(tt.model, tokens, 1, "")
+		require.NoError(t, err, tt.model)
+		ultrafast, err := svc.CalculateCostWithServiceTier(tt.model, tokens, 1, OpenAIFastTierUltrafast)
+		require.NoError(t, err, tt.model)
+		require.InDelta(t, standard.TotalCost*tt.want, ultrafast.TotalCost, 1e-12, tt.model)
+
+		// 渠道自定义价格与显式 Fast 倍率都不改变 Ultrafast 倍率。
+		custom, fast := 1e-6, 3.0
+		channelPricing, err := svc.GetModelPricingWithChannel(tt.model, &ChannelModelPricing{
+			InputPrice: &custom, OutputPrice: &custom, FastMultiplier: &fast,
+		})
+		require.NoError(t, err, tt.model)
+		require.Equal(t, tt.want, configuredServiceTierMultiplier(OpenAIFastTierUltrafast, channelPricing), tt.model)
+	}
+}
+
 func TestGPT61SolExplicitZeroCacheWriteAcrossTiers(t *testing.T) {
 	pricing := &PricingService{}
 	var err error
 	pricing.pricingData, err = pricing.parsePricingData([]byte(`{"gpt-6.1-sol":{"litellm_provider":"openai","input_cost_per_token":0.000002,"output_cost_per_token":0.00001,"input_cost_per_token_flex":0.000001,"cache_creation_input_token_cost":0,"cache_creation_input_token_cost_priority":0.000005}}`))
 	require.NoError(t, err)
 	svc := NewBillingService(&config.Config{}, pricing)
-	for _, tier := range []string{"", "fast", "priority", "flex"} {
+	for _, tier := range []string{"", "fast", "priority", "flex", "ultrafast"} {
 		cost, err := svc.CalculateCostWithServiceTier("openai/gpt-6.1-sol-max", UsageTokens{CacheCreationTokens: 300000}, 1, tier)
 		require.NoError(t, err)
 		require.Zero(t, cost.CacheCreationCost)

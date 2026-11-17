@@ -6,10 +6,10 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/pkg/codexcontext"
 )
 
-// Desktop injects page snapshots as standalone outputs, without a model tool call.
-// Keep them as untrusted user text, including on history replay and mixed bootstrap turns.
-func normalizeCodexPageContext(body []byte) ([]byte, bool) {
-	if !mayContainCodexCallOutputCandidate(body, "codex_apps_open_page", "codex_apps_selected_page_part_") || !hasUniqueJSONMembers(body) {
+// Codex injects external context as standalone outputs, without a model tool call.
+// Use the legacy user-message representation for HTTP Responses interoperability.
+func normalizeCodexUntrustedContext(body []byte) ([]byte, bool) {
+	if !mayContainCodexCallOutputCandidate(body, "codex_apps_open_page", "codex_apps_selected_page_part_", "browser_info", "goal_objective", "untrusted_context") || !hasUniqueJSONMembers(body) {
 		return body, false
 	}
 	var request map[string]json.RawMessage
@@ -37,7 +37,7 @@ func normalizeCodexPageContext(body []byte) ([]byte, bool) {
 			continue
 		}
 		name, output := readString("name"), readString("output")
-		text, valid := codexcontext.PageOutput(readString("type"), readString("namespace"), name, output, callIDValue, hasCallID)
+		text, valid := codexcontext.UntrustedOutput(readString("type"), readString("namespace"), name, output, callIDValue, hasCallID)
 		if !valid {
 			continue
 		}
@@ -69,6 +69,10 @@ func normalizeCodexPageContext(body []byte) ([]byte, bool) {
 		return body, false
 	}
 	return encoded, true
+}
+
+func validCodexUntrustedContext(name, output string) bool {
+	return codexcontext.ValidUntrustedContext(name, output)
 }
 
 func validCodexPageContext(name, output string) bool {

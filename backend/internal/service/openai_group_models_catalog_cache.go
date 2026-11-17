@@ -27,7 +27,8 @@ func catalogSourceVersionOf(response *OpenAIModelsResponse) catalogSourceVersion
 // Fixed-source membership is also a projection: cache it before the final
 // representation lookup so a conditional request does not decode every source.
 func (s *OpenAIGatewayService) cachedPinnedOpenAIGroupSource(ctx context.Context, group *Group, account *Account, source *OpenAIModelsResponse) (*OpenAIModelsResponse, error) {
-	keyBody, err := json.Marshal([]any{group.ID, group.ModelAllowlist, account.ID, account.Platform, account.Type, account.GetModelMapping(), account.IsOpenAIPassthroughEnabled(), hasEmptyEngineModelCatalog(account), catalogSourceVersionOf(source)})
+	engineModelCount, engineCatalogKnown := codexEngineKnownModelCount(account)
+	keyBody, err := json.Marshal([]any{group.ID, group.ModelAllowlist, account.ID, account.Platform, account.Type, account.GetModelMapping(), account.IsOpenAIPassthroughEnabled(), account.IsOpenAIPassthroughModelFilterEnabled(), engineCatalogKnown, engineModelCount, catalogSourceVersionOf(source)})
 	if err != nil {
 		return nil, err
 	}

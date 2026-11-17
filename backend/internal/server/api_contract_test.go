@@ -369,6 +369,9 @@ func TestAPIContracts(t *testing.T) {
 						"weekly_limit_usd": null,
 						"monthly_limit_usd": null,
 						"total_limit_usd": null,
+						"total_quota_no_expiry": false,
+						"grok_safety_fee_enabled": false,
+						"grok_safety_fee": null,
 						"image_price_1k": null,
 						"image_price_2k": null,
 						"image_price_4k": null,
@@ -418,7 +421,7 @@ func TestAPIContracts(t *testing.T) {
 						UserID:          1,
 						GroupID:         10,
 						StartsAt:        deps.now,
-						ExpiresAt:       time.Date(2099, 1, 2, 3, 4, 5, 0, time.UTC), // 使用未来日期避免 normalizeSubscriptionStatus 标记为过期
+						ExpiresAt:       new(time.Date(2099, 1, 2, 3, 4, 5, 0, time.UTC)), // 使用未来日期避免 normalizeSubscriptionStatus 标记为过期
 						Status:          service.SubscriptionStatusActive,
 						DailyUsageUSD:   1.23,
 						WeeklyUsageUSD:  2.34,
@@ -495,6 +498,7 @@ func TestAPIContracts(t *testing.T) {
 						"value": 1.25,
 						"gift_ratio": 0,
 						"gift_value": 0,
+						"quota_amount": null,
 						"status": "used",
 						"used_by": 1,
 						"used_at": "2025-01-02T03:04:05Z",
@@ -922,6 +926,17 @@ func TestAPIContracts(t *testing.T) {
 					"max_codex_version": "",
 					"codex_cli_only_blacklist": "",
 					"codex_cli_only_whitelist": "",
+"codex_telemetry_effective_enabled": true,
+"codex_telemetry_enabled": true,
+"codex_telemetry_forced_off_reason": "",
+"codex_telemetry_observation_enabled": true,
+"codex_telemetry_simulation_enabled": true,
+"enable_openai_codex_residency_us": true,
+"enable_openai_oauth_daily_session_rotation": false,
+"enable_openai_passthrough_timezone_conversion": true,
+"enable_openai_request_timezone_conversion": true,
+"openai_daybreak_enabled": true,
+"openai_request_integrity_observe_enabled": true,
 					"compact_home_enabled": false,
 					"codex_cli_only_allow_app_server_clients": false,
 					"codex_cli_only_engine_fingerprint_signals": "[{\"type\":\"header_prefix\",\"match\":[\"x-codex-\"],\"required\":true},{\"type\":\"header_exact\",\"match\":[\"session-id\",\"session_id\"],\"required\":false},{\"type\":\"header_exact\",\"match\":[\"thread-id\",\"thread_id\"],\"required\":false},{\"type\":\"body_path\",\"match\":[\"client_metadata.x-codex-window-id\",\"client_metadata.x-codex-installation-id\"],\"required\":false}]",
@@ -973,7 +988,7 @@ func TestAPIContracts(t *testing.T) {
 					"openai_codex_user_agent":           "",
 					"openai_codex_client_version":       "",
 					"openai_codex_client_version_synced": "",
-					"openai_codex_client_version_builtin": "0.152.0",
+					"openai_codex_client_version_builtin": "0.169.0",
 					"openai_codex_version_auto_sync_enabled": true,
 					"claude_code_client_version": "",
 					"claude_code_client_version_synced": "",
@@ -1263,6 +1278,17 @@ func TestAPIContracts(t *testing.T) {
 					"max_codex_version": "",
 					"codex_cli_only_blacklist": "",
 					"codex_cli_only_whitelist": "",
+"codex_telemetry_effective_enabled": true,
+"codex_telemetry_enabled": true,
+"codex_telemetry_forced_off_reason": "",
+"codex_telemetry_observation_enabled": true,
+"codex_telemetry_simulation_enabled": true,
+"enable_openai_codex_residency_us": true,
+"enable_openai_oauth_daily_session_rotation": false,
+"enable_openai_passthrough_timezone_conversion": true,
+"enable_openai_request_timezone_conversion": true,
+"openai_daybreak_enabled": true,
+"openai_request_integrity_observe_enabled": true,
 					"compact_home_enabled": false,
 					"codex_cli_only_allow_app_server_clients": false,
 					"codex_cli_only_engine_fingerprint_signals": "[{\"type\":\"header_prefix\",\"match\":[\"x-codex-\"],\"required\":true},{\"type\":\"header_exact\",\"match\":[\"session-id\",\"session_id\"],\"required\":false},{\"type\":\"header_exact\",\"match\":[\"thread-id\",\"thread_id\"],\"required\":false},{\"type\":\"body_path\",\"match\":[\"client_metadata.x-codex-window-id\",\"client_metadata.x-codex-installation-id\"],\"required\":false}]",
@@ -1302,7 +1328,7 @@ func TestAPIContracts(t *testing.T) {
 					"openai_codex_user_agent":           "",
 					"openai_codex_client_version":       "",
 					"openai_codex_client_version_synced": "",
-					"openai_codex_client_version_builtin": "0.152.0",
+					"openai_codex_client_version_builtin": "0.169.0",
 					"openai_codex_version_auto_sync_enabled": true,
 					"claude_code_client_version": "",
 					"claude_code_client_version_synced": "",
@@ -2066,6 +2092,10 @@ func (s *stubAccountRepo) ClearAntigravityQuotaScopes(ctx context.Context, id in
 }
 
 func (s *stubAccountRepo) ClearModelRateLimits(ctx context.Context, id int64) error {
+	return errors.New("not implemented")
+}
+
+func (s *stubAccountRepo) ClearModelRateLimit(ctx context.Context, id int64, scope string) error {
 	return errors.New("not implemented")
 }
 

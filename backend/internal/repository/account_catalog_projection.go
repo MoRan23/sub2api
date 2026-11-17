@@ -12,7 +12,7 @@ import (
 // Explicit allowlists ensure a catalog lookup never decodes tokens or credentials
 // belonging to accounts which are not selected as the actual directory source.
 var catalogCredentialFields = []string{"model_mapping", "compact_model_mapping", "base_url", "oauth_type", "plan_type", "auth_mode", "openai_auth_mode", "openai_capabilities", "project_id"}
-var catalogExtraFields = []string{"openai_passthrough", "openai_oauth_passthrough", "openai_responses_mode", "openai_responses_supported", service.OpenAIAPIKeyModeExtraKey, service.CodexEngineModelsSyncExtraKey, service.OpenAIDaybreakBlueEnabledKey, service.OpenAIDaybreakRedEnabledKey, service.UpstreamModelMetadataExtraKey}
+var catalogExtraFields = []string{"openai_passthrough", "openai_passthrough_model_filter", "openai_oauth_passthrough", "openai_responses_mode", "openai_responses_supported", service.OpenAIAPIKeyModeExtraKey, service.CodexEngineModelsSyncExtraKey, service.OpenAIDaybreakBlueEnabledKey, service.OpenAIDaybreakRedEnabledKey, service.UpstreamModelMetadataExtraKey}
 
 func catalogJSONProjection(column string, keys []string) string {
 	pairs := make([]string, 0, len(keys)*2)

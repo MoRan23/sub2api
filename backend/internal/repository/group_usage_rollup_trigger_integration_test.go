@@ -320,11 +320,9 @@ func TestGroupUsageRollupSyncRebuildsAfterTimezoneChange(t *testing.T) {
 	useGroupUsageRepositoryTestTimezone(t, "America/New_York")
 	todayStart := time.Date(2026, 3, 9, 4, 0, 0, 0, time.UTC)
 	schema := createGroupUsageRollupTriggerTestSchema(t, ctx, false)
-	tx := beginGroupUsageRollupTriggerTestTx(t, ctx, schema)
-	defer func() { _ = tx.Rollback() }()
+	db := openGroupUsageRollupSchemaDB(t, schema, "UTC")
 
-	_, err := tx.ExecContext(ctx, `
-		SET LOCAL TIME ZONE 'UTC';
+	_, err := db.ExecContext(ctx, `
 		INSERT INTO groups (id) VALUES (10);
 		INSERT INTO users (id) VALUES (1);
 		INSERT INTO usage_logs (id, user_id, group_id, actual_cost, created_at) VALUES
@@ -340,12 +338,12 @@ func TestGroupUsageRollupSyncRebuildsAfterTimezoneChange(t *testing.T) {
 	`)
 	require.NoError(t, err)
 
-	repo := newDashboardAggregationRepositoryWithSQL(tx)
+	repo := newDashboardAggregationRepositoryWithSQL(db)
 	require.NoError(t, repo.SyncGroupUsageRollups(ctx, todayStart))
 
 	var stateTimezone string
 	var closedBefore string
-	require.NoError(t, tx.QueryRowContext(ctx, `
+	require.NoError(t, db.QueryRowContext(ctx, `
 		SELECT timezone_name, closed_before::text
 		FROM usage_group_rollup_state
 		WHERE id = 1
@@ -354,14 +352,14 @@ func TestGroupUsageRollupSyncRebuildsAfterTimezoneChange(t *testing.T) {
 	require.Equal(t, "2026-03-09", closedBefore)
 
 	var rollupCost float64
-	require.NoError(t, tx.QueryRowContext(ctx, `
+	require.NoError(t, db.QueryRowContext(ctx, `
 		SELECT actual_cost
 		FROM usage_group_daily_rollups
 		WHERE bucket_date = DATE '2026-03-08' AND group_id = 10
 	`).Scan(&rollupCost))
 	require.InDelta(t, 3, rollupCost, 0.0000001)
 
-	usageRepo := newUsageLogRepositoryWithSQL(nil, tx)
+	usageRepo := newUsageLogRepositoryWithSQL(nil, db)
 	result, err := usageRepo.GetAllGroupUsageSummary(ctx, todayStart)
 	require.NoError(t, err)
 	require.Len(t, result, 1)
@@ -405,8 +403,29 @@ func TestGroupUsageSummaryUsesConfiguredDSTBoundaries(t *testing.T) {
 }
 
 func createGroupUsageRollupTriggerTestSchema(t *testing.T, ctx context.Context, partitioned bool) string {
-	t.Helper()
+	return createGroupUsageRollupTriggerTestSchemaWithOrder(t, ctx, partitioned, false)
+}
 
+func createGroupUsageRollupTriggerTestSchemaWithOrder(t *testing.T, ctx context.Context, partitioned, upgrade bool) string {
+	t.Helper()
+	migrationNames := []string{
+		"222_group_usage_daily_rollups.sql",
+		"223_group_usage_rollup_timezone.sql",
+	}
+	localMigrations := []string{"290_usage_rollup_fenced_builds.sql", "291_usage_subject_daily_rollups.sql"}
+	if upgrade {
+		migrationNames = append(migrationNames, localMigrations...)
+		migrationNames = append(migrationNames, "251_group_usage_rollup_nonblocking_build.sql")
+	} else {
+		migrationNames = append(migrationNames, "251_group_usage_rollup_nonblocking_build.sql")
+		migrationNames = append(migrationNames, localMigrations...)
+	}
+	migrationNames = append(migrationNames, "305_merge_v022_usage_rollup_compat.sql")
+	return createGroupUsageRollupSchemaWithMigrations(t, ctx, partitioned, migrationNames)
+}
+
+func createGroupUsageRollupSchemaWithMigrations(t *testing.T, ctx context.Context, partitioned bool, migrationNames []string) string {
+	t.Helper()
 	schema := fmt.Sprintf("group_usage_rollup_trigger_%d", time.Now().UnixNano())
 	quotedSchema := pq.QuoteIdentifier(schema)
 	_, err := integrationDB.ExecContext(ctx, "CREATE SCHEMA "+quotedSchema)
@@ -426,6 +445,10 @@ func createGroupUsageRollupTriggerTestSchema(t *testing.T, ctx context.Context, 
 			user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 			group_id BIGINT REFERENCES groups(id) ON DELETE SET NULL,
 			actual_cost NUMERIC(20, 10) NOT NULL,
+			api_key_id BIGINT, account_id BIGINT,
+			input_tokens BIGINT NOT NULL DEFAULT 0, output_tokens BIGINT NOT NULL DEFAULT 0,
+			cache_creation_tokens BIGINT NOT NULL DEFAULT 0, cache_read_tokens BIGINT NOT NULL DEFAULT 0,
+			total_cost NUMERIC(20, 10) NOT NULL DEFAULT 0, duration_ms BIGINT, grok_safety_rejection JSONB,
 			created_at TIMESTAMPTZ NOT NULL
 		);
 	`
@@ -436,6 +459,10 @@ func createGroupUsageRollupTriggerTestSchema(t *testing.T, ctx context.Context, 
 				user_id BIGINT NOT NULL REFERENCES users(id) ON DELETE CASCADE,
 				group_id BIGINT REFERENCES groups(id) ON DELETE SET NULL,
 				actual_cost NUMERIC(20, 10) NOT NULL,
+				api_key_id BIGINT, account_id BIGINT,
+				input_tokens BIGINT NOT NULL DEFAULT 0, output_tokens BIGINT NOT NULL DEFAULT 0,
+				cache_creation_tokens BIGINT NOT NULL DEFAULT 0, cache_read_tokens BIGINT NOT NULL DEFAULT 0,
+				total_cost NUMERIC(20, 10) NOT NULL DEFAULT 0, duration_ms BIGINT, grok_safety_rejection JSONB,
 				created_at TIMESTAMPTZ NOT NULL
 			) PARTITION BY RANGE (created_at);
 			CREATE TABLE usage_logs_default PARTITION OF usage_logs DEFAULT;
@@ -448,11 +475,7 @@ func createGroupUsageRollupTriggerTestSchema(t *testing.T, ctx context.Context, 
 	`+usageLogsDDL)
 	require.NoError(t, err)
 
-	for _, migrationName := range []string{
-		"222_group_usage_daily_rollups.sql",
-		"223_group_usage_rollup_timezone.sql",
-		"290_usage_rollup_fenced_builds.sql",
-	} {
+	for _, migrationName := range migrationNames {
 		migrationSQL, readErr := migrations.FS.ReadFile(migrationName)
 		require.NoError(t, readErr)
 		for range 2 {

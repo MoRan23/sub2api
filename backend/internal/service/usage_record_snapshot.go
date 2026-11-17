@@ -78,6 +78,7 @@ func (b *usageSnapshotBuilder) forward(out *ForwardResult, r *ForwardResult) *Fo
 		ImageOutputSizes: b.strings(r.ImageOutputSizes), ImageSizeSource: b.string(r.ImageSizeSource),
 		ImageSizeBreakdown: b.intMap(r.ImageSizeBreakdown), SearchCount: r.SearchCount,
 		AudioUsage: b.audio(r.AudioUsage), CacheStorageTokenHours: r.CacheStorageTokenHours,
+		UpstreamPriceMultiplier: r.UpstreamPriceMultiplier,
 	}
 	return out
 }

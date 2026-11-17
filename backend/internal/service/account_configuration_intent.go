@@ -27,7 +27,7 @@ func withAccountConfigurationIntent(ctx context.Context, ids []int64, extra map[
 	if len(credentials) > 0 {
 		_, intent.ModelMapping = credentials[0]["model_mapping"]
 	}
-	for _, key := range []string{openAIInstallationPinEnabledKey, "enable_tls_fingerprint", "tls_fingerprint_profile_id", OpenAIDaybreakBlueEnabledKey, OpenAIDaybreakRedEnabledKey, OpenAIAPIKeyAutoAttributionEnabledExtraKey, OpenAIAttributionReplaceWhitelistEnabledExtraKey, ForceOpenAIFastExtraKey, ForceOpenAIUltrafastExtraKey, FreeOpenAIFastExtraKey, FreeOpenAIUltrafastExtraKey} {
+	for _, key := range []string{openAIInstallationPinEnabledKey, "enable_tls_fingerprint", "tls_fingerprint_profile_id", "openai_passthrough_model_filter", OpenAIDaybreakBlueEnabledKey, OpenAIDaybreakRedEnabledKey, OpenAIAPIKeyAutoAttributionEnabledExtraKey, OpenAIAttributionReplaceWhitelistEnabledExtraKey, ForceOpenAIFastExtraKey, ForceOpenAIUltrafastExtraKey, FreeOpenAIFastExtraKey, FreeOpenAIUltrafastExtraKey} {
 		if value, exists := extra[key]; exists {
 			intent.Extra[key] = value
 		}
@@ -76,6 +76,12 @@ func PreserveAccountConfiguration(current, target *Account, intent AccountConfig
 		}
 	}
 	copyCurrent(OpenAIAPIKeyAutoAttributionEnabledExtraKey)
+	copyCurrent("openai_passthrough_model_filter")
+	if target.Platform != PlatformOpenAI {
+		delete(target.Extra, "openai_passthrough_model_filter")
+	} else if value, explicit := intent.Extra["openai_passthrough_model_filter"]; explicit {
+		target.Extra["openai_passthrough_model_filter"] = value
+	}
 	copyCurrent(OpenAIAttributionReplaceWhitelistEnabledExtraKey)
 	if target.Platform != PlatformOpenAI || (target.Type != AccountTypeOAuth && target.Type != AccountTypeAPIKey) {
 		delete(target.Extra, OpenAIAttributionReplaceWhitelistEnabledExtraKey)

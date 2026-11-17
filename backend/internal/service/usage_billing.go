@@ -14,6 +14,7 @@ import (
 
 var ErrUsageBillingRequestIDRequired = errors.New("usage billing request_id is required")
 var ErrUsageBillingRequestConflict = errors.New("usage billing request fingerprint conflict")
+var ErrUsageBillingStopped = errors.New("usage billing has stopped")
 
 // UsageBillingCommand describes one billable request that must be applied at most once.
 type UsageBillingCommand struct {
@@ -22,20 +23,24 @@ type UsageBillingCommand struct {
 	RequestFingerprint string
 	RequestPayloadHash string
 
-	UserID              int64
-	AccountID           int64
-	SubscriptionID      *int64
-	AccountType         string
-	Model               string
-	ServiceTier         string
-	ReasoningEffort     string
-	BillingType         int8
-	InputTokens         int
-	OutputTokens        int
-	CacheCreationTokens int
-	CacheReadTokens     int
-	ImageCount          int
-	MediaType           string
+	UserID         int64
+	AccountID      int64
+	SubscriptionID *int64
+	// TotalQuotaSpendSnapshot belongs to this physical billing command. A user
+	// lane may combine requests admitted against different quota batches.
+	// It is execution metadata and deliberately excluded from the fingerprint.
+	TotalQuotaSpendSnapshot *TotalQuotaSpendSnapshot
+	AccountType             string
+	Model                   string
+	ServiceTier             string
+	ReasoningEffort         string
+	BillingType             int8
+	InputTokens             int
+	OutputTokens            int
+	CacheCreationTokens     int
+	CacheReadTokens         int
+	ImageCount              int
+	MediaType               string
 
 	BalanceCost         float64
 	SubscriptionCost    float64
@@ -243,4 +248,41 @@ type UsageBillingRepository interface {
 // back to the best-effort usage batcher.
 type AtomicUsageBillingRepository interface {
 	ApplyWithUsageLog(context.Context, *UsageBillingCommand, *UsageLog) (*UsageBillingApplyResult, error)
+}
+
+// UsageBillingBatchOutcome 是合并结算中单条命令的结果：Err 非空时 Result 为 nil。
+type UsageBillingBatchOutcome struct {
+	Result *UsageBillingApplyResult
+	Err    error
+}
+
+// UsageBillingBatchRepository 在 UsageBillingRepository 之上支持把同一用户的多条命令合并到一个事务内结算。
+type UsageBillingBatchRepository interface {
+	UsageBillingRepository
+	// ApplyBatch 在一个事务内结算同一用户的多条命令，各条结果与按 cmds 顺序逐条调用 Apply 一致，
+	// 返回值与 cmds 一一对应。返回 error 时没有任何命令生效；提交请求发出后连接中断时提交结果未知，与 Apply 相同。
+	ApplyBatch(ctx context.Context, cmds []*UsageBillingCommand) ([]UsageBillingBatchOutcome, error)
+}
+
+// snapshotUsageBillingCommand retains only settlement data while the command
+// waits in a lane. Never keep the caller's context, which may own request bodies.
+func snapshotUsageBillingCommand(ctx context.Context, cmd *UsageBillingCommand) *UsageBillingCommand {
+	if cmd == nil {
+		return nil
+	}
+	out := *cmd
+	if cmd.SubscriptionID != nil {
+		id := *cmd.SubscriptionID
+		out.SubscriptionID = &id
+	}
+	snapshot := cmd.TotalQuotaSpendSnapshot
+	if snapshot == nil {
+		snapshot, _ = TotalQuotaSpendSnapshotFromContext(ctx)
+	}
+	if snapshot != nil {
+		owned := *snapshot
+		owned.EventIDs = append([]int64(nil), snapshot.EventIDs...)
+		out.TotalQuotaSpendSnapshot = &owned
+	}
+	return &out
 }

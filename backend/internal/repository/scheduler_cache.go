@@ -251,24 +251,25 @@ type schedulerCache struct {
 	// now 是进程内快照缓存判定条目年龄的时钟。
 	now func() time.Time
 
-	snapshotMu      sync.RWMutex
-	snapshotEntries map[string]*schedulerSnapshotEntry
-	accountEntries  map[schedulerAccountPoolKey]*schedulerAccountPoolEntry
-	accountFlights  schedulerAccountFlights
-	cacheMaxBytes   int64
-	accountBytes    int64
-	lastCleanup     time.Time
-	bucketBytes     int64
-	poolHits        atomic.Uint64
-	poolMisses      atomic.Uint64
-	poolEvictions   atomic.Uint64
-	bucketHits      atomic.Uint64
-	bucketMisses    atomic.Uint64
-	bucketEvictions atomic.Uint64
-	cleanupStart    sync.Once
-	cleanupStop     sync.Once
-	cleanupDone     chan struct{}
-	cleanupCancel   chan struct{}
+	snapshotMu         sync.RWMutex
+	snapshotEntries    map[string]*schedulerSnapshotEntry
+	accountEntries     map[schedulerAccountPoolKey]*schedulerAccountPoolEntry
+	accountFlights     schedulerAccountFlights
+	cacheMaxBytes      int64
+	lastUsedGeneration atomic.Uint64
+	accountBytes       int64
+	lastCleanup        time.Time
+	bucketBytes        int64
+	poolHits           atomic.Uint64
+	poolMisses         atomic.Uint64
+	poolEvictions      atomic.Uint64
+	bucketHits         atomic.Uint64
+	bucketMisses       atomic.Uint64
+	bucketEvictions    atomic.Uint64
+	cleanupStart       sync.Once
+	cleanupStop        sync.Once
+	cleanupDone        chan struct{}
+	cleanupCancel      chan struct{}
 
 	// globalRevisionPending 与 globalRevisionWriting 合并写入出错后的后台全局修订号写入，见 scheduleGlobalAccountMetaRevision。
 	globalRevisionPending atomic.Bool
@@ -288,11 +289,13 @@ type schedulerSnapshotEntry struct {
 	runtimeVersion uint64
 	lastAccess     time.Time
 	estimatedBytes int64
+	lastUsed       atomic.Pointer[schedulerLastUsedValues]
+	lastUsedLoads  sharedflight.Group[uint64, *schedulerLastUsedValues]
 }
 
 type schedulerMetadataLoad struct {
-	accounts     service.CandidateSet
-	lastUsedKeys []string
+	accounts service.CandidateSet
+	entry    *schedulerSnapshotEntry
 }
 
 func NewSchedulerCache(rdb *redis.Client) service.SchedulerCache {
@@ -321,7 +324,7 @@ func newSchedulerCacheWithChunkSizes(rdb *redis.Client, mgetChunkSize, writeChun
 
 // GetCandidateSnapshot 读取 bucket 的激活快照。解码后的精简记录按账号内容身份共享，
 // 只有 ready、active 版本、全局修订号与该 bucket 所涉平台的修订号都与 Redis 一致且未超过最长复用时长时才复用；
-// 否则重新从 Redis 加载。last_used 每次都从 Redis 读取。
+// 否则重新从 Redis 加载。last_used 的独立缓存最多复用 200ms，本进程写入立即失效。
 // 返回的候选 view 由本次调用独占，Account 母本发布后只读。
 func (c *schedulerCache) GetCandidateSnapshot(ctx context.Context, bucket service.SchedulerBucket) (service.CandidateSet, bool, error) {
 	bucketKey := bucket.String()
@@ -443,7 +446,7 @@ func (c *schedulerCache) GetCandidateSnapshot(ctx context.Context, bucket servic
 			}
 		}
 
-		return schedulerMetadataLoad{accounts: accounts, lastUsedKeys: lastUsedKeys}, nil
+		return schedulerMetadataLoad{accounts: accounts, entry: entry}, nil
 	})
 	if err != nil {
 		return nil, false, err
@@ -453,7 +456,7 @@ func (c *schedulerCache) GetCandidateSnapshot(ctx context.Context, bucket servic
 	}
 	// Never let a waiter's LastUsed refresh mutate the shared flight result.
 	views := append(service.CandidateSet(nil), loaded.accounts...)
-	views, err = c.snapshotCandidates(ctx, views, loaded.lastUsedKeys)
+	views, err = c.snapshotCandidates(ctx, views, loaded.entry)
 	return views, err == nil, err
 }
 
@@ -470,38 +473,22 @@ func (c *schedulerCache) snapshotCandidatesFromEntry(ctx context.Context, entry 
 	if accounts == nil {
 		return nil, nil
 	}
-	return c.snapshotCandidates(ctx, accounts, entry.lastUsedKeys)
+	return c.snapshotCandidates(ctx, accounts, entry)
 }
 
 // Only hot LastUsed state and small views belong to the request.
-func (c *schedulerCache) snapshotCandidates(ctx context.Context, accounts service.CandidateSet, lastUsedKeys []string) (service.CandidateSet, error) {
-	lastUsedValues, err := c.mgetChunked(ctx, lastUsedKeys)
+func (c *schedulerCache) snapshotCandidates(ctx context.Context, accounts service.CandidateSet, entry *schedulerSnapshotEntry) (service.CandidateSet, error) {
+	lastUsedValues, err := c.entryLastUsed(ctx, entry)
 	if err != nil {
 		return nil, err
 	}
 	if len(lastUsedValues) != len(accounts) {
 		return nil, fmt.Errorf("unexpected scheduler last_used value count: got %d, want %d", len(lastUsedValues), len(accounts))
 	}
-	var times []time.Time
 	for i := range accounts {
 		lastUsed := accounts[i].LastUsedAt
-		if lastUsedValues[i] != nil {
-			value, err := schedulerCacheOptionalString(lastUsedValues[i])
-			if err != nil {
-				return nil, err
-			}
-			millis, err := strconv.ParseInt(value, 10, 64)
-			if err != nil {
-				return nil, fmt.Errorf("invalid last_used cache value %q: %w", value, err)
-			}
-			updated := time.UnixMilli(millis).UTC()
-			if lastUsed == nil || updated.After(*lastUsed) {
-				if times == nil {
-					times = make([]time.Time, len(accounts))
-				}
-				times[i] = updated
-				lastUsed = &times[i]
-			}
+		if updated := lastUsedValues[i]; updated != nil && (lastUsed == nil || updated.After(*lastUsed)) {
+			lastUsed = updated
 		}
 		accounts[i].LastUsedAt = lastUsed
 	}
@@ -966,6 +953,8 @@ func (c *schedulerCache) UpdateLastUsed(ctx context.Context, updates map[int64]t
 		pipe.Set(ctx, schedulerAccountMetaRevisionKey, newSchedulerAccountMetaRevision(), 0)
 	}
 	_, err := pipe.Exec(ctx)
+	// Even a partially failed pipeline may have updated side keys.
+	c.lastUsedGeneration.Add(1)
 	return err
 }
 
@@ -1382,6 +1371,7 @@ func filterSchedulerCredentials(credentials map[string]any) map[string]any {
 	// Candidate-list admission evaluates the account override before hydrating
 	// the full account. Dropping it silently falls back to the platform threshold.
 	keys := []string{"model_mapping", "compact_model_mapping", "project_id", "oauth_type", "plan_type", "auth_mode", "openai_auth_mode", "account_scheduling_threshold",
+		"openai_capabilities",
 		// Gemini 候选只读取非敏感能力配置；实际 API Key 在选号后加载完整账号再校验。
 		"base_url", service.GeminiExplicitCacheUpstreamCredentialKey, service.GeminiExplicitCacheUpstreamMaxTTLCredentialKey}
 	filtered := make(map[string]any)
@@ -1447,6 +1437,7 @@ func filterSchedulerExtra(extra map[string]any) map[string]any {
 		// model_not_supported —— 转发阶段却仍按透传工作，表现为"单独测账号能通、
 		// 走网关报 no available accounts"。
 		"openai_passthrough",
+		"openai_passthrough_model_filter",
 		service.OpenAIAPIKeyModeExtraKey,
 		service.CodexEngineModelsSyncExtraKey,
 		service.OpenAIAPIKeyAutoAttributionEnabledExtraKey,

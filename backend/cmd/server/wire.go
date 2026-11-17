@@ -121,6 +121,7 @@ func provideCleanup(
 	emailQueue *service.EmailQueueService,
 	billingCache *service.BillingCacheService,
 	usageRecordWorkerPool *service.UsageRecordWorkerPool,
+	usageBillingLanes *service.UsageBillingLaneCombiner,
 	balanceNotify *service.BalanceNotifyService,
 	digestSessions *service.DigestSessionStore,
 	subscriptionService *service.SubscriptionService,
@@ -389,6 +390,12 @@ func provideCleanup(
 				}
 				return nil
 			}},
+			{"UsageBillingLaneCombiner", func() error {
+				if usageBillingLanes != nil {
+					usageBillingLanes.Stop()
+				}
+				return nil
+			}},
 			{"OAuthService", func() error {
 				oauth.Stop()
 				return nil
@@ -522,7 +529,34 @@ func provideCleanup(
 			}
 		}
 
-		runParallel(parallelSteps)
+		// Producers and transports finish before workers are drained. Billing
+		// dependencies must stay live until the final per-command result and
+		// cache/notification side effects have completed.
+		drainOrder := []string{
+			"UsageRecordWorkerPool", "UsageBillingLaneCombiner",
+			"SubscriptionService", "PricingService", "BalanceNotifyService",
+			"EmailQueueService", "BillingCacheService", "UserPlatformQuotaUsageFlusher",
+		}
+		deferred := make(map[string]cleanupStep, len(drainOrder))
+		for _, name := range drainOrder {
+			deferred[name] = cleanupStep{}
+		}
+		producers := make([]cleanupStep, 0, len(parallelSteps)-len(drainOrder))
+		for _, step := range parallelSteps {
+			if _, ok := deferred[step.name]; ok {
+				deferred[step.name] = step
+			} else {
+				producers = append(producers, step)
+			}
+		}
+		drainSteps := make([]cleanupStep, 0, len(drainOrder))
+		for _, name := range drainOrder {
+			if step := deferred[name]; step.fn != nil {
+				drainSteps = append(drainSteps, step)
+			}
+		}
+		runParallel(producers)
+		runSequential(drainSteps)
 		runSequential(infraSteps)
 
 		// Check if context timed out

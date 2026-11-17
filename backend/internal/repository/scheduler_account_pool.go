@@ -201,6 +201,8 @@ func schedulerBucketEstimatedBytes(key string, entry *schedulerSnapshotEntry) in
 	size := int64(unsafe.Sizeof(*entry)) + int64(len(key)+len(entry.active))
 	size += int64(len(entry.accountKeys)) * int64(unsafe.Sizeof(schedulerAccountPoolKey{}))
 	size += int64(len(entry.lastUsedKeys)+len(entry.revisions)) * 16
+	// Reserve the immutable last_used sidecar at admission, including its time slab.
+	size += int64(unsafe.Sizeof(schedulerLastUsedValues{})) + int64(len(entry.lastUsedKeys))*(8+int64(unsafe.Sizeof(time.Time{})))
 	for _, value := range entry.lastUsedKeys {
 		size += int64(len(value))
 	}

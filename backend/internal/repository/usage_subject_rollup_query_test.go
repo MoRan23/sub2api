@@ -22,7 +22,7 @@ func TestSubjectDashboardRejectsUnreadyHistoryWithoutRawFallback(t *testing.T) {
 		t.Run(state.name, func(t *testing.T) {
 			db, mock := newSQLMock(t)
 			mock.ExpectBegin()
-			mock.ExpectQuery(`SELECT closed_before::text,retained_from,timezone_name FROM usage_subject_rollup_state`).WillReturnRows(sqlmock.NewRows([]string{"closed", "retained", "tz"}).AddRow(state.date, time.Unix(0, 0), state.tz))
+			mock.ExpectQuery(`SELECT closed_before::text,retained_from,timezone_name,expired_before FROM usage_subject_rollup_state`).WillReturnRows(sqlmock.NewRows([]string{"closed", "retained", "tz", "expired"}).AddRow(state.date, time.Unix(0, 0), state.tz, time.Unix(0, 0)))
 			mock.ExpectRollback()
 			_, err := newUsageLogRepositoryWithSQL(nil, db).GetUserDashboardStats(context.Background(), 1)
 			require.ErrorIs(t, err, service.ErrUsageStatsInitializing)
@@ -49,7 +49,7 @@ func TestSubjectRollupTailUsesCalendarDaysAcrossDST(t *testing.T) {
 func TestSubjectDashboardMissingStateIsInitializing(t *testing.T) {
 	db, mock := newSQLMock(t)
 	mock.ExpectBegin()
-	mock.ExpectQuery(`SELECT closed_before::text,retained_from,timezone_name FROM usage_subject_rollup_state`).WillReturnRows(sqlmock.NewRows([]string{"closed", "retained", "tz"}))
+	mock.ExpectQuery(`SELECT closed_before::text,retained_from,timezone_name,expired_before FROM usage_subject_rollup_state`).WillReturnRows(sqlmock.NewRows([]string{"closed", "retained", "tz", "expired"}))
 	mock.ExpectRollback()
 	_, err := newUsageLogRepositoryWithSQL(nil, db).GetAPIKeyDashboardStats(context.Background(), 1)
 	require.ErrorIs(t, err, service.ErrUsageStatsInitializing)

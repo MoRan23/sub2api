@@ -511,7 +511,7 @@ func openAIGroupCatalogMetadataTarget(group *Group, accounts []Account, modelID 
 			continue
 		}
 		target := modelID
-		if !openAIGroupCatalogIgnoresModelMapping(account) {
+		if !openAIGroupCatalogUsesPassthroughNames(account) {
 			if mapped, matched := account.ResolveMappedModel(modelID); matched && strings.TrimSpace(mapped) != "" {
 				target = strings.TrimSpace(mapped)
 			}
@@ -527,7 +527,12 @@ func openAIGroupCatalogMetadataTarget(group *Group, accounts []Account, modelID 
 }
 
 func openAIGroupCatalogIgnoresModelMapping(account *Account) bool {
-	return account.IsOpenAIPassthroughEnabled() && !account.IsCodexEngine() && !shouldForwardOpenAIResponsesViaRawChatCompletions(account)
+	return openAIGroupCatalogUsesPassthroughNames(account) && !account.IsOpenAIPassthroughModelFilterEnabled()
+}
+
+func openAIGroupCatalogUsesPassthroughNames(account *Account) bool {
+	return account.IsOpenAIPassthroughEnabled() && !account.IsCodexEngine() &&
+		(account.IsOpenAIPassthroughModelFilterEnabled() || !shouldForwardOpenAIResponsesViaRawChatCompletions(account))
 }
 
 func openAIGroupCatalogSynthesisAccounts(accounts []Account) []Account {
@@ -536,9 +541,21 @@ func openAIGroupCatalogSynthesisAccounts(accounts []Account) []Account {
 	// models or borrow unrelated model capabilities, without changing Composite.
 	projected := append([]Account(nil), accounts...)
 	for i := range projected {
-		if openAIGroupCatalogIgnoresModelMapping(&projected[i]) {
+		if openAIGroupCatalogUsesPassthroughNames(&projected[i]) {
 			projected[i].Credentials = maps.Clone(projected[i].Credentials)
-			delete(projected[i].Credentials, "model_mapping")
+			if projected[i].IsOpenAIPassthroughModelFilterEnabled() {
+				if projected[i].Credentials == nil {
+					projected[i].Credentials = make(map[string]any)
+				}
+				mapping := projected[i].GetModelMapping()
+				sources := make(map[string]any, len(mapping))
+				for id := range mapping {
+					sources[id] = id
+				}
+				projected[i].Credentials["model_mapping"] = sources
+			} else {
+				delete(projected[i].Credentials, "model_mapping")
+			}
 		}
 	}
 	return projected

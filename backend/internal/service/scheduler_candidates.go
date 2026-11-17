@@ -92,7 +92,7 @@ func (s *SchedulerSnapshotService) ListSchedulableCandidates(ctx context.Context
 			return nil, useMixed, ctxErr
 		}
 		if err == nil && hit {
-			return views, useMixed, nil
+			return compactSchedulableCandidates(views), useMixed, nil
 		}
 		if err != nil {
 			slog.Warn("scheduler candidate cache read failed", "bucket", bucket.String(), "error", err)
@@ -111,7 +111,7 @@ func (s *SchedulerSnapshotService) ListSchedulableCandidates(ctx context.Context
 		if err := s.guardFallback(loadCtx); err != nil {
 			return nil, err
 		}
-		fallbackCtx, cancel := s.withFallbackTimeout(loadCtx)
+		fallbackCtx, cancel := s.withSharedFallbackTimeout(loadCtx)
 		defer cancel()
 		accounts, err := s.loadAccountsFromDB(fallbackCtx, bucket, useMixed)
 		if err != nil {
@@ -130,7 +130,20 @@ func (s *SchedulerSnapshotService) ListSchedulableCandidates(ctx context.Context
 	if err != nil {
 		return nil, useMixed, err
 	}
-	return append(CandidateSet(nil), views...), useMixed, nil
+	return compactSchedulableCandidates(append(CandidateSet(nil), views...)), useMixed, nil
+}
+
+// The cache keeps cooling members so an expired transient block can recover
+// without a database write. Only compact request-owned views, never the masters.
+func compactSchedulableCandidates(views CandidateSet) CandidateSet {
+	out := views[:0]
+	for _, view := range views {
+		if view.Account != nil && view.Account.IsSchedulable() {
+			out = append(out, view)
+		}
+	}
+	clear(views[len(out):])
+	return out
 }
 
 // ApplyCandidateSchedulingThreshold preserves threshold side effects while

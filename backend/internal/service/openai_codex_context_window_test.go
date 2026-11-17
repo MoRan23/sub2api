@@ -39,7 +39,7 @@ func TestCodexContextWindowSyncRoundTrip(t *testing.T) {
 					"input_modalities":["text","image"],%s
 				}]}`, tc.fields))),
 			}}
-			repo := &upstreamModelMetadataRepoStub{}
+			repo := &upstreamModelMetadataRepoStub{account: &account}
 			syncer := &AccountTestService{accountRepo: repo, httpUpstream: upstream, cfg: upstreamModelSyncTestConfig()}
 			catalog, err := syncer.SyncUpstreamModelCatalog(context.Background(), &account)
 			require.NoError(t, err)

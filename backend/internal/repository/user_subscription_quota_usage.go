@@ -145,13 +145,18 @@ func loadTotalQuotaSpendRows(ctx context.Context, exec sqlExecutor, subscription
 			WITH snapshot_ids AS (
 				SELECT id, ord
 				FROM unnest($2::bigint[]) WITH ORDINALITY AS snapshot_ids(id, ord)
+			), locked AS MATERIALIZED (
+				SELECT e.id, e.quota_total_usd, e.quota_used_usd
+				FROM user_subscription_quota_events e
+				WHERE e.user_subscription_id = $1
+				  AND e.id = ANY($2::bigint[])
+				ORDER BY e.id
+				FOR UPDATE
 			)
 			SELECT e.id, e.quota_total_usd, e.quota_used_usd
 			FROM snapshot_ids s
-			JOIN user_subscription_quota_events e ON e.id = s.id
-			WHERE e.user_subscription_id = $1
+			JOIN locked e ON e.id = s.id
 			ORDER BY s.ord
-			FOR UPDATE OF e
 		`, subscriptionID, pq.Array(snapshot.EventIDs))
 		if err != nil {
 			return nil, 0, err
@@ -178,12 +183,16 @@ func loadTotalQuotaSpendRows(ctx context.Context, exec sqlExecutor, subscription
 
 	now := time.Now().UTC()
 	rows, err := exec.QueryContext(ctx, `
-		SELECT id, quota_total_usd, quota_used_usd
-		FROM user_subscription_quota_events
-		WHERE user_subscription_id = $1
-		  AND (expires_at IS NULL OR expires_at > $2)
+		WITH locked AS MATERIALIZED (
+			SELECT id, quota_total_usd, quota_used_usd, expires_at
+			FROM user_subscription_quota_events
+			WHERE user_subscription_id = $1
+			  AND (expires_at IS NULL OR expires_at > $2)
+			ORDER BY id
+			FOR UPDATE
+		)
+		SELECT id, quota_total_usd, quota_used_usd FROM locked
 		ORDER BY expires_at ASC NULLS LAST, id ASC
-		FOR UPDATE
 	`, subscriptionID, now)
 	if err != nil {
 		return nil, 0, err

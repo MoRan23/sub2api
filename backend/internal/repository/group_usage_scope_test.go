@@ -19,7 +19,7 @@ func TestGroupUsageSummaryFiltersHistoryTailAndOutput(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, empty)
 	mock.ExpectBegin()
-	mock.ExpectQuery("SELECT COUNT").WillReturnRows(sqlmock.NewRows([]string{"count", "closed", "retained", "timezone"}).AddRow(0, nil, nil, nil))
+	mock.ExpectQuery("SELECT COUNT").WillReturnRows(sqlmock.NewRows([]string{"count", "closed", "retained", "timezone", "expired"}).AddRow(0, nil, nil, nil, nil))
 	mock.ExpectQuery(`(?s)WITH historical.*rollup.group_id = ANY\(\$8::bigint\[\]\).*ul.group_id = ANY\(\$8::bigint\[\]\).*WHERE g.id = ANY\(\$8::bigint\[\]\)`).
 		WithArgs(sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), false, sqlmock.AnyArg(), sqlmock.AnyArg(), sqlmock.AnyArg(), pq.Array([]int64{2, 4})).
 		WillReturnRows(sqlmock.NewRows([]string{"group_id", "total", "today", "yesterday"}).AddRow(2, 12.0, 2.0, 3.0).AddRow(4, 0.0, 0.0, 0.0))

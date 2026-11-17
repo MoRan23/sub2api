@@ -13,6 +13,35 @@ import (
 
 var selectedPageName = regexp.MustCompile(`^codex_apps_selected_page_part_([1-9][0-9]*)_of_([1-9][0-9]*)$`)
 
+// UntrustedOutput recognizes external context carried by Codex as a standalone
+// named output. Forwarding and audit extraction share this exact boundary.
+func UntrustedOutput(kind, namespace, name, output string, callID any, hasCallID bool) (string, bool) {
+	switch name {
+	case "browser_info", "goal_objective", "untrusted_context":
+		if kind != "function_call_output" || namespace != "agent" || strings.TrimSpace(output) == "" {
+			return "", false
+		}
+		if hasCallID {
+			id, ok := callID.(string)
+			if !ok || strings.TrimSpace(id) != "" {
+				return "", false
+			}
+		}
+		return "<external_" + name + ">" + output + "</external_" + name + ">", true
+	default:
+		return PageOutput(kind, namespace, name, output, callID, hasCallID)
+	}
+}
+
+func ValidUntrustedContext(name, output string) bool {
+	switch name {
+	case "browser_info", "goal_objective", "untrusted_context":
+		return strings.TrimSpace(output) != ""
+	default:
+		return ValidPageContext(name, output)
+	}
+}
+
 // PageOutput accepts only standalone desktop page context, never a model tool
 // result identified by a nonempty call ID. The output remains untrusted text.
 func PageOutput(kind, namespace, name, output string, callID any, hasCallID bool) (string, bool) {

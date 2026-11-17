@@ -308,8 +308,8 @@ func TestFetchOpenAIAccountModelsMappingChangesReuseRawCache(t *testing.T) {
 		calls.Add(1)
 		return ordinaryModelsUpstreamResponse(`{"data":[
 			{"id":"target","owned_by":"provider","created":123},
-			{"id":"gpt-a"},
-			{"id":"gpt-special"},
+			{"id":"gpt-a","owned_by":"source-a-provider","created":789},
+			{"id":"gpt-special","owned_by":"source-special-provider","created":987},
 			{"id":"other","owned_by":"other-provider","created":456}
 		]}`), nil
 	}})
@@ -327,11 +327,11 @@ func TestFetchOpenAIAccountModelsMappingChangesReuseRawCache(t *testing.T) {
 	for _, model := range models {
 		switch model.ID {
 		case "gpt-a":
-			require.EqualValues(t, 123, model.Created)
-			require.Equal(t, "provider", model.OwnedBy)
+			require.EqualValues(t, 789, model.Created)
+			require.Equal(t, "source-a-provider", model.OwnedBy)
 		case "gpt-special":
-			require.EqualValues(t, 456, model.Created, "exact mapping takes priority over the wildcard")
-			require.Equal(t, "other-provider", model.OwnedBy)
+			require.EqualValues(t, 987, model.Created, "an existing public source keeps its own descriptor even with an exact mapping")
+			require.Equal(t, "source-special-provider", model.OwnedBy)
 		}
 	}
 
@@ -339,6 +339,8 @@ func TestFetchOpenAIAccountModelsMappingChangesReuseRawCache(t *testing.T) {
 	models, err = svc.FetchOpenAIAccountModels(ctx, account)
 	require.NoError(t, err)
 	require.Equal(t, []string{"second"}, pickerModelIDs(models), "mapping changes apply without refreshing discovery")
+	require.EqualValues(t, 456, models[0].Created, "an alias without a source descriptor inherits its unique target")
+	require.Equal(t, "other-provider", models[0].OwnedBy)
 	after, err := gateway.FetchOpenAIModelsList(ctx, account)
 	require.NoError(t, err)
 	require.Equal(t, original, after.Body, "projection must not mutate the shared catalog")

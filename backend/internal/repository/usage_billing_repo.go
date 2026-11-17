@@ -30,7 +30,7 @@ type batchImageHoldReceipt struct {
 	archived     bool
 }
 
-func NewUsageBillingRepository(_ *dbent.Client, sqlDB *sql.DB) service.UsageBillingRepository {
+func NewUsageBillingRepository(_ *dbent.Client, sqlDB *sql.DB) service.UsageBillingBatchRepository {
 	return &usageBillingRepository{db: sqlDB}
 }
 
@@ -223,6 +223,9 @@ func (r *usageBillingRepository) applyBatchImageBalanceHold(
 
 func (r *usageBillingRepository) applyUsageBillingEffects(ctx context.Context, tx *sql.Tx, cmd *service.UsageBillingCommand, result *service.UsageBillingApplyResult) error {
 	if cmd.SubscriptionCost > 0 && cmd.SubscriptionID != nil {
+		if cmd.TotalQuotaSpendSnapshot != nil {
+			ctx = service.WithTotalQuotaSpendSnapshot(ctx, cmd.TotalQuotaSpendSnapshot)
+		}
 		if err := incrementUsageBillingSubscription(ctx, tx, *cmd.SubscriptionID, cmd.SubscriptionCost); err != nil {
 			return err
 		}
@@ -268,10 +271,7 @@ func incrementUsageBillingSubscription(ctx context.Context, tx *sql.Tx, subscrip
 	return incrementSubscriptionUsage(ctx, tx, subscriptionID, costUSD)
 }
 
-func deductUsageBillingBalance(ctx context.Context, tx *sql.Tx, userID int64, amount float64) (float64, bool, error) {
-	var newBalance float64
-	var sufficient bool
-	err := tx.QueryRowContext(ctx, `
+const deductUsageBillingBalanceSQL = `
 		WITH target AS (
 			SELECT id, balance, gift_balance
 			FROM users
@@ -297,7 +297,12 @@ func deductUsageBillingBalance(ctx context.Context, tx *sql.Tx, userID int64, am
 				a.balance + a.gift_balance >= $1 AS sufficient
 		)
 		SELECT total_balance, sufficient FROM updated
-	`, amount, userID).Scan(&newBalance, &sufficient)
+	`
+
+func deductUsageBillingBalance(ctx context.Context, tx *sql.Tx, userID int64, amount float64) (float64, bool, error) {
+	var newBalance float64
+	var sufficient bool
+	err := tx.QueryRowContext(ctx, deductUsageBillingBalanceSQL, amount, userID).Scan(&newBalance, &sufficient)
 	if errors.Is(err, sql.ErrNoRows) {
 		return 0, false, service.ErrUserNotFound
 	}
@@ -558,9 +563,9 @@ func userExistsForBilling(ctx context.Context, tx *sql.Tx, userID int64) (bool, 
 	return true, nil
 }
 
-func incrementUsageBillingAPIKeyQuota(ctx context.Context, tx *sql.Tx, apiKeyID int64, amount float64) (bool, error) {
-	var exhausted bool
-	err := tx.QueryRowContext(ctx, `
+// usageBillingAPIKeyQuotaUpdate 累加 Key 已用额度（$1），本次累加从未达额度跨到达到额度时把 active 状态置为额度耗尽。
+// 参数：$1=金额 $2=api_key_id $3=active 状态 $4=额度耗尽状态。
+const usageBillingAPIKeyQuotaUpdate = `
 		UPDATE api_keys
 		SET quota_used = quota_used + $1,
 			status = CASE
@@ -572,7 +577,11 @@ func incrementUsageBillingAPIKeyQuota(ctx context.Context, tx *sql.Tx, apiKeyID 
 				ELSE status
 			END,
 			updated_at = NOW()
-		WHERE id = $2 AND deleted_at IS NULL
+		WHERE id = $2 AND deleted_at IS NULL`
+
+func incrementUsageBillingAPIKeyQuota(ctx context.Context, tx *sql.Tx, apiKeyID int64, amount float64) (bool, error) {
+	var exhausted bool
+	err := tx.QueryRowContext(ctx, usageBillingAPIKeyQuotaUpdate+`
 		RETURNING quota > 0 AND quota_used >= quota AND quota_used - $1 < quota
 	`, amount, apiKeyID, service.StatusAPIKeyActive, service.StatusAPIKeyQuotaExhausted).Scan(&exhausted)
 	if errors.Is(err, sql.ErrNoRows) {

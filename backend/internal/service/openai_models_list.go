@@ -236,7 +236,9 @@ func projectAccountModelAliases(body []byte, account *Account, group *Group, cod
 		envelope[field] = json.RawMessage(`[]`)
 		return json.Marshal(envelope)
 	}
-	if account.IsOpenAIPassthroughEnabled() || len(account.GetModelMapping()) == 0 {
+	passthrough := account.IsOpenAIPassthroughEnabled()
+	_, engineCatalogKnown := codexEngineKnownModelCount(account)
+	if !engineCatalogKnown && ((passthrough && !account.IsOpenAIPassthroughModelFilterEnabled()) || len(account.GetModelMapping()) == 0) {
 		return body, nil
 	}
 	field, idField := "data", "id"
@@ -296,6 +298,10 @@ func projectAccountModelAliases(body []byte, account *Account, group *Group, cod
 			continue
 		}
 		target, matched := account.ResolveMappedModel(id)
+		if passthrough {
+			// Filtering changes eligibility, never the upstream/public model name.
+			target, matched = id, account.IsModelSupported(id)
+		}
 		raw, available := byID[strings.TrimSpace(target)]
 		if !matched || !available {
 			continue

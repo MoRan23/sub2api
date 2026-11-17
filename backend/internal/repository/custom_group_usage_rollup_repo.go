@@ -28,28 +28,28 @@ type groupUsageRollupSnapshot struct {
 // 判定条件与原先 SQL 里的 state_values CTE 完全一致：
 // 恰好一行、时区名与当前服务端配置相同、且水位不在未来。
 func readGroupUsageRollupSnapshot(ctx context.Context, sqlq sqlExecutor, timezoneName, todayDate string) (groupUsageRollupSnapshot, error) {
-	epoch := time.Unix(0, 0).UTC()
-	invalid := groupUsageRollupSnapshot{
-		closedBefore: "1970-01-01",
-		retainedDate: "1970-01-01",
-		tailStart:    epoch,
-	}
-
 	var rowCount int
 	var closedBefore sql.NullString
 	var retainedFrom sql.NullTime
 	var stateTimezone sql.NullString
+	var expiredBefore sql.NullTime
 	if err := scanSingleRow(ctx, sqlq, `
 		SELECT
 			COUNT(*),
 			MAX(closed_before)::text,
 			MAX(retained_from),
-			MAX(timezone_name)
+			MAX(timezone_name),
+			MAX(expired_before)
 		FROM usage_group_rollup_state
 		WHERE id = 1
-	`, nil, &rowCount, &closedBefore, &retainedFrom, &stateTimezone); err != nil {
+	`, nil, &rowCount, &closedBefore, &retainedFrom, &stateTimezone, &expiredBefore); err != nil {
 		return groupUsageRollupSnapshot{}, fmt.Errorf("读取分组用量汇总水位: %w", err)
 	}
+	floor := time.Unix(0, 0).UTC()
+	if rowCount == 1 && expiredBefore.Valid && expiredBefore.Time.After(floor) {
+		floor = expiredBefore.Time.UTC()
+	}
+	invalid := groupUsageRollupSnapshot{closedBefore: "1970-01-01", retainedDate: "1970-01-01", tailStart: floor}
 	if rowCount != 1 || !closedBefore.Valid || !retainedFrom.Valid ||
 		!stateTimezone.Valid || stateTimezone.String != timezoneName ||
 		closedBefore.String > todayDate {
@@ -61,10 +61,17 @@ func readGroupUsageRollupSnapshot(ctx context.Context, sqlq sqlExecutor, timezon
 		// 水位值解析不出来，按无效处理：宁可多扫一次，也不要算错钱。
 		return invalid, nil //nolint:nilerr // 与上面的 valid 判定同语义，均降级为全量重算
 	}
+	if floor.After(tailStart) {
+		tailStart = floor
+	}
+	retainedDate := service.GroupUsageDate(retainedFrom.Time)
+	if expiredDate := service.GroupUsageDate(floor); expiredDate > retainedDate {
+		retainedDate = expiredDate
+	}
 	return groupUsageRollupSnapshot{
 		valid:        true,
 		closedBefore: closedBefore.String,
-		retainedDate: service.GroupUsageDate(retainedFrom.Time),
+		retainedDate: retainedDate,
 		tailStart:    tailStart.UTC(),
 	}, nil
 }
@@ -230,26 +237,16 @@ func lockGroupUsageRollupState(ctx context.Context, tx *sql.Tx) error {
 	return nil
 }
 
-func invalidateGroupUsageRollupsAt(ctx context.Context, tx *sql.Tx, affectedAt time.Time) error {
-	timezoneName := service.GroupUsageTimezoneName()
-	_, err := tx.ExecContext(ctx, `
-		UPDATE usage_group_rollup_state
-		SET closed_before = LEAST(
-			closed_before,
-			($1::timestamptz AT TIME ZONE $2::text)::date
-		),
-			updated_at = NOW()
-		WHERE id = 1
-	`, affectedAt.UTC(), timezoneName)
-	if err != nil {
-		return err
-	}
-	// DROP PARTITION does not run usage row triggers. Fence an in-flight
-	// subject build even when the group watermark was already at this date.
-	_, err = tx.ExecContext(ctx, `
-		UPDATE usage_subject_rollup_state
-		SET closed_before=LEAST(closed_before,($1::timestamptz AT TIME ZONE $2::text)::date),updated_at=NOW()
-		WHERE id=1
-	`, affectedAt.UTC(), timezoneName)
+// Both state rows are invalidated in group-before-subject order, including
+// explicit partition maintenance which does not run the usage row triggers.
+func invalidateGroupUsageRollupsAt(ctx context.Context, q sqlExecutor, affectedAt time.Time) error {
+	_, err := q.ExecContext(ctx, "SELECT invalidate_group_usage_rollups_at($1, $2)", affectedAt.UTC(), service.GroupUsageTimezoneName())
+	return err
+}
+
+// Retention is an exact instant, not a rounded day. The database fences both
+// builders and invalidates the boundary day before old source rows are removed.
+func expireGroupUsageRollupsBefore(ctx context.Context, q sqlExecutor, cutoff time.Time) error {
+	_, err := q.ExecContext(ctx, "SELECT expire_usage_rollups_before($1, $2)", cutoff.UTC(), service.GroupUsageTimezoneName())
 	return err
 }

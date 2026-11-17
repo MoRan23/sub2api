@@ -86,6 +86,7 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		emailQueueSvc,
 		billingCacheSvc,
 		&service.UsageRecordWorkerPool{},
+		nil, // usageBillingLanes
 		service.ProvideBalanceNotifyService(nil, nil, nil, nil),
 		service.NewDigestSessionStore(),
 		&service.SubscriptionService{},
@@ -114,6 +115,7 @@ func TestProvideCleanup_WithMinimalDependencies_NoPanic(t *testing.T) {
 		nil, // openAIAutoReset
 		nil, // promptAudit
 		nil, // pluginManager
+		nil, // usageExports
 	)
 
 	require.NotPanics(t, func() {

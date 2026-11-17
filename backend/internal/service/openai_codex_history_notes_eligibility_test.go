@@ -294,7 +294,7 @@ func TestForwardCodexHistoryNotesRevalidatesEligibilityAfterTokenResolution(t *t
 		{name: "account_no_longer_schedulable", mutate: func(a *Account) { a.Schedulable = false }, wantError: true},
 		{name: "reload_database_failure", reloadErr: databaseFailure, wantError: true},
 		{name: "account_deleted", reloadErr: ErrAccountNotFound, wantError: true},
-		{name: "without_refresh_provider_uses_captured_account", reloadErr: databaseFailure, withoutProvider: true},
+		{name: "without_refresh_provider_only_resolves_credentials", reloadErr: databaseFailure, withoutProvider: true},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -313,8 +313,18 @@ func TestForwardCodexHistoryNotesRevalidatesEligibilityAfterTokenResolution(t *t
 			alternative.ID++
 			repo := &codexAuxiliaryEligibilityAccountRepo{
 				accounts: []Account{candidate, alternative},
-				byID:     map[int64]*Account{candidate.ID: &latest},
-				getErr:   tt.reloadErr,
+			}
+			repo.getByID = func(id int64) (*Account, error) {
+				require.Equal(t, candidate.ID, id)
+				// Credential resolution first reads the selected owner. Changes
+				// become visible only in the post-token eligibility recheck.
+				if repo.getCalls == 1 {
+					return &candidate, nil
+				}
+				if tt.reloadErr != nil {
+					return nil, tt.reloadErr
+				}
+				return &latest, nil
 			}
 			upstreamCalls := 0
 			svc := &OpenAIGatewayService{
@@ -348,9 +358,9 @@ func TestForwardCodexHistoryNotesRevalidatesEligibilityAfterTokenResolution(t *t
 				require.Equal(t, 1, upstreamCalls)
 			}
 			if tt.withoutProvider {
-				require.Zero(t, repo.getCalls, "a path without token refresh must not add a redundant account reload")
+				require.Equal(t, 1, repo.getCalls, "without token refresh, resolve credentials without a second eligibility reload")
 			} else {
-				require.Equal(t, 1, repo.getCalls, "the current account must be checked after the provider returns its token")
+				require.Equal(t, 2, repo.getCalls, "resolve credentials, then recheck the current account after the provider returns its token")
 			}
 			owner, ok := svc.codexAuxiliarySticky.Load(bindingKey)
 			require.True(t, ok)

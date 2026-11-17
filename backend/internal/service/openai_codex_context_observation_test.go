@@ -163,8 +163,13 @@ func TestCodexContextObservationHistoryRejectionWaitsForDeliveryWithoutFallback(
 				}
 				return &http.Response{StatusCode: status, Status: http.StatusText(status), Header: make(http.Header), Body: io.NopCloser(strings.NewReader(`{"items":[]}`))}, nil
 			}}
+			// Credential resolution reloads the selected OAuth account before sending.
+			repo := &codexAuxiliaryEligibilityAccountRepo{
+				accounts: accounts,
+				byID:     map[int64]*Account{901: &accounts[0], 902: &accounts[1]},
+			}
 			svc := &OpenAIGatewayService{
-				accountRepo: &countingCodexModelsAccountRepo{accounts: accounts}, httpUpstream: &upstream,
+				accountRepo: repo, httpUpstream: &upstream,
 				cfg: &config.Config{JWT: config.JWTConfig{Secret: "context-observation-test-secret"}},
 			}
 			key := &APIKey{ID: 71, UserID: 70}

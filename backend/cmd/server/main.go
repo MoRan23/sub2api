@@ -8,6 +8,7 @@ import (
 	"errors"
 	"flag"
 	"log"
+	"net"
 	"net/http"
 	"os"
 	"os/signal"
@@ -157,6 +158,11 @@ func runMainServer() {
 		log.Fatalf("Failed to initialize application: %v", err)
 	}
 	defer app.Cleanup()
+	requestContext, cancelRequests := context.WithCancel(context.Background())
+	defer cancelRequests()
+	drain := &requestDrain{next: app.Server.Handler}
+	app.Server.Handler = drain
+	app.Server.BaseContext = func(net.Listener) context.Context { return requestContext }
 	if app.PluginManager != nil {
 		if err := app.PluginManager.Start(context.Background()); err != nil {
 			log.Printf("Plugin manager started in degraded state: %v", err)
@@ -195,13 +201,21 @@ func runMainServer() {
 	<-quit
 
 	log.Println("Shutting down server...")
+	drain.seal()
 
 	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
 	defer cancel()
 
 	if err := app.Server.Shutdown(ctx); err != nil {
 		log.Printf("Server forced to shutdown: %v", err)
+		cancelRequests()
+		_ = app.Server.Close()
 	}
+	// Shutdown does not wait for hijacked connections; Close also does not wait
+	// for handlers to finish. Cancel their shared base context, then let them
+	// publish their final tasks before Cleanup drains workers and closes storage.
+	cancelRequests()
+	drain.wait()
 
 	log.Println("Server exited")
 }

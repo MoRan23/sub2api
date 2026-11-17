@@ -17,7 +17,7 @@ type candidateFlightRepo struct {
 	release chan struct{}
 }
 
-func (r *candidateFlightRepo) ListSchedulableUngroupedByPlatform(ctx context.Context, _ string) ([]Account, error) {
+func (r *candidateFlightRepo) ListModelAvailabilityCandidates(ctx context.Context, _ *int64, _ []string, _ bool) ([]Account, error) {
 	n := int(r.calls.Add(1))
 	if r.entered != nil {
 		r.entered <- n

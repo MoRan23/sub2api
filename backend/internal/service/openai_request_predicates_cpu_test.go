@@ -126,6 +126,32 @@ func TestOpenAIResponsesToolSchemaValidatedStringCPUParity(t *testing.T) {
 	}
 }
 
+func TestOpenAIResponsesToolSchemaValidationCPUParity(t *testing.T) {
+	// Match the pre-merge validation contract, including the permissive JSON
+	// treatment of duplicate members and isolated surrogate escapes.
+	bodies := []string{
+		``, `null`, `true`, `false`, `0`, `-0.00`, `1e100000000`, `-1e-999999`, `01`, `1.`, `1e`, `+1`,
+		`[]`, `{}`, `"text"`, `"\uD800"`, `"\uDC00"`, `"\uD800\uDC00"`, `"\u0000"`,
+		`"\u123"`, `"\uZZZZ"`, `"bad\q"`, `"unterminated`, "\"bad\x00control\"",
+		`{"a":1,"a":2}`, `{"a":1,"\u0061":2}`, `{"a":1} null`, `{"a":true,}`, `[1,]`,
+		`{"tools":[{"parameters":{"type":null,"type":"object"}}]}`,
+		`{"to\u006fls":[{"parameters":{"one\u004ff":[{"type":"object"}]}}]}`,
+		`{"input":"` + string([]byte{0xff}) + `"}`,
+		`{"input":"你好😀"}`, `{"input":"` + strings.Repeat("A", 1<<20) + `"}`,
+	}
+	for _, depth := range []int{127, 128, 129, 132, 10001} {
+		bodies = append(bodies, strings.Repeat(`[`, depth)+`0`+strings.Repeat(`]`, depth))
+	}
+	for i, raw := range bodies {
+		body := []byte(raw)
+		want, wantChanged, wantErr := legacyCPUSchemaSanitizeOpenAIResponsesToolParameterTypes(body)
+		got, gotChanged, gotErr := sanitizeOpenAIResponsesToolParameterTypes(body)
+		if !bytes.Equal(got, want) || gotChanged != wantChanged || fmt.Sprint(gotErr) != fmt.Sprint(wantErr) {
+			t.Fatalf("case %d: validation changed: got changed=%v err=%v, want changed=%v err=%v", i, gotChanged, gotErr, wantChanged, wantErr)
+		}
+	}
+}
+
 func buildRequestPredicatesCPUBody(size int, kind string, repair bool) []byte {
 	prefix := `{"model":"gpt-6-sol","input":[{"type":"message","content":[{"type":"input_image","image_url":"data:image/png;base64,`
 	if kind == "text" {

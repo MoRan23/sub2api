@@ -519,7 +519,7 @@ func (s *OpenAIGatewayService) BuildCodexEngineBillingEvent(ctx context.Context,
 	}
 	statsPrice := f.Prices[model]
 	if f.Version >= 4 && event.Kind != "search" && f.GroupID != nil {
-		log.AccountStatsCost = resolveAccountStatsCost(ctx, s.channelService, bs, job.AccountID, *f.GroupID, model, tokens, max(1, event.ImageCount), cost.TotalCost, tier, f.PricingAt, f.LongContext, effort)
+		log.AccountStatsCost = resolveAccountStatsCost(ctx, s.channelService, bs, job.AccountID, *f.GroupID, model, tokens, max(1, event.ImageCount), cost.TotalCost, tier, f.PricingAt, f.LongContext, 1, effort)
 	}
 	if statsPrice.StatsCustom != nil && event.Kind != "search" {
 		log.AccountStatsCost = calculateStatsCost(statsPrice.StatsCustom, tokens, max(1, event.ImageCount))

@@ -306,17 +306,20 @@ func extractSystemPreviewFromBody(body []byte) string {
 
 	switch {
 	case sys.IsArray():
-		for _, item := range sys.Array() {
+		var preview string
+		sys.ForEach(func(_, item gjson.Result) bool {
 			if !item.IsObject() {
-				continue
+				return true
 			}
 			if strings.EqualFold(item.Get("type").String(), "text") {
 				if t := item.Get("text").String(); strings.TrimSpace(t) != "" {
-					return t
+					preview = t
+					return false
 				}
 			}
-		}
-		return ""
+			return true
+		})
+		return preview
 	case sys.Type == gjson.String:
 		return sys.String()
 	default:
@@ -353,12 +356,12 @@ func buildClaudeMimicDebugLine(req *http.Request, body []byte, account *Account,
 
 	h := make([]string, 0, len(interesting))
 	for _, k := range interesting {
-		if v := req.Header.Get(k); v != "" {
-			h = append(h, fmt.Sprintf("%s=%q", k, safeHeaderValueForLog(k, v)))
+		if v := getHeaderRaw(req.Header, k); v != "" {
+			h = append(h, fmt.Sprintf("%s=%q", k, boundedClaudeMimicDebugValue(safeHeaderValueForLog(k, v), 256)))
 		}
 	}
 
-	metaUserID := strings.TrimSpace(gjson.GetBytes(body, "metadata.user_id").String())
+	metaUserID := boundedClaudeMimicDebugValue(strings.TrimSpace(gjson.GetBytes(body, "metadata.user_id").String()), 256)
 	sysPreview := strings.TrimSpace(extractSystemPreviewFromBody(body))
 
 	// Truncate preview to keep logs sane.
@@ -372,12 +375,16 @@ func buildClaudeMimicDebugLine(req *http.Request, body []byte, account *Account,
 	aname := ""
 	if account != nil {
 		aid = account.ID
-		aname = account.Name
+		aname = boundedClaudeMimicDebugValue(account.Name, 128)
+	}
+	url := ""
+	if req.URL != nil {
+		url = boundedClaudeMimicDebugValue(req.URL.String(), 512)
 	}
 
-	return fmt.Sprintf(
+	line := fmt.Sprintf(
 		"url=%s account=%d(%s) tokenType=%s mimic=%t meta.user_id=%q system.preview=%q headers={%s}",
-		req.URL.String(),
+		url,
 		aid,
 		aname,
 		tokenType,
@@ -386,6 +393,40 @@ func buildClaudeMimicDebugLine(req *http.Request, body []byte, account *Account,
 		sysPreview,
 		strings.Join(h, " "),
 	)
+	return boundedClaudeMimicDebugValue(line, 8192)
+}
+
+func boundedClaudeMimicDebugValue(value string, limit int) string {
+	if len(value) <= limit {
+		return value
+	}
+	// Keep the retained diagnostic bounded; only the formatted result escapes.
+	return value[:limit-3] + "..."
+}
+
+// buildClaudeMimicDebugLineOnError runs synchronously against the selected
+// physical attempt. Ordinary successes and retries never scan or retain the
+// request for diagnostics. Callers may store only the returned short string.
+func buildClaudeMimicDebugLineOnError(req *http.Request, wireBody []byte, account *Account, tokenType string, mimicClaudeCode bool, errorBody []byte) string {
+	if tokenType != "oauth" || !isClaudeCodeCredentialScopeError(extractUpstreamErrorMessage(errorBody)) {
+		return ""
+	}
+	return buildClaudeMimicDebugLine(req, wireBody, account, tokenType, mimicClaudeCode)
+}
+
+// claudeMimicDebugLineFromContext never holds a lazy request/body closure.
+func claudeMimicDebugLineFromContext(c interface {
+	Get(string) (any, bool)
+}) string {
+	if c == nil {
+		return ""
+	}
+	v, ok := c.Get(claudeMimicDebugInfoKey)
+	if !ok {
+		return ""
+	}
+	line, _ := v.(string)
+	return line
 }
 
 func logClaudeMimicDebug(req *http.Request, body []byte, account *Account, tokenType string, mimicClaudeCode bool) {
@@ -405,10 +446,7 @@ func isClaudeCodeCredentialScopeError(msg string) bool {
 		strings.Contains(m, "cannot be used for other api requests")
 }
 
-// sseDataRe matches SSE data lines with optional whitespace after colon.
-// Some upstream APIs return non-standard "data:" without space (should be "data: ").
 var (
-	sseDataRe            = regexp.MustCompile(`^data:\s*`)
 	claudeCliUserAgentRe = regexp.MustCompile(`(?i)^claude-cli/\d+\.\d+\.\d+`)
 
 	// claudeCodePromptPrefixes 用于检测 Claude Code 系统提示词的前缀列表
@@ -666,6 +704,17 @@ type ForwardResult struct {
 	// CacheStorageTokenHours 显式上下文缓存的存储量（缓存 token 数 × 存储小时数），按计费模型的
 	// 存储单价折算为费用后叠加在 token 费用之上。
 	CacheStorageTokenHours float64
+	// UpstreamPriceMultiplier 是上游按实际请求端点计价相对计费模型价格的倍数（见 VertexUpstreamPriceMultiplier），
+	// 只作用于 token 费用；0 按 1 处理。
+	UpstreamPriceMultiplier float64
+}
+
+// upstreamPriceFactor 返回 UpstreamPriceMultiplier，未设置时为 1。
+func (r *ForwardResult) upstreamPriceFactor() float64 {
+	if r == nil || r.UpstreamPriceMultiplier <= 0 {
+		return 1
+	}
+	return r.UpstreamPriceMultiplier
 }
 
 // GatewayFailureStage identifies which request stage failed. The zero value is
@@ -720,6 +769,7 @@ type UpstreamFailoverError struct {
 	NextAccountAction        NextAccountAction
 	ClientStatusCode         int
 	ClientMessage            string
+	StreamFailedFrame        *OpenAIStreamFailedFrame // 触发本次 failover 的流内 failed/error 帧；耗尽时用于错误透传规则匹配
 }
 
 func (e *UpstreamFailoverError) Error() string {
@@ -1477,7 +1527,7 @@ func (s *GatewayService) GetAvailableModels(ctx context.Context, groupID *int64,
 		// Treat it like an unmapped account: skip its mapping here and let
 		// supplementUnmappedOpenAIModels contribute the default set. Mappings on
 		// the ordinary accounts in the same group still count.
-		if platform == PlatformOpenAI && acc.IsOpenAIPassthroughEnabled() {
+		if platform == PlatformOpenAI && acc.IsOpenAIPassthroughEnabled() && !acc.IsOpenAIPassthroughModelFilterEnabled() {
 			continue
 		}
 

@@ -274,8 +274,8 @@ func extractResponses(value any) []promptSegment {
 				result = append(result, promptSegment{text: entry, user: true, role: "user"})
 			case map[string]any:
 				callID, hasCallID := entry["call_id"]
-				if text, ok := codexcontext.PageOutput(stringValue(entry["type"]), stringValue(entry["namespace"]), stringValue(entry["name"]), stringValue(entry["output"]), callID, hasCallID); ok {
-					// Desktop context is inspected as untrusted context, not a new
+				if text, ok := codexcontext.UntrustedOutput(stringValue(entry["type"]), stringValue(entry["namespace"]), stringValue(entry["name"]), stringValue(entry["output"]), callID, hasCallID); ok {
+					// External context is inspected as untrusted context, not a new
 					// user instruction for latest-turn combination matching.
 					result = append(result, promptSegment{text: text, role: "tool"})
 					continue

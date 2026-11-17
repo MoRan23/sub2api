@@ -121,6 +121,8 @@ type UsageRecordWorkerPool struct {
 	lastScaleNanos        atomic.Int64
 	autoScaleCancel       context.CancelFunc
 	lifecycleWg           sync.WaitGroup
+	admissionMu           sync.Mutex
+	stopping              bool
 	stopOnce              sync.Once
 }
 
@@ -163,14 +165,29 @@ func NewUsageRecordWorkerPoolWithOptions(opts UsageRecordWorkerPoolOptions) *Usa
 // Submit 提交一个使用量记录任务。
 // 提交失败（队列满）时按 overflowPolicy 执行降级策略：drop/sample/sync。
 func (p *UsageRecordWorkerPool) Submit(task UsageRecordTask) UsageRecordSubmitMode {
+	return p.submit(task, false)
+}
+
+// SubmitMandatory keeps money-critical queue-overflow fallbacks within the
+// pool's shutdown barrier, even when ordinary overflow uses drop or sample.
+func (p *UsageRecordWorkerPool) SubmitMandatory(task UsageRecordTask) UsageRecordSubmitMode {
+	return p.submit(task, true)
+}
+
+func (p *UsageRecordWorkerPool) submit(task UsageRecordTask, mandatory bool) UsageRecordSubmitMode {
 	if p == nil || task == nil {
 		return UsageRecordSubmitModeDropped
 	}
-	if p.pool == nil || p.pool.Stopped() {
+	p.admissionMu.Lock()
+	if p.stopping || p.pool == nil || p.pool.Stopped() {
+		p.admissionMu.Unlock()
 		p.droppedPoolStopped.Add(1)
 		p.logDrop("stopped")
 		return UsageRecordSubmitModeDroppedStopped
 	}
+	p.lifecycleWg.Add(1)
+	p.admissionMu.Unlock()
+	defer p.lifecycleWg.Done()
 
 	submittedAt := time.Now()
 	_, ok := p.pool.TrySubmit(func() {
@@ -198,6 +215,13 @@ func (p *UsageRecordWorkerPool) Submit(task UsageRecordTask) UsageRecordSubmitMo
 			p.execute(task)
 			return UsageRecordSubmitModeSync
 		}
+	}
+
+	if mandatory {
+		p.syncFallback.Add(1)
+		// Match the handler's pre-existing mandatory drop/sample fallback.
+		p.executeWithTimeout(task, 10*time.Second)
+		return UsageRecordSubmitModeSync
 	}
 
 	p.droppedQueueFull.Add(1)
@@ -234,6 +258,9 @@ func (p *UsageRecordWorkerPool) Stop() {
 		return
 	}
 	p.stopOnce.Do(func() {
+		p.admissionMu.Lock()
+		p.stopping = true
+		p.admissionMu.Unlock()
 		if p.autoScaleCancel != nil {
 			p.autoScaleCancel()
 		}
@@ -340,9 +367,13 @@ func (p *UsageRecordWorkerPool) shouldSyncFallback() bool {
 }
 
 func (p *UsageRecordWorkerPool) execute(task UsageRecordTask) {
+	p.executeWithTimeout(task, p.taskTimeout)
+}
+
+func (p *UsageRecordWorkerPool) executeWithTimeout(task UsageRecordTask, timeout time.Duration) {
 	startedAt := time.Now()
 	defer func() { p.executionHistogram.ObserveDuration(time.Since(startedAt)) }()
-	ctx, cancel := context.WithTimeout(context.Background(), p.taskTimeout)
+	ctx, cancel := context.WithTimeout(context.Background(), timeout)
 	defer cancel()
 
 	defer func() {

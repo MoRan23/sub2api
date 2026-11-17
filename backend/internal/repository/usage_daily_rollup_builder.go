@@ -66,14 +66,14 @@ func syncUsageDailyRollups(ctx context.Context, db *sql.DB, kind string, today t
 			return e
 		}
 		var closed, oldTZ string
-		var previousRetained time.Time
-		e = tx.QueryRowContext(ctx, "SELECT closed_before::text,timezone_name,retained_from FROM "+state+" WHERE id=1 FOR UPDATE").Scan(&closed, &oldTZ, &previousRetained)
+		var previousRetained, expiredBefore time.Time
+		e = tx.QueryRowContext(ctx, "SELECT closed_before::text,timezone_name,retained_from,expired_before FROM "+state+" WHERE id=1 FOR UPDATE").Scan(&closed, &oldTZ, &previousRetained, &expiredBefore)
 		if e != nil {
 			tx.Rollback()
 			return e
 		}
 		var earliest sql.NullTime
-		e = tx.QueryRowContext(ctx, "SELECT MIN(created_at) FROM usage_logs").Scan(&earliest)
+		e = tx.QueryRowContext(ctx, "SELECT MIN(created_at) FROM usage_logs WHERE created_at >= $1", expiredBefore).Scan(&earliest)
 		if e != nil {
 			tx.Rollback()
 			return e
@@ -81,6 +81,9 @@ func syncUsageDailyRollups(ctx context.Context, db *sql.DB, kind string, today t
 		retained := today
 		if earliest.Valid {
 			retained = earliest.Time
+		}
+		if expiredBefore.After(retained) {
+			retained = expiredBefore
 		}
 		first := service.GroupUsageDate(retained)
 		if first > service.GroupUsageDate(today) {
@@ -113,7 +116,18 @@ func syncUsageDailyRollups(ctx context.Context, db *sql.DB, kind string, today t
 			_, e = conn.ExecContext(ctx, "DELETE FROM "+table+" WHERE bucket_date < $1::date OR bucket_date >= $2::date", first, service.GroupUsageDate(today))
 			return e
 		}
-		end := start.AddDate(0, 0, 1)
+		// A civil day may begin at 01:00 when midnight is skipped by DST.
+		// Advance the date, not that shifted wall-clock instant.
+		calendarDay, e := time.Parse("2006-01-02", closed)
+		if e != nil {
+			tx.Rollback()
+			return e
+		}
+		end, e := service.ParseGroupUsageDate(calendarDay.AddDate(0, 0, 1).Format("2006-01-02"))
+		if e != nil {
+			tx.Rollback()
+			return e
+		}
 		token := uuid.NewString()
 		var revision int64
 		e = tx.QueryRowContext(ctx, "UPDATE "+state+" SET closed_before=$1::date,retained_from=$2,timezone_name=$3,build_token=$4::uuid,building_before=$5::date,updated_at=NOW() WHERE id=1 RETURNING revision", closed, retained, tz, token, service.GroupUsageDate(end)).Scan(&revision)
@@ -124,10 +138,14 @@ func syncUsageDailyRollups(ctx context.Context, db *sql.DB, kind string, today t
 		if e = tx.Commit(); e != nil {
 			return e
 		}
+		rowsFrom := start.UTC()
+		if expiredBefore.After(rowsFrom) {
+			rowsFrom = expiredBefore
+		}
 		if kind == "group" {
-			_, err = conn.ExecContext(ctx, "INSERT INTO "+stage+"(build_token,bucket_date,group_id,actual_cost) SELECT $1::uuid,$2::date,group_id,COALESCE(SUM(actual_cost),0) FROM usage_logs WHERE group_id IS NOT NULL AND created_at >= $3 AND created_at < $4 GROUP BY group_id", token, closed, start.UTC(), end.UTC())
+			_, err = conn.ExecContext(ctx, "INSERT INTO "+stage+"(build_token,bucket_date,group_id,actual_cost) SELECT $1::uuid,$2::date,group_id,COALESCE(SUM(actual_cost),0) FROM usage_logs WHERE group_id IS NOT NULL AND created_at >= $3 AND created_at < $4 GROUP BY group_id", token, closed, rowsFrom, end.UTC())
 		} else {
-			_, err = conn.ExecContext(ctx, "INSERT INTO "+stage+"(build_token,bucket_date,user_id,api_key_id,group_id,account_id,"+subjectRollupColumns+") SELECT $1::uuid,$2::date,COALESCE(user_id,0),COALESCE(api_key_id,0),COALESCE(group_id,0),COALESCE(account_id,0),"+subjectRollupAggregate+" FROM usage_logs WHERE created_at >= $3 AND created_at < $4 GROUP BY user_id,api_key_id,group_id,account_id", token, closed, start.UTC(), end.UTC())
+			_, err = conn.ExecContext(ctx, "INSERT INTO "+stage+"(build_token,bucket_date,user_id,api_key_id,group_id,account_id,"+subjectRollupColumns+") SELECT $1::uuid,$2::date,COALESCE(user_id,0),COALESCE(api_key_id,0),COALESCE(group_id,0),COALESCE(account_id,0),"+subjectRollupAggregate+" FROM usage_logs WHERE created_at >= $3 AND created_at < $4 GROUP BY user_id,api_key_id,group_id,account_id", token, closed, rowsFrom, end.UTC())
 		}
 		if err != nil {
 			return err

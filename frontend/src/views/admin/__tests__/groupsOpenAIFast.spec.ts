@@ -21,18 +21,28 @@ describe("groupsOpenAIFast", () => {
     expect(normalizeGroupOpenAIFast("openai", false)).toBe(false);
   });
 
+  it("describes catalog-based Ultrafast support without a fixed model or price list", () => {
+    for (const locale of [zh, en]) {
+      expect(locale.groups.openaiFast).toMatchObject({
+        forceUltrafast: expect.stringContaining("Ultrafast"),
+        ultrafastHint: expect.stringContaining("priority"),
+      });
+      expect(locale.groups.openaiFast.ultrafastHint).not.toMatch(/GPT-6|6x|6 倍/);
+    }
+  });
+
   it("provides localized switch labels", () => {
     expect(zh.groups.openaiFast).toMatchObject({
       title: expect.any(String),
       force: expect.any(String),
-      hint: expect.stringContaining("service_tier=priority"),
+      hint: expect.stringContaining("OAuth Guardian"),
       free: expect.any(String),
       freeHint: expect.stringContaining("Standard"),
     });
     expect(en.groups.openaiFast).toMatchObject({
       title: expect.any(String),
       force: expect.any(String),
-      hint: expect.stringContaining("service_tier=priority"),
+      hint: expect.stringContaining("OAuth Guardian"),
       free: expect.any(String),
       freeHint: expect.stringContaining("Standard"),
     });
