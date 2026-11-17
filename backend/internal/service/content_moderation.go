@@ -20,6 +20,7 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+	"unicode/utf8"
 
 	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/httpclient"
@@ -954,8 +955,7 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 			"configured_models", cfg.ModelFilter.Models)
 		return allow, nil
 	}
-	content := ExtractContentModerationInput(input.Protocol, input.Body)
-	keywordText := extractContentModerationKeywordText(input.Protocol, input.Body)
+	content, keywordText := extractContentModerationInputs(input.Protocol, input.Body)
 	if content.IsEmpty() && strings.TrimSpace(keywordText) == "" {
 		slog.Info("content_moderation.skip_empty_input",
 			"user_id", input.UserID,
@@ -973,7 +973,7 @@ func (s *ContentModerationService) Check(ctx context.Context, input ContentModer
 		"group_id", contentModerationLogGroupID(input.GroupID),
 		"endpoint", input.Endpoint,
 		"protocol", input.Protocol,
-		"text_runes", len([]rune(content.Text)),
+		"text_runes", utf8.RuneCountInString(content.Text),
 		"image_count", len(content.Images))
 	hashText := content.Hash()
 	if cfg.whitelistsUser(input.UserID) {
@@ -3330,11 +3330,19 @@ func trimRunes(text string, max int) string {
 	if max <= 0 {
 		return ""
 	}
-	runes := []rune(text)
-	if len(runes) <= max {
-		return text
+	count := 0
+	for offset := range text {
+		if count == max {
+			prefix := text[:offset]
+			if !utf8.ValidString(prefix) {
+				// Match the previous []rune conversion only on truncated input.
+				return string([]rune(prefix))
+			}
+			return strings.Clone(prefix)
+		}
+		count++
 	}
-	return string(runes[:max])
+	return text
 }
 
 func maskSecretTail(secret string) string {
