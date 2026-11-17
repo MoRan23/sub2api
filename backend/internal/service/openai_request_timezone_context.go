@@ -19,6 +19,7 @@ type openAIRequestTimezoneCapture struct {
 	acceptedAt               time.Time
 	body                     []byte
 	inbound                  *TimezoneScanResult
+	ingressScan              *requestTimezoneScanner
 	states                   map[bool]*RequestTimezoneState
 	convertedStates          map[bool]*RequestTimezoneState
 	compactionInputReordered bool
@@ -47,8 +48,10 @@ func (s *OpenAIGatewayService) captureOpenAIRequestTimezoneSource(c *gin.Context
 		if capture, ok := raw.(*openAIRequestTimezoneCapture); ok && alphaSearch && !capture.alphaSearch {
 			capture.alphaSearch = true
 			capture.states = make(map[bool]*RequestTimezoneState)
+			capture.ingressScan = nil
 			if globalFingerprintObserver.enabled.Load() {
-				capture.inbound = &scanOpenAIRequestTimezoneIngress(capture.body, true).result
+				capture.ingressScan = scanOpenAIRequestTimezoneIngress(capture.body, true)
+				capture.inbound = &capture.ingressScan.result
 			}
 		}
 		return
@@ -61,7 +64,8 @@ func (s *OpenAIGatewayService) captureOpenAIRequestTimezoneSource(c *gin.Context
 	s.freezeOpenAIRequestPolicy(ctx, c)
 	capture := &openAIRequestTimezoneCapture{acceptedAt: acceptedAt, body: body, states: make(map[bool]*RequestTimezoneState), alphaSearch: alphaSearch}
 	if globalFingerprintObserver.enabled.Load() {
-		capture.inbound = &scanOpenAIRequestTimezoneIngress(body, alphaSearch).result
+		capture.ingressScan = scanOpenAIRequestTimezoneIngress(body, alphaSearch)
+		capture.inbound = &capture.ingressScan.result
 	}
 	c.Set(openAIRequestTimezoneCaptureKey, capture)
 }
@@ -163,6 +167,7 @@ func applyCapturedOpenAIRequestTimezone(c *gin.Context, capture *openAIRequestTi
 			}
 		}
 	}
+	active.preparedBody = prepared
 	SetRequestTimezoneState(c, active)
 	captureOpenAIRequestTimezoneCheckpoint(c, prepared)
 	return prepared
@@ -214,12 +219,16 @@ func (s *OpenAIGatewayService) prepareOpenAIRequestTimezoneState(ctx context.Con
 	}
 	state, ok := capture.states[passthrough]
 	if !ok {
-		_, state = prepareOpenAIRequestTimezoneBody(capture.body, policy, capture.acceptedAt, passthrough, globalFingerprintObserver.enabled.Load(), capture.alphaSearch)
+		observe := globalFingerprintObserver.enabled.Load()
+		if capture.ingressScan == nil && (observe || (policy.TimezoneConversionEnabled && (!passthrough || policy.PassthroughTimezoneConversionEnabled))) {
+			capture.ingressScan = scanOpenAIRequestTimezoneIngress(capture.body, capture.alphaSearch)
+		}
+		state = prepareOpenAIRequestTimezoneSources(capture.body, policy, capture.acceptedAt, passthrough, observe, capture.alphaSearch, capture.ingressScan)
 		state.Inbound = capture.inbound
 		capture.states[passthrough] = state
 	}
 	target, egress := s.resolveOpenAIRequestTimezoneTarget(c, account)
-	state = state.WithTarget(target)
+	state = state.withTargetMetadata(target)
 	state.EgressLocation = egress
 	return capture, state
 }
@@ -247,6 +256,7 @@ func applyDeferredOpenAIRequestTimezone(c *gin.Context, body []byte) []byte {
 		}
 		SetRequestTimezoneState(c, state)
 	}
+	state.preparedBody = prepared
 	captureOpenAIRequestTimezoneCheckpoint(c, prepared)
 	return prepared
 }

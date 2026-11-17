@@ -2482,11 +2482,35 @@ func openAIRequestBodyMayContainEmptyBase64InputImage(body []byte) bool {
 	if len(body) == 0 || !openAIRequestBodyMayContainInputImageToken(body) {
 		return false
 	}
+	if !openAIRequestBodyMayContainEmptyBase64DataURI(body) {
+		return false
+	}
 	input := gjson.GetBytes(body, "input")
 	if !input.Exists() {
 		return false
 	}
 	return openAIJSONValueMayContainEmptyBase64InputImage(input)
+}
+
+// An empty data URI must have a quoted/whitespace suffix after ";base64,".
+// Reject the common nonempty-image case with byte searches before gjson copies
+// and traverses the entire input. This is only a conservative negative filter:
+// escapes and non-ASCII suffixes still use the original decoded predicate.
+func openAIRequestBodyMayContainEmptyBase64DataURI(body []byte) bool {
+	remaining := body
+	for {
+		index := bytes.Index(remaining, []byte(";base64,"))
+		if index < 0 {
+			break
+		}
+		remaining = remaining[index+len(";base64,"):]
+		if len(remaining) == 0 || remaining[0] == '"' || remaining[0] == '\\' ||
+			remaining[0] <= ' ' || remaining[0] >= 0x80 {
+			return true
+		}
+	}
+	// Unicode escapes can spell any part of the URI, including its delimiter.
+	return bytes.Contains(body, []byte(`\u`))
 }
 
 func openAIRequestBodyMayContainInputImageToken(body []byte) bool {

@@ -138,6 +138,7 @@ type openAIResponsesToolSchemaEdit struct {
 type openAIResponsesToolSchemaParser struct {
 	body      []byte
 	pos       int
+	validated bool
 	options   openAIResponsesToolSchemaOptions
 	edits     []openAIResponsesToolSchemaEdit
 	probeType string
@@ -152,7 +153,11 @@ func sanitizeOpenAIResponsesToolSchemas(
 	if !utf8.Valid(body) {
 		return nil, false, fmt.Errorf("sanitize OpenAI Responses tool schemas: invalid UTF-8")
 	}
-	p := openAIResponsesToolSchemaParser{body: body, options: options}
+	// Validate once before scoped parsing so large instance strings can be
+	// skipped with byte searches. Invalid input still takes the strict parser,
+	// preserving its syntax errors and bounded-depth fallback behavior.
+	valid := json.Valid(body)
+	p := openAIResponsesToolSchemaParser{body: body, options: options, validated: valid}
 	if err := p.parseValue(openAIResponsesToolSchemaDocument, false, 0); err != nil {
 		if errors.Is(err, errOpenAIResponsesToolSchemaLimit) {
 			return body, false, nil
@@ -163,7 +168,7 @@ func sanitizeOpenAIResponsesToolSchemas(
 	if p.pos != len(body) {
 		return nil, false, fmt.Errorf("sanitize OpenAI Responses tool schemas: trailing data at byte %d", p.pos)
 	}
-	if !json.Valid(body) {
+	if !valid {
 		return nil, false, fmt.Errorf("sanitize OpenAI Responses tool schemas: invalid JSON")
 	}
 	if len(p.edits) == 0 {
@@ -191,7 +196,7 @@ func (p *openAIResponsesToolSchemaParser) parseValue(
 		}
 	}
 	if context == openAIResponsesToolSchemaInputItem && p.body[p.pos] == '{' {
-		probe := openAIResponsesToolSchemaParser{body: p.body, pos: p.pos}
+		probe := openAIResponsesToolSchemaParser{body: p.body, pos: p.pos, validated: p.validated}
 		if err := probe.parseValue(openAIResponsesToolSchemaTypeProbe, false, depth); err != nil {
 			return err
 		}
@@ -201,7 +206,10 @@ func (p *openAIResponsesToolSchemaParser) parseValue(
 		case "additional_tools":
 			context = openAIResponsesToolSchemaToolCarrier
 		default:
-			context = openAIResponsesToolSchemaSkip
+			// The type probe already traversed and bounded this whole value.
+			// Ordinary messages, image inputs and tool outputs contain no schema.
+			p.pos = probe.pos
+			return nil
 		}
 	}
 	switch p.body[p.pos] {
@@ -512,6 +520,24 @@ func (p *openAIResponsesToolSchemaParser) parseString() (int, int, error) {
 	}
 	start := p.pos
 	p.pos++
+	if p.validated {
+		for p.pos < len(p.body) {
+			index := bytes.IndexByte(p.body[p.pos:], '"')
+			if index < 0 {
+				break
+			}
+			quote := p.pos + index
+			escapeStart := quote
+			for escapeStart > start+1 && p.body[escapeStart-1] == '\\' {
+				escapeStart--
+			}
+			p.pos = quote + 1
+			if (quote-escapeStart)%2 == 0 {
+				return start, p.pos, nil
+			}
+		}
+		return 0, 0, p.syntaxError("unterminated string")
+	}
 	for p.pos < len(p.body) {
 		switch p.body[p.pos] {
 		case '"':

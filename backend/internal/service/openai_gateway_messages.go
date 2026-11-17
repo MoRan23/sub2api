@@ -73,7 +73,7 @@ func (s *OpenAIGatewayService) forwardAsAnthropic(
 	} else if changed {
 		body = sanitized
 	}
-	rememberOpenCodeInboundBody(c, body)
+	rememberOpenCodeInboundBody(c, account, body)
 	beginUpstreamResponseModelObservation(c)
 	ClearActualOpenAIUpstreamEndpoint(c)
 	// Web Search 模拟：Chat Completions 转换会丢掉 web_search 工具，纯 web_search

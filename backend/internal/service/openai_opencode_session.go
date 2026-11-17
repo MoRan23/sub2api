@@ -12,8 +12,8 @@ import (
 )
 
 const (
-	openCodeSessionHeader         = "X-OpenCode-Session"
-	openCodeInboundBodyContextKey = "opencode_inbound_body"
+	openCodeSessionHeader            = "X-OpenCode-Session"
+	openCodeInboundSessionContextKey = "opencode_inbound_session"
 
 	// openCodeUpstreamUserAgent 是发往官方 OpenCode 上游的规范 User-Agent。
 	// opencode.ai 前置 Cloudflare 按客户端 UA 签名做 bot 拦截：Python-urllib 等
@@ -24,29 +24,46 @@ const (
 	openCodeUpstreamUserAgent = "opencode/1.0.0"
 )
 
-// rememberOpenCodeInboundBody keeps the client request body so protocol
-// conversion (Responses↔Anthropic↔Chat Completions) can still recover
-// prompt_cache_key / metadata.user_id after those fields are dropped.
-func rememberOpenCodeInboundBody(c *gin.Context, body []byte) {
-	if c == nil || len(body) == 0 {
+// rememberOpenCodeInboundBody keeps only the session scalar needed after
+// protocol conversion (Responses↔Anthropic↔Chat Completions). Holding the whole
+// adapted body here would retain it across unrelated OAuth 429 backoffs too.
+func rememberOpenCodeInboundBody(c *gin.Context, account *Account, body []byte) {
+	if c == nil {
 		return
 	}
-	c.Set(openCodeInboundBodyContextKey, body)
+	if !maySendOpenCodeSessionHeader(account) {
+		// Account attempts share Gin state. Clear a prior OpenCode hint without
+		// scanning ordinary OAuth or API Key payloads during rate-limit retries.
+		c.Set(openCodeInboundSessionContextKey, "")
+		return
+	}
+	// The payload view borrows its strings. Clone the bounded, validated value,
+	// including overwriting a previous attempt's hint when this body has none.
+	sessionID := sanitizeSessionID(openCodeSessionIDFromPayload(body))
+	c.Set(openCodeInboundSessionContextKey, strings.Clone(sessionID))
 }
 
-func openCodeInboundBodies(c *gin.Context) [][]byte {
-	if c == nil {
-		return nil
+func maySendOpenCodeSessionHeader(account *Account) bool {
+	if account == nil || account.Type != AccountTypeAPIKey {
+		return false
 	}
-	raw, ok := c.Get(openCodeInboundBodyContextKey)
-	if !ok {
-		return nil
+	if account.IsOpenCodeGoPlan() {
+		return true
 	}
-	body, ok := raw.([]byte)
-	if !ok || len(body) == 0 {
-		return nil
+	// Adaptive providers can select a different endpoint after protocol
+	// conversion. Retain their scalar until the actual destination is known.
+	if account.IsAdaptiveAPIProtocol() {
+		return true
 	}
-	return [][]byte{body}
+	baseURL := account.GetOpenAIBaseURL()
+	if account.IsGrok() {
+		// Grok deliberately has no OpenAI base URL. Its own resolver preserves
+		// explicit relays and supplies the official endpoint when unset.
+		baseURL = account.GetGrokBaseURL()
+	} else if account.IsAnthropicProtocol() {
+		baseURL = account.GetAnthropicProtocolBaseURL()
+	}
+	return strings.TrimSpace(baseURL) == "" || isOfficialOpenCodeHost(baseURL)
 }
 
 // applyOpenCodeSessionHeader sets x-opencode-session on outbound inference
@@ -64,8 +81,7 @@ func applyOpenCodeSessionHeader(c *gin.Context, account *Account, targetURL stri
 		return
 	}
 
-	payloads := append(openCodeInboundBodies(c), bodies...)
-	sessionID := resolveOpenCodeSessionID(c, headers, shouldGenerateOpenCodeSession(account, targetURL), payloads...)
+	sessionID := resolveOpenCodeSessionID(c, headers, shouldGenerateOpenCodeSession(account, targetURL), bodies...)
 	if sessionID == "" {
 		return
 	}
@@ -154,6 +170,11 @@ func resolveOpenCodeSessionID(c *gin.Context, headers http.Header, generate bool
 			return sessionID
 		}
 		if sessionID := sanitizeSessionID(ClaudeCodeSessionIDFromHeader(c)); sessionID != "" {
+			return sessionID
+		}
+	}
+	if c != nil {
+		if sessionID := c.GetString(openCodeInboundSessionContextKey); sessionID != "" {
 			return sessionID
 		}
 	}

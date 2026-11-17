@@ -33,6 +33,10 @@ type openAIResponsesRejectedFieldRetryState struct {
 	mu             sync.Mutex
 	budget         *openAIResponsesRejectedFieldRetryBudget
 	seenBodyHashes map[[sha256.Size]byte]struct{}
+	// HTTP attempts own immutable input for their lifetime. Defer its digest
+	// until an actual compatibility retry, and drop this reference immediately
+	// afterwards. Long-lived WS state uses the eager constructor below.
+	initialBody []byte
 }
 
 type openAIResponsesRejectedFieldRetryBudget struct {
@@ -59,7 +63,7 @@ func openAIResponsesRejectedFieldRetryStateForRequest(c *gin.Context, initialBod
 			c.Set(openAIResponsesRejectedFieldRetryBudgetContextKey, budget)
 		}
 	}
-	return newOpenAIResponsesRejectedFieldRetryStateWithBudget(initialBody, budget)
+	return newLazyOpenAIResponsesRejectedFieldRetryState(initialBody, budget)
 }
 
 func newOpenAIResponsesRejectedFieldRetryState(initialBody []byte) *openAIResponsesRejectedFieldRetryState {
@@ -67,12 +71,20 @@ func newOpenAIResponsesRejectedFieldRetryState(initialBody []byte) *openAIRespon
 }
 
 func newOpenAIResponsesRejectedFieldRetryStateWithBudget(initialBody []byte, budget *openAIResponsesRejectedFieldRetryBudget) *openAIResponsesRejectedFieldRetryState {
-	state := &openAIResponsesRejectedFieldRetryState{
-		budget:         budget,
-		seenBodyHashes: make(map[[sha256.Size]byte]struct{}, maxOpenAIResponsesRejectedFieldRetries+1),
-	}
+	state := &openAIResponsesRejectedFieldRetryState{budget: budget}
 	state.remember(initialBody)
 	return state
+}
+
+func newLazyOpenAIResponsesRejectedFieldRetryState(initialBody []byte, budget *openAIResponsesRejectedFieldRetryBudget) *openAIResponsesRejectedFieldRetryState {
+	return &openAIResponsesRejectedFieldRetryState{budget: budget, initialBody: initialBody}
+}
+
+func (s *openAIResponsesRejectedFieldRetryState) seedInitialBodyLocked() {
+	if len(s.initialBody) > 0 {
+		s.rememberLocked(s.initialBody)
+	}
+	s.initialBody = nil
 }
 
 func (s *openAIResponsesRejectedFieldRetryState) Allow(nextBody []byte) bool {
@@ -81,6 +93,7 @@ func (s *openAIResponsesRejectedFieldRetryState) Allow(nextBody []byte) bool {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.seedInitialBodyLocked()
 	bodyHash := sha256.Sum256(nextBody)
 	if _, seen := s.seenBodyHashes[bodyHash]; seen {
 		return false
@@ -89,6 +102,9 @@ func (s *openAIResponsesRejectedFieldRetryState) Allow(nextBody []byte) bool {
 	defer s.budget.mu.Unlock()
 	if s.budget.attempts >= maxOpenAIResponsesRejectedFieldRetries {
 		return false
+	}
+	if s.seenBodyHashes == nil {
+		s.seenBodyHashes = make(map[[sha256.Size]byte]struct{}, maxOpenAIResponsesRejectedFieldRetries+1)
 	}
 	s.seenBodyHashes[bodyHash] = struct{}{}
 	s.budget.attempts++
@@ -101,6 +117,7 @@ func (s *openAIResponsesRejectedFieldRetryState) remember(body []byte) {
 	}
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	s.seedInitialBodyLocked()
 	s.rememberLocked(body)
 }
 

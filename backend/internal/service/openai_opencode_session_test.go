@@ -205,14 +205,14 @@ func TestApplyOpenCodeSessionHeaderUsesRememberedInboundBodyAfterConversion(t *t
 	account := &Account{Platform: PlatformOpenCodeGo, Type: AccountTypeAPIKey}
 
 	c := newOpenCodeSessionTestContext(t, "")
-	rememberOpenCodeInboundBody(c, []byte(`{"model":"gpt-5","prompt_cache_key":"inbound-responses-session","input":"hello"}`))
+	rememberOpenCodeInboundBody(c, account, []byte(`{"model":"gpt-5","prompt_cache_key":"inbound-responses-session","input":"hello"}`))
 	headers := make(http.Header)
 	convertedCC := []byte(`{"model":"deepseek-v4-flash","messages":[{"role":"user","content":"hello"}]}`)
 	applyOpenCodeSessionHeader(c, account, "https://opencode.ai/zen/go/v1/chat/completions", headers, convertedCC)
 	require.Equal(t, "inbound-responses-session", headers.Get(openCodeSessionHeader))
 
 	c2 := newOpenCodeSessionTestContext(t, "")
-	rememberOpenCodeInboundBody(c2, []byte(`{"model":"grok-4.6","metadata":{"user_id":"inbound-messages-session"},"messages":[{"role":"user","content":"hi"}]}`))
+	rememberOpenCodeInboundBody(c2, account, []byte(`{"model":"grok-4.6","metadata":{"user_id":"inbound-messages-session"},"messages":[{"role":"user","content":"hi"}]}`))
 	headers2 := make(http.Header)
 	convertedResponses := []byte(`{"model":"grok-4.6","input":"hi"}`)
 	applyOpenCodeSessionHeader(c2, account, "https://opencode.ai/zen/go/v1/responses", headers2, convertedResponses)

@@ -240,12 +240,9 @@ func freezeDeferredOpenAIRequestTimezoneBaseline(c *gin.Context, converted any, 
 		neutral = capture.convertedStates[state.passthrough]
 	}
 	if neutral == nil {
-		_, neutral = prepareOpenAIRequestTimezoneBody(encoded, state.Policy, state.AcceptedAt, state.passthrough, IsFingerprintObservationEnabled(), false)
+		neutral = prepareOpenAIRequestTimezoneSources(encoded, state.Policy, state.AcceptedAt, state.passthrough, IsFingerprintObservationEnabled(), false, nil)
 		if capture != nil {
 			constrainConvertedTimezoneSources(neutral, capture.body, paths)
-		}
-		if prepared, ok := neutral.ApplyToBody(encoded); ok {
-			neutral.preparedBody = prepared
 		}
 		if capture != nil {
 			if capture.convertedStates == nil {
@@ -254,7 +251,7 @@ func freezeDeferredOpenAIRequestTimezoneBaseline(c *gin.Context, converted any, 
 			capture.convertedStates[state.passthrough] = neutral
 		}
 	}
-	projected := neutral.WithTarget(state.Target)
+	projected := neutral.withTargetMetadata(state.Target)
 	projected.EgressLocation = state.EgressLocation
 	SetRequestTimezoneState(c, projected)
 	// Both integrity and timezone now describe the exact converted Responses
@@ -266,7 +263,7 @@ func freezeDeferredOpenAIRequestTimezoneBaseline(c *gin.Context, converted any, 
 // declarations through the adapter's structural map; otherwise a wrong tag
 // would appear absent and incorrectly qualify for the strict fallback.
 func constrainConvertedTimezoneSources(state *RequestTimezoneState, original []byte, paths map[string]string) {
-	root := gjson.ParseBytes(original)
+	root := parseRawJSONView(original)
 	rootMetadataPresent := requestTimezoneEnvironmentMetadataBlocker(root) != ""
 	for i := range state.projectionSources {
 		source := &state.projectionSources[i]
@@ -286,10 +283,10 @@ func constrainConvertedTimezoneSources(state *RequestTimezoneState, original []b
 			allowed = false
 		}
 		if allowed {
-			message := gjson.GetBytes(original, strings.Join(parts[:2], "."))
+			message := root.Get(strings.Join(parts[:2], "."))
 			part := gjson.Result{}
 			if len(parts) >= 5 {
-				part = gjson.GetBytes(original, strings.Join(parts[:4], "."))
+				part = root.Get(strings.Join(parts[:4], "."))
 			}
 			if message.Get("role").String() != "user" {
 				allowed = false

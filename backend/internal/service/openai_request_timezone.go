@@ -146,7 +146,7 @@ func (s *RequestTimezoneState) ApplyToBody(body []byte) ([]byte, bool) {
 	}
 	output := body
 	for _, patch := range s.patches {
-		if gjson.GetBytes(output, patch.path).Raw == patch.prepared {
+		if parseRawJSONView(output).Get(patch.path).Raw == patch.prepared {
 			continue
 		}
 		var err error
@@ -164,19 +164,25 @@ func (s *RequestTimezoneState) matchesBody(body []byte) bool {
 	if !gjson.ValidBytes(body) {
 		return false
 	}
+	root := parseRawJSONView(body)
 	for _, patch := range s.patches {
 		if patch.containerPath != "" {
-			container := gjson.GetBytes(body, patch.containerPath)
+			container := root.Get(patch.containerPath)
 			if patch.toolType != "" {
-				if !gjson.GetBytes(body, "tools").IsArray() || !container.IsObject() || container.Get("type").String() != patch.toolType {
+				if !root.Get("tools").IsArray() || !container.IsObject() || container.Get("type").String() != patch.toolType {
 					return false
 				}
 			} else if container.Exists() && !container.IsObject() {
 				return false
 			}
 		}
-		value := gjson.GetBytes(body, patch.path)
+		value := root.Get(patch.path)
 		if !value.Exists() && !patch.originalExists {
+			continue
+		}
+		// Frozen patches are already canonical. The common unchanged/retry case
+		// needs no second parse or allocation of their environment text.
+		if value.Exists() && len(value.Raw) <= openAIRequestTimezoneTextLimit && (value.Raw == patch.original || value.Raw == patch.prepared) {
 			continue
 		}
 		canonical, ok := canonicalRequestTimezonePatch(value)
@@ -286,19 +292,35 @@ func PrepareOpenAIRequestTimezone(body []byte, policy openai.RequestPolicy, acce
 // alphaSearch is an explicit ingress classification, not a guess based on JSON
 // shape. Only a search_query may create an absent standalone search location.
 func prepareOpenAIRequestTimezoneBody(body []byte, policy openai.RequestPolicy, acceptedAt time.Time, passthrough, observe, alphaSearch bool) ([]byte, *RequestTimezoneState) {
+	state := prepareOpenAIRequestTimezoneSources(body, policy, acceptedAt, passthrough, observe, alphaSearch, nil)
+	prepared, ok := state.ApplyToBody(body)
+	if !ok {
+		return body, state
+	}
+	state.preparedBody = prepared
+	return prepared, state
+}
+
+// Internal attempts freeze sources without materializing a default-target body
+// that would immediately be undone and rebuilt for the selected account.
+// scan, when provided, belongs to the same immutable ingress body.
+func prepareOpenAIRequestTimezoneSources(body []byte, policy openai.RequestPolicy, acceptedAt time.Time, passthrough, observe, alphaSearch bool, scan *requestTimezoneScanner) *RequestTimezoneState {
 	state := &RequestTimezoneState{Policy: policy, AcceptedAt: acceptedAt, preparedBody: body, alphaSearch: alphaSearch, Target: openAIRequestSearchLocation(), passthrough: passthrough}
 	enabled := policy.TimezoneConversionEnabled && (!passthrough || policy.PassthroughTimezoneConversionEnabled)
 	if !enabled && !observe {
-		return body, state
+		return state
 	}
-	scan := scanOpenAIRequestTimezoneIngress(body, alphaSearch)
+	if scan == nil {
+		scan = scanOpenAIRequestTimezoneIngress(body, alphaSearch)
+	}
+	root := parseRawJSONView(body)
 	state.projectionScanStatus = scan.result.ScanStatus
 	for _, occurrence := range scan.occurrences {
 		source := requestTimezoneProjectionSource{occurrence: occurrence, acceptedAt: acceptedAt, scanStatus: scan.result.ScanStatus, enabled: enabled}
 		source.occurrence.item.Location = cloneRequestLocation(occurrence.item.Location)
-		source.containerExists = gjson.GetBytes(body, strings.TrimSuffix(occurrence.locationPath, ".user_location")).Exists()
+		source.containerExists = root.Get(strings.TrimSuffix(occurrence.locationPath, ".user_location")).Exists()
 		if strings.HasPrefix(occurrence.locationPath, "tools.") {
-			source.toolType = gjson.GetBytes(body, strings.TrimSuffix(occurrence.locationPath, ".user_location")+".type").String()
+			source.toolType = root.Get(strings.TrimSuffix(occurrence.locationPath, ".user_location") + ".type").String()
 		}
 		state.projectionSources = append(state.projectionSources, source)
 	}
@@ -306,12 +328,7 @@ func prepareOpenAIRequestTimezoneBody(body []byte, policy openai.RequestPolicy, 
 		state.Inbound = &scan.result
 	}
 	state.buildTargetProjection()
-	prepared, ok := state.ApplyToBody(body)
-	if !ok {
-		return body, state
-	}
-	state.preparedBody = prepared
-	return prepared, state
+	return state
 }
 
 func (state *RequestTimezoneState) buildTargetProjection() {
@@ -516,8 +533,8 @@ func (s *requestTimezoneScanner) scanMessages(messages gjson.Result, path string
 			return false
 		}
 		i := key.Int()
-		content := message.Get("content")
-		current := message.Get("role").String() == "user"
+		content, role, kinds := requestTimezoneMessageFields(message)
+		current := role.String() == "user"
 		if !current && lastCurrent >= 0 {
 			s.markHistorical(lastCurrent)
 			lastCurrent = -1
@@ -526,15 +543,14 @@ func (s *requestTimezoneScanner) scanMessages(messages gjson.Result, path string
 		if content.Type == gjson.String {
 			s.scanText(content.String(), fmt.Sprintf("%s.%d.content", path, i), false, false)
 		} else if content.IsArray() {
-			kinds := message.Get("internal_chat_message_metadata_passthrough.content_item_kinds")
 			content.ForEach(func(key, part gjson.Result) bool {
 				if !s.countNode() {
 					return false
 				}
-				kind := part.Get("type").String()
+				kindValue, text := requestTimezoneTextPartFields(part)
+				kind := kindValue.String()
 				marker := kinds.Get(fmt.Sprintf("%d", key.Int()))
 				eligible := current && kind == "input_text" && kinds.IsArray() && marker.Type == gjson.String && marker.String() == "environments.environment_context"
-				text := part.Get("text")
 				if text.Type == gjson.String {
 					if kind == "" || kind == "text" || kind == "input_text" {
 						beforeText := len(s.occurrences)
@@ -589,6 +605,67 @@ func (s *requestTimezoneScanner) scanMessages(messages gjson.Result, path string
 		}
 		return s.result.ScanStatus == "complete"
 	})
+}
+
+// Read small fields together: looking up each absent field separately otherwise
+// rescans the same image payload. First-key semantics match gjson.Get, including
+// explicit null and escaped keys. These results only borrow immutable JSON.
+func requestTimezoneMessageFields(message gjson.Result) (content, role, kinds gjson.Result) {
+	if !message.IsObject() {
+		return
+	}
+	// ForEach decodes escaped string values even for unknown keys. Keep the
+	// selective lookup path for those objects so a large opaque tool result is
+	// never unescaped solely to look for message metadata.
+	if strings.Contains(message.Raw, `\`) {
+		return message.Get("content"), message.Get("role"), message.Get("internal_chat_message_metadata_passthrough.content_item_kinds")
+	}
+	var seenContent, seenRole, seenMetadata bool
+	message.ForEach(func(key, value gjson.Result) bool {
+		switch key.String() {
+		case "content":
+			if !seenContent {
+				content, seenContent = value, true
+			}
+		case "role":
+			if !seenRole {
+				role, seenRole = value, true
+			}
+		case "internal_chat_message_metadata_passthrough":
+			if !seenMetadata {
+				kinds = value.Get("content_item_kinds")
+				// A nested gjson path continues to a duplicate parent when its
+				// first occurrence has no matching child (including null/{}).
+				seenMetadata = kinds.Exists()
+			}
+		}
+		return !(seenContent && seenRole && seenMetadata)
+	})
+	return
+}
+
+func requestTimezoneTextPartFields(part gjson.Result) (kind, text gjson.Result) {
+	if !part.IsObject() {
+		return
+	}
+	if strings.Contains(part.Raw, `\`) {
+		return part.Get("type"), part.Get("text")
+	}
+	var seenKind, seenText bool
+	part.ForEach(func(key, value gjson.Result) bool {
+		switch key.String() {
+		case "type":
+			if !seenKind {
+				kind, seenKind = value, true
+			}
+		case "text":
+			if !seenText {
+				text, seenText = value, true
+			}
+		}
+		return !(seenKind && seenText)
+	})
+	return
 }
 
 // Only a labeling field or an invalid metadata container blocks the missing-tag

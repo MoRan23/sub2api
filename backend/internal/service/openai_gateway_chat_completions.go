@@ -102,7 +102,7 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 			SetOpenAIOAuthIdentityCapture(c, CaptureOpenAIOAuthIdentityForCompatTurn(c, body, promptCacheKey))
 		}
 	}
-	rememberOpenCodeInboundBody(c, body)
+	rememberOpenCodeInboundBody(c, account, body)
 	beginUpstreamResponseModelObservation(c)
 	ClearActualOpenAIUpstreamEndpoint(c)
 	if shouldForwardOpenAIResponsesViaRawChatCompletions(account) {

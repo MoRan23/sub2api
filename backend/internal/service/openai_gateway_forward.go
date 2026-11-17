@@ -191,7 +191,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	}
 
 	originalBody := body
-	rememberOpenCodeInboundBody(c, originalBody)
+	rememberOpenCodeInboundBody(c, account, originalBody)
 	requestView := newOpenAIRequestView(body)
 	reqModel, reqStream, promptCacheKey := requestView.Model, requestView.Stream, requestView.PromptCacheKey
 	setOpenAIClientRequestedStream(c, reqStream)
@@ -589,6 +589,11 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 			})
 		}
 		if codexResult.Modified {
+			markDecodedModified()
+		} else if _, hasInputArray := decoded["input"].([]any); hasInputArray && !bodyModified && !canReuseDecodedOpenAICodexBody(body, decoded) {
+			// The old transform always encoded input arrays. Retain its duplicate
+			// key and invalid Unicode normalization when raw reuse is not equivalent.
+			// ensureReqBody has flushed prior patches, so decoded matches body here.
 			markDecodedModified()
 		}
 		if codexResult.NormalizedModel != "" {

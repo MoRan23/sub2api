@@ -3,7 +3,6 @@ package service
 import (
 	"strings"
 
-	"github.com/tidwall/gjson"
 	"github.com/tidwall/sjson"
 )
 
@@ -21,7 +20,7 @@ func (s *RequestTimezoneState) UndoToBody(body []byte) ([]byte, bool) {
 	for _, patch := range s.patches {
 		var err error
 		if patch.originalExists {
-			if gjson.GetBytes(out, patch.path).Raw != patch.original {
+			if parseRawJSONView(out).Get(patch.path).Raw != patch.original {
 				out, err = sjson.SetRawBytes(out, patch.path, []byte(patch.original))
 			}
 		} else {
@@ -31,7 +30,7 @@ func (s *RequestTimezoneState) UndoToBody(body []byte) ([]byte, bool) {
 			return body, false
 		}
 		if !patch.containerExists && patch.containerPath != "" {
-			container := gjson.GetBytes(out, patch.containerPath)
+			container := parseRawJSONView(out).Get(patch.containerPath)
 			if container.IsObject() && len(container.Map()) == 0 {
 				out, err = sjson.DeleteBytes(out, patch.containerPath)
 				if err != nil {
@@ -56,6 +55,17 @@ func (s *RequestTimezoneState) WithTarget(target RequestLocationObservation) *Re
 				result.preparedBody = prepared
 			}
 		}
+	}
+	return result
+}
+
+// withTargetMetadata is used when the caller will apply these patches directly
+// to its own attempt body. It never creates another full-body projection.
+func (s *RequestTimezoneState) withTargetMetadata(target RequestLocationObservation) *RequestTimezoneState {
+	result := cloneRequestTimezoneStateMetadata(s)
+	if result != nil && target != s.Target {
+		result.Target = target
+		result.buildTargetProjection()
 	}
 	return result
 }
