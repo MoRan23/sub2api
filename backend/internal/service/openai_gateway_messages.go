@@ -712,13 +712,8 @@ func (s *OpenAIGatewayService) guardOpenAIMessagesTurnStateForPlan(
 	if bytes.Equal(guardedBody, body) {
 		return body
 	}
-	bodySnapshot := append([]byte(nil), guardedBody...)
-	req.Body = io.NopCloser(bytes.NewReader(bodySnapshot))
-	req.ContentLength = int64(len(bodySnapshot))
-	req.GetBody = func() (io.ReadCloser, error) {
-		return io.NopCloser(bytes.NewReader(bodySnapshot)), nil
-	}
-	return bodySnapshot
+	setOpenAIRequestBodySnapshot(req, guardedBody)
+	return guardedBody
 }
 
 func ensureCodexOAuthInstructionsField(reqBody map[string]any) {

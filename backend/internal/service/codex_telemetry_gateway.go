@@ -138,6 +138,11 @@ func (s *OpenAIGatewayService) skipCodexTelemetryIdentity(account *Account, head
 // request. It never generates an identity or consults an observer cache.
 // Per-frame metadata takes precedence on a reused WebSocket connection.
 func codexTelemetryInputFromWire(account *Account, headers http.Header, body []byte, proxyURL string, websocket bool, profile CodexWireProfile) CodexTelemetryInput {
+	// This view borrows the finalized, immutable bytes only during this call.
+	// Copy scalar results below before any asynchronous telemetry work can retain
+	// them; never retain the view or its large input/messages fields.
+	rawBody := openAIWSPayloadStringView(body)
+	root := gjson.Parse(rawBody)
 	identity := func(value string, names ...string) string {
 		if websocket && value != "" {
 			return codexTelemetryUUID(value)
@@ -173,19 +178,23 @@ func codexTelemetryInputFromWire(account *Account, headers http.Header, body []b
 	}
 	approval := profile.ExtraMetadata["approval_policy"]
 	if approval == "" {
-		approval = gjson.GetBytes(body, "approval_policy").String()
+		approval = gjson.Get(rawBody, "approval_policy").String()
 	}
-	reviewer := codexTelemetryReviewField(headers, body, "approvals_reviewer").String()
+	reviewer := codexTelemetryReviewFieldFromView(headers, root, "approvals_reviewer").String()
 	if reviewer != "user" && reviewer != "auto_review" {
 		reviewer = ""
 	}
 	// These fields are independent from auto_review_enabled. Codex's latter
 	// combines the approval policy and reviewer; it carries no V2 extension state.
-	guardianV2 := codexTelemetryOptionalBool(codexTelemetryReviewField(headers, body, "guardian_v2_enabled").String())
+	guardianV2 := codexTelemetryOptionalBool(codexTelemetryReviewFieldFromView(headers, root, "guardian_v2_enabled").String())
+	var returnedToolCallIDs []string
+	if len(body) <= openAIRequestOSBodyLimit {
+		returnedToolCallIDs = codexTelemetryReturnedToolCallIDsFromView(gjson.Get(rawBody, "input"))
+	}
 	return CodexTelemetryInput{
 		AccountID: account.ID, AccountName: strings.Clone(account.Name),
 		OSFamily: openai.DetectOSFamilyFromUserAgent(userAgent), InstallationID: identity(profile.InstallationID, codexInstallationIDKey),
-		Shell: codexTelemetryShellFromBody(body), ReturnedToolCallIDs: codexTelemetryReturnedToolCallIDs(body),
+		Shell: codexTelemetryShellFromBodyView(body, root), ReturnedToolCallIDs: returnedToolCallIDs,
 		AccessToken: strings.Clone(token), ChatGPTAccountID: strings.Clone(codexTelemetryHeader(headers, "Chatgpt-Account-Id")), ProxyURL: strings.Clone(proxyURL),
 		UserAgent: strings.Clone(userAgent), Originator: strings.Clone(codexTelemetryHeader(headers, "originator")), Version: strings.Clone(version),
 		ProductSKU:     codexTelemetryAuxiliaryHeader(headers, "X-OpenAI-Product-Sku"),
@@ -200,8 +209,8 @@ func codexTelemetryInputFromWire(account *Account, headers http.Header, body []b
 		OpenAISubagent:  strings.Clone(firstNonEmptyString(codexTelemetryHeader(headers, "x-openai-subagent"), profile.SubagentHeader)),
 		GuardianRequest: strings.Clone(openAIGuardianKind(headers)),
 		ApprovalPolicy:  strings.Clone(approval), ApprovalsReviewer: strings.Clone(reviewer), AutoReviewEnabled: review, GuardianV2Enabled: guardianV2,
-		Model: strings.Clone(gjson.GetBytes(body, "model").String()), Effort: strings.Clone(gjson.GetBytes(body, "reasoning.effort").String()),
-		ServiceTier: strings.Clone(gjson.GetBytes(body, "service_tier").String()), WebSocket: websocket, StartedAt: time.Now(),
+		Model: strings.Clone(gjson.Get(rawBody, "model").String()), Effort: strings.Clone(gjson.Get(rawBody, "reasoning.effort").String()),
+		ServiceTier: strings.Clone(gjson.Get(rawBody, "service_tier").String()), WebSocket: websocket, StartedAt: time.Now(),
 	}
 }
 
@@ -269,7 +278,10 @@ func codexTelemetryReturnedToolCallIDs(body []byte) []string {
 	if len(body) > openAIRequestOSBodyLimit {
 		return nil
 	}
-	input := gjson.GetBytes(body, "input")
+	return codexTelemetryReturnedToolCallIDsFromView(gjson.Get(openAIWSPayloadStringView(body), "input"))
+}
+
+func codexTelemetryReturnedToolCallIDsFromView(input gjson.Result) []string {
 	if !input.IsArray() {
 		return nil
 	}
@@ -304,10 +316,20 @@ func codexTelemetryReturnedToolCallIDs(body []byte) []string {
 // Like OS detection, shell evidence is accepted only from standalone environment
 // blocks in the final consecutive user messages, never tools, skills or history.
 func codexTelemetryShellFromBody(body []byte) string {
+	if len(body) > openAIRequestOSBodyLimit {
+		return ""
+	}
+	return codexTelemetryShellFromBodyView(body, parseRawJSONView(body))
+}
+
+func codexTelemetryShellFromBodyView(body []byte, root gjson.Result) string {
 	if len(body) > openAIRequestOSBodyLimit || !gjson.ValidBytes(body) {
 		return ""
 	}
-	root := gjson.ParseBytes(body)
+	return codexTelemetryShellFromValidatedView(root)
+}
+
+func codexTelemetryShellFromValidatedView(root gjson.Result) string {
 	messages := root.Get("input")
 	if root.Get("messages").Exists() {
 		if messages.Exists() {
@@ -558,8 +580,7 @@ func codexTelemetryShellFromEnvironment(text string) string {
 // Read only these scalar review fields from the same final carriers as the wire
 // profile. The generic extra-metadata map accepts strings, whereas a final wire
 // boolean is also meaningful here. An explicit malformed value remains unknown.
-func codexTelemetryReviewField(headers http.Header, body []byte, key string) gjson.Result {
-	root := gjson.ParseBytes(body)
+func codexTelemetryReviewFieldFromView(headers http.Header, root gjson.Result, key string) gjson.Result {
 	client := root.Get("client_metadata")
 	for _, carrier := range []gjson.Result{client.Get(openAIWSTurnMetadataHeader), root.Get(openAIWSTurnMetadataHeader)} {
 		if carrier.Type == gjson.String {
