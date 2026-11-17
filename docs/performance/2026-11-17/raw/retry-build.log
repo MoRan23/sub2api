@@ -1,0 +1,3 @@
+GOEXPERIMENT=greenteagc,jsonv2 GOMAXPROCS=4 go build -p 2 -o ../.tmp-cpu-server.exe ./cmd/server
+exit code: 0
+No compiler output.

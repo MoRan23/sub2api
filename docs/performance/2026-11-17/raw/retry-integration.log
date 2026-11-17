@@ -1,0 +1,328 @@
+2026/11/17 09:28:16 Timezone initialized: UTC (UTC offset: +00:00)
+2026/11/17 09:28:16 github.com/testcontainers/testcontainers-go - Connected to docker: 
+  Server Version: 29.4.0
+  API Version: 1.51
+  Operating System: Ubuntu 24.04.3 LTS
+  Total Memory: 32099 MB
+  Testcontainers for Go Version: v0.40.0
+  Resolved Docker Host: unix:///var/run/docker.sock
+  Resolved Docker Socket Path: /var/run/docker.sock
+  Test SessionID: c29a3470121d8197e89c8669d014a6ab96ff435624c631dc939033536329f4ea
+  Test ProcessID: 8fe04c86-60ad-4168-bb65-55e2e281498b
+2026/11/17 09:28:16 🐳 Creating container for image postgres:18.1-alpine3.23
+2026/11/17 09:28:16 🐳 Creating container for image testcontainers/ryuk:0.13.0
+2026/11/17 09:28:17 ✅ Container created: 3a257816a749
+2026/11/17 09:28:17 🐳 Starting container: 3a257816a749
+2026/11/17 09:28:17 ✅ Container started: 3a257816a749
+2026/11/17 09:28:17 ⏳ Waiting for container id 3a257816a749 image: testcontainers/ryuk:0.13.0. Waiting for: port 8080/tcp to be listening
+2026/11/17 09:28:17 Shell not found in container
+2026/11/17 09:28:17 🔔 Container is ready: 3a257816a749
+2026/11/17 09:28:17 ✅ Container created: 9709c2bce69e
+2026/11/17 09:28:17 🐳 Starting container: 9709c2bce69e
+2026/11/17 09:28:17 ✅ Container started: 9709c2bce69e
+2026/11/17 09:28:17 ⏳ Waiting for container id 9709c2bce69e image: postgres:18.1-alpine3.23. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2), port 5432/tcp to be listening]
+2026/11/17 09:28:19 🔔 Container is ready: 9709c2bce69e
+2026/11/17 09:28:19 🐳 Creating container for image redis:8.4-alpine
+2026/11/17 09:28:20 ✅ Container created: c9294a7c2b66
+2026/11/17 09:28:20 🐳 Starting container: c9294a7c2b66
+2026/11/17 09:28:20 ✅ Container started: c9294a7c2b66
+2026/11/17 09:28:20 ⏳ Waiting for container id c9294a7c2b66 image: redis:8.4-alpine. Waiting for: all of: [port 6379/tcp to be listening, log message "* Ready to accept connections"]
+2026/11/17 09:28:20 🔔 Container is ready: c9294a7c2b66
+=== RUN   TestCodexTelemetryCompletedRuntimeParentPoolIsolation
+=== RUN   TestCodexTelemetryCompletedRuntimeParentPoolIsolation/expiry
+=== RUN   TestCodexTelemetryCompletedRuntimeParentPoolIsolation/eviction
+--- PASS: TestCodexTelemetryCompletedRuntimeParentPoolIsolation (0.11s)
+    --- PASS: TestCodexTelemetryCompletedRuntimeParentPoolIsolation/expiry (0.06s)
+    --- PASS: TestCodexTelemetryCompletedRuntimeParentPoolIsolation/eviction (0.06s)
+=== RUN   TestCodexTelemetryCompletedRuntimeGenericPlanBoundsParentPool
+    codex_telemetry_eviction_pool_integration_test.go:155: pool_bounded_eviction_plan=[
+          {
+            "Plan": {
+              "Node Type": "Limit",
+              "Parallel Aware": false,
+              "Async Capable": false,
+              "Startup Cost": 1407.99,
+              "Total Cost": 1407.99,
+              "Plan Rows": 1,
+              "Plan Width": 85,
+              "Actual Rows": 2.00,
+              "Actual Loops": 1,
+              "Disabled": false,
+              "Shared Hit Blocks": 853,
+              "Shared Read Blocks": 0,
+              "Shared Dirtied Blocks": 0,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0,
+              "Plans": [
+                {
+                  "Node Type": "Sort",
+                  "Parent Relationship": "Outer",
+                  "Parallel Aware": false,
+                  "Async Capable": false,
+                  "Startup Cost": 1407.99,
+                  "Total Cost": 1408.00,
+                  "Plan Rows": 2,
+                  "Plan Width": 85,
+                  "Actual Rows": 2.00,
+                  "Actual Loops": 1,
+                  "Disabled": false,
+                  "Sort Key": ["a.updated_at", "a.kind COLLATE \"C\"", "a.activity_key COLLATE \"C\""],
+                  "Sort Method": "top-N heapsort",
+                  "Sort Space Used": 25,
+                  "Sort Space Type": "Memory",
+                  "Shared Hit Blocks": 853,
+                  "Shared Read Blocks": 0,
+                  "Shared Dirtied Blocks": 0,
+                  "Shared Written Blocks": 0,
+                  "Local Hit Blocks": 0,
+                  "Local Read Blocks": 0,
+                  "Local Dirtied Blocks": 0,
+                  "Local Written Blocks": 0,
+                  "Temp Read Blocks": 0,
+                  "Temp Written Blocks": 0,
+                  "Plans": [
+                    {
+                      "Node Type": "Nested Loop",
+                      "Parent Relationship": "Outer",
+                      "Parallel Aware": false,
+                      "Async Capable": false,
+                      "Join Type": "Anti",
+                      "Startup Cost": 9.25,
+                      "Total Cost": 1407.98,
+                      "Plan Rows": 2,
+                      "Plan Width": 85,
+                      "Actual Rows": 128.00,
+                      "Actual Loops": 1,
+                      "Disabled": false,
+                      "Inner Unique": false,
+                      "Join Filter": "((protected.kind = a.kind) AND (protected.activity_key = a.activity_key))",
+                      "Rows Removed by Join Filter": 0,
+                      "Shared Hit Blocks": 853,
+                      "Shared Read Blocks": 0,
+                      "Shared Dirtied Blocks": 0,
+                      "Shared Written Blocks": 0,
+                      "Local Hit Blocks": 0,
+                      "Local Read Blocks": 0,
+                      "Local Dirtied Blocks": 0,
+                      "Local Written Blocks": 0,
+                      "Temp Read Blocks": 0,
+                      "Temp Written Blocks": 0,
+                      "Plans": [
+                        {
+                          "Node Type": "Bitmap Heap Scan",
+                          "Parent Relationship": "Outer",
+                          "Parallel Aware": false,
+                          "Async Capable": false,
+                          "Relation Name": "codex_telemetry_activities",
+                          "Alias": "a",
+                          "Startup Cost": 9.25,
+                          "Total Cost": 1407.48,
+                          "Plan Rows": 2,
+                          "Plan Width": 21,
+                          "Actual Rows": 128.00,
+                          "Actual Loops": 1,
+                          "Disabled": false,
+                          "Recheck Cond": "((pool_id = $1) AND (kind = ANY ('{turn,attempt,sampling}'::text[])))",
+                          "Rows Removed by Index Recheck": 0,
+                          "Filter": "((kind = 'sampling'::text) OR ((kind = 'turn'::text) AND (((state -> 'sealed'::text) = 'true'::jsonb) OR ((state -> 'incomplete'::text) = 'true'::jsonb))) OR ((kind = 'attempt'::text) AND (((state -> 'finished'::text) = 'true'::jsonb) OR (NOT EXISTS(SubPlan 1)))))",
+                          "Rows Removed by Filter": 256,
+                          "Exact Heap Blocks": 207,
+                          "Lossy Heap Blocks": 0,
+                          "Shared Hit Blocks": 853,
+                          "Shared Read Blocks": 0,
+                          "Shared Dirtied Blocks": 0,
+                          "Shared Written Blocks": 0,
+                          "Local Hit Blocks": 0,
+                          "Local Read Blocks": 0,
+                          "Local Dirtied Blocks": 0,
+                          "Local Written Blocks": 0,
+                          "Temp Read Blocks": 0,
+                          "Temp Written Blocks": 0,
+                          "Plans": [
+                            {
+                              "Node Type": "Bitmap Index Scan",
+                              "Parent Relationship": "Outer",
+                              "Parallel Aware": false,
+                              "Async Capable": false,
+                              "Index Name": "runtime_age",
+                              "Startup Cost": 0.00,
+                              "Total Cost": 9.25,
+                              "Plan Rows": 128,
+                              "Plan Width": 0,
+                              "Actual Rows": 384.00,
+                              "Actual Loops": 1,
+                              "Disabled": false,
+                              "Index Cond": "(pool_id = $1)",
+                              "Index Searches": 1,
+                              "Shared Hit Blocks": 6,
+                              "Shared Read Blocks": 0,
+                              "Shared Dirtied Blocks": 0,
+                              "Shared Written Blocks": 0,
+                              "Local Hit Blocks": 0,
+                              "Local Read Blocks": 0,
+                              "Local Dirtied Blocks": 0,
+                              "Local Written Blocks": 0,
+                              "Temp Read Blocks": 0,
+                              "Temp Written Blocks": 0
+                            },
+                            {
+                              "Node Type": "Result",
+                              "Parent Relationship": "SubPlan",
+                              "Subplan Name": "SubPlan 1",
+                              "Parallel Aware": false,
+                              "Async Capable": false,
+                              "Startup Cost": 0.29,
+                              "Total Cost": 8.32,
+                              "Plan Rows": 1,
+                              "Plan Width": 4,
+                              "Actual Rows": 0.50,
+                              "Actual Loops": 256,
+                              "Disabled": false,
+                              "One-Time Filter": "($1 = a.pool_id)",
+                              "Shared Hit Blocks": 640,
+                              "Shared Read Blocks": 0,
+                              "Shared Dirtied Blocks": 0,
+                              "Shared Written Blocks": 0,
+                              "Local Hit Blocks": 0,
+                              "Local Read Blocks": 0,
+                              "Local Dirtied Blocks": 0,
+                              "Local Written Blocks": 0,
+                              "Temp Read Blocks": 0,
+                              "Temp Written Blocks": 0,
+                              "Plans": [
+                                {
+                                  "Node Type": "Index Scan",
+                                  "Parent Relationship": "Outer",
+                                  "Parallel Aware": false,
+                                  "Async Capable": false,
+                                  "Scan Direction": "Forward",
+                                  "Index Name": "codex_telemetry_activities_pkey",
+                                  "Relation Name": "codex_telemetry_activities",
+                                  "Alias": "parent",
+                                  "Startup Cost": 0.29,
+                                  "Total Cost": 8.32,
+                                  "Plan Rows": 1,
+                                  "Plan Width": 0,
+                                  "Actual Rows": 0.50,
+                                  "Actual Loops": 256,
+                                  "Disabled": false,
+                                  "Index Cond": "((pool_id = a.pool_id) AND (kind = 'turn'::text) AND (activity_key = COALESCE((a.state ->> 'turn_key'::text), ''::text)))",
+                                  "Rows Removed by Index Recheck": 0,
+                                  "Filter": "((COALESCE((state -> 'sealed'::text), 'false'::jsonb) <> 'true'::jsonb) AND (COALESCE((state -> 'incomplete'::text), 'false'::jsonb) <> 'true'::jsonb))",
+                                  "Rows Removed by Filter": 0,
+                                  "Index Searches": 256,
+                                  "Shared Hit Blocks": 640,
+                                  "Shared Read Blocks": 0,
+                                  "Shared Dirtied Blocks": 0,
+                                  "Shared Written Blocks": 0,
+                                  "Local Hit Blocks": 0,
+                                  "Local Read Blocks": 0,
+                                  "Local Dirtied Blocks": 0,
+                                  "Local Written Blocks": 0,
+                                  "Temp Read Blocks": 0,
+                                  "Temp Written Blocks": 0
+                                }
+                              ]
+                            }
+                          ]
+                        },
+                        {
+                          "Node Type": "Function Scan",
+                          "Parent Relationship": "Inner",
+                          "Parallel Aware": false,
+                          "Async Capable": false,
+                          "Alias": "protected",
+                          "Startup Cost": 0.01,
+                          "Total Cost": 0.11,
+                          "Plan Rows": 10,
+                          "Plan Width": 64,
+                          "Actual Rows": 0.00,
+                          "Actual Loops": 128,
+                          "Disabled": false,
+                          "Shared Hit Blocks": 0,
+                          "Shared Read Blocks": 0,
+                          "Shared Dirtied Blocks": 0,
+                          "Shared Written Blocks": 0,
+                          "Local Hit Blocks": 0,
+                          "Local Read Blocks": 0,
+                          "Local Dirtied Blocks": 0,
+                          "Local Written Blocks": 0,
+                          "Temp Read Blocks": 0,
+                          "Temp Written Blocks": 0
+                        }
+                      ]
+                    }
+                  ]
+                }
+              ]
+            },
+            "Planning": {
+              "Shared Hit Blocks": 24,
+              "Shared Read Blocks": 0,
+              "Shared Dirtied Blocks": 0,
+              "Shared Written Blocks": 0,
+              "Local Hit Blocks": 0,
+              "Local Read Blocks": 0,
+              "Local Dirtied Blocks": 0,
+              "Local Written Blocks": 0,
+              "Temp Read Blocks": 0,
+              "Temp Written Blocks": 0
+            },
+            "Planning Time": 0.672,
+            "Triggers": [
+            ],
+            "Execution Time": 1.190
+          }
+        ]
+--- PASS: TestCodexTelemetryCompletedRuntimeGenericPlanBoundsParentPool (0.22s)
+=== RUN   TestCodexTelemetryIncrementalExpiryEligibilityAndCache
+--- PASS: TestCodexTelemetryIncrementalExpiryEligibilityAndCache (0.05s)
+=== RUN   TestCodexTelemetryIncrementalEvictionOrderAndProtection
+--- PASS: TestCodexTelemetryIncrementalEvictionOrderAndProtection (0.05s)
+=== RUN   TestCodexTelemetryRuntimeSlotsMigration
+--- PASS: TestCodexTelemetryRuntimeSlotsMigration (0.01s)
+=== RUN   TestCodexTelemetryRuntimeSlotsShapes
+=== RUN   TestCodexTelemetryRuntimeSlotsShapes/turn{}
+=== RUN   TestCodexTelemetryRuntimeSlotsShapes/turnnull
+=== RUN   TestCodexTelemetryRuntimeSlotsShapes/turn{"inflight":{"a":"bad-time","b":null}}
+=== RUN   TestCodexTelemetryRuntimeSlotsShapes/turn{"sealed":true,"inflight":{"a":null}}
+=== RUN   TestCodexTelemetryRuntimeSlotsShapes/turn{"incomplete":true,"inflight":{"a":null}}
+=== RUN   TestCodexTelemetryRuntimeSlotsShapes/turn{"sealed":null,"incomplete":null,"inflight":null}
+=== RUN   TestCodexTelemetryRuntimeSlotsShapes/turn[]
+=== RUN   TestCodexTelemetryRuntimeSlotsShapes/turn{"sealed":"true"}
+=== RUN   TestCodexTelemetryRuntimeSlotsShapes/turn{"incomplete":1}
+=== RUN   TestCodexTelemetryRuntimeSlotsShapes/turn{"inflight":[]}
+=== RUN   TestCodexTelemetryRuntimeSlotsShapes/attempt{"finished":false,"turn_key":"t"}
+=== RUN   TestCodexTelemetryRuntimeSlotsShapes/attempt{"finished":null,"turn_key":null}
+=== RUN   TestCodexTelemetryRuntimeSlotsShapes/attempttrue
+=== RUN   TestCodexTelemetryRuntimeSlotsShapes/attempt{"finished":1}
+=== RUN   TestCodexTelemetryRuntimeSlotsShapes/attempt{"turn_key":[]}
+=== RUN   TestCodexTelemetryRuntimeSlotsShapes/sampling[]
+--- PASS: TestCodexTelemetryRuntimeSlotsShapes (0.01s)
+    --- PASS: TestCodexTelemetryRuntimeSlotsShapes/turn{} (0.00s)
+    --- PASS: TestCodexTelemetryRuntimeSlotsShapes/turnnull (0.00s)
+    --- PASS: TestCodexTelemetryRuntimeSlotsShapes/turn{"inflight":{"a":"bad-time","b":null}} (0.00s)
+    --- PASS: TestCodexTelemetryRuntimeSlotsShapes/turn{"sealed":true,"inflight":{"a":null}} (0.00s)
+    --- PASS: TestCodexTelemetryRuntimeSlotsShapes/turn{"incomplete":true,"inflight":{"a":null}} (0.00s)
+    --- PASS: TestCodexTelemetryRuntimeSlotsShapes/turn{"sealed":null,"incomplete":null,"inflight":null} (0.00s)
+    --- PASS: TestCodexTelemetryRuntimeSlotsShapes/turn[] (0.00s)
+    --- PASS: TestCodexTelemetryRuntimeSlotsShapes/turn{"sealed":"true"} (0.00s)
+    --- PASS: TestCodexTelemetryRuntimeSlotsShapes/turn{"incomplete":1} (0.00s)
+    --- PASS: TestCodexTelemetryRuntimeSlotsShapes/turn{"inflight":[]} (0.00s)
+    --- PASS: TestCodexTelemetryRuntimeSlotsShapes/attempt{"finished":false,"turn_key":"t"} (0.00s)
+    --- PASS: TestCodexTelemetryRuntimeSlotsShapes/attempt{"finished":null,"turn_key":null} (0.00s)
+    --- PASS: TestCodexTelemetryRuntimeSlotsShapes/attempttrue (0.00s)
+    --- PASS: TestCodexTelemetryRuntimeSlotsShapes/attempt{"finished":1} (0.00s)
+    --- PASS: TestCodexTelemetryRuntimeSlotsShapes/attempt{"turn_key":[]} (0.00s)
+    --- PASS: TestCodexTelemetryRuntimeSlotsShapes/sampling[] (0.00s)
+=== RUN   TestCodexTelemetryRuntimeSlotsChangesRollbackAndInstances
+--- PASS: TestCodexTelemetryRuntimeSlotsChangesRollbackAndInstances (0.32s)
+=== RUN   TestCodexTelemetryRuntimeSlotsReuseWithinTransaction
+--- PASS: TestCodexTelemetryRuntimeSlotsReuseWithinTransaction (0.06s)
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/repository	8.329s

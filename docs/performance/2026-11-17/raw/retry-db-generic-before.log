@@ -1,0 +1,30 @@
+SET
+BEGIN
+SET
+PREPARE
+                                                                                                                                                                                                            QUERY PLAN                                                                                                                                                                                                             
+-----------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Delete on codex_telemetry_activities a  (cost=57.34..4080.36 rows=2 width=93)
+   ->  Nested Loop  (cost=57.34..4080.36 rows=2 width=93)
+         ->  Subquery Scan on v  (cost=56.79..3549.17 rows=62 width=150)
+               ->  Limit  (cost=56.79..3548.55 rows=62 width=135)
+                     ->  Incremental Sort  (cost=56.79..35143.35 rows=623 width=135)
+                           Sort Key: a_1.updated_at, a_1.kind COLLATE "C", a_1.activity_key COLLATE "C"
+                           Presorted Key: a_1.updated_at
+                           ->  Nested Loop Anti Join  (cost=0.42..35115.31 rows=623 width=135)
+                                 Join Filter: ((protected.kind = a_1.kind) AND (protected.activity_key = a_1.activity_key))
+                                 ->  Index Scan using codex_telemetry_activities_runtime_age_idx on codex_telemetry_activities a_1  (cost=0.41..34959.56 rows=623 width=71)
+                                       Index Cond: (pool_id = $1)
+                                       Filter: ((kind = 'sampling'::text) OR ((kind = 'turn'::text) AND (((state -> 'sealed'::text) = 'true'::jsonb) OR ((state -> 'incomplete'::text) = 'true'::jsonb))) OR ((kind = 'attempt'::text) AND (((state -> 'finished'::text) = 'true'::jsonb) OR (NOT (ANY ((pool_id = (hashed SubPlan 2).col1) AND (COALESCE((state ->> 'turn_key'::text), ''::text) = (hashed SubPlan 2).col2)))))))
+                                       SubPlan 2
+                                         ->  Bitmap Heap Scan on codex_telemetry_activities parent  (cost=732.23..8278.13 rows=6888 width=72)
+                                               Recheck Cond: (kind = 'turn'::text)
+                                               Filter: ((COALESCE((state -> 'sealed'::text), 'false'::jsonb) <> 'true'::jsonb) AND (COALESCE((state -> 'incomplete'::text), 'false'::jsonb) <> 'true'::jsonb))
+                                               ->  Bitmap Index Scan on codex_telemetry_activities_pkey  (cost=0.00..730.51 rows=6958 width=0)
+                                                     Index Cond: (kind = 'turn'::text)
+                                 ->  Function Scan on protected  (cost=0.01..0.11 rows=10 width=64)
+         ->  Index Scan using codex_telemetry_activities_pkey on codex_telemetry_activities a  (cost=0.55..8.57 rows=1 width=69)
+               Index Cond: ((pool_id = $1) AND (kind = v.kind) AND (activity_key = v.activity_key))
+(21 rows)
+
+ROLLBACK

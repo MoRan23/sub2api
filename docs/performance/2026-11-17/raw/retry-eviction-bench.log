@@ -1,0 +1,43 @@
+2026/11/17 09:36:07 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/repository
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkCodexTelemetryCompletedRuntimeEvictionPlan/legacy-4         	       5	 218025385 ns/op	     908 B/op	      28 allocs/op
+--- BENCH: BenchmarkCodexTelemetryCompletedRuntimeEvictionPlan/legacy-4
+    codex_telemetry_eviction_pool_benchmark_integration_test.go:73: legacy parent=Bitmap Heap Scan rows=4096 loops=1 index=<nil>
+    codex_telemetry_eviction_pool_benchmark_integration_test.go:81: legacy explain_ms=235.902 shared_hits=34125 shared_reads=0
+    codex_telemetry_eviction_pool_benchmark_integration_test.go:73: legacy parent=Bitmap Heap Scan rows=4096 loops=1 index=<nil>
+    codex_telemetry_eviction_pool_benchmark_integration_test.go:81: legacy explain_ms=221.108 shared_hits=34122 shared_reads=0
+BenchmarkCodexTelemetryCompletedRuntimeEvictionPlan/legacy-4         	       5	 181466407 ns/op	     908 B/op	      28 allocs/op
+--- BENCH: BenchmarkCodexTelemetryCompletedRuntimeEvictionPlan/legacy-4
+    codex_telemetry_eviction_pool_benchmark_integration_test.go:73: legacy parent=Bitmap Heap Scan rows=4096 loops=1 index=<nil>
+    codex_telemetry_eviction_pool_benchmark_integration_test.go:81: legacy explain_ms=188.541 shared_hits=34122 shared_reads=0
+    codex_telemetry_eviction_pool_benchmark_integration_test.go:73: legacy parent=Bitmap Heap Scan rows=4096 loops=1 index=<nil>
+    codex_telemetry_eviction_pool_benchmark_integration_test.go:81: legacy explain_ms=178.063 shared_hits=34122 shared_reads=0
+BenchmarkCodexTelemetryCompletedRuntimeEvictionPlan/legacy-4         	       5	 190970845 ns/op	     908 B/op	      28 allocs/op
+--- BENCH: BenchmarkCodexTelemetryCompletedRuntimeEvictionPlan/legacy-4
+    codex_telemetry_eviction_pool_benchmark_integration_test.go:73: legacy parent=Bitmap Heap Scan rows=4096 loops=1 index=<nil>
+    codex_telemetry_eviction_pool_benchmark_integration_test.go:81: legacy explain_ms=176.533 shared_hits=34122 shared_reads=0
+    codex_telemetry_eviction_pool_benchmark_integration_test.go:73: legacy parent=Bitmap Heap Scan rows=4096 loops=1 index=<nil>
+    codex_telemetry_eviction_pool_benchmark_integration_test.go:81: legacy explain_ms=174.104 shared_hits=34122 shared_reads=0
+BenchmarkCodexTelemetryCompletedRuntimeEvictionPlan/correlated-4     	       5	  25011006 ns/op	     912 B/op	      29 allocs/op
+--- BENCH: BenchmarkCodexTelemetryCompletedRuntimeEvictionPlan/correlated-4
+    codex_telemetry_eviction_pool_benchmark_integration_test.go:73: correlated parent=Index Scan rows=0.03 loops=3968 index=((pool_id = a.pool_id) AND (kind = 'turn'::text) AND (activity_key = COALESCE((a.state ->> 'turn_key'::text), ''::text)))
+    codex_telemetry_eviction_pool_benchmark_integration_test.go:81: correlated explain_ms=22.472 shared_hits=14204 shared_reads=0
+    codex_telemetry_eviction_pool_benchmark_integration_test.go:73: correlated parent=Index Scan rows=0.03 loops=3968 index=((pool_id = a.pool_id) AND (kind = 'turn'::text) AND (activity_key = COALESCE((a.state ->> 'turn_key'::text), ''::text)))
+    codex_telemetry_eviction_pool_benchmark_integration_test.go:81: correlated explain_ms=26.081 shared_hits=14204 shared_reads=0
+BenchmarkCodexTelemetryCompletedRuntimeEvictionPlan/correlated-4     	       5	  25000136 ns/op	     960 B/op	      29 allocs/op
+--- BENCH: BenchmarkCodexTelemetryCompletedRuntimeEvictionPlan/correlated-4
+    codex_telemetry_eviction_pool_benchmark_integration_test.go:73: correlated parent=Index Scan rows=0.03 loops=3968 index=((pool_id = a.pool_id) AND (kind = 'turn'::text) AND (activity_key = COALESCE((a.state ->> 'turn_key'::text), ''::text)))
+    codex_telemetry_eviction_pool_benchmark_integration_test.go:81: correlated explain_ms=25.734 shared_hits=14204 shared_reads=0
+    codex_telemetry_eviction_pool_benchmark_integration_test.go:73: correlated parent=Index Scan rows=0.03 loops=3968 index=((pool_id = a.pool_id) AND (kind = 'turn'::text) AND (activity_key = COALESCE((a.state ->> 'turn_key'::text), ''::text)))
+    codex_telemetry_eviction_pool_benchmark_integration_test.go:81: correlated explain_ms=24.275 shared_hits=14204 shared_reads=0
+BenchmarkCodexTelemetryCompletedRuntimeEvictionPlan/correlated-4     	       5	  22572053 ns/op	     912 B/op	      29 allocs/op
+--- BENCH: BenchmarkCodexTelemetryCompletedRuntimeEvictionPlan/correlated-4
+    codex_telemetry_eviction_pool_benchmark_integration_test.go:73: correlated parent=Index Scan rows=0.03 loops=3968 index=((pool_id = a.pool_id) AND (kind = 'turn'::text) AND (activity_key = COALESCE((a.state ->> 'turn_key'::text), ''::text)))
+    codex_telemetry_eviction_pool_benchmark_integration_test.go:81: correlated explain_ms=25.551 shared_hits=14204 shared_reads=0
+    codex_telemetry_eviction_pool_benchmark_integration_test.go:73: correlated parent=Index Scan rows=0.03 loops=3968 index=((pool_id = a.pool_id) AND (kind = 'turn'::text) AND (activity_key = COALESCE((a.state ->> 'turn_key'::text), ''::text)))
+    codex_telemetry_eviction_pool_benchmark_integration_test.go:81: correlated explain_ms=24.181 shared_hits=14204 shared_reads=0
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/repository	15.358s

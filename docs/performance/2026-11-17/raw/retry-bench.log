@@ -1,0 +1,343 @@
+2026/11/17 09:25:12 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkCodexRawReuseGuard/1MiB/x-4        	    1875	     54571 ns/op	19215.41 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCodexRawReuseGuard/1MiB/x-4        	    2680	     53085 ns/op	19753.36 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCodexRawReuseGuard/1MiB/x-4        	    1868	     60710 ns/op	17272.49 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCodexRawReuseGuard/1MiB/\n-4       	      27	   4165896 ns/op	 251.71 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCodexRawReuseGuard/1MiB/\n-4       	      33	   3981879 ns/op	 263.35 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCodexRawReuseGuard/1MiB/\n-4       	      32	   3239541 ns/op	 323.69 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCodexRawReuseGuard/1MiB/\\-4       	      37	   3671708 ns/op	 285.59 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCodexRawReuseGuard/1MiB/\\-4       	      33	   3222270 ns/op	 325.43 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCodexRawReuseGuard/1MiB/\\-4       	      39	   3568349 ns/op	 293.86 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCodexRawReuseGuard/1MiB/\"-4       	      19	   5345632 ns/op	 196.16 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCodexRawReuseGuard/1MiB/\"-4       	      28	   4666586 ns/op	 224.71 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCodexRawReuseGuard/1MiB/\"-4       	      26	   5300750 ns/op	 197.82 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCodexRawReuseGuard/1MiB/\u0061-4   	     103	   1220549 ns/op	 859.13 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCodexRawReuseGuard/1MiB/\u0061-4   	      94	   1399720 ns/op	 749.15 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCodexRawReuseGuard/1MiB/\u0061-4   	     100	   1160124 ns/op	 903.87 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCodexRawReuseGuard/8MiB/x-4        	     194	    555701 ns/op	15095.60 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCodexRawReuseGuard/8MiB/x-4        	     189	    600342 ns/op	13973.11 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCodexRawReuseGuard/8MiB/x-4        	     267	    426610 ns/op	19663.49 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCodexRawReuseGuard/8MiB/\n-4       	       4	  29485550 ns/op	 284.50 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCodexRawReuseGuard/8MiB/\n-4       	       4	  26921225 ns/op	 311.60 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCodexRawReuseGuard/8MiB/\n-4       	       4	  25305175 ns/op	 331.50 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCodexRawReuseGuard/8MiB/\\-4       	       4	  29353175 ns/op	 285.78 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCodexRawReuseGuard/8MiB/\\-4       	       4	  28072300 ns/op	 298.82 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCodexRawReuseGuard/8MiB/\\-4       	       4	  29016575 ns/op	 289.10 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCodexRawReuseGuard/8MiB/\"-4       	       3	  44686800 ns/op	 187.72 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCodexRawReuseGuard/8MiB/\"-4       	       3	  41250267 ns/op	 203.36 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCodexRawReuseGuard/8MiB/\"-4       	       3	  44605900 ns/op	 188.06 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCodexRawReuseGuard/8MiB/\u0061-4   	      10	  13467530 ns/op	 622.88 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCodexRawReuseGuard/8MiB/\u0061-4   	      10	  10107310 ns/op	 829.96 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCodexRawReuseGuard/8MiB/\u0061-4   	      14	   9387700 ns/op	 893.58 MB/s	       0 B/op	       0 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_false/attempts_1/legacy-4         	      43	   4248149 ns/op	 246.86 MB/s	 6599937 B/op	     101 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_false/attempts_1/legacy-4         	      26	   4292950 ns/op	 244.29 MB/s	 6629968 B/op	     100 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_false/attempts_1/legacy-4         	      39	   5569108 ns/op	 188.31 MB/s	 6684672 B/op	     103 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_false/attempts_1/sparse-4         	      33	   3709903 ns/op	 282.68 MB/s	 5246648 B/op	      77 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_false/attempts_1/sparse-4         	      33	   4497667 ns/op	 233.17 MB/s	 5246183 B/op	      76 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_false/attempts_1/sparse-4         	      61	   3447387 ns/op	 304.21 MB/s	 5246212 B/op	      75 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_false/attempts_5/legacy-4         	       4	  27437125 ns/op	 191.11 MB/s	33639716 B/op	     517 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_false/attempts_5/legacy-4         	       5	  24209620 ns/op	 216.59 MB/s	32790059 B/op	     492 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_false/attempts_5/legacy-4         	       5	  25863300 ns/op	 202.74 MB/s	32792448 B/op	     500 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_false/attempts_5/sparse-4         	       6	  17684433 ns/op	 296.51 MB/s	26229197 B/op	     373 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_false/attempts_5/sparse-4         	       6	  17143350 ns/op	 305.87 MB/s	26235005 B/op	     396 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_false/attempts_5/sparse-4         	       7	  15521457 ns/op	 337.83 MB/s	26231386 B/op	     382 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_false/attempts_15/legacy-4        	       2	  70283700 ns/op	 223.82 MB/s	99328356 B/op	    1513 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_false/attempts_15/legacy-4        	       2	  75821300 ns/op	 207.47 MB/s	97740996 B/op	    1486 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_false/attempts_15/legacy-4        	       2	  81599100 ns/op	 192.78 MB/s	98799440 B/op	    1504 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_false/attempts_15/sparse-4        	       2	  53549200 ns/op	 293.76 MB/s	78707596 B/op	    1200 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_false/attempts_15/sparse-4        	       2	  56962100 ns/op	 276.16 MB/s	78691164 B/op	    1135 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_false/attempts_15/sparse-4        	       2	  50385400 ns/op	 312.21 MB/s	78707420 B/op	    1198 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_true/attempts_1/legacy-4          	      36	   4577786 ns/op	 229.09 MB/s	 6635605 B/op	     100 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_true/attempts_1/legacy-4          	      27	   4362559 ns/op	 240.40 MB/s	 6783258 B/op	     105 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_true/attempts_1/legacy-4          	      31	   6263426 ns/op	 167.44 MB/s	 6551530 B/op	     101 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_true/attempts_1/sparse-4          	      43	   3229456 ns/op	 324.74 MB/s	 5254552 B/op	      78 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_true/attempts_1/sparse-4          	      34	   3041274 ns/op	 344.84 MB/s	 5255186 B/op	      80 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_true/attempts_1/sparse-4          	      36	   4671431 ns/op	 224.50 MB/s	 5255045 B/op	      80 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_true/attempts_5/legacy-4          	       4	  27948125 ns/op	 187.62 MB/s	33947038 B/op	     534 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_true/attempts_5/legacy-4          	       4	  25431675 ns/op	 206.19 MB/s	33151666 B/op	     515 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_true/attempts_5/legacy-4          	       5	  22860940 ns/op	 229.37 MB/s	32832200 B/op	     504 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_true/attempts_5/sparse-4          	       7	  16010300 ns/op	 327.52 MB/s	26277137 B/op	     407 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_true/attempts_5/sparse-4          	       6	  17917700 ns/op	 292.66 MB/s	26273200 B/op	     393 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_true/attempts_5/sparse-4          	       7	  16607371 ns/op	 315.75 MB/s	26274915 B/op	     399 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_true/attempts_15/legacy-4         	       2	  62485250 ns/op	 251.76 MB/s	99988396 B/op	    1572 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_true/attempts_15/legacy-4         	       2	  62264500 ns/op	 252.65 MB/s	99992564 B/op	    1585 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_true/attempts_15/legacy-4         	       2	  66702450 ns/op	 235.84 MB/s	99982908 B/op	    1551 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_true/attempts_15/sparse-4         	       3	  50318367 ns/op	 312.63 MB/s	78821037 B/op	    1184 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_true/attempts_15/sparse-4         	       2	  58938400 ns/op	 266.91 MB/s	78822388 B/op	    1189 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_true/attempts_15/sparse-4         	       2	  70944350 ns/op	 221.74 MB/s	78822632 B/op	    1190 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_false/attempts_1/legacy-4         	       3	  41566200 ns/op	 201.82 MB/s	55946288 B/op	     122 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_false/attempts_1/legacy-4         	       3	  42393133 ns/op	 197.88 MB/s	58747816 B/op	     135 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_false/attempts_1/legacy-4         	       4	  31224850 ns/op	 268.66 MB/s	54547658 B/op	     124 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_false/attempts_1/sparse-4         	       4	  26093425 ns/op	 321.49 MB/s	41949750 B/op	      92 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_false/attempts_1/sparse-4         	       5	  23266400 ns/op	 360.55 MB/s	41948108 B/op	      86 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_false/attempts_1/sparse-4         	       4	  27818175 ns/op	 301.56 MB/s	41950042 B/op	      93 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_false/attempts_5/legacy-4         	       1	 165288400 ns/op	 253.76 MB/s	268533824 B/op	     587 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_false/attempts_5/legacy-4         	       1	 182090300 ns/op	 230.35 MB/s	276936816 B/op	     621 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_false/attempts_5/legacy-4         	       1	 242633500 ns/op	 172.87 MB/s	260123848 B/op	     526 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_false/attempts_5/sparse-4         	       1	 181837000 ns/op	 230.67 MB/s	209745336 B/op	     448 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_false/attempts_5/sparse-4         	       1	 136860100 ns/op	 306.47 MB/s	209740008 B/op	     428 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_false/attempts_5/sparse-4         	       1	 189200100 ns/op	 221.69 MB/s	209745448 B/op	     449 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_false/attempts_15/legacy-4        	       1	 586955900 ns/op	 214.38 MB/s	797198176 B/op	    1731 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_false/attempts_15/legacy-4        	       1	 623010900 ns/op	 201.97 MB/s	839192392 B/op	    1814 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_false/attempts_15/legacy-4        	       1	 653761900 ns/op	 192.47 MB/s	788798928 B/op	    1716 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_false/attempts_15/sparse-4        	       1	 534032500 ns/op	 235.62 MB/s	629219200 B/op	    1279 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_false/attempts_15/sparse-4        	       1	 400265000 ns/op	 314.37 MB/s	629236120 B/op	    1345 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_false/attempts_15/sparse-4        	       1	 413018800 ns/op	 304.66 MB/s	629241656 B/op	    1367 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_true/attempts_1/legacy-4          	       3	  35596433 ns/op	 235.66 MB/s	55954706 B/op	     123 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_true/attempts_1/legacy-4          	       4	  33795625 ns/op	 248.22 MB/s	54554240 B/op	     118 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_true/attempts_1/legacy-4          	       3	  37951633 ns/op	 221.04 MB/s	53153738 B/op	     113 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_true/attempts_1/sparse-4          	       3	  37111467 ns/op	 226.04 MB/s	41955832 B/op	      85 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_true/attempts_1/sparse-4          	       5	  24239740 ns/op	 346.08 MB/s	41957294 B/op	      90 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_true/attempts_1/sparse-4          	       3	  33751900 ns/op	 248.54 MB/s	41959642 B/op	      99 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_true/attempts_5/legacy-4          	       1	 202233300 ns/op	 207.40 MB/s	260167144 B/op	     543 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_true/attempts_5/legacy-4          	       1	 207782500 ns/op	 201.86 MB/s	293780096 B/op	     673 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_true/attempts_5/legacy-4          	       1	 188158600 ns/op	 222.92 MB/s	276971872 B/op	     605 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_true/attempts_5/sparse-4          	       1	 252181200 ns/op	 166.32 MB/s	209780920 B/op	     433 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_true/attempts_5/sparse-4          	       1	 308671000 ns/op	 135.89 MB/s	209786344 B/op	     452 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_true/attempts_5/sparse-4          	       1	 197420400 ns/op	 212.46 MB/s	209791752 B/op	     471 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_true/attempts_15/legacy-4         	       1	 650872400 ns/op	 193.33 MB/s	822510032 B/op	    1758 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_true/attempts_15/legacy-4         	       1	 727515600 ns/op	 172.96 MB/s	839314576 B/op	    1816 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_true/attempts_15/legacy-4         	       1	 535095000 ns/op	 235.16 MB/s	830924512 B/op	    1846 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_true/attempts_15/sparse-4         	       1	 403649000 ns/op	 311.74 MB/s	629347728 B/op	    1316 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_true/attempts_15/sparse-4         	       1	 541527200 ns/op	 232.36 MB/s	629337944 B/op	    1285 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_true/attempts_15/sparse-4         	       1	 373294400 ns/op	 337.08 MB/s	629359688 B/op	    1361 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/image/1MiB/legacy-4                   	      45	   2658429 ns/op	 394.52 MB/s	 1056768 B/op	       1 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/image/1MiB/legacy-4                   	      46	   2834028 ns/op	 370.08 MB/s	 1056768 B/op	       1 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/image/1MiB/legacy-4                   	      33	   3134164 ns/op	 334.64 MB/s	 1056768 B/op	       1 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/image/1MiB/current-4                  	    3774	     30705 ns/op	34157.19 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/image/1MiB/current-4                  	    3213	     31880 ns/op	32898.98 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/image/1MiB/current-4                  	    4482	     31249 ns/op	33563.12 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/text/1MiB/legacy-4                    	      55	   2086022 ns/op	 502.78 MB/s	 1056768 B/op	       1 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/text/1MiB/legacy-4                    	      70	   1998740 ns/op	 524.74 MB/s	 1056768 B/op	       1 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/text/1MiB/legacy-4                    	      48	   2145604 ns/op	 488.82 MB/s	 1056768 B/op	       1 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/text/1MiB/current-4                   	    4275	     32214 ns/op	32557.23 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/text/1MiB/current-4                   	    4634	     34720 ns/op	30207.49 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/text/1MiB/current-4                   	    3355	     39434 ns/op	26596.48 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/image/8MiB/legacy-4                   	       5	  24374240 ns/op	 344.17 MB/s	 8396800 B/op	       1 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/image/8MiB/legacy-4                   	       4	  34015325 ns/op	 246.62 MB/s	 8396800 B/op	       1 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/image/8MiB/legacy-4                   	       5	  24002560 ns/op	 349.50 MB/s	 8396800 B/op	       1 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/image/8MiB/current-4                  	     363	    328772 ns/op	25515.72 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/image/8MiB/current-4                  	     348	    314376 ns/op	26684.08 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/image/8MiB/current-4                  	     363	    317073 ns/op	26457.12 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/text/8MiB/legacy-4                    	       9	  16664433 ns/op	 503.40 MB/s	 8396800 B/op	       1 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/text/8MiB/legacy-4                    	       7	  14395571 ns/op	 582.74 MB/s	 8396800 B/op	       1 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/text/8MiB/legacy-4                    	       7	  15640686 ns/op	 536.35 MB/s	 8396800 B/op	       1 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/text/8MiB/current-4                   	     246	    543829 ns/op	15425.51 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/text/8MiB/current-4                   	     146	    813965 ns/op	10306.15 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/text/8MiB/current-4                   	     222	    816291 ns/op	10276.78 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/image/32MiB/legacy-4                  	       2	  82045350 ns/op	 408.98 MB/s	33562624 B/op	       1 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/image/32MiB/legacy-4                  	       2	  79974100 ns/op	 419.57 MB/s	33562624 B/op	       1 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/image/32MiB/legacy-4                  	       2	  80340900 ns/op	 417.65 MB/s	33562624 B/op	       1 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/image/32MiB/current-4                 	      34	   3145535 ns/op	10667.40 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/image/32MiB/current-4                 	      45	   3527787 ns/op	9511.54 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/image/32MiB/current-4                 	      39	   2750441 ns/op	12199.74 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/text/32MiB/legacy-4                   	       2	  71714000 ns/op	 467.90 MB/s	33562624 B/op	       1 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/text/32MiB/legacy-4                   	       2	  56001700 ns/op	 599.17 MB/s	33562624 B/op	       1 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/text/32MiB/legacy-4                   	       2	  60027900 ns/op	 558.98 MB/s	33562624 B/op	       1 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/text/32MiB/current-4                  	      48	   3025621 ns/op	11090.18 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/text/32MiB/current-4                  	      50	   2656902 ns/op	12629.25 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIEmptyBase64PredicateCPU/text/32MiB/current-4                  	      50	   2400600 ns/op	13977.62 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/1MiB/repair=false/legacy-4      	      37	   3511878 ns/op	 298.65 MB/s	      30 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/1MiB/repair=false/legacy-4      	      42	   3787674 ns/op	 276.90 MB/s	      36 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/1MiB/repair=false/legacy-4      	      31	   3841990 ns/op	 272.99 MB/s	      43 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/1MiB/repair=false/current-4     	     172	    712649 ns/op	1471.71 MB/s	      20 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/1MiB/repair=false/current-4     	     183	    637085 ns/op	1646.27 MB/s	      20 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/1MiB/repair=false/current-4     	     183	    721707 ns/op	1453.24 MB/s	      18 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/1MiB/repair=true/legacy-4       	      14	   8795879 ns/op	 119.24 MB/s	 2113946 B/op	      12 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/1MiB/repair=true/legacy-4       	      16	   8962575 ns/op	 117.02 MB/s	 2113931 B/op	      12 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/1MiB/repair=true/legacy-4       	      12	   8612225 ns/op	 121.79 MB/s	 2113966 B/op	      12 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/1MiB/repair=true/current-4      	      26	   3969642 ns/op	 264.22 MB/s	 2113929 B/op	      12 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/1MiB/repair=true/current-4      	      49	   3213547 ns/op	 326.38 MB/s	 2113918 B/op	      12 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/1MiB/repair=true/current-4      	      36	   3105869 ns/op	 337.70 MB/s	 2113914 B/op	      12 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/1MiB/repair=false/legacy-4       	      20	   5616770 ns/op	 186.73 MB/s	      74 B/op	       2 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/1MiB/repair=false/legacy-4       	      19	   5690105 ns/op	 184.32 MB/s	      77 B/op	       2 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/1MiB/repair=false/legacy-4       	      21	   6910300 ns/op	 151.78 MB/s	      72 B/op	       2 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/1MiB/repair=false/current-4      	      82	   1613923 ns/op	 649.85 MB/s	      42 B/op	       2 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/1MiB/repair=false/current-4      	     100	   1564326 ns/op	 670.46 MB/s	      40 B/op	       2 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/1MiB/repair=false/current-4      	      93	   1659953 ns/op	 631.83 MB/s	      41 B/op	       2 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/1MiB/repair=true/legacy-4        	      16	   8235412 ns/op	 127.36 MB/s	 2113942 B/op	      12 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/1MiB/repair=true/legacy-4        	      16	   7849019 ns/op	 133.63 MB/s	 2113931 B/op	      12 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/1MiB/repair=true/legacy-4        	      19	   8676563 ns/op	 120.88 MB/s	 2113923 B/op	      12 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/1MiB/repair=true/current-4       	      43	   3470837 ns/op	 302.19 MB/s	 2113906 B/op	      12 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/1MiB/repair=true/current-4       	      52	   3880615 ns/op	 270.28 MB/s	 2113896 B/op	      12 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/1MiB/repair=true/current-4       	      44	   3257259 ns/op	 322.00 MB/s	 2113910 B/op	      12 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/8MiB/repair=false/legacy-4      	       6	  23363333 ns/op	 359.06 MB/s	     158 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/8MiB/repair=false/legacy-4      	       5	  30521640 ns/op	 274.85 MB/s	     120 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/8MiB/repair=false/legacy-4      	       5	  25574000 ns/op	 328.02 MB/s	     187 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/8MiB/repair=false/current-4     	      24	   7414517 ns/op	1131.41 MB/s	      37 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/8MiB/repair=false/current-4     	      26	   5788550 ns/op	1449.21 MB/s	      36 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/8MiB/repair=false/current-4     	      19	   5279589 ns/op	1588.92 MB/s	      43 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/8MiB/repair=true/legacy-4       	       2	  57140500 ns/op	 146.81 MB/s	16794576 B/op	      15 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/8MiB/repair=true/legacy-4       	       2	  60032600 ns/op	 139.74 MB/s	16794408 B/op	      14 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/8MiB/repair=true/legacy-4       	       2	  58947450 ns/op	 142.31 MB/s	16794408 B/op	      14 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/8MiB/repair=true/current-4      	       3	  44662333 ns/op	 187.83 MB/s	16794234 B/op	      13 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/8MiB/repair=true/current-4      	       4	  25391500 ns/op	 330.38 MB/s	16794232 B/op	      13 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/8MiB/repair=true/current-4      	       4	  26803500 ns/op	 312.98 MB/s	16794316 B/op	      14 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/8MiB/repair=false/legacy-4       	       2	  51596850 ns/op	 162.58 MB/s	     292 B/op	       3 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/8MiB/repair=false/legacy-4       	       3	  51209833 ns/op	 163.81 MB/s	     317 B/op	       3 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/8MiB/repair=false/legacy-4       	       3	  41939200 ns/op	 200.02 MB/s	     205 B/op	       2 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/8MiB/repair=false/current-4      	      12	   9870308 ns/op	 849.91 MB/s	      75 B/op	       2 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/8MiB/repair=false/current-4      	      12	  11333100 ns/op	 740.21 MB/s	      75 B/op	       2 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/8MiB/repair=false/current-4      	      10	  14380810 ns/op	 583.34 MB/s	      84 B/op	       2 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/8MiB/repair=true/legacy-4        	       2	  61277300 ns/op	 136.90 MB/s	16794576 B/op	      15 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/8MiB/repair=true/legacy-4        	       2	  58015350 ns/op	 144.60 MB/s	16794576 B/op	      15 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/8MiB/repair=true/legacy-4        	       2	  64545600 ns/op	 129.97 MB/s	16794408 B/op	      14 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/8MiB/repair=true/current-4       	       4	  27237525 ns/op	 307.99 MB/s	16794232 B/op	      13 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/8MiB/repair=true/current-4       	       5	  27273720 ns/op	 307.58 MB/s	16794334 B/op	      14 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/8MiB/repair=true/current-4       	       5	  47109780 ns/op	 178.07 MB/s	16794334 B/op	      14 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/32MiB/repair=false/legacy-4     	       1	 120045100 ns/op	 279.52 MB/s	     872 B/op	       5 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/32MiB/repair=false/legacy-4     	       1	 140750900 ns/op	 238.40 MB/s	     536 B/op	       3 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/32MiB/repair=false/legacy-4     	       1	 120363600 ns/op	 278.78 MB/s	     872 B/op	       5 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/32MiB/repair=false/current-4    	       5	  23959860 ns/op	1400.45 MB/s	     187 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/32MiB/repair=false/current-4    	       4	  36629700 ns/op	 916.05 MB/s	     230 B/op	       2 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/32MiB/repair=false/current-4    	       5	  23131220 ns/op	1450.62 MB/s	     187 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/32MiB/repair=true/legacy-4      	       1	 251166100 ns/op	 133.60 MB/s	67126392 B/op	      16 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/32MiB/repair=true/legacy-4      	       1	 232836000 ns/op	 144.11 MB/s	67126392 B/op	      16 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/32MiB/repair=true/legacy-4      	       1	 254950200 ns/op	 131.61 MB/s	67126728 B/op	      18 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/32MiB/repair=true/current-4     	       2	 159946450 ns/op	 209.79 MB/s	67126392 B/op	      16 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/32MiB/repair=true/current-4     	       1	 173413000 ns/op	 193.50 MB/s	67126056 B/op	      14 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/32MiB/repair=true/current-4     	       1	 211649700 ns/op	 158.54 MB/s	67126392 B/op	      16 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/32MiB/repair=false/legacy-4      	       1	 202803600 ns/op	 165.45 MB/s	     888 B/op	       6 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/32MiB/repair=false/legacy-4      	       1	 216268600 ns/op	 155.15 MB/s	     888 B/op	       6 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/32MiB/repair=false/legacy-4      	       1	 227624100 ns/op	 147.41 MB/s	     888 B/op	       6 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/32MiB/repair=false/current-4     	       1	 162004400 ns/op	 207.12 MB/s	     552 B/op	       4 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/32MiB/repair=false/current-4     	       1	 165429100 ns/op	 202.83 MB/s	     888 B/op	       6 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/32MiB/repair=false/current-4     	       2	  81410850 ns/op	 412.16 MB/s	     460 B/op	       4 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/32MiB/repair=true/legacy-4       	       1	 266691000 ns/op	 125.82 MB/s	67126392 B/op	      16 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/32MiB/repair=true/legacy-4       	       1	 384014000 ns/op	  87.38 MB/s	67126728 B/op	      18 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/32MiB/repair=true/legacy-4       	       1	 523729600 ns/op	  64.07 MB/s	67126728 B/op	      18 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/32MiB/repair=true/current-4      	       1	 113160600 ns/op	 296.52 MB/s	67126392 B/op	      16 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/32MiB/repair=true/current-4      	       1	 110553800 ns/op	 303.51 MB/s	67126392 B/op	      16 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/32MiB/repair=true/current-4      	       1	 154599600 ns/op	 217.04 MB/s	67126056 B/op	      14 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/1MiB/1_attempts/legacy-4              	      13	   8595308 ns/op	 122.05 MB/s	 6373240 B/op	     334 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/1MiB/1_attempts/legacy-4              	      14	   9552207 ns/op	 109.83 MB/s	 6373149 B/op	     334 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/1MiB/1_attempts/legacy-4              	      16	   7781706 ns/op	 134.81 MB/s	 6373304 B/op	     335 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/1MiB/1_attempts/sources_only-4        	      37	   4109989 ns/op	 255.25 MB/s	 2127818 B/op	     164 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/1MiB/1_attempts/sources_only-4        	      39	   5264654 ns/op	 199.27 MB/s	 2127843 B/op	     164 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/1MiB/1_attempts/sources_only-4        	      49	   3691333 ns/op	 284.20 MB/s	 2127857 B/op	     164 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/1MiB/5_attempts/legacy-4              	       3	  42562533 ns/op	 123.24 MB/s	31865666 B/op	    1670 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/1MiB/5_attempts/legacy-4              	       3	  52080033 ns/op	 100.72 MB/s	31865666 B/op	    1670 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/1MiB/5_attempts/legacy-4              	       3	  43873667 ns/op	 119.56 MB/s	31865666 B/op	    1670 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/1MiB/5_attempts/sources_only-4        	       9	  14818678 ns/op	 353.97 MB/s	10639254 B/op	     824 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/1MiB/5_attempts/sources_only-4        	       8	  12683825 ns/op	 413.55 MB/s	10639059 B/op	     822 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/1MiB/5_attempts/sources_only-4        	       8	  15450362 ns/op	 339.50 MB/s	10638942 B/op	     821 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/1MiB/8_attempts/legacy-4              	       2	  61963500 ns/op	 135.44 MB/s	50985948 B/op	    2680 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/1MiB/8_attempts/legacy-4              	       2	  89027000 ns/op	  94.27 MB/s	50985004 B/op	    2673 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/1MiB/8_attempts/legacy-4              	       2	  66169900 ns/op	 126.83 MB/s	50986464 B/op	    2683 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/1MiB/8_attempts/sources_only-4        	       4	  29110225 ns/op	 288.30 MB/s	17022888 B/op	    1318 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/1MiB/8_attempts/sources_only-4        	       5	  20201520 ns/op	 415.44 MB/s	17022545 B/op	    1315 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/1MiB/8_attempts/sources_only-4        	       5	  21960580 ns/op	 382.17 MB/s	17022691 B/op	    1317 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/8MiB/1_attempts/legacy-4              	       2	  61777650 ns/op	 135.80 MB/s	50415088 B/op	     345 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/8MiB/1_attempts/legacy-4              	       2	  64051700 ns/op	 130.97 MB/s	50415140 B/op	     346 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/8MiB/1_attempts/legacy-4              	       2	  68248200 ns/op	 122.92 MB/s	50414176 B/op	     337 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/8MiB/1_attempts/sources_only-4        	       6	  21125683 ns/op	 397.10 MB/s	16808305 B/op	     166 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/8MiB/1_attempts/sources_only-4        	       6	  28813483 ns/op	 291.15 MB/s	16808466 B/op	     168 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/8MiB/1_attempts/sources_only-4        	       3	  33642367 ns/op	 249.36 MB/s	16808461 B/op	     168 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/8MiB/5_attempts/legacy-4              	       1	 366047600 ns/op	 114.59 MB/s	252072584 B/op	    1706 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/8MiB/5_attempts/legacy-4              	       1	 319048400 ns/op	 131.47 MB/s	252072632 B/op	    1707 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/8MiB/5_attempts/legacy-4              	       1	 339285200 ns/op	 123.63 MB/s	252071840 B/op	    1698 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/8MiB/5_attempts/sources_only-4        	       1	 140510600 ns/op	 298.52 MB/s	84042968 B/op	     844 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/8MiB/5_attempts/sources_only-4        	       1	 115656200 ns/op	 362.67 MB/s	84041096 B/op	     828 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/8MiB/5_attempts/sources_only-4        	       1	 121605100 ns/op	 344.93 MB/s	84043000 B/op	     845 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/8MiB/8_attempts/legacy-4              	       1	 632119800 ns/op	 106.17 MB/s	403316088 B/op	    2730 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/8MiB/8_attempts/legacy-4              	       1	 612213600 ns/op	 109.62 MB/s	403313344 B/op	    2707 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/8MiB/8_attempts/legacy-4              	       1	 599321700 ns/op	 111.98 MB/s	403317072 B/op	    2739 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/8MiB/8_attempts/sources_only-4        	       1	 201497800 ns/op	 333.07 MB/s	134465432 B/op	    1328 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/8MiB/8_attempts/sources_only-4        	       1	 193103200 ns/op	 347.55 MB/s	134466368 B/op	    1336 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/8MiB/8_attempts/sources_only-4        	       1	 254422800 ns/op	 263.78 MB/s	134466368 B/op	    1336 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/32MiB/1_attempts/legacy-4             	       1	 452985900 ns/op	  74.08 MB/s	201412000 B/op	     357 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/32MiB/1_attempts/legacy-4             	       1	 362963800 ns/op	  92.45 MB/s	201411112 B/op	     349 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/32MiB/1_attempts/legacy-4             	       1	 276661600 ns/op	 121.29 MB/s	201411176 B/op	     350 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/32MiB/1_attempts/sources_only-4       	       1	 184519900 ns/op	 181.85 MB/s	67141432 B/op	     176 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/32MiB/1_attempts/sources_only-4       	       2	  81824600 ns/op	 410.08 MB/s	67140440 B/op	     170 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/32MiB/1_attempts/sources_only-4       	       2	  79156150 ns/op	 423.91 MB/s	67140440 B/op	     170 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/32MiB/5_attempts/legacy-4             	       1	1229963100 ns/op	 136.41 MB/s	1007050320 B/op	    1721 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/32MiB/5_attempts/legacy-4             	       1	1722701900 ns/op	  97.39 MB/s	1007049528 B/op	    1715 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/32MiB/5_attempts/legacy-4             	       1	1469717900 ns/op	 114.15 MB/s	1007048464 B/op	    1711 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/32MiB/5_attempts/sources_only-4       	       1	 576917700 ns/op	 290.81 MB/s	335701240 B/op	     845 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/32MiB/5_attempts/sources_only-4       	       1	 424348300 ns/op	 395.37 MB/s	335701208 B/op	     844 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/32MiB/5_attempts/sources_only-4       	       1	 603693200 ns/op	 277.91 MB/s	335701240 B/op	     845 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/32MiB/8_attempts/legacy-4             	       1	1880124000 ns/op	 142.78 MB/s	1611276688 B/op	    2729 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/32MiB/8_attempts/legacy-4             	       1	1966972100 ns/op	 136.47 MB/s	1611279640 B/op	    2756 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/32MiB/8_attempts/legacy-4             	       1	2981382400 ns/op	  90.04 MB/s	1611277192 B/op	    2735 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/32MiB/8_attempts/sources_only-4       	       1	 649631400 ns/op	 413.22 MB/s	537120600 B/op	    1340 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/32MiB/8_attempts/sources_only-4       	       1	 660130400 ns/op	 406.65 MB/s	537121600 B/op	    1350 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/32MiB/8_attempts/sources_only-4       	       1	 540812900 ns/op	 496.36 MB/s	537122536 B/op	    1358 allocs/op
+BenchmarkOpenAIRequestTimezoneFieldScan/1MiB/legacy-4                        	     141	    923899 ns/op	1135.02 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIRequestTimezoneFieldScan/1MiB/legacy-4                        	      98	   1038263 ns/op	1010.00 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIRequestTimezoneFieldScan/1MiB/legacy-4                        	     100	   1109022 ns/op	 945.55 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIRequestTimezoneFieldScan/1MiB/combined-4                      	     147	    749339 ns/op	1399.42 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIRequestTimezoneFieldScan/1MiB/combined-4                      	     136	    877602 ns/op	1194.89 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIRequestTimezoneFieldScan/1MiB/combined-4                      	     152	    819824 ns/op	1279.10 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIRequestTimezoneFieldScan/8MiB/legacy-4                        	      14	   8956214 ns/op	 936.63 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIRequestTimezoneFieldScan/8MiB/legacy-4                        	      13	   8869415 ns/op	 945.80 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIRequestTimezoneFieldScan/8MiB/legacy-4                        	      13	   9654338 ns/op	 868.90 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIRequestTimezoneFieldScan/8MiB/combined-4                      	      14	   8892950 ns/op	 943.29 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIRequestTimezoneFieldScan/8MiB/combined-4                      	      14	   7449207 ns/op	1126.12 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIRequestTimezoneFieldScan/8MiB/combined-4                      	      15	   8846567 ns/op	 948.24 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIRequestTimezoneFieldScan/32MiB/legacy-4                       	       3	  36665767 ns/op	 915.15 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIRequestTimezoneFieldScan/32MiB/legacy-4                       	       3	  34044200 ns/op	 985.62 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIRequestTimezoneFieldScan/32MiB/legacy-4                       	       3	  36968200 ns/op	 907.66 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIRequestTimezoneFieldScan/32MiB/combined-4                     	       4	  30778150 ns/op	1090.21 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIRequestTimezoneFieldScan/32MiB/combined-4                     	       4	  25495700 ns/op	1316.08 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIRequestTimezoneFieldScan/32MiB/combined-4                     	       4	  27015650 ns/op	1242.04 MB/s	       0 B/op	       0 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/64KiB/1attempts/before-4               	    4492	     26965 ns/op	     400 B/op	       4 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/64KiB/1attempts/before-4               	    4010	     28279 ns/op	     400 B/op	       4 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/64KiB/1attempts/before-4               	    3656	     29022 ns/op	     400 B/op	       4 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/64KiB/1attempts/after-4                	 4035607	        34.34 ns/op	      64 B/op	       2 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/64KiB/1attempts/after-4                	 4049811	        29.49 ns/op	      64 B/op	       2 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/64KiB/1attempts/after-4                	 3599744	        33.01 ns/op	      64 B/op	       2 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/64KiB/5attempts/before-4               	     840	    136212 ns/op	    1936 B/op	      16 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/64KiB/5attempts/before-4               	     864	    136374 ns/op	    1936 B/op	      16 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/64KiB/5attempts/before-4               	     862	    139767 ns/op	    1936 B/op	      16 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/64KiB/5attempts/after-4                	 1000000	       100.7 ns/op	     256 B/op	       6 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/64KiB/5attempts/after-4                	 1000000	       141.2 ns/op	     256 B/op	       6 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/64KiB/5attempts/after-4                	 1066600	       113.3 ns/op	     256 B/op	       6 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/64KiB/15attempts/before-4              	     284	    436199 ns/op	    5776 B/op	      46 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/64KiB/15attempts/before-4              	     278	    422373 ns/op	    5776 B/op	      46 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/64KiB/15attempts/before-4              	     295	    414837 ns/op	    5776 B/op	      46 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/64KiB/15attempts/after-4               	  425410	       362.4 ns/op	     736 B/op	      16 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/64KiB/15attempts/after-4               	  474758	       330.5 ns/op	     736 B/op	      16 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/64KiB/15attempts/after-4               	  447427	       322.4 ns/op	     736 B/op	      16 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/1024KiB/1attempts/before-4             	     267	    455109 ns/op	     400 B/op	       4 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/1024KiB/1attempts/before-4             	     253	    448107 ns/op	     400 B/op	       4 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/1024KiB/1attempts/before-4             	     286	    432013 ns/op	     400 B/op	       4 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/1024KiB/1attempts/after-4              	 3907317	        36.85 ns/op	      64 B/op	       2 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/1024KiB/1attempts/after-4              	 3700825	        33.56 ns/op	      64 B/op	       2 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/1024KiB/1attempts/after-4              	 3772137	        34.57 ns/op	      64 B/op	       2 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/1024KiB/5attempts/before-4             	      54	   2269854 ns/op	    1936 B/op	      16 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/1024KiB/5attempts/before-4             	      54	   2120376 ns/op	    1936 B/op	      16 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/1024KiB/5attempts/before-4             	      46	   2420046 ns/op	    1936 B/op	      16 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/1024KiB/5attempts/after-4              	 1000000	       105.3 ns/op	     256 B/op	       6 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/1024KiB/5attempts/after-4              	 1000000	       116.7 ns/op	     256 B/op	       6 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/1024KiB/5attempts/after-4              	 1000000	       152.4 ns/op	     256 B/op	       6 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/1024KiB/15attempts/before-4            	      16	   7057081 ns/op	    5776 B/op	      46 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/1024KiB/15attempts/before-4            	      13	   9098469 ns/op	    5776 B/op	      46 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/1024KiB/15attempts/before-4            	      19	   6742737 ns/op	    5776 B/op	      46 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/1024KiB/15attempts/after-4             	  467817	       314.1 ns/op	     736 B/op	      16 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/1024KiB/15attempts/after-4             	  379698	       322.9 ns/op	     736 B/op	      16 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/1024KiB/15attempts/after-4             	  447594	       300.0 ns/op	     736 B/op	      16 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/8192KiB/1attempts/before-4             	      30	   3808800 ns/op	     400 B/op	       4 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/8192KiB/1attempts/before-4             	      32	   3592975 ns/op	     400 B/op	       4 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/8192KiB/1attempts/before-4             	      33	   3539588 ns/op	     400 B/op	       4 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/8192KiB/1attempts/after-4              	 3996921	        40.75 ns/op	      64 B/op	       2 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/8192KiB/1attempts/after-4              	 3197450	        34.22 ns/op	      64 B/op	       2 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/8192KiB/1attempts/after-4              	 4057137	        34.16 ns/op	      64 B/op	       2 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/8192KiB/5attempts/before-4             	       6	  17615817 ns/op	    1936 B/op	      16 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/8192KiB/5attempts/before-4             	       6	  17077017 ns/op	    1936 B/op	      16 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/8192KiB/5attempts/before-4             	       6	  17427933 ns/op	    1936 B/op	      16 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/8192KiB/5attempts/after-4              	 1000000	       116.0 ns/op	     256 B/op	       6 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/8192KiB/5attempts/after-4              	 1000000	       103.9 ns/op	     256 B/op	       6 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/8192KiB/5attempts/after-4              	 1222472	        98.18 ns/op	     256 B/op	       6 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/8192KiB/15attempts/before-4            	       2	  53209950 ns/op	    5776 B/op	      46 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/8192KiB/15attempts/before-4            	       2	  52148250 ns/op	    5776 B/op	      46 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/8192KiB/15attempts/before-4            	       2	  50639350 ns/op	    5776 B/op	      46 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/8192KiB/15attempts/after-4             	  443572	       285.8 ns/op	     736 B/op	      16 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/8192KiB/15attempts/after-4             	  367443	       319.1 ns/op	     736 B/op	      16 allocs/op
+BenchmarkOpenAIResponsesRetryLazyHash/8192KiB/15attempts/after-4             	  467726	       332.8 ns/op	     736 B/op	      16 allocs/op
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/service	78.842s

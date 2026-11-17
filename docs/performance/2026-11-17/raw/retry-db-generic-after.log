@@ -1,0 +1,36 @@
+SET
+BEGIN
+SET
+PREPARE
+                                                                                                                                              QUERY PLAN                                                                                                                                              
+------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------
+ Limit  (cost=57.05..3564.34 rows=62 width=135) (actual rows=2.00 loops=1)
+   Buffers: shared hit=10 read=4
+   ->  Incremental Sort  (cost=57.05..35299.73 rows=623 width=135) (actual rows=2.00 loops=1)
+         Sort Key: a.updated_at, a.kind COLLATE "C", a.activity_key COLLATE "C"
+         Presorted Key: a.updated_at
+         Full-sort Groups: 1  Sort Method: quicksort  Average Memory: 25kB  Peak Memory: 25kB
+         Buffers: shared hit=10 read=4
+         ->  Nested Loop Anti Join  (cost=0.42..35271.69 rows=623 width=135) (actual rows=3.00 loops=1)
+               Join Filter: ((protected.kind = a.kind) AND (protected.activity_key = a.activity_key))
+               Buffers: shared hit=1 read=4
+               ->  Index Scan using codex_telemetry_activities_runtime_age_idx on codex_telemetry_activities a  (cost=0.41..35115.94 rows=623 width=71) (actual rows=3.00 loops=1)
+                     Index Cond: (pool_id = $1)
+                     Filter: ((kind = 'sampling'::text) OR ((kind = 'turn'::text) AND (((state -> 'sealed'::text) = 'true'::jsonb) OR ((state -> 'incomplete'::text) = 'true'::jsonb))) OR ((kind = 'attempt'::text) AND (((state -> 'finished'::text) = 'true'::jsonb) OR (NOT EXISTS(SubPlan 1)))))
+                     Index Searches: 1
+                     Buffers: shared hit=1 read=4
+                     SubPlan 1
+                       ->  Result  (cost=0.55..8.58 rows=1 width=4) (never executed)
+                             One-Time Filter: ($1 = a.pool_id)
+                             ->  Index Scan using codex_telemetry_activities_pkey on codex_telemetry_activities parent  (cost=0.55..8.58 rows=1 width=0) (never executed)
+                                   Index Cond: ((pool_id = a.pool_id) AND (kind = 'turn'::text) AND (activity_key = COALESCE((a.state ->> 'turn_key'::text), ''::text)))
+                                   Filter: ((COALESCE((state -> 'sealed'::text), 'false'::jsonb) <> 'true'::jsonb) AND (COALESCE((state -> 'incomplete'::text), 'false'::jsonb) <> 'true'::jsonb))
+                                   Index Searches: 0
+               ->  Function Scan on protected  (cost=0.01..0.11 rows=10 width=64) (actual rows=0.00 loops=3)
+ Planning:
+   Buffers: shared hit=247
+ Planning Time: 3.986 ms
+ Execution Time: 0.841 ms
+(27 rows)
+
+ROLLBACK
