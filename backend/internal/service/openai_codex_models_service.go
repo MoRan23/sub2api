@@ -552,6 +552,13 @@ func newConfiguredCodexModelDescriptor(modelID string) configuredCodexModelDescr
 		// Keep the October 12, 2026 Codex/Work 500k default even though the
 		// bundled official snapshot remains 272k. Explicit upstream metadata wins.
 		descriptor.ContextWindow = 500_000
+		// The two 6.2 descriptors now occupy the first two slots.
+		descriptor.Priority = 3
+	}
+	if base := openai.GPT62ModelID(modelID); base != "" {
+		// The full user catalog takes the raw descriptor before reaching synthesis.
+		// Retain extensions here without undoing the synthetic route safeguards.
+		descriptor.officialMetadata = bundledCodexModelDefault(base)
 	}
 	return descriptor
 }
@@ -2291,6 +2298,8 @@ func CodexModelsManifestETag(body []byte) string {
 }
 
 var apiKeyCodexModelsWithoutResponsesLite = map[string]struct{}{
+	"gpt-6.2-sol":   {},
+	"gpt-6.2-astra": {},
 	"gpt-6.1-terra": {},
 	"gpt-6.1-sol":   {},
 	"gpt-6-astra":   {},

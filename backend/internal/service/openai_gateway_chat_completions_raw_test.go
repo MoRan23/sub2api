@@ -1280,3 +1280,177 @@ func TestForwardAsRawChatCompletions_RestoresMappedResponseModel(t *testing.T) {
 		}
 	}
 }
+
+// flushCountingRecorder 记录 Flush 次数，并在每次 Flush 时回调当时已写出的内容。
+type flushCountingRecorder struct {
+	*httptest.ResponseRecorder
+	flushes int
+	onFlush func(written string)
+}
+
+func (w *flushCountingRecorder) Flush() {
+	w.flushes++
+	w.ResponseRecorder.Flush()
+	if w.onFlush != nil {
+		w.onFlush(w.Body.String())
+	}
+}
+
+func rawStreamFlushTestEvent(content string) string {
+	return `data: {"id":"chatcmpl_f","object":"chat.completion.chunk","model":"gpt-5.4","choices":[{"index":0,"delta":{"content":"` + content + `"}}]}` + "\n\n"
+}
+
+// 一次读取里到达的多行合并成一次 flush，写给客户端的内容不变。
+func TestStreamRawChatCompletions_CoalescesFlushesWithinOneUpstreamRead(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	w := &flushCountingRecorder{ResponseRecorder: httptest.NewRecorder()}
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+
+	upstreamBody := rawStreamFlushTestEvent("a") + rawStreamFlushTestEvent("b") + rawStreamFlushTestEvent("c") +
+		`data: {"id":"chatcmpl_f","object":"chat.completion.chunk","model":"gpt-5.4","choices":[],"usage":{"prompt_tokens":3,"completion_tokens":3,"total_tokens":6}}` + "\n\n" +
+		"data: [DONE]\n\n"
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       io.NopCloser(strings.NewReader(upstreamBody)),
+	}}
+	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+
+	result, err := svc.forwardAsRawChatCompletions(context.Background(), c, rawChatCompletionsTestAccount(), body, "")
+	require.NoError(t, err)
+	require.Equal(t, 3, result.Usage.OutputTokens)
+	require.Equal(t, upstreamBody, w.Body.String())
+	// 之前每行（含事件间空行）flush 一次，这里是 10 次。
+	require.Equal(t, 1, w.flushes)
+}
+
+// 合并不能推迟已到达的数据：开始等待上游下一批数据之前，已到达的事件必须已经 flush 给客户端。
+func TestStreamRawChatCompletions_FlushesBeforeWaitingForUpstream(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	body := []byte(`{"model":"gpt-5.4","messages":[{"role":"user","content":"hello"}],"stream":true}`)
+	firstEventFlushed := make(chan struct{})
+	w := &flushCountingRecorder{ResponseRecorder: httptest.NewRecorder()}
+	w.onFlush = func(written string) {
+		if strings.Contains(written, `"content":"first"`) {
+			select {
+			case <-firstEventFlushed:
+			default:
+				close(firstEventFlushed)
+			}
+		}
+	}
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", bytes.NewReader(body))
+
+	pr, pw := io.Pipe()
+	writerErr := make(chan error, 1)
+	go func() {
+		defer func() { _ = pw.Close() }()
+		if _, err := io.WriteString(pw, rawStreamFlushTestEvent("first")); err != nil {
+			writerErr <- err
+			return
+		}
+		// 上游在客户端收到第一个事件之前不再发送任何数据。
+		select {
+		case <-firstEventFlushed:
+		case <-time.After(5 * time.Second):
+			writerErr <- errors.New("first event was not flushed before waiting for more upstream data")
+			return
+		}
+		_, err := io.WriteString(pw, rawStreamFlushTestEvent("second")+"data: [DONE]\n\n")
+		writerErr <- err
+	}()
+
+	upstream := &httpUpstreamRecorder{resp: &http.Response{
+		StatusCode: http.StatusOK,
+		Header:     http.Header{"Content-Type": []string{"text/event-stream"}},
+		Body:       pr,
+	}}
+	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig(), httpUpstream: upstream}
+
+	_, err := svc.forwardAsRawChatCompletions(context.Background(), c, rawChatCompletionsTestAccount(), body, "")
+	require.NoError(t, err)
+	require.NoError(t, <-writerErr)
+	require.Contains(t, w.Body.String(), `"content":"second"`)
+	require.Contains(t, w.Body.String(), "data: [DONE]")
+}
+
+// The raw parser owns safety observation, so a complete rejection must flush
+// without a further upstream read even when no semantic output preceded it.
+func TestStreamRawChatCompletions_GrokRejectionFlushesWithoutAnotherRead(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const rejection = "event: error\ndata: {\"error\":{\"code\":\"safety_review_rejected\"},\n" +
+		"data: \"usage\":{\"input_tokens\":7,\"output_tokens\":2}}\n\n"
+	for _, split := range []bool{false, true} {
+		t.Run(fmt.Sprint("split_", split), func(t *testing.T) {
+			chunks := []string{rejection + "data: [DONE]\n\n"}
+			if split {
+				chunks = []string{rejection[:17], rejection[17 : len(rejection)-1], rejection[len(rejection)-1:]}
+			}
+			body := &rawChatRejectionReadProbe{chunks: chunks}
+			ctx := WithGrokSafetyFee(context.Background(), .2)
+			StartGrokSafetyAttempt(ctx, http.StatusOK, nil)
+			w := &flushCountingRecorder{ResponseRecorder: httptest.NewRecorder()}
+			c, _ := gin.CreateTestContext(w)
+			c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(ctx)
+			resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: body}
+			svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}
+			account := &Account{ID: 1, Platform: PlatformGrok, Type: AccountTypeAPIKey}
+
+			result, err := svc.streamRawChatCompletions(c, resp, account, "grok-4.7", "grok-4.7", "grok-4.7", nil, nil, time.Now(), 0)
+			require.ErrorIs(t, err, ErrGrokSafetyRejected)
+			require.Equal(t, len(chunks), body.reads, "a terminal rejection must not wait for another upstream read")
+			require.Equal(t, rejection, w.Body.String())
+			require.Equal(t, len(chunks), w.flushes, "flush each available upstream batch, including the terminal one")
+			result, err = FinalizeGrokSafetyRejection(ctx, result, err)
+			require.ErrorIs(t, err, ErrGrokSafetyRejected)
+			require.Equal(t, 7, result.Usage.InputTokens)
+			require.Equal(t, 2, result.Usage.OutputTokens)
+			require.Equal(t, .2, result.GrokSafetyRejection.Fee)
+		})
+	}
+}
+
+func TestStreamRawChatCompletions_GrokRejectionAtEOFFlushesPendingLines(t *testing.T) {
+	gin.SetMode(gin.TestMode)
+	const rejection = `data: {"error":{"code":"safety_review_rejected"},"usage":{"prompt_tokens":4,"completion_tokens":1}}`
+	ctx := WithGrokSafetyFee(context.Background(), .1)
+	StartGrokSafetyAttempt(ctx, http.StatusOK, nil)
+	w := &flushCountingRecorder{ResponseRecorder: httptest.NewRecorder()}
+	c, _ := gin.CreateTestContext(w)
+	c.Request = httptest.NewRequest(http.MethodPost, "/v1/chat/completions", nil).WithContext(ctx)
+	resp := &http.Response{StatusCode: http.StatusOK, Header: http.Header{}, Body: io.NopCloser(strings.NewReader(rejection))}
+	svc := &OpenAIGatewayService{cfg: rawChatCompletionsTestConfig()}
+	account := &Account{ID: 1, Platform: PlatformGrok, Type: AccountTypeAPIKey}
+
+	result, err := svc.streamRawChatCompletions(c, resp, account, "grok-4.7", "grok-4.7", "grok-4.7", nil, nil, time.Now(), 0)
+	require.ErrorIs(t, err, ErrGrokSafetyRejected)
+	require.Equal(t, rejection+"\n", w.Body.String())
+	require.Equal(t, 1, w.flushes)
+	result, err = FinalizeGrokSafetyRejection(ctx, result, err)
+	require.ErrorIs(t, err, ErrGrokSafetyRejected)
+	require.Equal(t, 4, result.Usage.InputTokens)
+	require.Equal(t, 1, result.Usage.OutputTokens)
+}
+
+type rawChatRejectionReadProbe struct {
+	chunks []string
+	reads  int
+}
+
+func (r *rawChatRejectionReadProbe) Read(p []byte) (int, error) {
+	r.reads++
+	if len(r.chunks) == 0 {
+		return 0, errors.New("read past complete rejection")
+	}
+	n := copy(p, r.chunks[0])
+	r.chunks[0] = r.chunks[0][n:]
+	if r.chunks[0] == "" {
+		r.chunks = r.chunks[1:]
+	}
+	return n, nil
+}
+
+func (r *rawChatRejectionReadProbe) Close() error { return nil }

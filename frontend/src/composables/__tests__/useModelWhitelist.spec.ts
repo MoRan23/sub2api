@@ -46,21 +46,25 @@ describe('useModelWhitelist', () => {
     expect(models).toContain('gpt-5.6')
     expect(models).toContain('gpt-6')
     expect(models).toContain('gpt-6-astra')
+    expect(models).toContain('gpt-6.2-sol')
+    expect(models).toContain('gpt-6.2-astra')
     expect(models).toContain('gpt-6.1-sol')
     expect(models).toContain('gpt-6.1-terra')
     expect(models).toContain('gpt-6-sol')
     expect(models).toContain('gpt-6-luna')
     expect(models.filter(model => model.startsWith('gpt-6'))).toEqual([
-      'gpt-6', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-sol', 'gpt-6-luna'
+      'gpt-6', 'gpt-6-astra', 'gpt-6.2-sol', 'gpt-6.2-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-sol', 'gpt-6-luna'
     ])
     expect(models).toContain('gpt-image-2.6-flare')
     expect(models).toContain('gpt-image-2.6-sunburst')
   })
 
-  it('openai 预设映射包含 GPT-6 别名及 GPT-6.1 Sol / Terra', () => {
+  it('openai 预设映射包含 GPT-6 别名及 GPT-6.1 / GPT-6.2 模型', () => {
     expect(getPresetMappingsByPlatform('openai')).toEqual(expect.arrayContaining([
       expect.objectContaining({ label: 'GPT-6', from: 'gpt-6', to: 'gpt-6' }),
       expect.objectContaining({ label: 'GPT-6 Astra', from: 'gpt-6-astra', to: 'gpt-6-astra' }),
+      expect.objectContaining({ label: 'GPT-6.2 Sol', from: 'gpt-6.2-sol', to: 'gpt-6.2-sol' }),
+      expect.objectContaining({ label: 'GPT-6.2 Astra', from: 'gpt-6.2-astra', to: 'gpt-6.2-astra' }),
       expect.objectContaining({ label: 'GPT-6.1 Sol', from: 'gpt-6.1-sol', to: 'gpt-6.1-sol' }),
       expect.objectContaining({ label: 'GPT-6.1 Terra', from: 'gpt-6.1-terra', to: 'gpt-6.1-terra' }),
       expect.objectContaining({ label: 'GPT-6 Sol', from: 'gpt-6-sol', to: 'gpt-6-sol' }),
@@ -68,7 +72,7 @@ describe('useModelWhitelist', () => {
     ]))
     const presetModels = getPresetMappingsByPlatform('openai').map(({ from }) => from)
     expect(presetModels.filter(model => model.startsWith('gpt-6'))).toEqual([
-      'gpt-6', 'gpt-6-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-sol', 'gpt-6-luna'
+      'gpt-6', 'gpt-6-astra', 'gpt-6.2-sol', 'gpt-6.2-astra', 'gpt-6.1-sol', 'gpt-6.1-terra', 'gpt-6-sol', 'gpt-6-luna'
     ])
     expect(new Set(presetModels).size).toBe(presetModels.length)
     expect(presetModels).not.toContain('gpt-5.4')

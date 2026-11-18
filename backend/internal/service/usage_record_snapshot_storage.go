@@ -45,7 +45,7 @@ func (b *usageSnapshotBuilder) init(storage *usageSnapshotStorage, stringBytes i
 	if group != nil && frozenUsageBillingGroup(group) == nil {
 		for _, p := range group.ModelPricing {
 			floatCount += usageSnapshotFloatPointerCount(p.InputPrice, p.OutputPrice, p.CacheWritePrice, p.CacheWrite1hPrice, p.CacheWrite12hPrice,
-				p.CacheReadPrice, p.FastMultiplier, p.FlexMultiplier, p.ImageInputPrice, p.ImageOutputPrice, p.PerRequestPrice)
+				p.CacheReadPrice, p.FastMultiplier, p.FlexMultiplier, p.UltrafastMultiplier, p.ImageInputPrice, p.ImageOutputPrice, p.PerRequestPrice)
 			for _, v := range p.Intervals {
 				floatCount += usageSnapshotFloatPointerCount(v.InputPrice, v.OutputPrice, v.CacheWritePrice, v.CacheWrite1hPrice, v.CacheWrite12hPrice,
 					v.CacheReadPrice, v.InputMultiplier, v.OutputMultiplier, v.CacheWriteMultiplier, v.CacheReadMultiplier, v.PerRequestPrice)

@@ -24,6 +24,7 @@ func loadBundledCodexModelDefaults() map[string]json.RawMessage {
 	if err := json.Unmarshal(bundledCodexModelDefaultsJSON, &catalog); err != nil {
 		panic("invalid bundled Codex model defaults")
 	}
+	catalog.Models = append(catalog.Models, openai.CodexGPT62SolMetadata, openai.CodexGPT62AstraMetadata)
 	models := make(map[string]json.RawMessage, len(catalog.Models))
 	for _, raw := range catalog.Models {
 		var model struct {
@@ -46,6 +47,9 @@ func bundledCodexModelDefault(modelID string) json.RawMessage {
 	// existing conservative fallback instead of inheriting unrelated metadata.
 	if raw := bundledCodexModelDefaults[getNormalizedCodexModel(canonical)]; raw != nil {
 		return raw
+	}
+	if base := openai.GPT62ModelID(canonical); base != "" {
+		return bundledCodexModelDefaults[base]
 	}
 	switch {
 	case openai.IsKnownCodexModelVariant(canonical, "gpt-6"):

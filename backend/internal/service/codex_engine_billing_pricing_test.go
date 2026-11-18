@@ -67,6 +67,43 @@ func TestCodexEngineCurrentPricingCaptureExcludesPricesAndSecrets(t *testing.T) 
 	require.Equal(t, 4, f.Version)
 }
 
+func TestCodexEngineCurrentPricingGPT62UltrafastUsesRequestInstant(t *testing.T) {
+	ctx := context.Background()
+	boundary := time.Date(2027, time.March, 1, 8, 0, 0, 0, time.UTC)
+	for _, model := range []string{"gpt-6.2-sol", "gpt-6.2-astra"} {
+		for _, before := range []bool{false, true} {
+			t.Run(fmt.Sprintf("%s/before_%t", model, before), func(t *testing.T) {
+				cfg := &config.Config{}
+				cfg.Default.RateMultiplier = 1
+				billing := &BillingService{fallbackPrices: make(map[string]*ModelPricing)}
+				billing.initFallbackPricing()
+				svc := &OpenAIGatewayService{cfg: cfg, billingService: billing}
+				at, multiplier := boundary, 6.0
+				if before {
+					at, multiplier = boundary.Add(-time.Nanosecond), 3
+				}
+				tier := "ultrafast"
+				input := &OpenAIRecordUsageInput{
+					Account: engineReceiptTestAccount(), User: &User{ID: 1}, APIKey: &APIKey{ID: 2}, PricingAt: at,
+					Result: &OpenAIForwardResult{Model: model, UpstreamModel: model, ServiceTier: &tier},
+				}
+				raw, err := svc.CaptureCodexEngineBillingSnapshot(ctx, input)
+				require.NoError(t, err)
+				event := engineFrozenTestModelEvent()
+				event.Model, event.ServiceTier = model, tier
+				event.OccurredAt = boundary.Add(time.Hour)
+				job := &CodexEngineBillingJob{CodexEngineBillingPending: CodexEngineBillingPending{UserID: 1, APIKeyID: 2, AccountID: input.Account.ID, Snapshot: raw}}
+				_, log, err := svc.BuildCodexEngineBillingEvent(ctx, job, event)
+				require.NoError(t, err)
+				standard, err := billing.CalculateCostUnified(CostInput{Model: model, Tokens: event.Usage.billingUsageTokens(), RateMultiplier: 1, PricingAt: at})
+				require.NoError(t, err)
+				require.InDelta(t, standard.TotalCost*multiplier, log.TotalCost, 1e-12)
+				require.InDelta(t, log.TotalCost, log.ActualCost, 1e-12)
+			})
+		}
+	}
+}
+
 func TestCodexEngineFrozenPricingActualModelsTiersAndSearchAreSeparate(t *testing.T) {
 	job, _ := engineFrozenTestSnapshot(t)
 	svc := &OpenAIGatewayService{}
@@ -202,7 +239,10 @@ func TestCodexEngineFrozenPricingUngroupedLongContextMatchesOrdinaryPolicy(t *te
 			event.Model, event.Usage.InputTokens = "gpt-5.4", 300000
 			_, got, err := svc.BuildCodexEngineBillingEvent(context.Background(), &CodexEngineBillingJob{CodexEngineBillingPending: CodexEngineBillingPending{Snapshot: raw}}, event)
 			require.NoError(t, err)
-			want, err := svc.billingService.calculateCostWithServiceTierPolicy("gpt-5.4", UsageTokens{InputTokens: 299980, OutputTokens: 10, CacheReadTokens: 20}, 1, "default", enabled)
+			want, err := svc.billingService.CalculateCostUnified(CostInput{
+				Model: "gpt-5.4", Tokens: UsageTokens{InputTokens: 299980, OutputTokens: 10, CacheReadTokens: 20},
+				RateMultiplier: 1, ServiceTier: "default", LongContextBillingEnabled: &enabled,
+			})
 			require.NoError(t, err)
 			require.Equal(t, enabled, got.LongContextBillingApplied)
 			require.InDelta(t, want.TotalCost, got.TotalCost, 1e-12)

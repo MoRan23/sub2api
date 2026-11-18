@@ -79,7 +79,11 @@ func TestOpenAIGroupCatalogDaybreakBlueFastIncludesMappedPublicModel(t *testing.
 				require.Equal(t, map[string]any{"enabled": true}, model["unknown"])
 			}
 			if model["slug"] == "gpt-5.6-sol" {
-				require.Equal(t, "gpt-5.6-sol", model["display_name"])
+				expectedName := "gpt-5.6-sol"
+				if catalogs[1] == empty {
+					expectedName = "GPT-5.6-Sol"
+				}
+				require.Equal(t, expectedName, model["display_name"])
 			}
 		}
 		require.Equal(t, original, string(official.Body), "capability source must stay immutable")
@@ -164,7 +168,13 @@ func TestOpenAIGroupCatalogMappedNativeStandardMetadata(t *testing.T) {
 		if codex {
 			instructions := "Sol instructions"
 			if tc.catalog != official {
-				instructions = newConfiguredCodexModelDescriptor("gpt-5.6-sol").ModelMessages.InstructionsTemplate
+				var descriptor struct {
+					Messages struct {
+						Instructions string `json:"instructions_template"`
+					} `json:"model_messages"`
+				}
+				require.NoError(t, json.Unmarshal(bundledOfficialCodexDescriptors["gpt-5.6-sol"], &descriptor))
+				instructions = descriptor.Messages.Instructions
 			}
 			require.Equal(t, instructions, models[0]["model_messages"].(map[string]any)["instructions_template"])
 		}

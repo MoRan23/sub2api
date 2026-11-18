@@ -221,6 +221,7 @@ func (b *usageSnapshotBuilder) modelPricing(p ChannelModelPricing) ChannelModelP
 	p.CacheWritePrice, p.CacheWrite1hPrice, p.CacheReadPrice = b.float(p.CacheWritePrice), b.float(p.CacheWrite1hPrice), b.float(p.CacheReadPrice)
 	p.CacheWrite12hPrice = b.float(p.CacheWrite12hPrice)
 	p.FastMultiplier, p.FlexMultiplier = b.float(p.FastMultiplier), b.float(p.FlexMultiplier)
+	p.UltrafastMultiplier = b.float(p.UltrafastMultiplier)
 	p.ImageInputPrice, p.ImageOutputPrice, p.PerRequestPrice = b.float(p.ImageInputPrice), b.float(p.ImageOutputPrice), b.float(p.PerRequestPrice)
 	p.ReasoningEffortMultipliers = b.floatMap(p.ReasoningEffortMultipliers)
 	if p.Intervals != nil {

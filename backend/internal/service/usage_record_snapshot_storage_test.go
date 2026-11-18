@@ -64,7 +64,7 @@ func TestUsageRecordSnapshotLargePricingBackingOwnsAllValues(t *testing.T) {
 	price := ChannelModelPricing{
 		Models: []string{"gpt-4o"}, InputPrice: &value, OutputPrice: &value,
 		CacheWritePrice: &value, CacheWrite1hPrice: &value, CacheWrite12hPrice: &value, CacheReadPrice: &value,
-		FastMultiplier: &value, FlexMultiplier: &value, ImageInputPrice: &value, ImageOutputPrice: &value, PerRequestPrice: &value,
+		FastMultiplier: &value, FlexMultiplier: &value, UltrafastMultiplier: &value, ImageInputPrice: &value, ImageOutputPrice: &value, PerRequestPrice: &value,
 		Intervals: []PricingInterval{{MaxTokens: &maxTokens, TierLabel: "one",
 			InputPrice: &value, OutputPrice: &value, CacheWritePrice: &value, CacheWrite1hPrice: &value, CacheWrite12hPrice: &value, CacheReadPrice: &value,
 			InputMultiplier: &value, OutputMultiplier: &value, CacheWriteMultiplier: &value, CacheReadMultiplier: &value, PerRequestPrice: &value}},
@@ -101,7 +101,7 @@ func TestUsageRecordSnapshotLargePricingBackingOwnsAllValues(t *testing.T) {
 	require.Equal(t, "tts", got.Result.AudioUsage.Mode)
 	for _, p := range got.APIKey.Group.ModelPricing {
 		for _, pointer := range []*float64{p.InputPrice, p.OutputPrice, p.CacheWritePrice, p.CacheWrite1hPrice, p.CacheWrite12hPrice, p.CacheReadPrice,
-			p.FastMultiplier, p.FlexMultiplier, p.ImageInputPrice, p.ImageOutputPrice, p.PerRequestPrice} {
+			p.FastMultiplier, p.FlexMultiplier, p.UltrafastMultiplier, p.ImageInputPrice, p.ImageOutputPrice, p.PerRequestPrice} {
 			require.Equal(t, 1.25, *pointer)
 		}
 		for _, interval := range p.Intervals {
@@ -112,5 +112,25 @@ func TestUsageRecordSnapshotLargePricingBackingOwnsAllValues(t *testing.T) {
 			}
 		}
 		require.Equal(t, "00:00", p.TimePricing.Periods[0].StartTime)
+	}
+}
+
+func TestUsageRecordSnapshotUltrafastPricesUseReservedScalarStorage(t *testing.T) {
+	var storage usageSnapshotStorage
+	var builder usageSnapshotBuilder
+	group := &Group{ModelPricing: make([]ChannelModelPricing, 40)}
+	for i := range group.ModelPricing {
+		group.ModelPricing[i].UltrafastMultiplier = usageSnapshotTestValue(float64(i + 1))
+	}
+	owned := make([]ChannelModelPricing, len(group.ModelPricing))
+	builder.init(&storage, 0, group)
+	for i, price := range group.ModelPricing {
+		owned[i] = builder.modelPricing(price)
+	}
+	require.LessOrEqual(t, builder.floatIndex, len(builder.floats), "all configured multipliers must fit without per-price fallback allocations")
+	for i, price := range owned {
+		require.Same(t, &builder.floats[i], price.UltrafastMultiplier)
+		*group.ModelPricing[i].UltrafastMultiplier = 999
+		require.Equal(t, float64(i+1), *price.UltrafastMultiplier)
 	}
 }

@@ -3,6 +3,8 @@ package service
 import (
 	_ "embed"
 	"encoding/json"
+
+	"github.com/Wei-Shaw/sub2api/internal/pkg/openai"
 )
 
 // Complete offline fallback for the public catalog, from openai/codex commit
@@ -12,7 +14,43 @@ import (
 // evidence, and must never be observed by the OAuth capability cache.
 //
 //go:embed openai_codex_official_catalog.json
-var bundledOfficialCodexCatalogJSON []byte
+var bundledOfficialCodexCatalogBaseJSON []byte
+
+// Merge newly published full descriptors once, retaining the raw JSON fields.
+// The immutable index also covers a model missing from a successful older public
+// snapshot. Neither these bytes nor their tiers are account capability evidence.
+var bundledOfficialCodexCatalogJSON, bundledOfficialCodexDescriptors = loadBundledOfficialCodexCatalog()
+
+func loadBundledOfficialCodexCatalog() ([]byte, map[string]json.RawMessage) {
+	var catalog map[string]json.RawMessage
+	if err := json.Unmarshal(bundledOfficialCodexCatalogBaseJSON, &catalog); err != nil {
+		panic("invalid bundled official Codex catalog")
+	}
+	var models []json.RawMessage
+	if err := json.Unmarshal(catalog["models"], &models); err != nil {
+		panic("invalid bundled official Codex models")
+	}
+	models = append(models, openai.CodexGPT62SolMetadata, openai.CodexGPT62AstraMetadata)
+	index := make(map[string]json.RawMessage, len(models))
+	for _, raw := range models {
+		var model struct {
+			Slug string `json:"slug"`
+		}
+		if err := json.Unmarshal(raw, &model); err != nil || model.Slug == "" || index[model.Slug] != nil {
+			panic("invalid or duplicate bundled official Codex model")
+		}
+		index[model.Slug] = raw
+	}
+	var err error
+	if catalog["models"], err = json.Marshal(models); err != nil {
+		panic(err)
+	}
+	body, err := json.Marshal(catalog)
+	if err != nil {
+		panic(err)
+	}
+	return body, index
+}
 
 // The administrator-supplied descriptors deliberately take precedence over
 // automatic catalogs. Keep these resources complete; do not infer account

@@ -89,6 +89,7 @@ func cloneUsageBillingModelPricing(price ChannelModelPricing) ChannelModelPricin
 	price.CacheWritePrice, price.CacheWrite1hPrice, price.CacheReadPrice = cloneUsageBillingScalar(price.CacheWritePrice), cloneUsageBillingScalar(price.CacheWrite1hPrice), cloneUsageBillingScalar(price.CacheReadPrice)
 	price.CacheWrite12hPrice = cloneUsageBillingScalar(price.CacheWrite12hPrice)
 	price.FastMultiplier, price.FlexMultiplier = cloneUsageBillingScalar(price.FastMultiplier), cloneUsageBillingScalar(price.FlexMultiplier)
+	price.UltrafastMultiplier = cloneUsageBillingScalar(price.UltrafastMultiplier)
 	price.ImageInputPrice, price.ImageOutputPrice, price.PerRequestPrice = cloneUsageBillingScalar(price.ImageInputPrice), cloneUsageBillingScalar(price.ImageOutputPrice), cloneUsageBillingScalar(price.PerRequestPrice)
 	price.ReasoningEffortMultipliers = cloneUsageBillingFloatMap(price.ReasoningEffortMultipliers)
 	if price.Intervals != nil {

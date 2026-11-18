@@ -443,6 +443,14 @@ func selectOpenAIGroupCodexDescriptor(publicID, targetID string, fixed, official
 			return raw, id
 		}
 	}
+	for i, id := range ids {
+		if i != 0 && id == publicID {
+			continue
+		}
+		if raw := lookupOfficialCodexCatalogModel(bundledOfficialCodexDescriptors, id); raw != nil {
+			return raw, id
+		}
+	}
 	return nil, targetID
 }
 

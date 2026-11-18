@@ -321,12 +321,19 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	}
 	requestID := resp.Header.Get("x-request-id")
 	writeStreamHeaders := s.newStreamHeaderWriter(c, resp.Header)
-	scanner := s.newUpstreamSSEScanner(resp.Body)
 
 	var usage OpenAIUsage
 	var firstTokenMs *int
 	clientDisconnected := false
 	clientOutputStarted := false
+	flushPending := false
+	flushToClient := func() {
+		if flushPending && !clientDisconnected && clientOutputStarted {
+			c.Writer.Flush()
+		}
+		flushPending = false
+	}
+	scanner := s.newUpstreamSSEScanner(&flushBeforeUpstreamRead{r: resp.Body, flush: flushToClient})
 	pendingLines := make([]string, 0, 8)
 	refusalDetector := newOpenAIChatSilentRefusalDetector(requestBodyLen)
 	var terminal openAIRawStreamTerminalState
@@ -392,17 +399,11 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 
 		line = s.replaceModelInSSELine(line, upstreamModel, originalModel)
 		writeLine(line)
-		if line == "" {
-			if !clientDisconnected && clientOutputStarted {
-				c.Writer.Flush()
-			}
-			if GrokSafetyRejected(c.Request.Context()) {
-				break
-			}
-			continue
-		}
-		if !clientDisconnected && clientOutputStarted {
-			c.Writer.Flush()
+		// Flush the available batch before the next upstream read, or immediately
+		// after a terminal rejection without waiting for the upstream to close.
+		flushPending = true
+		if line == "" && GrokSafetyRejected(c.Request.Context()) {
+			break
 		}
 	}
 	if account != nil && account.IsGrok() {
@@ -412,13 +413,16 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	}
 	if GrokSafetyRejected(c.Request.Context()) && !clientOutputStarted && !clientDisconnected {
 		writeStreamHeaders()
+		clientOutputStarted = true
 		for _, pending := range pendingLines {
 			if _, err := c.Writer.WriteString(pending + "\n"); err != nil {
+				clientDisconnected = true
 				break
 			}
 		}
-		c.Writer.Flush()
+		flushPending = true
 	}
+	flushToClient()
 
 	resultWithUsage := func() *OpenAIForwardResult {
 		return &OpenAIForwardResult{

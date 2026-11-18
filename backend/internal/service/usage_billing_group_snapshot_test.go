@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/stretchr/testify/require"
@@ -30,7 +31,7 @@ func usageBillingSnapshotTestGroup() *Group {
 			ID: 31, ChannelID: 32, Platform: PlatformOpenAI, BillingMode: BillingModeToken,
 			Models: []string{"gpt-4o", "gpt-4o-*"}, InputPrice: p(11), OutputPrice: p(12),
 			CacheWritePrice: p(13), CacheWrite1hPrice: p(14), CacheWrite12hPrice: p(31), CacheReadPrice: p(15),
-			FastMultiplier: p(16), FlexMultiplier: p(17), ImageInputPrice: p(18), ImageOutputPrice: p(19), PerRequestPrice: p(20),
+			FastMultiplier: p(16), FlexMultiplier: p(17), UltrafastMultiplier: p(33), ImageInputPrice: p(18), ImageOutputPrice: p(19), PerRequestPrice: p(20),
 			ReasoningEffortMultipliers: map[string]float64{"high": 1.7},
 			Intervals: []PricingInterval{{
 				ID: 41, PricingID: 31, MinTokens: 1000, MaxTokens: usageSnapshotTestValue(10000), TierLabel: "large", SortOrder: 2,
@@ -72,7 +73,7 @@ func usageBillingSnapshotTestMutateNested(pricing []ChannelModelPricing, videos 
 	p.ReasoningEffortMultipliers["high"] = 999
 	p.ReasoningEffortMultipliers["low"] = 999
 	usageBillingSnapshotTestMutatePointers(p.InputPrice, p.OutputPrice, p.CacheWritePrice, p.CacheWrite1hPrice, p.CacheWrite12hPrice,
-		p.CacheReadPrice, p.FastMultiplier, p.FlexMultiplier, p.ImageInputPrice, p.ImageOutputPrice, p.PerRequestPrice)
+		p.CacheReadPrice, p.FastMultiplier, p.FlexMultiplier, p.UltrafastMultiplier, p.ImageInputPrice, p.ImageOutputPrice, p.PerRequestPrice)
 	iv := &p.Intervals[0]
 	*iv.MaxTokens = 999
 	iv.MinTokens, iv.TierLabel = 999, "changed-tier"
@@ -380,4 +381,74 @@ func TestUsageBillingGroupSnapshotConcurrentReaders(t *testing.T) {
 		require.NoError(t, err)
 	}
 	usageBillingSnapshotTestEqualGroup(t, usageBillingSnapshotTestGroup(), frozen)
+}
+
+func TestUsageBillingGroupSnapshotQueuedUltrafastBillingSurvivesPriceReplacement(t *testing.T) {
+	for _, published := range []bool{false, true} {
+		t.Run(fmt.Sprintf("auth_published_%t", published), func(t *testing.T) {
+			key, user, account, _ := usageSnapshotTestSubjects()
+			multiplier := 3.5
+			key.Group = &Group{ID: 10, Platform: PlatformOpenAI, Hydrated: true, RateMultiplier: 1,
+				ModelPricing: []ChannelModelPricing{{Models: []string{"gpt-4o"}, BillingMode: BillingModeToken,
+					InputPrice: usageSnapshotTestValue(1e-6), UltrafastMultiplier: &multiplier}}}
+			key.GroupID = &key.Group.ID
+			sourceKey := key
+			auth := &APIKeyService{}
+			if published {
+				key = auth.snapshotToAPIKey(key.Key, auth.snapshotFromAPIKey(context.Background(), key))
+			}
+			record := SnapshotOpenAIRecordUsageInput(&OpenAIRecordUsageInput{
+				APIKey: key, User: user, Account: account,
+				Result: &OpenAIForwardResult{RequestID: "queued-ultrafast", Model: "gpt-4o",
+					ServiceTier: usageSnapshotTestValue("ultrafast"), Usage: OpenAIUsage{InputTokens: 1_000_000}},
+			})
+			usageRepo := &openAIRecordUsageLogRepoStub{inserted: true}
+			billingRepo := &openAIRecordUsageBillingRepoStub{result: &UsageBillingApplyResult{Applied: false}}
+			svc := newOpenAIRecordUsageServiceWithBillingRepoForTest(usageRepo, billingRepo,
+				&openAIRecordUsageUserRepoStub{}, &openAIRecordUsageSubRepoStub{}, nil)
+			svc.resolver = NewModelPricingResolver(nil, svc.billingService)
+			pool := NewUsageRecordWorkerPoolWithOptions(UsageRecordWorkerPoolOptions{
+				WorkerCount: 1, QueueSize: 2, TaskTimeout: 5 * time.Second,
+			})
+			gate, started := make(chan struct{}), make(chan struct{})
+			var unblock sync.Once
+			release := func() { unblock.Do(func() { close(gate) }) }
+			t.Cleanup(pool.Stop)
+			t.Cleanup(release)
+			require.Equal(t, UsageRecordSubmitModeEnqueued, pool.Submit(func(context.Context) {
+				close(started)
+				<-gate
+			}))
+			select {
+			case <-started:
+			case <-time.After(5 * time.Second):
+				t.Fatal("usage worker did not start")
+			}
+			done := make(chan error, 1)
+			require.Equal(t, UsageRecordSubmitModeEnqueued, pool.Submit(func(ctx context.Context) {
+				done <- svc.RecordUsage(ctx, record)
+			}))
+
+			// Replace the request's price source while billing is queued. A new auth
+			// publication must expose the replacement without changing older tasks.
+			multiplier = 9
+			sourceKey.Group.ModelPricing[0].UltrafastMultiplier = usageSnapshotTestValue(11.0)
+			if published {
+				replacement := auth.snapshotToAPIKey(sourceKey.Key, auth.snapshotFromAPIKey(context.Background(), sourceKey))
+				require.Equal(t, 11.0, *frozenUsageBillingGroup(replacement.Group).ModelPricing[0].UltrafastMultiplier)
+			}
+			release()
+			select {
+			case err := <-done:
+				require.NoError(t, err)
+			case <-time.After(5 * time.Second):
+				t.Fatal("queued billing did not complete")
+			}
+			require.NotNil(t, usageRepo.lastLog)
+			require.InDelta(t, 3.5, usageRepo.lastLog.TotalCost, 1e-12)
+			require.InDelta(t, 3.5, usageRepo.lastLog.ActualCost, 1e-12)
+			require.NotNil(t, billingRepo.lastCmd)
+			require.InDelta(t, 3.5, billingRepo.lastCmd.BalanceCost, 1e-12)
+		})
+	}
 }

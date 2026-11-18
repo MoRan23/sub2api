@@ -49,3 +49,19 @@ func TestResponsesCacheWriteTTLAliasAndCanonicalAggregate(t *testing.T) {
 	require.Zero(t, usage.CacheCreation30mInputTokens)
 	require.Zero(t, usage.CacheCreation12hInputTokens)
 }
+
+func TestChatCacheWriteTTLCanonicalZeroSurvivesJSONRoundTrip(t *testing.T) {
+	t.Parallel()
+	const rawDetails = `{"ttl_30m_tokens":4,"ttl_12h_tokens":6,"vendor":"kept"}`
+	var usage ChatUsage
+	require.NoError(t, json.Unmarshal([]byte(`{"prompt_tokens":100,"completion_tokens":2,"prompt_tokens_details":{"cache_write_tokens":0,"cache_creation_tokens":10,"cache_write_tokens_details":`+rawDetails+`}}`), &usage))
+	encoded, err := json.Marshal(usage)
+	require.NoError(t, err)
+	var restored ChatUsage
+	require.NoError(t, json.Unmarshal(encoded, &restored))
+	converted := ChatUsageToResponsesUsage(&restored)
+	require.Zero(t, converted.CacheCreationInputTokens, "explicit zero must not revive the legacy alias")
+	require.Zero(t, converted.CacheCreation30mInputTokens)
+	require.Zero(t, converted.CacheCreation12hInputTokens)
+	require.JSONEq(t, rawDetails, string(converted.InputTokensDetails.CacheWriteTokensDetails), "raw TTL evidence remains available without being accepted for billing")
+}

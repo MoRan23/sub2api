@@ -37,6 +37,9 @@ func normalizeKnownOpenAICodexModel(model string) string {
 		}
 	}
 
+	if base := openai.GPT62ModelID(normalized); base != "" {
+		return base
+	}
 	if openai.IsGPT61SolModelSpelling(normalized) {
 		return "gpt-6.1-sol"
 	}
@@ -125,7 +128,7 @@ func isOpenAIGPT6AstraModel(model string) bool {
 // isOpenAIGPT6Model includes only the known GPT-6 families and their established
 // spelling, effort, and snapshot variants. The bare alias remains Astra.
 func isOpenAIGPT6Model(model string) bool {
-	return isOpenAIGPT6AstraModel(model) || openai.IsGPT6SolOrLunaModelSpelling(model) ||
+	return openai.GPT62ModelID(model) != "" || isOpenAIGPT6AstraModel(model) || openai.IsGPT6SolOrLunaModelSpelling(model) ||
 		openai.IsGPT61SolModelSpelling(model) || openai.IsGPT61TerraModelSpelling(model)
 }
 

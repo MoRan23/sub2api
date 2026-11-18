@@ -3,6 +3,7 @@ package openai
 
 import (
 	_ "embed"
+	"encoding/json"
 	"fmt"
 	"strings"
 	"time"
@@ -21,6 +22,8 @@ type Model struct {
 // DefaultModels OpenAI models list
 var DefaultModels = []Model{
 	{ID: "gpt-5.6-sol", Object: "model", Created: 1780876800, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.6 Sol"},
+	{ID: "gpt-6.2-sol", Object: "model", Created: 1794873600, OwnedBy: "openai", Type: "model", DisplayName: "GPT-6.2 Sol"},
+	{ID: "gpt-6.2-astra", Object: "model", Created: 1794873600, OwnedBy: "openai", Type: "model", DisplayName: "GPT-6.2 Astra"},
 	{ID: "gpt-6", Object: "model", Created: 1788480000, OwnedBy: "openai", Type: "model", DisplayName: "GPT-6 (Astra)"},
 	{ID: "gpt-5.6", Object: "model", Created: 1780876800, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.6 (Sol)"},
 	{ID: "gpt-5.6-terra", Object: "model", Created: 1780876800, OwnedBy: "openai", Type: "model", DisplayName: "GPT-5.6 Terra"},
@@ -106,6 +109,31 @@ var instructionsDaybreakBlue string
 //go:embed instructions_daybreak_red.txt
 var instructionsDaybreakRed string
 
+// Complete descriptors from the 2026-11-17 Codex catalog (client 0.169.0).
+// They describe models, not the selected account's authorization.
+//
+//go:embed codex_gpt62_sol.json
+var CodexGPT62SolMetadata []byte
+
+//go:embed codex_gpt62_astra.json
+var CodexGPT62AstraMetadata []byte
+
+// Decode templates once; request normalization must not parse a full descriptor.
+var instructionsGPT62Sol = codexInstructionsTemplate(CodexGPT62SolMetadata)
+var instructionsGPT62Astra = codexInstructionsTemplate(CodexGPT62AstraMetadata)
+
+func codexInstructionsTemplate(metadata []byte) string {
+	var descriptor struct {
+		ModelMessages struct {
+			InstructionsTemplate string `json:"instructions_template"`
+		} `json:"model_messages"`
+	}
+	if err := json.Unmarshal(metadata, &descriptor); err != nil || descriptor.ModelMessages.InstructionsTemplate == "" {
+		panic("invalid bundled Codex instructions template")
+	}
+	return descriptor.ModelMessages.InstructionsTemplate
+}
+
 // CodexGPT61SolMetadata is the complete official descriptor from openai/codex
 // e742db9f7ba98e63e502b310857d49d047888518, codex-rs/models-manager/models.json.
 //
@@ -173,8 +201,20 @@ func CanonicalizeOpenAIModelAliasSpelling(model string) string {
 // and established aliases. Older models and unknown names keep their existing
 // compatibility fallback; no template is inferred from another new model.
 func CodexBaseInstructionsForModel(model string) string {
+	// Forwarding normally supplies the canonical slug. Keep this hot path free of
+	// alias normalization and descriptor parsing.
+	switch model {
+	case "gpt-6.2-sol":
+		return instructionsGPT62Sol
+	case "gpt-6.2-astra":
+		return instructionsGPT62Astra
+	}
 	canonical := CanonicalizeOpenAIModelAliasSpelling(model)
 	switch {
+	case GPT62ModelID(canonical) == "gpt-6.2-sol":
+		return instructionsGPT62Sol
+	case GPT62ModelID(canonical) == "gpt-6.2-astra":
+		return instructionsGPT62Astra
 	case IsKnownCodexModelVariant(canonical, "gpt-6") || IsKnownCodexModelVariant(canonical, "gpt-6-astra"):
 		if v := strings.TrimSpace(instructionsGPT6Astra); v != "" {
 			return instructionsGPT6Astra
@@ -242,6 +282,22 @@ func IsGPT6SolOrLunaModelSpelling(model string) bool {
 		IsKnownCodexModelVariant(model, "gpt-6-luna")
 }
 
+// GPT62ModelID returns the published model ID for local effort and compact
+// spellings. Keep disabled effort suffixes identifiable for request validation.
+func GPT62ModelID(model string) string {
+	switch model {
+	case "gpt-6.2-sol", "gpt-6.2-astra":
+		return model
+	}
+	canonical := CanonicalizeOpenAIModelAliasSpelling(model)
+	for _, base := range []string{"gpt-6.2-sol", "gpt-6.2-astra"} {
+		if IsKnownCodexModelVariant(canonical, base) {
+			return base
+		}
+	}
+	return ""
+}
+
 // IsGPT61SolModelSpelling recognizes the published model and local effort/compact
 // spellings. Invalid effort suffixes remain identifiable for request validation.
 func IsGPT61SolModelSpelling(model string) bool {
@@ -257,7 +313,7 @@ func IsGPT61TerraModelSpelling(model string) bool {
 // RequiresResponsesForToolCalls reports models whose tool calls are only
 // available through the Responses API.
 func RequiresResponsesForToolCalls(model string) bool {
-	return IsGPT61SolModelSpelling(model) || IsGPT61TerraModelSpelling(model)
+	return GPT62ModelID(model) != "" || IsGPT61SolModelSpelling(model) || IsGPT61TerraModelSpelling(model)
 }
 
 // ValidateGPT61SolReasoningEffort rejects disabled reasoning instead of silently
@@ -282,10 +338,24 @@ func ValidateGPT61TerraReasoningEffort(model, effort string) error {
 }
 
 // ValidateGPT61ReasoningEffort applies the published effort scale of each
-// GPT-6.1 model.
+// GPT-6.1 and GPT-6.2 model.
 func ValidateGPT61ReasoningEffort(model, effort string) error {
+	if err := ValidateGPT62ReasoningEffort(model, effort); err != nil {
+		return err
+	}
 	if err := ValidateGPT61SolReasoningEffort(model, effort); err != nil {
 		return err
 	}
 	return ValidateGPT61TerraReasoningEffort(model, effort)
+}
+
+// ValidateGPT62ReasoningEffort rejects disabled and minimal reasoning on GPT-6.2.
+func ValidateGPT62ReasoningEffort(model, effort string) error {
+	switch strings.ToLower(strings.TrimSpace(effort)) {
+	case "none", "minimal":
+		if base := GPT62ModelID(model); base != "" {
+			return fmt.Errorf("%s does not support reasoning effort %q; use low, medium, high, xhigh or max", base, effort)
+		}
+	}
+	return nil
 }

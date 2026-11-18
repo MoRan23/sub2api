@@ -1489,6 +1489,10 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
   // GPT-6 uses the bundled official default context (272k), not the opt-in
   // extended window. Output limits retain the existing OpenCode configuration;
   // the official Codex catalog does not declare an output-token limit.
+  const solAstraOptions = {
+    options: { store: false },
+    variants: { low: {}, medium: {}, high: {}, xhigh: {}, max: {} }
+  }
   const openaiModels = {
     'gpt-6': {
       name: 'GPT-6 (Astra)',
@@ -1563,22 +1567,20 @@ function generateOpenCodeConfig(platform: string, baseUrl: string, apiKey: strin
       options: { store: false },
       variants: { none: {}, low: {}, medium: {}, high: {}, xhigh: {}, max: {} }
     },
+    'gpt-6.2-sol': {
+      name: 'GPT-6.2 Sol',
+      limit: { context: 500000, output: 128000 },
+      ...solAstraOptions
+    },
+    'gpt-6.2-astra': {
+      name: 'GPT-6.2 Astra',
+      limit: { context: 272000, output: 128000 },
+      ...solAstraOptions
+    },
     'gpt-6.1-sol': {
       name: 'GPT-6.1 Sol',
-      limit: {
-        context: 1050000,
-        output: 128000
-      },
-      options: {
-        store: false
-      },
-      variants: {
-        low: {},
-        medium: {},
-        high: {},
-        xhigh: {},
-        max: {}
-      }
+      limit: { context: 1050000, output: 128000 },
+      ...solAstraOptions
     },
     'gpt-6-sol': {
       name: 'GPT-6 Sol',

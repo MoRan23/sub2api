@@ -1,6 +1,7 @@
 package service
 
 import (
+	"math"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -218,6 +219,14 @@ func TestChannelMultipliersMustBePositive(t *testing.T) {
 	zero := 0.0
 	require.Error(t, checkPricesNotNegative(ChannelModelPricing{FastMultiplier: &zero}))
 	require.Error(t, checkPricesNotNegative(ChannelModelPricing{FlexMultiplier: &zero}))
+	require.Error(t, checkPricesNotNegative(ChannelModelPricing{UltrafastMultiplier: &zero}))
+	negative := -1.0
+	require.Error(t, checkPricesNotNegative(ChannelModelPricing{UltrafastMultiplier: &negative}))
+	for _, nonFinite := range []float64{math.NaN(), math.Inf(1), math.Inf(-1)} {
+		require.Error(t, checkPricesNotNegative(ChannelModelPricing{FastMultiplier: &nonFinite}))
+		require.Error(t, checkPricesNotNegative(ChannelModelPricing{FlexMultiplier: &nonFinite}))
+		require.Error(t, checkPricesNotNegative(ChannelModelPricing{UltrafastMultiplier: &nonFinite}))
+	}
 	require.Error(t, ValidateIntervals([]PricingInterval{{
 		MinTokens:       100,
 		InputMultiplier: &zero,

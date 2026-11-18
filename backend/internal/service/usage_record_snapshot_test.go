@@ -25,7 +25,7 @@ func usageSnapshotTestSubjects() (*APIKey, *User, *Account, *UserSubscription) {
 		VideoModelPrices: map[string]map[string]float64{"grok-imagine-video": {"480p": 0.05}}, SearchPricePer1k: usageSnapshotTestValue(5.0),
 		AudioTTSPricePerMillionChars: usageSnapshotTestValue(7.0), WebSearchPricePerCall: usageSnapshotTestValue(0.02),
 		ModelPricing: []ChannelModelPricing{{Models: []string{"gpt-4o"}, InputPrice: usageSnapshotTestValue(2.0), OutputPrice: usageSnapshotTestValue(8.0),
-			FastMultiplier: usageSnapshotTestValue(2.0), ReasoningEffortMultipliers: map[string]float64{"high": 1.2},
+			FastMultiplier: usageSnapshotTestValue(2.0), UltrafastMultiplier: usageSnapshotTestValue(3.5), ReasoningEffortMultipliers: map[string]float64{"high": 1.2},
 			Intervals:   []PricingInterval{{MaxTokens: usageSnapshotTestValue(10000), InputPrice: usageSnapshotTestValue(3.0)}},
 			TimePricing: &ChannelTimePricing{Timezone: "UTC", Periods: []ChannelTimePricingPeriod{{StartTime: "00:00", EndTime: "23:59", Multiplier: 1.1}}}}}}
 	key := &APIKey{ID: 21, UserID: user.ID, Key: "auth-invalidation-key", GroupID: &group.ID, User: user, Group: group, Quota: 100, RateLimit5h: 10}
@@ -73,6 +73,7 @@ func TestUsageRecordSnapshotOwnsMutableBillingValues(t *testing.T) {
 	result.UpstreamHeaders.Set("X-Upstream-ID", "reused-header")
 	*key.GroupID = 999
 	*key.Group.ModelPricing[0].InputPrice = 99
+	*key.Group.ModelPricing[0].UltrafastMultiplier = 99
 	*key.Group.ModelPricing[0].Intervals[0].MaxTokens = 999
 	*key.Group.ModelPricing[0].Intervals[0].InputPrice = 99
 	key.Group.ModelPricing[0].ReasoningEffortMultipliers["high"] = 99
@@ -91,6 +92,7 @@ func TestUsageRecordSnapshotOwnsMutableBillingValues(t *testing.T) {
 	require.Equal(t, 0.5, got.Result.AudioUsage.DurationOrUnits)
 	require.EqualValues(t, 10, *got.APIKey.GroupID)
 	require.Equal(t, 2.0, *got.APIKey.Group.ModelPricing[0].InputPrice)
+	require.Equal(t, 3.5, *got.APIKey.Group.ModelPricing[0].UltrafastMultiplier)
 	require.Equal(t, 10000, *got.APIKey.Group.ModelPricing[0].Intervals[0].MaxTokens)
 	require.Equal(t, 3.0, *got.APIKey.Group.ModelPricing[0].Intervals[0].InputPrice)
 	require.Equal(t, 1.2, got.APIKey.Group.ModelPricing[0].ReasoningEffortMultipliers["high"])
