@@ -1,0 +1,77 @@
+2026/11/18 08:03:17 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestExtractSSEUsage
+=== RUN   TestExtractSSEUsage/message_delta_with_output_tokens
+=== RUN   TestExtractSSEUsage/non-data_line_ignored
+=== RUN   TestExtractSSEUsage/top-level_usage_with_all_fields
+=== RUN   TestExtractSSEUsage/message_start_nested_usage_with_input/cache_tokens
+=== RUN   TestExtractSSEUsage/message_start_nested_usage_with_cache_creation_breakdown
+--- PASS: TestExtractSSEUsage (0.00s)
+    --- PASS: TestExtractSSEUsage/message_delta_with_output_tokens (0.00s)
+    --- PASS: TestExtractSSEUsage/non-data_line_ignored (0.00s)
+    --- PASS: TestExtractSSEUsage/top-level_usage_with_all_fields (0.00s)
+    --- PASS: TestExtractSSEUsage/message_start_nested_usage_with_input/cache_tokens (0.00s)
+    --- PASS: TestExtractSSEUsage/message_start_nested_usage_with_cache_creation_breakdown (0.00s)
+=== RUN   TestCalculateCost_OpenAIGPT54LongContextMarkerRequiresActualCostIncrease
+--- PASS: TestCalculateCost_OpenAIGPT54LongContextMarkerRequiresActualCostIncrease (0.00s)
+=== RUN   TestGatewayService_ParseSSEUsagePassthrough_MessageStartFallbacks
+--- PASS: TestGatewayService_ParseSSEUsagePassthrough_MessageStartFallbacks (0.00s)
+=== RUN   TestParseClaudeUsageFromResponseBody
+=== RUN   TestParseClaudeUsageFromResponseBody/empty_or_missing_usage
+=== RUN   TestParseClaudeUsageFromResponseBody/parse_all_usage_fields_and_fallback
+=== RUN   TestParseClaudeUsageFromResponseBody/keep_explicit_aggregate_values
+--- PASS: TestParseClaudeUsageFromResponseBody (0.00s)
+    --- PASS: TestParseClaudeUsageFromResponseBody/empty_or_missing_usage (0.00s)
+    --- PASS: TestParseClaudeUsageFromResponseBody/parse_all_usage_fields_and_fallback (0.00s)
+    --- PASS: TestParseClaudeUsageFromResponseBody/keep_explicit_aggregate_values (0.00s)
+=== RUN   TestHandleResponsesBufferedStreamingResponse_PreservesMessageStartCacheUsage
+=== PAUSE TestHandleResponsesBufferedStreamingResponse_PreservesMessageStartCacheUsage
+=== RUN   TestHandleResponsesStreamingResponse_NormalizesTerminalUsage
+=== RUN   TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/cache_read_input_tokens_full_cache/message_stop
+=== RUN   TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/cache_read_input_tokens_full_cache/eof
+=== RUN   TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/cached_tokens_full_cache/message_stop
+=== RUN   TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/cached_tokens_full_cache/eof
+=== RUN   TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/prompt_tokens_details_full_cache/message_stop
+=== RUN   TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/prompt_tokens_details_full_cache/eof
+=== RUN   TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/DeepSeek_input_total_with_hit_and_miss_buckets/message_stop
+=== RUN   TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/DeepSeek_input_total_with_hit_and_miss_buckets/eof
+=== RUN   TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/OpenAI_prompt_total_with_cached_details/message_stop
+=== RUN   TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/OpenAI_prompt_total_with_cached_details/eof
+=== RUN   TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/cache_creation_only_without_prompt_total_or_miss_bucket_keeps_independent_input/message_stop
+=== RUN   TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/cache_creation_only_without_prompt_total_or_miss_bucket_keeps_independent_input/eof
+=== RUN   TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/explicit_aggregate_caps_contradictory_TTL_breakdown/message_stop
+=== RUN   TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/explicit_aggregate_caps_contradictory_TTL_breakdown/eof
+=== RUN   TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/explicit_zero_falls_back_to_TTL_breakdown/message_stop
+=== RUN   TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/explicit_zero_falls_back_to_TTL_breakdown/eof
+=== RUN   TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/null_aggregate_and_TTL_preserve_partial_snapshots/message_stop
+=== RUN   TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/null_aggregate_and_TTL_preserve_partial_snapshots/eof
+=== RUN   TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/null_does_not_clear_explicit_aggregate_zero/message_stop
+=== RUN   TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/null_does_not_clear_explicit_aggregate_zero/eof
+=== RUN   TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/zero_placeholders_preserve_normalized_prompt_total/message_stop
+=== RUN   TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/zero_placeholders_preserve_normalized_prompt_total/eof
+--- PASS: TestHandleResponsesStreamingResponse_NormalizesTerminalUsage (0.00s)
+    --- PASS: TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/cache_read_input_tokens_full_cache/message_stop (0.00s)
+    --- PASS: TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/cache_read_input_tokens_full_cache/eof (0.00s)
+    --- PASS: TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/cached_tokens_full_cache/message_stop (0.00s)
+    --- PASS: TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/cached_tokens_full_cache/eof (0.00s)
+    --- PASS: TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/prompt_tokens_details_full_cache/message_stop (0.00s)
+    --- PASS: TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/prompt_tokens_details_full_cache/eof (0.00s)
+    --- PASS: TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/DeepSeek_input_total_with_hit_and_miss_buckets/message_stop (0.00s)
+    --- PASS: TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/DeepSeek_input_total_with_hit_and_miss_buckets/eof (0.00s)
+    --- PASS: TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/OpenAI_prompt_total_with_cached_details/message_stop (0.00s)
+    --- PASS: TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/OpenAI_prompt_total_with_cached_details/eof (0.00s)
+    --- PASS: TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/cache_creation_only_without_prompt_total_or_miss_bucket_keeps_independent_input/message_stop (0.00s)
+    --- PASS: TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/cache_creation_only_without_prompt_total_or_miss_bucket_keeps_independent_input/eof (0.00s)
+    --- PASS: TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/explicit_aggregate_caps_contradictory_TTL_breakdown/message_stop (0.00s)
+    --- PASS: TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/explicit_aggregate_caps_contradictory_TTL_breakdown/eof (0.00s)
+    --- PASS: TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/explicit_zero_falls_back_to_TTL_breakdown/message_stop (0.00s)
+    --- PASS: TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/explicit_zero_falls_back_to_TTL_breakdown/eof (0.00s)
+    --- PASS: TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/null_aggregate_and_TTL_preserve_partial_snapshots/message_stop (0.00s)
+    --- PASS: TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/null_aggregate_and_TTL_preserve_partial_snapshots/eof (0.00s)
+    --- PASS: TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/null_does_not_clear_explicit_aggregate_zero/message_stop (0.00s)
+    --- PASS: TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/null_does_not_clear_explicit_aggregate_zero/eof (0.00s)
+    --- PASS: TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/zero_placeholders_preserve_normalized_prompt_total/message_stop (0.00s)
+    --- PASS: TestHandleResponsesStreamingResponse_NormalizesTerminalUsage/zero_placeholders_preserve_normalized_prompt_total/eof (0.00s)
+=== CONT  TestHandleResponsesBufferedStreamingResponse_PreservesMessageStartCacheUsage
+--- PASS: TestHandleResponsesBufferedStreamingResponse_PreservesMessageStartCacheUsage (0.00s)
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/service	0.115s

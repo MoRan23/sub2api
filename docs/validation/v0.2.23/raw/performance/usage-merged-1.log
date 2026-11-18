@@ -1,0 +1,14 @@
+UTC=2026-11-18T07:55:32.523152+00:00
+affinity=0x55; GOMAXPROCS=4; round=1; order=['baseline', 'merged']
+command=['C:\\Users\\Admin\\.codex\\worktrees\\merge-upstream-v0-2-22\\sub2api\\.tmp-v023-merged-service.test.exe', '-test.run=^$', '-test.bench=^Benchmark(GatewayService_ParseSSEUsage.*|ParseClaudeUsageFromResponseBody)$', '-test.benchtime=2s', '-test.count=1', '-test.benchmem']
+2026/11/18 07:55:32 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkGatewayService_ParseSSEUsage_MessageStart-4              	  550782	      4472 ns/op	    2056 B/op	      39 allocs/op
+BenchmarkGatewayService_ParseSSEUsagePassthrough_MessageStart-4   	 1717015	      1382 ns/op	      16 B/op	       2 allocs/op
+BenchmarkGatewayService_ParseSSEUsage_MessageDelta-4              	  661263	      3892 ns/op	    1664 B/op	      34 allocs/op
+BenchmarkGatewayService_ParseSSEUsagePassthrough_MessageDelta-4   	 1764478	      1396 ns/op	      16 B/op	       2 allocs/op
+BenchmarkParseClaudeUsageFromResponseBody-4                       	 1806488	      1324 ns/op	     352 B/op	       4 allocs/op
+PASS

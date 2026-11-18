@@ -1,0 +1,42 @@
+2026/11/18 08:10:48 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestForwardAsAnthropic_InjectsPromptCacheKeyForAPIKeyMessagesDispatch
+=== PAUSE TestForwardAsAnthropic_InjectsPromptCacheKeyForAPIKeyMessagesDispatch
+=== RUN   TestForwardAsAnthropic_AutoDerivesPromptCacheKeyWhenMessagesDispatchHasNoSessionID
+=== PAUSE TestForwardAsAnthropic_AutoDerivesPromptCacheKeyWhenMessagesDispatchHasNoSessionID
+=== RUN   TestForwardAsAnthropic_APIKeyMetadataSessionSurvivesChangingCacheControlAnchorAfterContinuationDisabled
+=== PAUSE TestForwardAsAnthropic_APIKeyMetadataSessionSurvivesChangingCacheControlAnchorAfterContinuationDisabled
+=== CONT  TestForwardAsAnthropic_InjectsPromptCacheKeyForAPIKeyMessagesDispatch
+=== CONT  TestForwardAsAnthropic_APIKeyMetadataSessionSurvivesChangingCacheControlAnchorAfterContinuationDisabled
+=== CONT  TestForwardAsAnthropic_AutoDerivesPromptCacheKeyWhenMessagesDispatchHasNoSessionID
+2026/11/18 08:10:48 WARN openai_codex_turn_identity_fallback reason=hmac_secret_unavailable mapping=session mapping_digest=2bb0216c5d9a
+2026/11/18 08:10:48 WARN openai_codex_turn_identity_fallback reason=hmac_secret_unavailable mapping=session mapping_digest=5a5b081ece00
+2026/11/18 08:10:48 WARN openai_codex_turn_identity_fallback reason=hmac_secret_unavailable mapping=session mapping_digest=679ff136fc9e
+=== NAME  TestForwardAsAnthropic_APIKeyMetadataSessionSurvivesChangingCacheControlAnchorAfterContinuationDisabled
+    openai_compat_model_test.go:1074: 
+        	Error Trace:	C:/Users/Admin/.codex/worktrees/merge-upstream-v0-2-23-baseline/sub2api/backend/internal/service/openai_compat_model_test.go:1074
+        	Error:      	Should be true
+        	Test:       	TestForwardAsAnthropic_APIKeyMetadataSessionSurvivesChangingCacheControlAnchorAfterContinuationDisabled
+=== NAME  TestForwardAsAnthropic_AutoDerivesPromptCacheKeyWhenMessagesDispatchHasNoSessionID
+    openai_compat_model_test.go:553: 
+        	Error Trace:	C:/Users/Admin/.codex/worktrees/merge-upstream-v0-2-23-baseline/sub2api/backend/internal/service/openai_compat_model_test.go:553
+        	Error:      	Should be true
+        	Test:       	TestForwardAsAnthropic_AutoDerivesPromptCacheKeyWhenMessagesDispatchHasNoSessionID
+=== NAME  TestForwardAsAnthropic_InjectsPromptCacheKeyForAPIKeyMessagesDispatch
+    openai_compat_model_test.go:505: 
+        	Error Trace:	C:/Users/Admin/.codex/worktrees/merge-upstream-v0-2-23-baseline/sub2api/backend/internal/service/openai_compat_model_test.go:505
+        	Error:      	Not equal: 
+        	            	expected: "stable-cache-key"
+        	            	actual  : "01a1edb5-5c9a-7906-b1cd-d2948eb8a19d"
+--- FAIL: TestForwardAsAnthropic_APIKeyMetadataSessionSurvivesChangingCacheControlAnchorAfterContinuationDisabled (0.00s)
+--- FAIL: TestForwardAsAnthropic_AutoDerivesPromptCacheKeyWhenMessagesDispatchHasNoSessionID (0.00s)
+=== NAME  TestForwardAsAnthropic_InjectsPromptCacheKeyForAPIKeyMessagesDispatch
+        	            	
+        	            	Diff:
+        	            	--- Expected
+        	            	+++ Actual
+        	            	@@ -1 +1 @@
+        	            	-stable-cache-key
+        	            	+01a1edb5-5c9a-7906-b1cd-d2948eb8a19d
+        	Test:       	TestForwardAsAnthropic_InjectsPromptCacheKeyForAPIKeyMessagesDispatch
+--- FAIL: TestForwardAsAnthropic_InjectsPromptCacheKeyForAPIKeyMessagesDispatch (0.00s)
+FAIL

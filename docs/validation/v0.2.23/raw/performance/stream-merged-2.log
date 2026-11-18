@@ -1,0 +1,13 @@
+UTC=2026-11-18T07:55:56.714412+00:00
+affinity=0x55; GOMAXPROCS=4; round=2; order=['merged', 'baseline']
+command=['C:\\Users\\Admin\\.codex\\worktrees\\merge-upstream-v0-2-22\\sub2api\\.tmp-v023-merged-service.test.exe', '-test.run=^$', '-test.bench=^Benchmark(RawChatCompletionsFlushBatch|OpenAIReasoningRewrite300)$', '-test.benchtime=2s', '-test.count=1', '-test.benchmem']
+2026/11/18 07:55:56 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkRawChatCompletionsFlushBatch/1-4 	  125530	     17996 ns/op	   8.11 MB/s	         1.000 flushes/op	   74931 B/op	      55 allocs/op
+BenchmarkRawChatCompletionsFlushBatch/128-4         	    8409	    314893 ns/op	  53.70 MB/s	         1.000 flushes/op	  175517 B/op	    1198 allocs/op
+BenchmarkOpenAIReasoningRewrite300/deepseek-4       	    2103	   1254044 ns/op	 830.85 MB/s	 2358384 B/op	      31 allocs/op
+BenchmarkOpenAIReasoningRewrite300/ollama-4         	    1107	   2461208 ns/op	 428.34 MB/s	 3701584 B/op	      30 allocs/op
+PASS

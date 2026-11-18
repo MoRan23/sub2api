@@ -1,0 +1,4 @@
+
+> sub2api-frontend@1.0.0 lint:check C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend
+> eslint . --ext .vue,.js,.jsx,.cjs,.mjs,.ts,.tsx,.cts,.mts "--" "src/components/keys/UseKeyModal.vue" "src/components/keys/__tests__/UseKeyModal.spec.ts" "src/composables/useModelWhitelist.ts" "src/composables/__tests__/useModelWhitelist.spec.ts" "src/components/admin/channel/PricingEntryCard.vue" "src/components/admin/channel/types.ts" "src/views/admin/ChannelsView.vue" "src/views/admin/__tests__/ChannelsView.ultrafastPricing.spec.ts" "src/api/admin/channels.ts"
+

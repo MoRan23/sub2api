@@ -1,0 +1,9 @@
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/pkg/openai
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkGPT62Instructions-4   	638960623	         1.933 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGPT62Instructions-4   	649721918	         1.848 ns/op	       0 B/op	       0 allocs/op
+BenchmarkGPT62Instructions-4   	652941118	         1.821 ns/op	       0 B/op	       0 allocs/op
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/pkg/openai	6.351s

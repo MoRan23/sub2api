@@ -1,0 +1,10 @@
+UTC=2026-11-18T07:56:29.081893+00:00
+affinity=0x55; GOMAXPROCS=4; round=2; order=['merged', 'baseline']
+command=['C:\\Users\\Admin\\.codex\\worktrees\\merge-upstream-v0-2-22\\sub2api\\.tmp-v023-merged-service.test.exe', '-test.run=^$', '-test.bench=^BenchmarkUsageRecordLifecycleAuthenticated/ws_replay/bytes=1048576/owned_snapshot$', '-test.benchtime=2s', '-test.count=1', '-test.benchmem']
+2026/11/18 07:56:29 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkUsageRecordLifecycleAuthenticated/ws_replay/bytes=1048576/owned_snapshot-4         	    4101	    575115 ns/op	1823.25 MB/s	  40701700 p95-e2e-ns	        16.00 producers	      1739 requests/s	   2220127 runtime-cpu-ns/op	         4.000 workers	 1060152 B/op	     125 allocs/op
+PASS

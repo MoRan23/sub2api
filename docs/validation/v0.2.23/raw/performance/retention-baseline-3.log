@@ -1,0 +1,12 @@
+UTC=2026-11-18T07:57:40.432137+00:00
+affinity=0x55; GOMAXPROCS=4; round=3; order=['baseline', 'merged']
+command=['C:\\Users\\Admin\\.codex\\worktrees\\merge-upstream-v0-2-22\\sub2api\\.tmp-v023-baseline-service.test.exe', '-test.run=^$', '-test.bench=^BenchmarkUsageRecordQueueRetainedHeap/.*/queued=128$', '-test.benchtime=1x', '-test.count=1', '-test.benchmem']
+2026/11/18 07:57:40 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkUsageRecordQueueRetainedHeap/ws_replay/queued=128-4         	       1	  20350600 ns/op	      3763 retained-B/task	         0.003588 retained/payload	134855256 B/op	    2496 allocs/op
+BenchmarkUsageRecordQueueRetainedHeap/systemone_response/queued=128-4         	       1	  26562800 ns/op	      3514 retained-B/task	         0.003351 retained/payload	134791624 B/op	    2364 allocs/op
+BenchmarkUsageRecordQueueRetainedHeap/grok_request/queued=128-4               	       1	  74977800 ns/op	      3820 retained-B/task	         0.003643 retained/payload	134790920 B/op	    2363 allocs/op
+PASS
