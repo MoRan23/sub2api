@@ -131,7 +131,7 @@ func TestUsageExportPrecisionMatchesBrowser(t *testing.T) {
 	}{{0, "0.000"}, {1, "1.000"}, {0.1, "0.1000"}, {0.001, "0.001000"}, {10000, "1.000e+4"}, {1e-7, "1.000e-7"}, {1e-6, "0.000001000"}, {9999.5, "1.000e+4"}, {-2.5, "-2.500"}} {
 		require.Equal(t, tt.want, usageExportPrecision(tt.input))
 	}
-	for value, want := range map[string]string{"none": "-", "minimal": "-", "extra-high": "XHigh", "x_high": "XHigh", " maximum ": "Maximum"} {
+	for value, want := range map[string]string{"none": "-", "minimal": "-", "extra-high": "XHigh", "x_high": "XHigh", " maximum ": "maximum"} {
 		require.Equal(t, want, usageExportEffort(value))
 	}
 }

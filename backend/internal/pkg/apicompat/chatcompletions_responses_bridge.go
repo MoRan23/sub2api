@@ -49,6 +49,9 @@ func ResponsesToChatCompletionsRequestWithOptions(req *ResponsesRequest, opts *R
 	if req == nil {
 		return nil, fmt.Errorf("responses request is nil")
 	}
+	if err := validateResponsesBridgeContinuation(req); err != nil {
+		return nil, err
+	}
 
 	messages, err := responsesInputToChatMessagesWithOptions(req.Instructions, req.Input, opts)
 	if err != nil {
@@ -65,8 +68,12 @@ func ResponsesToChatCompletionsRequestWithOptions(req *ResponsesRequest, opts *R
 		ServiceTier:         req.ServiceTier,
 		ParallelToolCalls:   req.ParallelToolCalls,
 	}
-	if req.Reasoning != nil {
-		out.ReasoningEffort = req.Reasoning.Effort
+	reasoning, err := effectiveResponsesReasoning(req)
+	if err != nil {
+		return nil, err
+	}
+	if reasoning != nil {
+		out.SetReasoningEffort(reasoning.Effort, reasoning.EffortIsNumber)
 	}
 	effectiveTools, err := EffectiveResponsesTools(req)
 	if err != nil {
@@ -562,7 +569,10 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 			}
 			delete(mediaByCallID, callID)
 
-			outputText, media, rewritten := extractToolOutputMedia(outputRaw)
+			outputText, media, rewritten, err := extractToolOutputMediaWithAudio(outputRaw, true)
+			if err != nil {
+				return nil, nil, err
+			}
 			if rewritten {
 				if callID != "" {
 					mediaByCallID[callID] = media
@@ -603,7 +613,7 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 			pendingReasoning = ""
 			lastTurnReasoning = ""
 			continue
-		case "input_image":
+		case "input_image", "input_audio":
 			content, err := chatContentFromSingleResponsesPart(itemType, item)
 			if err != nil {
 				return nil, nil, err
@@ -611,6 +621,9 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 			messages = append(messages, ChatMessage{Role: "user", Content: content})
 			pendingReasoning = ""
 			lastTurnReasoning = ""
+			continue
+		case "configuration_update":
+			// Already folded into the target top-level reasoning field.
 			continue
 		}
 
@@ -687,45 +700,56 @@ func AgentMessageText(raw json.RawMessage) string {
 // outputs return rewritten=false so the caller can preserve their original
 // bytes and prompt-cache prefix.
 func extractToolOutputMedia(outputRaw json.RawMessage) (string, []ChatContentPart, bool) {
+	text, media, changed, _ := extractToolOutputMediaWithAudio(outputRaw, false)
+	return text, media, changed
+}
+
+func extractToolOutputMediaWithAudio(outputRaw json.RawMessage, audio bool) (string, []ChatContentPart, bool, error) {
 	outputRaw = bytesTrimSpace(outputRaw)
 	if len(outputRaw) == 0 || string(outputRaw) == "null" {
-		return "", nil, false
+		return "", nil, false, nil
 	}
 
 	var outputString string
 	if err := json.Unmarshal(outputRaw, &outputString); err == nil {
 		if isToolOutputImageDataURL(outputString) {
-			return toolOutputMediaMarker, []ChatContentPart{toolOutputImagePart(outputString)}, true
+			return toolOutputMediaMarker, []ChatContentPart{toolOutputImagePart(outputString)}, true, nil
 		}
 
 		nested, ok := decodeToolOutputJSON([]byte(outputString))
 		if !ok {
-			return "", nil, false
+			return "", nil, false, nil
 		}
-		rewritten, media, changed := rewriteToolOutputMediaValue(nested)
+		rewritten, media, changed, err := rewriteToolOutputMediaValue(nested, audio)
+		if err != nil {
+			return "", nil, false, err
+		}
 		if !changed {
-			return "", nil, false
+			return "", nil, false, nil
 		}
 		encoded, err := json.Marshal(rewritten)
 		if err != nil {
-			return "", nil, false
+			return "", nil, false, nil
 		}
-		return string(encoded), media, true
+		return string(encoded), media, true, nil
 	}
 
 	value, ok := decodeToolOutputJSON(outputRaw)
 	if !ok {
-		return "", nil, false
+		return "", nil, false, nil
 	}
-	rewritten, media, changed := rewriteToolOutputMediaValue(value)
+	rewritten, media, changed, err := rewriteToolOutputMediaValue(value, audio)
+	if err != nil {
+		return "", nil, false, err
+	}
 	if !changed {
-		return "", nil, false
+		return "", nil, false, nil
 	}
 	encoded, err := json.Marshal(rewritten)
 	if err != nil {
-		return "", nil, false
+		return "", nil, false, nil
 	}
-	return string(encoded), media, true
+	return string(encoded), media, true, nil
 }
 
 func decodeToolOutputJSON(raw []byte) (any, bool) {
@@ -741,13 +765,16 @@ func decodeToolOutputJSON(raw []byte) (any, bool) {
 	return value, true
 }
 
-func rewriteToolOutputMediaValue(value any) (any, []ChatContentPart, bool) {
+func rewriteToolOutputMediaValue(value any, audio bool) (any, []ChatContentPart, bool, error) {
 	switch typed := value.(type) {
 	case []any:
 		var media []ChatContentPart
 		changed := false
 		for i, item := range typed {
-			rewritten, itemMedia, itemChanged := rewriteToolOutputMediaValue(item)
+			rewritten, itemMedia, itemChanged, err := rewriteToolOutputMediaValue(item, audio)
+			if err != nil {
+				return nil, nil, false, err
+			}
 			if !itemChanged {
 				continue
 			}
@@ -755,27 +782,39 @@ func rewriteToolOutputMediaValue(value any) (any, []ChatContentPart, bool) {
 			media = append(media, itemMedia...)
 			changed = true
 		}
-		return typed, media, changed
+		return typed, media, changed, nil
 	case map[string]any:
+		if audio && typed["type"] == "input_audio" {
+			uri, _ := typed["audio_url"].(string)
+			fileID, _ := typed["file_id"].(string)
+			part, err := responsesAudioToChatPart(uri, fileID)
+			if err != nil {
+				return nil, nil, false, err
+			}
+			return map[string]any{"type": "input_text", "text": toolOutputMediaMarker}, []ChatContentPart{part}, true, nil
+		}
 		if imageURL, ok := recognizedToolOutputImageURL(typed); ok {
 			return map[string]any{
 				"type": "input_text",
 				"text": toolOutputMediaMarker,
-			}, []ChatContentPart{toolOutputImagePart(imageURL)}, true
+			}, []ChatContentPart{toolOutputImagePart(imageURL)}, true, nil
 		}
 
 		content, ok := typed["content"]
 		if !ok {
-			return typed, nil, false
+			return typed, nil, false, nil
 		}
-		rewritten, media, changed := rewriteToolOutputMediaValue(content)
+		rewritten, media, changed, err := rewriteToolOutputMediaValue(content, audio)
+		if err != nil {
+			return nil, nil, false, err
+		}
 		if !changed {
-			return typed, nil, false
+			return typed, nil, false, nil
 		}
 		typed["content"] = rewritten
-		return typed, media, true
+		return typed, media, true, nil
 	default:
-		return value, nil, false
+		return value, nil, false, nil
 	}
 }
 
@@ -1019,6 +1058,9 @@ func responsesContentToChatContent(raw json.RawMessage, role string) (json.RawMe
 
 	var obj map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &obj); err == nil {
+		if rawString(obj["type"]) == "input_audio" && role != "user" {
+			return nil, fmt.Errorf("Chat bridge supports input_audio only in user messages or tool output media")
+		}
 		return chatContentFromSingleResponsesPart(rawString(obj["type"]), obj)
 	}
 
@@ -1057,6 +1099,16 @@ func responsesContentPartsToChatContent(rawParts []json.RawMessage, role string)
 				Type:     "image_url",
 				ImageURL: &ChatImageURL{URL: imageURL},
 			})
+		case "input_audio":
+			if role != "user" {
+				return nil, fmt.Errorf("Chat bridge supports input_audio only in user messages or tool output media")
+			}
+			audio, err := responsesAudioToChatPart(rawString(part["audio_url"]), rawString(part["file_id"]))
+			if err != nil {
+				return nil, err
+			}
+			hasNonText = true
+			chatParts = append(chatParts, audio)
 		}
 	}
 
@@ -1077,6 +1129,12 @@ func responsesContentPartsToChatContent(rawParts []json.RawMessage, role string)
 
 func chatContentFromSingleResponsesPart(partType string, part map[string]json.RawMessage) (json.RawMessage, error) {
 	switch partType {
+	case "input_audio":
+		audio, err := responsesAudioToChatPart(rawString(part["audio_url"]), rawString(part["file_id"]))
+		if err != nil {
+			return nil, err
+		}
+		return json.Marshal([]ChatContentPart{audio})
 	case "input_image", "image_url":
 		imageURL := rawString(part["image_url"])
 		if imageURL == "" {

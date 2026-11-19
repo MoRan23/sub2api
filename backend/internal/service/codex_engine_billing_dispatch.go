@@ -55,10 +55,9 @@ func (s *OpenAIGatewayService) prepareCodexEngineBillingDispatch(ctx context.Con
 	if tier := gjson.GetBytes(body, "service_tier").String(); tier != "" {
 		in.Result.ServiceTier = &tier
 	}
-	effort := firstNonEmpty(gjson.GetBytes(body, "reasoning.effort").String(), gjson.GetBytes(body, "reasoning_effort").String())
-	if effort != "" {
-		in.Result.ReasoningEffort = &effort
-	}
+	in.Result.ReasoningEffort = EffectiveOpenAIReasoningEffortForBody(ctx, body, upstreamModel, model)
+	in.Result.RequestedReasoningEffort = RequestedReasoningEffortFromContext(ctx)
+	in.Result.RequestedReasoningEffortResolved = OpenAIReasoningEffortContextResolved(ctx)
 	snapshot, err := s.CaptureCodexEngineBillingSnapshot(ctx, &in)
 	if err != nil {
 		recordCodexEngineBillingSnapshotFailure(c, account, err)

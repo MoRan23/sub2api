@@ -231,8 +231,7 @@ func usageExportEffort(value string) string {
 	case "":
 		return "-"
 	default:
-		first, size := utf8.DecodeRuneInString(value)
-		return string(unicode.ToUpper(first)) + value[size:]
+		return value
 	}
 }
 

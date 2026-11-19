@@ -54,7 +54,7 @@ const (
 	openAICompactSessionSeedKey        = "openai_compact_session_seed"
 	openAIUpstreamEndpointContextKey   = "openai_actual_upstream_endpoint"
 	// codexCLIVersion 是 UA 首段、尾部和 version 头共用的编译期兜底版本。
-	codexCLIVersion = "0.169.0"
+	codexCLIVersion = "0.170.0"
 	// Codex 限额快照仅用于后台展示/诊断，不需要每个成功请求都立即落库。
 	openAICodexSnapshotPersistMinInterval = 30 * time.Second
 	// 配额自动暂停时，超过该时长仍未刷新的 used% 快照视为陈旧，不再据此暂停账号。
@@ -278,8 +278,11 @@ type OpenAIForwardResult struct {
 	// RequestedReasoningEffort is the client-requested effort before mapping.
 	// Empty/nil means it should fall back to ReasoningEffort at persistence.
 	RequestedReasoningEffort *string
-	Stream                   bool
-	OpenAIWSMode             bool
+	// Distinguish an intentionally unknown resolved value from older paths that
+	// still need the handler's ingress fallback. Never expose this internal bit.
+	RequestedReasoningEffortResolved bool `json:"-"`
+	Stream                           bool
+	OpenAIWSMode                     bool
 	// UpstreamTerminalEvent is the normalized terminal event observed on an
 	// upstream Responses WebSocket turn. Empty preserves legacy/non-WS success.
 	UpstreamTerminalEvent string

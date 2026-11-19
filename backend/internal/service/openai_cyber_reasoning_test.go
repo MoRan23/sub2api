@@ -57,9 +57,9 @@ func TestCyberClientUltraAliasDoesNotAddServerReasoningEffort(t *testing.T) {
 	for _, model := range []string{"gpt-5.6-cyber", "gpt-6-cyber"} {
 		body := []byte(fmt.Sprintf(`{"model":%q,"reasoning":{"effort":"ultra"}}`, model))
 		require.Empty(t, normalizeOpenAIReasoningEffortForModel("ultra", model))
-		require.Nil(t, CanonicalRequestedReasoningEffort(body))
+		require.Equal(t, "ultra", *CanonicalRequestedReasoningEffort(body), "opaque wire values remain observable without becoming server tiers")
 		out, changed, err := ApplyReasoningEffortPolicy(body, "max", nil, ReasoningEffortOverLimitDowngrade)
-		require.NoError(t, err)
+		require.Error(t, err, "an opaque value requires a model-scoped mapping under a ceiling")
 		require.False(t, changed)
 		require.Equal(t, body, out, "an unknown raw effort retains the existing passthrough behavior")
 	}

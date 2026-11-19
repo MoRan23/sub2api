@@ -205,6 +205,7 @@ type openAIWSPassthroughUsageMeta struct {
 	serviceTier              atomic.Pointer[string]
 	reasoningEffort          atomic.Pointer[string]
 	requestedReasoningEffort atomic.Pointer[string]
+	effortState              atomic.Pointer[openAIEffortRequestState]
 	requestModel             atomic.Pointer[string]
 	upstreamModel            atomic.Pointer[string]
 
@@ -801,10 +802,11 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	// For OAuth-like accounts, the physical-frame finalizer owns Responses Lite
 	// normalization after the final model and manifest capability are frozen.
 	originalFirstClientMessage := firstClientMessage
-	if next, policyErr := applyOpenAIWSReasoningEffortPolicy(firstClientMessage, hooks); policyErr != nil {
+	effortCtx, effortBody, effortErr := s.prepareOpenAIWSEffort(ctx, c, firstClientMessage, account, hooks)
+	if policyErr := effortErr; policyErr != nil {
 		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, policyErr.Error(), policyErr)
 	} else {
-		firstClientMessage = next
+		ctx, firstClientMessage = effortCtx, effortBody
 	}
 	requestModel := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "model").String())
 	requestPreviousResponseID := strings.TrimSpace(gjson.GetBytes(firstClientMessage, "previous_response_id").String())
@@ -900,6 +902,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	// goroutine）之间同步当前 turn 的 usage metadata。
 	usageMeta.initFromFirstFrame(firstClientMessage, capturedSessionModel)
 	usageMeta.captureRequestedReasoningEffort(originalFirstClientMessage, capturedSessionModel)
+	usageMeta.effortState.Store(currentOpenAIEffortState(ctx))
+	usageMeta.reasoningEffort.Store(effectiveOpenAIEffortForBody(ctx, firstClientMessage, capturedSessionModel))
+	usageMeta.requestedReasoningEffort.Store(RequestedReasoningEffortFromContext(ctx))
 	outboundIdentityEnabled := false
 	outboundIdentityModeEnabled := false
 	var outboundLogicalIdentity OpenAICodexLogicalTurnIdentity
@@ -983,6 +988,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		outboundIdentityEnabled = true
 	}
 	proxyURL := OpenAIOutboundRouteForAccount(c, account).ProxyURL
+	routing := s.prepareOpenAIGuardianRouting(c, account, outboundIdentityPlan, wsURL, proxyURL, headers, firstClientMessage)
 
 	dialer := s.getOpenAIWSPassthroughDialer()
 	if dialer == nil {
@@ -1004,7 +1010,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		if start := s.prepareCodexTelemetryConnect(ctx, account, headers, wsURL, gjson.GetBytes(firstClientMessage, "model").String()); start != nil {
 			connectObserver = start()
 		}
-		upstreamConn, statusCode, handshakeHeaders, err = dialer.Dial(withOpenAIWSTransportAccount(dialCtx, account.ID), wsURL, headers, proxyURL)
+		upstreamConn, statusCode, handshakeHeaders, err = dialer.Dial(withOpenAIGuardianRouting(withOpenAIWSTransportAccount(dialCtx, account.ID), routing), wsURL, headers, proxyURL)
 		if err == nil && upstreamConn == nil {
 			err = errors.New("openai ws dialer returned nil connection")
 		}
@@ -1181,6 +1187,13 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			if daybreakErr != nil {
 				return payload, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unable to prepare websocket Daybreak policy", daybreakErr)
 			}
+			if current := usageMeta.effortState.Load(); current != nil {
+				frozen := *current
+				turnCtx := context.WithValue(ctx, openAIEffortContextKey{}, &frozen)
+				CaptureFinalOpenAIReasoningEffort(turnCtx, payload)
+				usageMeta.effortState.Store(&frozen)
+				usageMeta.reasoningEffort.Store(effectiveOpenAIEffortForBody(turnCtx, nil, gjson.GetBytes(payload, "model").Str, inboundModel))
+			}
 			nextEvidence := beginOpenAIResponseEvidence(c, gjson.GetBytes(payload, "model").String())
 			if firstResponseEvidenceFrame {
 				observeOpenAIResponseEvidenceHeaders(nextEvidence, handshakeHeaders, "connection")
@@ -1297,6 +1310,10 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			}
 			acceptedTurn := false
 			if isResponseCreate {
+				nextRouting := s.prepareOpenAIGuardianRouting(c, account, frameIdentityPlan, wsURL, proxyURL, headers, payload)
+				if openAIGuardianRoutingPinID(nextRouting) != openAIGuardianRoutingPinID(routing) {
+					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusServiceRestart, "guardian parent routing changed; please reconnect", nil)
+				}
 				if !turnLifecycle.beginResponseCreate(clientFrameConn.markTurnStarted) {
 					err := errors.New("overlapping response.create is not supported")
 					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
@@ -1331,13 +1348,19 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			if isResponseCreate {
 				// OAuth-like follow-up payloads remain in their non-Lite shape until
 				// the same final capability decision used by the first physical write.
-				originalResponseCreate := payload
-				if next, policyErr := applyOpenAIWSReasoningEffortPolicy(payload, hooks); policyErr != nil {
+				if gjson.GetBytes(payload, "model").Str == "" {
+					if model := usageMeta.requestModelForFrame(payload); model != "" {
+						payload = s.ReplaceModelInBody(payload, model)
+					}
+				}
+				nextEffortCtx, next, policyErr := s.prepareOpenAIWSEffort(ctx, c, payload, account, hooks)
+				if policyErr != nil {
 					return payload, nil, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, policyErr.Error(), policyErr)
 				} else {
 					payload = next
 				}
-				usageMeta.captureRequestedReasoningEffort(originalResponseCreate)
+				usageMeta.effortState.Store(currentOpenAIEffortState(nextEffortCtx))
+				usageMeta.requestedReasoningEffort.Store(RequestedReasoningEffortFromContext(nextEffortCtx))
 			}
 			turnNo := int(completedTurns.Load()) + 1
 			if turnNo < 2 {
@@ -1417,6 +1440,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			//     service_tier 时按 default 处理，billing 应如实反映。
 			if policyErr == nil && blocked == nil && isResponseCreate {
 				usageMeta.updateFromResponseCreate(out, model, requestModelForThisFrame)
+				turnEffortCtx := context.WithValue(ctx, openAIEffortContextKey{}, usageMeta.effortState.Load())
+				usageMeta.reasoningEffort.Store(effectiveOpenAIEffortForBody(turnEffortCtx, out, model, requestModelForThisFrame))
 				_, actualModel := usageMeta.turnModels(requestModelForThisFrame)
 				SetOpsUpstreamModel(c, actualModel)
 				responseCreateAtCopy := responseCreateAt
@@ -1689,6 +1714,8 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 				}
 				if eventType == "response.created" {
 					activeResponseID = eventResponseID
+					turnEffortCtx := context.WithValue(ctx, openAIEffortContextKey{}, usageMeta.effortState.Load())
+					_ = s.RecordOpenAIResponseEffort(turnEffortCtx, c, nil, eventResponseID, account)
 					failureAccountSideEffectsApplied = false
 				}
 				if (eventType == "error" || eventType == "response.failed") && markOpenAIWSV2PassthroughCyberPolicy(c, payload) {

@@ -134,6 +134,17 @@
                 {{ t("admin.groups.form.reasoningEffortFrom") }}
               </label>
               <Select
+                v-if="supportsCustomReasoningEffortSource(platform)"
+                :id="`${idPrefix}-${pair.id}-source-kind`"
+                :model-value="pair.source_kind"
+                :options="sourceKindOptions"
+                :aria-label="t('admin.groups.form.reasoningEffortSourceKind')"
+                :searchable="false"
+                class="mb-2"
+                @update:model-value="updateSourceKind(group.id, pair.id, $event)"
+              />
+              <Select
+                v-if="pair.source_kind === 'preset'"
                 :id="`${idPrefix}-${pair.id}-from`"
                 :model-value="pair.from"
                 :options="reasoningEffortSourceOptions"
@@ -144,6 +155,21 @@
                 clearable
                 @update:model-value="updatePair(group.id, pair.id, 'from', $event)"
               />
+              <input
+                v-else
+                :id="`${idPrefix}-${pair.id}-from`"
+                :value="pair.from"
+                type="text"
+                :inputmode="pair.source_kind === 'number' ? 'numeric' : 'text'"
+                maxlength="64"
+                autocomplete="off"
+                class="input"
+                :aria-label="t('admin.groups.form.reasoningEffortFrom')"
+                :aria-invalid="showValidation && !!pairErrors(pair.id).from"
+                :placeholder="t(`admin.groups.form.${pair.source_kind === 'number' ? 'reasoningEffortNumberPlaceholder' : 'reasoningEffortCustomPlaceholder'}`)"
+                @input="updatePair(group.id, pair.id, 'from', ($event.target as HTMLInputElement).value)"
+              />
+              <p v-if="pair.source_kind !== 'preset'" class="input-hint mb-0">{{ t('admin.groups.form.reasoningEffortCustomHint') }}</p>
               <p
                 v-if="showValidation && pairErrors(pair.id).from"
                 class="mt-1 text-xs text-red-600 dark:text-red-400"
@@ -218,6 +244,7 @@ import {
   normalizeReasoningEffortMatchType,
   reasoningEffortOptionsForPlatform,
   reasoningEffortSourceOptionsForPlatform,
+  supportsCustomReasoningEffortSource,
   reasoningEffortTargetOptionsForPlatform,
   reasoningEffortMappingDeny,
   reasoningEffortOverLimitDeny,
@@ -225,6 +252,7 @@ import {
   validateReasoningEffortMappings,
   type ReasoningEffortMappingErrorCode,
   type ReasoningEffortMappingRow,
+  type ReasoningEffortMappingPair,
 } from "@/views/admin/groupsReasoningEffort";
 
 const props = defineProps<{
@@ -249,6 +277,14 @@ const reasoningEffortOptions = computed(() =>
 const reasoningEffortSourceOptions = computed(() =>
   reasoningEffortSourceOptionsForPlatform(props.platform),
 );
+const sourceKindOptions = computed(() => {
+  const options = [{ value: 'preset', label: t('admin.groups.form.reasoningEffortSourcePreset') }];
+  if (supportsCustomReasoningEffortSource(props.platform)) options.push(
+    { value: 'custom', label: t('admin.groups.form.reasoningEffortSourceCustom') },
+    { value: 'number', label: t('admin.groups.form.reasoningEffortSourceNumber') },
+  );
+  return options;
+});
 const reasoningEffortTargetOptions = computed(() =>
   reasoningEffortTargetOptionsForPlatform(props.platform).map((option) =>
     option.value === reasoningEffortMappingDeny
@@ -324,6 +360,19 @@ const updateGroup = (
 const onModelInput = (id: string, event: Event) => {
   const target = event.target as HTMLInputElement | null;
   updateGroup(id, "model", target?.value ?? "");
+};
+
+const updateSourceKind = (groupId: string, pairId: string, value: string | number | boolean | null) => {
+  if (value !== 'preset' && value !== 'custom' && value !== 'number') return;
+  emit('update:mappings', props.mappings.map((group) => group.id === groupId ? {
+    ...group,
+    pairs: group.pairs.map((pair): ReasoningEffortMappingPair => pair.id === pairId ? {
+      ...pair,
+      source_kind: value,
+      from_type: value === 'number' ? 'number' : 'string',
+      from: '',
+    } : pair),
+  } : group));
 };
 
 const updatePair = (

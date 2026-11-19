@@ -353,6 +353,9 @@ type ResponsesRequest struct {
 type ResponsesReasoning struct {
 	Effort  string `json:"effort"`            // "low" | "medium" | "high" | "xhigh"
 	Summary string `json:"summary,omitempty"` // "auto" | "concise" | "detailed"
+	// Numeric custom effort retains its uint64 wire type; the string stores its
+	// exact decimal digits without a float64 conversion.
+	EffortIsNumber bool `json:"-"`
 }
 
 // ResponsesText configures text output options in the Responses API.
@@ -418,6 +421,7 @@ type ResponsesContentPart struct {
 	Text                  string          `json:"text,omitempty"`
 	Refusal               string          `json:"refusal,omitempty"`   // type=refusal
 	ImageURL              string          `json:"image_url,omitempty"` // data URI for input_image
+	AudioURL              string          `json:"audio_url,omitempty"` // data URI or remote URL for native Responses
 	Detail                string          `json:"detail,omitempty"`    // image fidelity: auto, low, or high
 
 	// input_file fields.
@@ -774,10 +778,12 @@ type ChatCompletionsRequest struct {
 	Tools               []ChatTool         `json:"tools,omitempty"`
 	ParallelToolCalls   *bool              `json:"parallel_tool_calls,omitempty"`
 	ToolChoice          json.RawMessage    `json:"tool_choice,omitempty"`
-	ReasoningEffort     string             `json:"reasoning_effort,omitempty"` // "low" | "medium" | "high" | "xhigh"
-	ServiceTier         string             `json:"service_tier,omitempty"`
-	Stop                json.RawMessage    `json:"stop,omitempty"` // string or []string
-	ResponseFormat      json.RawMessage    `json:"response_format,omitempty"`
+	// A validated string or json.Number (uint64). Keep the union at the field
+	// level so marshaling never needs an additional full request buffer.
+	ReasoningEffort any             `json:"reasoning_effort,omitempty"`
+	ServiceTier     string          `json:"service_tier,omitempty"`
+	Stop            json.RawMessage `json:"stop,omitempty"` // string or []string
+	ResponseFormat  json.RawMessage `json:"response_format,omitempty"`
 
 	// Legacy function calling (deprecated but still supported)
 	Functions    []ChatFunction  `json:"functions,omitempty"`
@@ -811,6 +817,14 @@ type ChatContentPart struct {
 	Text                  string          `json:"text,omitempty"`
 	ImageURL              *ChatImageURL   `json:"image_url,omitempty"`
 	File                  *ChatFile       `json:"file,omitempty"`
+	InputAudio            *ChatInputAudio `json:"input_audio,omitempty"`
+}
+
+// ChatInputAudio is the provider Chat input_audio payload. Audio is carried as
+// Base64 without decoding or transcoding in protocol bridges.
+type ChatInputAudio struct {
+	Data   string `json:"data"`
+	Format string `json:"format"`
 }
 
 // ChatImageURL contains the URL for an image content part.

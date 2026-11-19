@@ -14,7 +14,9 @@ const (
 // exact matches the full model id, prefix/suffix match a model-id affix.
 // Empty MatchType and empty Model mean the mapping applies to every model.
 type ReasoningEffortMapping struct {
-	From      string `json:"from"`
+	From string `json:"from"`
+	// FromType distinguishes JSON numeric sources from strings. Empty means string.
+	FromType  string `json:"from_type,omitempty"`
 	To        string `json:"to"`
 	MatchType string `json:"match_type,omitempty"`
 	Model     string `json:"model,omitempty"`

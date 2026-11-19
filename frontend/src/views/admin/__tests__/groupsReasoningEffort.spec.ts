@@ -68,19 +68,23 @@ describe("groupsReasoningEffort", () => {
     }
   });
 
-  it("hydrates supported rows and drops stale custom values", () => {
+  it("hydrates standard and model-scoped custom values without losing their type", () => {
     const rows = reasoningEffortMappingsToRows(
       [
         { from: " max ", to: " xhigh " },
-        { from: "ultra", to: "high" },
+        { from: "Custom_MODEL_Effort", to: "high", model: "gpt-example" },
+        { from: "18446744073709551615", from_type: "number", to: "high", model: "gpt-example" },
       ],
       "openai",
     );
 
-    expect(rows).toHaveLength(1);
+    expect(rows).toHaveLength(2);
     expect(reasoningEffortMappingsToAPI(rows)).toEqual([
       { from: "max", to: "xhigh" },
+      { from: "Custom_MODEL_Effort", to: "high", model: "gpt-example", match_type: "exact" },
+      { from: "18446744073709551615", from_type: "number", to: "high", model: "gpt-example", match_type: "exact" },
     ]);
+    expect(validateReasoningEffortMappings(rows)).toEqual({});
   });
 
   it("hydrates and validates none only as a mapping source", () => {
@@ -124,7 +128,7 @@ describe("groupsReasoningEffort", () => {
       to: "low",
     });
     expect(validateReasoningEffortMappings([invalidSource], "openai")).toEqual({
-      [invalidSource.pairs[0].id]: { from: "unsupportedFrom" },
+      [invalidSource.pairs[0].id]: { from: "sourceModelRequired" },
     });
   });
 
@@ -320,11 +324,49 @@ describe("groupsReasoningEffort", () => {
     ]);
   });
 
-  it("rejects custom mappings", () => {
+  it("requires a model scope for unrankable custom mappings", () => {
     const row = createReasoningEffortMappingRow({ from: "ultra", to: "high" });
     expect(validateReasoningEffortMappings([row], "openai")).toEqual({
-      [row.pairs[0].id]: { from: "unsupportedFrom" },
+      [row.pairs[0].id]: { from: "sourceModelRequired" },
     });
+  });
+
+  it('keeps disabled distinct from none and numeric sources distinct from strings', () => {
+    const rows = reasoningEffortMappingsToRows([
+      { from: 'disabled', to: 'deny', model: 'gpt-example' },
+      { from: 'none', to: 'low', model: 'gpt-example' },
+      { from: '42', to: 'medium', model: 'gpt-example' },
+      { from: '00042', from_type: 'number', to: 'high', model: 'gpt-example' },
+      { from: 'Custom', to: 'low', model: 'gpt-example' },
+      { from: 'custom', to: 'high', model: 'gpt-example' },
+    ]);
+    expect(validateReasoningEffortMappings(rows)).toEqual({});
+    expect(reasoningEffortMappingsToAPI(rows).map(({ from, from_type }) => [from, from_type])).toEqual([
+      ['disabled', undefined], ['none', undefined], ['42', undefined], ['42', 'number'], ['Custom', undefined], ['custom', undefined],
+    ]);
+  });
+
+  it.each(['string', 'number'] as const)('rejects custom %s mappings for Anthropic even with a model scope', (from_type) => {
+    const row = createReasoningEffortMappingRow({ from: from_type === 'number' ? '42' : 'disabled', from_type, to: 'high', model: 'claude-example' });
+    expect(validateReasoningEffortMappings([row], 'anthropic')[row.pairs[0].id]).toEqual({ from: 'unsupportedFrom' });
+  });
+
+  it.each(['-1', '+1', '1.5', '1e2', '18446744073709551616', '100000000000000000000'])('rejects invalid numeric source %s', (from) => {
+    const row = createReasoningEffortMappingRow({ from, from_type: 'number', to: 'high', model: 'gpt-example' });
+    expect(validateReasoningEffortMappings([row])[row.pairs[0].id]).toEqual({ from: 'invalidNumericSource' });
+  });
+
+  it('rejects custom values over the source limit without discarding persisted values', () => {
+    const from = 'x'.repeat(65);
+    const rows = reasoningEffortMappingsToRows([{ from, to: 'high', model: 'gpt-example' }]);
+    expect(rows[0].pairs[0].from).toBe(from);
+    expect(validateReasoningEffortMappings(rows)[rows[0].pairs[0].id]).toEqual({ from: 'sourceTooLong' });
+  });
+
+  it('detects duplicate numeric values after canonicalization', () => {
+    const row = createReasoningEffortMappingRow({ from: '42', from_type: 'number', to: 'high', model: 'gpt-example' });
+    row.pairs.push(createReasoningEffortMappingPair({ from: '0042', from_type: 'number', to: 'low' }));
+    expect(validateReasoningEffortMappings([row])).toEqual(Object.fromEntries(row.pairs.map(({ id }) => [id, { from: 'duplicateFrom' }])));
   });
 
   it("normalizes over-limit access control to downgrade or deny", () => {

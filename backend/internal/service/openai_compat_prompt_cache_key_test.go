@@ -97,6 +97,19 @@ func TestDeriveCompatPromptCacheKey_DiffersAcrossSessions(t *testing.T) {
 	require.NotEqual(t, k1, k2, "different first user messages should yield different keys")
 }
 
+func TestDeriveCompatPromptCacheKey_DistinguishesNumericEffort(t *testing.T) {
+	req := &apicompat.ChatCompletionsRequest{
+		Model:    "gpt-6-sol",
+		Messages: []apicompat.ChatMessage{{Role: "user", Content: json.RawMessage(`"hello"`)}},
+	}
+	req.SetReasoningEffort("9007199254740993", false)
+	stringKey := deriveCompatPromptCacheKey(req, req.Model)
+	req.SetReasoningEffort("9007199254740993", true)
+	numericKey := deriveCompatPromptCacheKey(req, req.Model)
+	require.NotEmpty(t, stringKey)
+	require.NotEqual(t, stringKey, numericKey)
+}
+
 func TestDeriveCompatPromptCacheKey_UsesResolvedSparkFamily(t *testing.T) {
 	req := &apicompat.ChatCompletionsRequest{
 		Model: "gpt-5.3-codex-spark",

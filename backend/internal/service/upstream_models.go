@@ -1631,6 +1631,13 @@ func upstreamMetadataFromCapabilityEntry(modelID string, entry upstreamModelCapa
 	if len(levels) == 0 && entry.SupportsThinking != nil && *entry.SupportsThinking {
 		level := "high"
 		fixedLevel := normalizeReasoningLevel(modelID[strings.LastIndex(modelID, "-")+1:])
+		// Provider-declared custom values are preserved, but a model suffix alone
+		// is only evidence for the established built-in effort names.
+		switch fixedLevel {
+		case "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra":
+		default:
+			fixedLevel = ""
+		}
 		if fixedLevel != "" && fixedLevel != "none" {
 			level = fixedLevel
 		} else if entry.ThinkingBudget != nil {
@@ -1746,16 +1753,17 @@ func normalizeReasoningLevels(levels []string) []string {
 }
 
 func normalizeReasoningLevel(level string) string {
-	level = strings.ToLower(strings.TrimSpace(level))
-	switch level {
-	case "off", "disabled":
+	level = strings.TrimSpace(level)
+	switch strings.ToLower(level) {
+	case "off":
 		return "none"
 	case "extra-high", "extra_high":
 		return "xhigh"
-	case "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra":
-		return level
+	case "none", "minimal", "low", "medium", "high", "xhigh", "max", "ultra", "persistent", "disabled":
+		return strings.ToLower(level)
 	default:
-		return ""
+		// Catalog-defined efforts are opaque identifiers, including numeric budgets.
+		return level
 	}
 }
 
@@ -1764,7 +1772,7 @@ func normalizeCodexInputModalities(modalities []string) []string {
 	normalized := make([]string, 0, len(modalities))
 	for _, modality := range modalities {
 		modality = strings.ToLower(strings.TrimSpace(modality))
-		if modality != "text" && modality != "image" {
+		if modality != "text" && modality != "image" && modality != "audio" {
 			continue
 		}
 		if _, exists := seen[modality]; exists {

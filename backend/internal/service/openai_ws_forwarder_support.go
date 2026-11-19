@@ -286,6 +286,7 @@ func (s *OpenAIGatewayService) performOpenAIWSGeneratePrewarm(
 	if prewarmResponseID != "" && stateStore != nil {
 		ttl := s.openAIWSResponseStickyTTL()
 		logOpenAIWSBindResponseAccountWarn(groupID, account.ID, prewarmResponseID, stateStore.BindResponseAccount(ctx, groupID, prewarmResponseID, account.ID, ttl))
+		_ = s.RecordOpenAIResponseEffort(ctx, c, prewarmPayloadJSON, prewarmResponseID, account)
 		stateStore.BindResponseConn(prewarmResponseID, lease.ConnID(), ttl)
 	}
 	logOpenAIWSModeInfo(

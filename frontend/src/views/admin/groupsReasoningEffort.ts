@@ -30,6 +30,7 @@ const reasoningEffortMatchTypes: readonly ReasoningEffortMatchType[] = [
   "prefix",
   "suffix",
 ];
+const sourceTextEncoder = new TextEncoder();
 
 export const reasoningEffortOverLimitDowngrade = "downgrade";
 export const reasoningEffortOverLimitDeny = "deny";
@@ -48,6 +49,10 @@ export function supportsReasoningEffortPolicyPlatform(
   platform: GroupPlatform,
 ): boolean {
   return platform === "anthropic" || platform === "openai" || platform === "composite";
+}
+
+export function supportsCustomReasoningEffortSource(platform: GroupPlatform): boolean {
+  return platform === "openai" || platform === "composite";
 }
 
 export function reasoningEffortOptionsForPlatform(platform: GroupPlatform) {
@@ -131,6 +136,8 @@ export function normalizeReasoningEffortOverLimit(
 export interface ReasoningEffortMappingPair {
   id: string;
   from: string;
+  from_type: 'string' | 'number';
+  source_kind: 'preset' | 'custom' | 'number';
   to: string;
 }
 
@@ -147,6 +154,9 @@ export type ReasoningEffortMappingErrorCode =
   | "duplicateFrom"
   | "duplicateScope"
   | "unsupportedFrom"
+  | "sourceModelRequired"
+  | "sourceTooLong"
+  | "invalidNumericSource"
   | "unsupportedTo"
   | "unsupportedMatchType";
 
@@ -163,12 +173,17 @@ export type ReasoningEffortMappingErrors = Record<
 let nextMappingRowID = 0;
 
 export function createReasoningEffortMappingPair(
-  pair: Partial<Pick<ReasoningEffortMapping, "from" | "to">> = {},
+  pair: Partial<Pick<ReasoningEffortMapping, "from" | "from_type" | "to">> = {},
 ): ReasoningEffortMappingPair {
   nextMappingRowID += 1;
   return {
     id: `reasoning-effort-pair-${nextMappingRowID}`,
     from: pair.from ?? "",
+    from_type: pair.from_type ?? "string",
+    source_kind: pair.from_type === "number"
+      ? "number"
+      : pair.from && !normalizeReasoningEffortSourceForPlatform("openai", pair.from)
+        ? "custom" : "preset",
     to: pair.to ?? "",
   };
 }
@@ -186,6 +201,7 @@ export function createReasoningEffortMappingRow(
     pairs: [
       createReasoningEffortMappingPair({
         from: mapping.from,
+        from_type: mapping.from_type,
         to: mapping.to,
       }),
     ],
@@ -211,10 +227,9 @@ export function reasoningEffortMappingsToRows(
   const indexByScope = new Map<string, number>();
 
   (mappings ?? []).forEach((mapping) => {
-    const from = normalizeReasoningEffortSourceForPlatform(
-      platform,
-      mapping.from,
-    );
+    const from = mapping.from_type === "number"
+      ? mapping.from.trim()
+      : normalizeReasoningEffortSourceForPlatform(platform, mapping.from) || mapping.from.trim();
     const to = normalizeReasoningEffortTargetForPlatform(platform, mapping.to);
     if (!from || !to) return;
 
@@ -224,13 +239,14 @@ export function reasoningEffortMappingsToRows(
     const existingIndex = indexByScope.get(scope);
     if (existingIndex !== undefined) {
       groups[existingIndex].pairs.push(
-        createReasoningEffortMappingPair({ from, to }),
+        createReasoningEffortMappingPair({ from, from_type: mapping.from_type, to }),
       );
       return;
     }
 
     const group = createReasoningEffortMappingRow({
       from,
+      from_type: mapping.from_type,
       to,
       match_type: matchType,
       model,
@@ -249,9 +265,10 @@ export function reasoningEffortMappingsToAPI(
     const model = row.model.trim();
     return row.pairs.map((pair) => {
       const mapping: ReasoningEffortMapping = {
-        from: pair.from.trim(),
+        from: pair.from_type === "number" ? normalizeNumericSource(pair.from) || pair.from.trim() : pair.from.trim(),
         to: pair.to.trim(),
       };
+      if (pair.from_type === "number") mapping.from_type = "number";
       if (model) {
         mapping.match_type =
           normalizeReasoningEffortMatchType(row.match_type) || "exact";
@@ -285,10 +302,19 @@ export function validateReasoningEffortMappings(
       const to = pair.to.trim();
       if (!from) {
         errors[pair.id] = { ...errors[pair.id], from: "fromRequired" };
-      } else if (!normalizeReasoningEffortSourceForPlatform(platform, from)) {
+      } else if (!supportsReasoningEffortPolicyPlatform(platform)) {
         errors[pair.id] = { ...errors[pair.id], from: "unsupportedFrom" };
+      } else if (!supportsCustomReasoningEffortSource(platform) && (pair.from_type === "number" || !normalizeReasoningEffortSourceForPlatform(platform, from))) {
+        errors[pair.id] = { ...errors[pair.id], from: "unsupportedFrom" };
+      } else if (pair.from_type === "number" && !normalizeNumericSource(from)) {
+        errors[pair.id] = { ...errors[pair.id], from: "invalidNumericSource" };
+      } else if (sourceTextEncoder.encode(from).length > 64) {
+        errors[pair.id] = { ...errors[pair.id], from: "sourceTooLong" };
+      } else if (!row.model.trim() && (pair.from_type === "number" || !normalizeReasoningEffortSourceForPlatform(platform, from))) {
+        errors[pair.id] = { ...errors[pair.id], from: "sourceModelRequired" };
       } else {
-        const key = `${scope}\0${from.toLowerCase()}`;
+        const sourceKey = pair.from_type === "number" ? normalizeNumericSource(from) : normalizeReasoningEffortSourceForPlatform(platform, from) || from;
+        const key = `${scope}\0${pair.from_type}\0${sourceKey}`;
         sourcePairs.set(key, [...(sourcePairs.get(key) ?? []), pair]);
       }
       if (!to) {
@@ -314,4 +340,12 @@ export function validateReasoningEffortMappings(
   });
 
   return errors;
+}
+
+/** Decimal uint64 without converting through JavaScript's lossy Number type. */
+function normalizeNumericSource(value: string): string {
+  const raw = value.trim();
+  if (raw.length > 64 || !/^\d+$/.test(raw)) return "";
+  const normalized = raw.replace(/^0+(?=\d)/, "");
+  return normalized.length < 20 || (normalized.length === 20 && normalized <= "18446744073709551615") ? normalized : "";
 }

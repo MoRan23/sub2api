@@ -6,6 +6,14 @@ import {
 } from '@/utils/format'
 
 describe('formatReasoningEffort', () => {
+  it('preserves custom scalar spelling and full length', () => {
+    expect(formatReasoningEffort('model_specific_effort_with_more_than_twenty_characters')).toBe('model_specific_effort_with_more_than_twenty_characters')
+    expect(formatReasoningEffort('18446744073709551615')).toBe('18446744073709551615')
+    expect(formatReasoningEffort('disabled')).toBe('disabled')
+    expect(formatReasoningEffort('m_ax')).toBe('m_ax')
+    expect(formatReasoningEffort('none')).toBe('None')
+    expect(formatReasoningEffortMapping('Custom-A', 'custom_a')).toBe('Custom-A → custom_a')
+  })
   it('title-cases known effort values', () => {
     expect(formatReasoningEffort('max')).toBe('Max')
     expect(formatReasoningEffort('x-high')).toBe('XHigh')

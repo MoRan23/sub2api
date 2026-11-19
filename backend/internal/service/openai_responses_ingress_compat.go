@@ -132,7 +132,7 @@ func convertLegacyResponsesMessages(cfg *config.Config, body []byte) (convertedL
 	converted.temperature = responsesRequest.Temperature
 	converted.topP = responsesRequest.TopP
 	converted.serviceTier = strings.TrimSpace(responsesRequest.ServiceTier)
-	converted.hasReasoningEffort = strings.TrimSpace(chatRequest.ReasoningEffort) != ""
+	converted.hasReasoningEffort = strings.TrimSpace(chatRequest.ReasoningEffortText()) != ""
 	if responsesRequest.Reasoning != nil {
 		converted.reasoning = responsesRequest.Reasoning
 	}

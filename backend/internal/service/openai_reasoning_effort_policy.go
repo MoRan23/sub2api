@@ -4,11 +4,11 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"strconv"
 	"strings"
 
 	"github.com/Wei-Shaw/sub2api/internal/domain"
 	"github.com/tidwall/gjson"
-	"github.com/tidwall/sjson"
 )
 
 const (
@@ -108,7 +108,8 @@ func IsReasoningEffortPolicyDenied(err error) bool {
 		return true
 	}
 	var mappingDenied *ReasoningEffortMappingDeniedError
-	return errors.As(err, &mappingDenied)
+	var continuation *ReasoningEffortContinuationError
+	return errors.As(err, &mappingDenied) || errors.As(err, &continuation)
 }
 
 var reasoningEffortSeparatorRemover = strings.NewReplacer("-", "", "_", "", " ", "")
@@ -274,63 +275,52 @@ func requestModelMatchesReasoningEffortMapping(requestModel, matchType, mappingM
 }
 
 func selectReasoningEffortMapping(mappings []ReasoningEffortMapping, from, requestModel string) (ReasoningEffortMapping, bool) {
-	type candidate struct {
-		mapping       ReasoningEffortMapping
-		matchStrength int
-		patternLen    int
-		index         int
+	return selectTypedReasoningEffortMapping(mappings, OpenAIEffortValue{Type: "string", Value: from}, requestModel)
+}
+
+func selectTypedReasoningEffortMapping(mappings []ReasoningEffortMapping, from OpenAIEffortValue, requestModel string) (ReasoningEffortMapping, bool) {
+	var best ReasoningEffortMapping
+	bestStrength, bestLength := 0, 0
+	canonical := from.Value
+	if from.Type == "string" {
+		if known := normalizeReasoningEffortMappingSource(canonical); known != "" {
+			canonical = known
+		}
 	}
-	candidates := make([]candidate, 0, len(mappings))
-	for i, mapping := range mappings {
-		if normalizeReasoningEffortMappingSource(mapping.From) != from {
+	for _, mapping := range mappings {
+		kind := mapping.FromType
+		if kind == "" {
+			kind = "string"
+		}
+		if kind != from.Type {
+			continue
+		}
+		source := mapping.From
+		if kind == "string" {
+			if known := normalizeReasoningEffortMappingSource(source); known != "" {
+				source = known
+			}
+		}
+		if source != canonical {
 			continue
 		}
 		model := strings.TrimSpace(mapping.Model)
 		matchType, err := normalizeReasoningEffortMatchType(mapping.MatchType, model)
-		if err != nil {
+		if err != nil || !requestModelMatchesReasoningEffortMapping(requestModel, matchType, model) {
 			continue
 		}
-		if !requestModelMatchesReasoningEffortMapping(requestModel, matchType, model) {
-			continue
-		}
-		strength := 1
-		patternLen := 0
+		strength, length := 1, 0
 		switch matchType {
 		case domain.ReasoningEffortMatchExact:
 			strength = 3
 		case domain.ReasoningEffortMatchPrefix, domain.ReasoningEffortMatchSuffix:
-			strength = 2
-			patternLen = len(strings.ToLower(model))
+			strength, length = 2, len(model)
 		}
-		candidates = append(candidates, candidate{
-			mapping:       mapping,
-			matchStrength: strength,
-			patternLen:    patternLen,
-			index:         i,
-		})
-	}
-	if len(candidates) == 0 {
-		return ReasoningEffortMapping{}, false
-	}
-	best := candidates[0]
-	for _, item := range candidates[1:] {
-		if item.matchStrength != best.matchStrength {
-			if item.matchStrength > best.matchStrength {
-				best = item
-			}
-			continue
-		}
-		if item.patternLen != best.patternLen {
-			if item.patternLen > best.patternLen {
-				best = item
-			}
-			continue
-		}
-		if item.index < best.index {
-			best = item
+		if strength > bestStrength || (strength == bestStrength && length > bestLength) {
+			best, bestStrength, bestLength = mapping, strength, length
 		}
 	}
-	return best.mapping, true
+	return best, bestStrength > 0
 }
 
 // NormalizeReasoningEffortMappings validates group mapping rules against the
@@ -345,7 +335,24 @@ func NormalizeReasoningEffortMappings(platform string, raw []ReasoningEffortMapp
 	normalized := make([]ReasoningEffortMapping, 0, len(raw))
 	seen := make(map[string]struct{}, len(raw))
 	for i, mapping := range raw {
-		from := normalizeReasoningEffortMappingSource(mapping.From)
+		kind := strings.TrimSpace(mapping.FromType)
+		if kind == "" {
+			kind = "string"
+		}
+		if kind != "string" && kind != "number" {
+			return nil, fmt.Errorf("reasoning effort mapping %d has invalid source type", i+1)
+		}
+		from := strings.TrimSpace(mapping.From)
+		known := normalizeReasoningEffortMappingSource(from)
+		if kind == "number" {
+			number, err := strconv.ParseUint(from, 10, 64)
+			if err != nil || strings.ContainsAny(from, "+-.eE") {
+				return nil, fmt.Errorf("reasoning effort mapping %d requires a uint64 source", i+1)
+			}
+			from = strconv.FormatUint(number, 10)
+		} else if known != "" {
+			from = known
+		}
 		to := normalizeReasoningEffortMappingTarget(mapping.To)
 		if from == "" || to == "" {
 			return nil, fmt.Errorf("reasoning effort mapping %d contains an empty or unknown value", i+1)
@@ -353,7 +360,15 @@ func NormalizeReasoningEffortMappings(platform string, raw []ReasoningEffortMapp
 		if len(from) > maxReasoningEffortValueLen || len(to) > maxReasoningEffortValueLen {
 			return nil, fmt.Errorf("reasoning effort mapping %d values cannot exceed %d characters", i+1, maxReasoningEffortValueLen)
 		}
-		if from != "none" {
+		opaque := kind == "number" || known == ""
+		if opaque {
+			if platform != PlatformOpenAI && platform != PlatformComposite {
+				return nil, fmt.Errorf("custom reasoning effort mappings require OpenAI or Composite")
+			}
+			if strings.TrimSpace(mapping.Model) == "" {
+				return nil, fmt.Errorf("reasoning effort mapping %d custom source requires an explicit model scope", i+1)
+			}
+		} else if from != "none" {
 			if _, err := normalizeMaxReasoningEffortForPlatform(platform, from); err != nil {
 				return nil, fmt.Errorf("reasoning effort mapping %d source: %w", i+1, err)
 			}
@@ -384,7 +399,7 @@ func NormalizeReasoningEffortMappings(platform string, raw []ReasoningEffortMapp
 		if err != nil {
 			return nil, fmt.Errorf("reasoning effort mapping %d: %w", i+1, err)
 		}
-		key := reasoningEffortMappingDuplicateKey(from, matchType, model)
+		key := kind + ":" + reasoningEffortMappingDuplicateKey(from, matchType, model)
 		if _, exists := seen[key]; exists {
 			if model == "" {
 				return nil, fmt.Errorf("duplicate reasoning effort mapping source %q", from)
@@ -394,6 +409,7 @@ func NormalizeReasoningEffortMappings(platform string, raw []ReasoningEffortMapp
 		seen[key] = struct{}{}
 		normalized = append(normalized, ReasoningEffortMapping{
 			From:      from,
+			FromType:  strings.TrimSpace(mapping.FromType),
 			To:        to,
 			MatchType: matchType,
 			Model:     model,
@@ -476,7 +492,7 @@ func ApplyOpenAIReasoningEffortPolicyFromContext(ctx context.Context, body []byt
 	if !ok {
 		return body, false, nil
 	}
-	return ApplyOpenAIReasoningEffortPolicy(body, policy.maxEffort, policy.mappings, policy.overLimit)
+	return applyEffectiveOpenAIEffortPolicy(ctx, body, policy.maxEffort, policy.mappings, policy.overLimit)
 }
 
 func mapReasoningEffort(raw string, mappings []ReasoningEffortMapping, requestModel string) (string, bool) {
@@ -521,55 +537,7 @@ func sanitizeGroupReasoningEffortPolicy(group *Group) {
 // so upstream defaults stay in control. It understands both OpenAI and
 // Anthropic request field shapes.
 func ApplyReasoningEffortPolicy(body []byte, maxEffort string, mappings []ReasoningEffortMapping, overLimit string) ([]byte, bool, error) {
-	maxRank, hasMax := reasoningEffortRank(maxEffort)
-	if len(body) == 0 || (!hasMax && len(mappings) == 0) {
-		return body, false, nil
-	}
-	deny := hasMax && NormalizeMaxReasoningEffortOverLimit(overLimit) == ReasoningEffortOverLimitDeny
-	canonicalMax := NormalizeMaxReasoningEffort(maxEffort)
-
-	requestModel := strings.TrimSpace(gjson.GetBytes(body, "model").String())
-	result := body
-	changed := false
-	for _, path := range []string{"reasoning.effort", "reasoning_effort", "output_config.effort"} {
-		field := gjson.GetBytes(result, path)
-		if !field.Exists() || field.Type != gjson.String {
-			continue
-		}
-		original := strings.TrimSpace(field.String())
-		if original == "" {
-			continue
-		}
-
-		effective, mapped := mapReasoningEffort(original, mappings, requestModel)
-		if mapped && isReasoningEffortMappingDeny(effective) {
-			requested := normalizeReasoningEffortMappingSource(original)
-			if requested == "" {
-				requested = original
-			}
-			return body, false, &ReasoningEffortMappingDeniedError{Requested: requested}
-		}
-		if currentRank, recognized := reasoningEffortRank(effective); recognized {
-			effective = NormalizeMaxReasoningEffort(effective)
-			if hasMax && currentRank > maxRank {
-				if deny {
-					return body, false, &ReasoningEffortOverLimitError{Requested: effective, Max: canonicalMax}
-				}
-				effective = canonicalMax
-			}
-		}
-		if effective == original {
-			continue
-		}
-
-		updated, err := sjson.SetBytes(result, path, effective)
-		if err != nil {
-			continue
-		}
-		result = updated
-		changed = true
-	}
-	return result, changed, nil
+	return applyEffectiveOpenAIEffortPolicy(context.Background(), body, maxEffort, mappings, overLimit)
 }
 
 func applyOpenAIWSReasoningEffortPolicy(payload []byte, hooks *OpenAIWSIngressHooks) ([]byte, error) {

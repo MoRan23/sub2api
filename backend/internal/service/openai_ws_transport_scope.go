@@ -53,5 +53,9 @@ func openAIWSAcquireCompatibility(req openAIWSAcquireRequest) openAIWSHandshakeC
 		accountID = req.Account.ID
 	}
 	key.transportScope = newOpenAIWSTransportScope(accountID, req.WSURL, req.ProxyURL)
+	key.parentPinID = openAIGuardianRoutingPinID(req.Routing)
+	if req.Routing != nil {
+		key.routingScope = req.Routing.scope
+	}
 	return key
 }

@@ -117,7 +117,7 @@ func bindRequestedReasoningEffort(c *gin.Context, body []byte, model string) {
 }
 
 func stampOpenAIRequestedReasoningEffort(result *service.OpenAIForwardResult, c *gin.Context) {
-	if result == nil || result.RequestedReasoningEffort != nil {
+	if result == nil || result.RequestedReasoningEffort != nil || result.RequestedReasoningEffortResolved {
 		return
 	}
 	if c == nil || c.Request == nil {
@@ -133,13 +133,22 @@ func stampForwardRequestedReasoningEffort(result *service.ForwardResult, request
 	result.RequestedReasoningEffort = requested
 }
 
-func applyOpenAIReasoningEffortPolicyForRequest(c *gin.Context, apiKey *service.APIKey, body []byte) ([]byte, bool, error) {
+func applyOpenAIReasoningEffortPolicyForRequest(c *gin.Context, apiKey *service.APIKey, body []byte, gateways ...*service.OpenAIGatewayService) ([]byte, bool, error) {
 	bindRequestedReasoningEffort(c, body, strings.TrimSpace(gjson.GetBytes(body, "model").String()))
 	maxEffort, mappings, overLimit, ok := openAIReasoningEffortPolicyForRequest(c, apiKey)
 	if !ok {
 		return body, false, nil
 	}
-	return service.ApplyOpenAIReasoningEffortPolicy(body, maxEffort, mappings, overLimit)
+	if c == nil || c.Request == nil || len(gateways) == 0 {
+		return service.ApplyOpenAIReasoningEffortPolicy(body, maxEffort, mappings, overLimit)
+	}
+	ctx := service.WithOpenAIReasoningEffortPolicy(c.Request.Context(), maxEffort, mappings, overLimit)
+	ctx, err := gateways[0].PrepareOpenAIReasoningEffortContext(ctx, c, body, nil)
+	c.Request = c.Request.WithContext(ctx)
+	if err != nil {
+		return body, false, err
+	}
+	return service.ApplyOpenAIReasoningEffortPolicyFromContext(ctx, body)
 }
 
 func respondOpenAIReasoningEffortPolicyError(c *gin.Context, err error, write func(*gin.Context, int, string, string)) {

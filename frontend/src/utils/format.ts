@@ -266,7 +266,10 @@ export function getBrowserTimeZone(): string {
  * @returns 格式化后的字符串（Low / Medium / High / Xhigh），无值返回 "-"
  */
 function normalizeReasoningEffortKey(effort: string | null | undefined): string {
-  return (effort ?? '').toString().trim().toLowerCase().replace(/[-_\s]/g, '')
+  const raw = (effort ?? '').toString().trim()
+  const normalized = raw.toLowerCase()
+  if (['x-high', 'x_high', 'x high', 'extrahigh', 'extra-high', 'extra_high', 'extra high'].includes(normalized)) return 'xhigh'
+  return ['none', 'minimal', 'low', 'medium', 'high', 'xhigh', 'max'].includes(normalized) ? normalized : raw
 }
 
 export function formatReasoningEffort(effort: string | null | undefined): string {
@@ -287,11 +290,11 @@ export function formatReasoningEffort(effort: string | null | undefined): string
     case 'max':
       return 'Max'
     case 'none':
+      return 'None'
     case 'minimal':
-      return '-'
+      return 'Minimal'
     default:
-      // best-effort: Title-case first letter
-      return raw.length > 1 ? raw[0].toUpperCase() + raw.slice(1) : raw.toUpperCase()
+      return raw
   }
 }
 

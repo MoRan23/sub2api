@@ -92,7 +92,7 @@
         </template>
 
         <template #cell-reasoning_effort="{ row }">
-          <div v-if="hasReasoningEffortMapping(row)" data-testid="reasoning-effort-cell" class="space-y-0.5 text-xs">
+          <div v-if="hasReasoningEffortMapping(row)" data-testid="reasoning-effort-cell" class="max-w-48 space-y-0.5 whitespace-normal break-all text-xs">
             <div class="font-medium text-gray-900 dark:text-white">
               {{ formatReasoningEffort(row.reasoning_effort) }}
             </div>
@@ -100,7 +100,7 @@
               <span class="mr-0.5">↳</span>{{ formatReasoningEffort(row.upstream_reasoning_effort) }}
             </div>
           </div>
-          <span v-else data-testid="reasoning-effort-cell" class="text-sm text-gray-900 dark:text-white">
+          <span v-else data-testid="reasoning-effort-cell" class="inline-block max-w-48 whitespace-normal break-all text-sm text-gray-900 dark:text-white">
             {{ formatReasoningEffort(row.reasoning_effort) }}
           </span>
         </template>

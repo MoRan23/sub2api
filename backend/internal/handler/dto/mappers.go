@@ -846,8 +846,11 @@ func adminUpstreamReasoningEffort(l *service.UsageLog) *string {
 		return nil
 	}
 	requested := userFacingReasoningEffort(l)
-	if requested != nil && service.NormalizeMaxReasoningEffort(*requested) == service.NormalizeMaxReasoningEffort(forwarded) {
-		return nil
+	if requested != nil {
+		normalized := service.NormalizeMaxReasoningEffort(*requested)
+		if *requested == forwarded || (normalized != "" && normalized == service.NormalizeMaxReasoningEffort(forwarded)) {
+			return nil
+		}
 	}
 	return &forwarded
 }

@@ -33,6 +33,10 @@ type UsageLog struct {
 	RequestID string `json:"request_id,omitempty"`
 	// Model holds the value of the "model" field.
 	Model string `json:"model,omitempty"`
+	// ReasoningEffort holds the value of the "reasoning_effort" field.
+	ReasoningEffort *string `json:"reasoning_effort,omitempty"`
+	// RequestedReasoningEffort holds the value of the "requested_reasoning_effort" field.
+	RequestedReasoningEffort *string `json:"requested_reasoning_effort,omitempty"`
 	// RequestedModel holds the value of the "requested_model" field.
 	RequestedModel *string `json:"requested_model,omitempty"`
 	// UpstreamModel holds the value of the "upstream_model" field.
@@ -214,7 +218,7 @@ func (*UsageLog) scanValues(columns []string) ([]any, error) {
 			values[i] = new(sql.NullFloat64)
 		case usagelog.FieldID, usagelog.FieldUserID, usagelog.FieldAPIKeyID, usagelog.FieldAccountID, usagelog.FieldChannelID, usagelog.FieldGroupID, usagelog.FieldSubscriptionID, usagelog.FieldInputTokens, usagelog.FieldOutputTokens, usagelog.FieldCacheCreationTokens, usagelog.FieldCacheReadTokens, usagelog.FieldCacheCreation5mTokens, usagelog.FieldCacheCreation1hTokens, usagelog.FieldCacheCreation30mTokens, usagelog.FieldCacheCreation12hTokens, usagelog.FieldBillingType, usagelog.FieldDurationMs, usagelog.FieldFirstTokenMs, usagelog.FieldImageCount, usagelog.FieldVideoCount, usagelog.FieldVideoDurationSeconds:
 			values[i] = new(sql.NullInt64)
-		case usagelog.FieldRequestID, usagelog.FieldModel, usagelog.FieldRequestedModel, usagelog.FieldUpstreamModel, usagelog.FieldUpstreamResponseModel, usagelog.FieldModelMappingChain, usagelog.FieldBillingTier, usagelog.FieldBillingMode, usagelog.FieldUserAgent, usagelog.FieldIPAddress, usagelog.FieldImageSize, usagelog.FieldImageInputSize, usagelog.FieldImageOutputSize, usagelog.FieldImageSizeSource, usagelog.FieldVideoResolution:
+		case usagelog.FieldRequestID, usagelog.FieldModel, usagelog.FieldReasoningEffort, usagelog.FieldRequestedReasoningEffort, usagelog.FieldRequestedModel, usagelog.FieldUpstreamModel, usagelog.FieldUpstreamResponseModel, usagelog.FieldModelMappingChain, usagelog.FieldBillingTier, usagelog.FieldBillingMode, usagelog.FieldUserAgent, usagelog.FieldIPAddress, usagelog.FieldImageSize, usagelog.FieldImageInputSize, usagelog.FieldImageOutputSize, usagelog.FieldImageSizeSource, usagelog.FieldVideoResolution:
 			values[i] = new(sql.NullString)
 		case usagelog.FieldCreatedAt:
 			values[i] = new(sql.NullTime)
@@ -268,6 +272,20 @@ func (_m *UsageLog) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field model", values[i])
 			} else if value.Valid {
 				_m.Model = value.String
+			}
+		case usagelog.FieldReasoningEffort:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field reasoning_effort", values[i])
+			} else if value.Valid {
+				_m.ReasoningEffort = new(string)
+				*_m.ReasoningEffort = value.String
+			}
+		case usagelog.FieldRequestedReasoningEffort:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field requested_reasoning_effort", values[i])
+			} else if value.Valid {
+				_m.RequestedReasoningEffort = new(string)
+				*_m.RequestedReasoningEffort = value.String
 			}
 		case usagelog.FieldRequestedModel:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -639,6 +657,16 @@ func (_m *UsageLog) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("model=")
 	builder.WriteString(_m.Model)
+	builder.WriteString(", ")
+	if v := _m.ReasoningEffort; v != nil {
+		builder.WriteString("reasoning_effort=")
+		builder.WriteString(*v)
+	}
+	builder.WriteString(", ")
+	if v := _m.RequestedReasoningEffort; v != nil {
+		builder.WriteString("requested_reasoning_effort=")
+		builder.WriteString(*v)
+	}
 	builder.WriteString(", ")
 	if v := _m.RequestedModel; v != nil {
 		builder.WriteString("requested_model=")

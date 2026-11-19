@@ -85,7 +85,7 @@ func (h *GatewayHandler) ChatCompletions(c *gin.Context) {
 	if rejectSystemOneOnlyPlatform(c, apiKey, h.chatCompletionsErrorResponse) {
 		return
 	}
-	if cappedBody, changed, err := applyOpenAIReasoningEffortPolicyForRequest(c, apiKey, body); err != nil {
+	if cappedBody, changed, err := applyOpenAIReasoningEffortPolicyForRequest(c, apiKey, body, h.openAIGatewayService); err != nil {
 		respondOpenAIReasoningEffortPolicyError(c, err, h.chatCompletionsErrorResponse)
 		return
 	} else if changed {

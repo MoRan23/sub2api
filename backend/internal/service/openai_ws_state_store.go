@@ -101,6 +101,8 @@ type defaultOpenAIWSStateStore struct {
 	responseToAccount    map[string]openAIWSAccountBinding
 	responseOwnerMu      sync.RWMutex
 	responseOwners       map[string]openAIHTTPResponseOwnerBinding
+	responseEffortMu     sync.RWMutex
+	responseEfforts      map[string]openAIResponseEffortBinding
 	responseToConnMu     sync.RWMutex
 	responseToConn       map[string]openAIWSConnBinding
 	sessionToTurnStateMu sync.RWMutex
@@ -512,6 +514,10 @@ func (s *defaultOpenAIWSStateStore) maybeCleanup() {
 	s.responseOwnerMu.Lock()
 	cleanupExpiredHTTPResponseOwnerBindings(s.responseOwners, now, openAIWSStateStoreCleanupMaxPerMap)
 	s.responseOwnerMu.Unlock()
+
+	s.responseEffortMu.Lock()
+	cleanupExpiredResponseEffortBindings(s.responseEfforts, now, openAIWSStateStoreCleanupMaxPerMap)
+	s.responseEffortMu.Unlock()
 
 	s.responseToConnMu.Lock()
 	cleanupExpiredConnBindings(s.responseToConn, now, openAIWSStateStoreCleanupMaxPerMap)

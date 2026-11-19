@@ -104,7 +104,9 @@ func newCtxPoolResumeHarnessForAccount(t *testing.T, events [][]byte, replace, o
 		defer conn.CloseNow()
 		c, _ := gin.CreateTestContext(httptest.NewRecorder())
 		c.Request = r.Clone(r.Context())
-		c.Set("api_key", &APIKey{ID: 88703})
+		// Real authenticated WS requests always carry the owning user. Response
+		// continuation state must never be stored under an anonymous shared owner.
+		c.Set("api_key", &APIKey{ID: 88703, UserID: 88704})
 		readCtx, cancel := context.WithTimeout(r.Context(), 3*time.Second)
 		_, firstMessage, err := conn.Read(readCtx)
 		cancel()

@@ -22,8 +22,14 @@ import (
 func ptrUint64(v uint64) *uint64 { return &v }
 
 // Forward forwards request to OpenAI API
-func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (*OpenAIForwardResult, error) {
+func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, account *Account, body []byte) (forwardResult *OpenAIForwardResult, forwardResultErr error) {
+	defer func() { freezeOpenAIForwardRequestedReasoningEffort(forwardResult, ctx) }()
 	if account.IsCodexEngine() {
+		var effortErr error
+		ctx, effortErr = s.PrepareOpenAIReasoningEffortContext(ctx, c, body, account)
+		if effortErr != nil {
+			return nil, writeOpenAIHTTPReasoningContinuationError(c, effortErr)
+		}
 		endpoint := "/v1/responses"
 		if IsOpenAIResponsesCompactPath(c) {
 			endpoint += "/compact"
@@ -34,6 +40,10 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 	ctx, account, scopeErr := s.prepareOpenAIOAuthRequestScope(ctx, c, account, body)
 	if scopeErr != nil {
 		return nil, scopeErr
+	}
+	ctx, effortErr := s.PrepareOpenAIReasoningEffortContext(ctx, c, body, account)
+	if effortErr != nil {
+		return nil, writeOpenAIHTTPReasoningContinuationError(c, effortErr)
 	}
 	if account != nil && account.IsOpenAIOAuth() {
 		s.captureOpenAIRequestIntegrity(ctx, c, "responses", body)
@@ -312,7 +322,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		}
 		// 透传分支只需要轻量提取字段，避免热路径全量 Unmarshal。
 		mappedModel := account.GetMappedModel(reqModel)
-		reasoningEffort := extractOpenAIReasoningEffortFromBody(body, mappedModel)
+		reasoningEffort := EffectiveOpenAIReasoningEffortForBody(ctx, body, mappedModel)
 		// 国产模型默认 effort 补充：也要用 mappedModel 判定是否是 passback-required 上游。
 		reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, body, mappedModel)
 		return s.forwardOpenAIPassthrough(
@@ -1055,7 +1065,7 @@ func (s *OpenAIGatewayService) Forward(ctx context.Context, c *gin.Context, acco
 		return nil, wsErr
 	}
 
-	reasoningEffort := extractOpenAIReasoningEffortFromBody(body, upstreamModel, billingModel, originalModel)
+	reasoningEffort := EffectiveOpenAIReasoningEffortForBody(ctx, body, upstreamModel, billingModel, originalModel)
 	// 国产模型默认 effort 补充：此处 reqModel 已被 mapping 重写为 billingModel。
 	reasoningEffort = ApplyThinkingEnabledFallback(reasoningEffort, body, reqModel)
 	reasoningEffortValue := ""
@@ -1792,6 +1802,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestWithOptions(
 	if account.Platform == PlatformOpenAI {
 		req = ApplyOpenAIRequestPolicy(req, s.settingService)
 	}
+	CaptureFinalOpenAIReasoningEffort(ctx, body)
 	return req, nil
 }
 

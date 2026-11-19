@@ -76,6 +76,7 @@ type openAIWSAcquireRequest struct {
 	// UUIDv7 session/thread pair used by the handshake. Empty preserves the
 	// legacy account+beta-features pooling behavior.
 	IdentityDigest string
+	Routing        *openAIGuardianRoutingRequest
 	// HeadersFactory is evaluated inside dialConn. It exists so credentials
 	// whose authorization is per-dial (Agent Identity) are never cached in
 	// lastAcquire or delayed prewarm state.
@@ -102,6 +103,9 @@ type openAIWSHandshakeCompatibilityKey struct {
 	betaFeatures   string
 	timingMetrics  string
 	guardian       string
+	parentPinID    string
+	routingScope   [32]byte
+	originator     string
 	identityDigest string
 	residency      string
 	transportScope openAIWSTransportScope
@@ -865,7 +869,7 @@ func (c *openAIWSConn) matchesHandshakeCompatibility(compatibility openAIWSHands
 	// pre-V2 mirror fields instead of dialing it through the pool.
 	return c.handshakeCompatibility == (openAIWSHandshakeCompatibilityKey{}) &&
 		c.betaFeatures == compatibility.betaFeatures &&
-		c.identityDigest == compatibility.identityDigest && compatibility.residency == "" && compatibility.timingMetrics == "" && compatibility.guardian == ""
+		c.identityDigest == compatibility.identityDigest && compatibility.residency == "" && compatibility.timingMetrics == "" && compatibility.guardian == "" && compatibility.parentPinID == "" && compatibility.originator == "" && compatibility.routingScope == ([32]byte{})
 }
 
 // A timing request is advisory and fixed at handshake. A continuation pinned to
@@ -2302,6 +2306,7 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 		}
 	}
 	ctx = withOpenAIWSTransportAccount(ctx, req.Account.ID)
+	ctx = withOpenAIGuardianRouting(ctx, req.Routing)
 	var connectObserver *CodexTelemetryConnectObserver
 	if req.ConnectObserver != nil {
 		connectObserver = req.ConnectObserver()
@@ -2565,6 +2570,7 @@ func normalizeOpenAIWSHandshakeCompatibility(headers http.Header, identityDigest
 		betaFeatures:   normalizeOpenAIWSBetaFeatures(headers),
 		timingMetrics:  openAITimingMetricsCompatibility(headers),
 		guardian:       openAIGuardianCompatibility(headers),
+		originator:     headers.Get("originator"),
 		identityDigest: identityDigest,
 		residency:      normalizeOpenAIWSResidency(headers),
 	}

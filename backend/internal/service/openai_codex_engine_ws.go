@@ -134,8 +134,9 @@ func (s *OpenAIGatewayService) proxyCodexEngineWebSocket(ctx context.Context, c 
 					return err
 				}
 			}
-			if body, err = applyOpenAIWSReasoningEffortPolicy(body, hooks); err != nil {
-				return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), nil)
+			ctx, body, err = s.prepareOpenAIWSEffort(ctx, c, body, account, hooks)
+			if err != nil {
+				return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
 			}
 			if hooks.MapRequestModel != nil {
 				mapped, mapErr := hooks.MapRequestModel(turn, currentModel)
@@ -169,6 +170,11 @@ func (s *OpenAIGatewayService) proxyCodexEngineWebSocket(ctx context.Context, c 
 			if result != nil {
 				result.OpenAIWSMode = true
 				result.Model = currentModel
+				result.ReasoningEffort = effectiveOpenAIEffortForBody(ctx, body, currentModel)
+				result.RequestedReasoningEffort = RequestedReasoningEffortFromContext(ctx)
+				if err == nil {
+					_ = s.RecordOpenAIResponseEffort(ctx, c, body, result.ResponseID, account)
+				}
 			}
 			// Audit callbacks must read this physical turn's response headers,
 			// including an absent request ID, rather than the handshake's headers.

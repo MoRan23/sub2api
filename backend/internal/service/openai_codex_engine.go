@@ -319,10 +319,8 @@ func (s *OpenAIGatewayService) forwardCodexEngine(ctx context.Context, c *gin.Co
 	// is recovered from the durable receipt, never by keeping execution alive.
 	ctx, cancel := context.WithCancelCause(ctx)
 	defer cancel(nil)
-	effort := gjson.GetBytes(body, "reasoning.effort").String()
-	if effort == "" {
-		effort = gjson.GetBytes(body, "reasoning_effort").String()
-	}
+	CaptureFinalOpenAIReasoningEffort(ctx, body)
+	effort := optionalStringValue(EffectiveOpenAIReasoningEffortForBody(ctx, body, upstreamModel, model))
 	var firstTimer *time.Timer
 	req, err := http.NewRequestWithContext(ctx, http.MethodPost, target, bytes.NewReader(body))
 	if err != nil {

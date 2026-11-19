@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"fmt"
+	"net/http"
 	"slices"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/apicompat"
@@ -130,6 +131,7 @@ func (s *OpenAIGatewayService) convertResponsesShapedChatBody(c *gin.Context, bo
 		&apicompat.ResponsesToChatOptions{ReasoningContentByID: s.reasoningContentByID},
 	)
 	if err != nil {
+		writeOpenAIResponsesFallbackError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
 		return nil, fmt.Errorf("convert responses-shaped chat completions request: %w", err)
 	}
 	chatBody, err := json.Marshal(chatReq)

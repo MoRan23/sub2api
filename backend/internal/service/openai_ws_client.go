@@ -128,6 +128,7 @@ func (d *coderOpenAIWSClientDialer) Dial(
 	}
 
 	wrapped := &coderOpenAIWSClientConn{}
+	routing, _ := ctx.Value(openAIGuardianRoutingContextKey{}).(*openAIGuardianRoutingRequest)
 	opts := &coderws.DialOptions{
 		HTTPHeader:      cloneHeader(headers),
 		CompressionMode: coderws.CompressionContextTakeover,
@@ -136,11 +137,18 @@ func (d *coderOpenAIWSClientDialer) Dial(
 			return true
 		},
 	}
+	if opts.HTTPHeader == nil && routing != nil {
+		opts.HTTPHeader = make(http.Header)
+	}
+	openAIGuardianPins.apply(routing, targetURL, opts.HTTPHeader, time.Now())
 	client, clientErr := d.proxyHTTPClient(proxyURL, openAIWSTransportScopeFromContext(ctx, targetURL, proxyURL))
 	if clientErr != nil {
 		return nil, 0, nil, clientErr
 	}
 	opts.HTTPClient = openai.HTTPClientWithCodexResidencyRedirectGuard(client)
+	if routing != nil && routing.parentPinID != "" {
+		opts.HTTPClient = openAIGuardianRoutingRedirectGuard(opts.HTTPClient, targetURL)
+	}
 	originURL, parseErr := url.Parse(targetURL)
 	if parseErr != nil {
 		return nil, 0, nil, parseErr
@@ -182,6 +190,18 @@ func (d *coderOpenAIWSClientDialer) Dial(
 	respHeaders := http.Header(nil)
 	if resp != nil {
 		respHeaders = cloneHeader(resp.Header)
+		actualURL := targetURL
+		if resp.Request != nil && resp.Request.URL != nil {
+			actualURL = resp.Request.URL.String()
+		}
+		expected, actual := openAIGuardianPinURL(targetURL), openAIGuardianPinURL(actualURL)
+		if routing != nil && expected != nil && actual != nil && expected.String() == actual.String() {
+			wrapped.routingScope = routing.scope
+			wrapped.routingPinID = openAIGuardianPins.capture(routing, actualURL, resp.Header, time.Now())
+		}
+		// Routing cookies have one owner, the bounded registry. Evidence and
+		// pooled response headers do not retain a second raw copy.
+		respHeaders.Del("Set-Cookie")
 	}
 	actualHeaders := headers
 	if resp != nil && resp.Request != nil {
@@ -347,6 +367,8 @@ type coderOpenAIWSClientConn struct {
 	conn               *coderws.Conn
 	observationHeaders http.Header
 	upstreamPings      atomic.Int64
+	routingScope       [32]byte
+	routingPinID       string
 }
 
 func (c *coderOpenAIWSClientConn) FingerprintObservationHeaders() http.Header {
@@ -389,6 +411,9 @@ func (c *coderOpenAIWSClientConn) ReadMessage(ctx context.Context) ([]byte, erro
 	}
 	switch msgType {
 	case coderws.MessageText, coderws.MessageBinary:
+		if c.routingPinID != "" {
+			openAIGuardianPins.observe(c.routingScope, c.routingPinID, payload, time.Now())
+		}
 		return payload, nil
 	default:
 		return nil, errOpenAIWSConnClosed
@@ -405,6 +430,9 @@ func (c *coderOpenAIWSClientConn) ReadFrame(ctx context.Context) (coderws.Messag
 	msgType, payload, err := c.conn.Read(ctx)
 	if err != nil {
 		return coderws.MessageText, nil, err
+	}
+	if c.routingPinID != "" && (msgType == coderws.MessageText || msgType == coderws.MessageBinary) {
+		openAIGuardianPins.observe(c.routingScope, c.routingPinID, payload, time.Now())
 	}
 	return msgType, payload, nil
 }

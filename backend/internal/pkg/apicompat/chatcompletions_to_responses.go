@@ -28,7 +28,7 @@ func ChatCompletionsToResponsesWithMinOutputTokens(req *ChatCompletionsRequest, 
 	if req == nil {
 		return nil, fmt.Errorf("chat completions request is nil")
 	}
-	if err := openai.ValidateGPT61ReasoningEffort(req.Model, req.ReasoningEffort); err != nil {
+	if err := openai.ValidateGPT61ReasoningEffort(req.Model, req.ReasoningEffortText()); err != nil {
 		return nil, err
 	}
 	input, err := convertChatMessagesToResponsesInput(req.Messages)
@@ -79,10 +79,11 @@ func ChatCompletionsToResponsesWithMinOutputTokens(req *ChatCompletionsRequest, 
 	}
 
 	// reasoning_effort → reasoning.effort + reasoning.summary="auto"
-	if req.ReasoningEffort != "" {
+	if req.ReasoningEffortText() != "" {
 		out.Reasoning = &ResponsesReasoning{
-			Effort:  req.ReasoningEffort,
-			Summary: "auto",
+			Effort:         req.ReasoningEffortText(),
+			EffortIsNumber: req.NumericReasoningEffort(),
+			Summary:        "auto",
 		}
 	}
 
@@ -415,6 +416,11 @@ func parseChatContent(raw json.RawMessage) (string, error) {
 	if parsed.Text != nil {
 		return *parsed.Text, nil
 	}
+	for _, part := range parsed.Parts {
+		if part.Type == "input_audio" {
+			return "", fmt.Errorf("audio content cannot be flattened to text by this bridge")
+		}
+	}
 	return flattenChatContentParts(parsed.Parts), nil
 }
 
@@ -430,6 +436,11 @@ func parseChatMessageContent(raw json.RawMessage) (chatMessageContent, error) {
 
 	var parts []ChatContentPart
 	if err := json.Unmarshal(raw, &parts); err == nil {
+		for _, part := range parts {
+			if part.Type == "input_audio" && (part.InputAudio == nil || (part.InputAudio.Format != "wav" && part.InputAudio.Format != "mp3") || !validInlineAudioBase64(part.InputAudio.Data)) {
+				return chatMessageContent{}, fmt.Errorf("Chat input_audio requires valid Base64 data and wav or mp3 format")
+			}
+		}
 		return chatMessageContent{Parts: parts}, nil
 	}
 
@@ -479,6 +490,14 @@ func convertChatContentPartsToResponses(parts []ChatContentPart) []ResponsesCont
 					Filename:              p.File.Filename,
 					FileData:              p.File.FileData,
 					FileID:                p.File.FileID,
+				})
+			}
+		case "input_audio":
+			if p.InputAudio != nil {
+				responseParts = append(responseParts, ResponsesContentPart{
+					PromptCacheBreakpoint: p.PromptCacheBreakpoint,
+					Type:                  "input_audio",
+					AudioURL:              "data:audio/" + p.InputAudio.Format + ";base64," + p.InputAudio.Data,
 				})
 			}
 		}

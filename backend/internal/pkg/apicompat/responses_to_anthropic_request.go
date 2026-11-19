@@ -15,6 +15,26 @@ import (
 // enables Anthropic platform groups to accept OpenAI Responses API requests
 // by converting them to the native /v1/messages format before forwarding upstream.
 func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, error) {
+	if req == nil {
+		return nil, fmt.Errorf("responses request is nil")
+	}
+	if err := validateResponsesBridgeContinuation(req); err != nil {
+		return nil, err
+	}
+	reasoning, err := effectiveResponsesReasoning(req)
+	if err != nil {
+		return nil, err
+	}
+	if reasoning != nil {
+		if reasoning.EffortIsNumber {
+			return nil, fmt.Errorf("Anthropic bridge does not support numeric reasoning effort; configure an explicit mapping")
+		}
+		switch reasoning.Effort {
+		case "", "none", "minimal", "low", "medium", "high", "xhigh", "max":
+		default:
+			return nil, fmt.Errorf("Anthropic bridge does not support reasoning effort %q; configure an explicit mapping", reasoning.Effort)
+		}
+	}
 	isOpus55 := claude.IsOpus55(req.Model)
 	isSonnet55 := claude.IsSonnet55(req.Model)
 	isHaiku55 := claude.IsHaiku55(req.Model)
@@ -102,8 +122,8 @@ func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, erro
 				return nil, fmt.Errorf("%s does not allow temperature and top_p together; omit both", req.Model)
 			}
 		}
-		if req.Reasoning != nil && req.Reasoning.Effort != "" {
-			effort = req.Reasoning.Effort
+		if reasoning != nil && reasoning.Effort != "" {
+			effort = reasoning.Effort
 		}
 		if isSonnet55 && effort == "none" {
 			// OpenAI's no-reasoning request maps to Sonnet 5.5's lowest
@@ -137,8 +157,13 @@ func ResponsesToAnthropicRequest(req *ResponsesRequest) (*AnthropicRequest, erro
 	}
 
 	// reasoning.effort → output_config.effort + thinking
-	if req.Reasoning != nil && req.Reasoning.Effort != "" {
-		effort := mapResponsesEffortToAnthropic(req.Reasoning.Effort)
+	if reasoning != nil && reasoning.Effort != "" {
+		switch reasoning.Effort {
+		case "low", "medium", "high", "xhigh", "max":
+		default:
+			return nil, fmt.Errorf("Anthropic bridge does not support reasoning effort %q for %s; configure an explicit mapping", reasoning.Effort, req.Model)
+		}
+		effort := mapResponsesEffortToAnthropic(reasoning.Effort)
 		out.OutputConfig = &AnthropicOutputConfig{Effort: effort}
 		// Enable thinking for non-low efforts
 		if effort != "low" {
@@ -210,8 +235,25 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 	var messages []AnthropicMessage
 
 	for _, item := range items {
+		if item.Type == "input_audio" {
+			return nil, nil, fmt.Errorf("Anthropic bridge does not support input_audio")
+		}
+		switch item.Type {
+		case "function_call_output", "custom_tool_call_output", "tool_search_output", "tool_search_call_output", "mcp_tool_call_output":
+			if err := rejectAnthropicAudio(item.outputRaw); err != nil {
+				return nil, nil, err
+			}
+			if len(item.outputRaw) == 0 && (strings.Contains(item.Output, "input_audio") || strings.Contains(item.Output, `\u`)) {
+				if err := rejectAnthropicAudio(json.RawMessage(item.Output)); err != nil {
+					return nil, nil, err
+				}
+			}
+		}
 		switch {
 		case item.Role == "system" || item.Role == "developer":
+			if err := rejectAnthropicAudio(item.Content); err != nil {
+				return nil, nil, err
+			}
 			text := extractTextFromContent(item.Content)
 			if text != "" {
 				systemParts = append(systemParts, text)
@@ -549,6 +591,9 @@ func anthropicContentIsOnlyBlankText(content json.RawMessage) bool {
 }
 
 func convertResponsesUserToAnthropicContent(raw json.RawMessage) (json.RawMessage, error) {
+	if err := rejectAnthropicAudio(raw); err != nil {
+		return nil, err
+	}
 	if len(raw) == 0 {
 		return json.Marshal("") // empty string content
 	}
@@ -604,6 +649,9 @@ func convertResponsesUserToAnthropicContent(raw json.RawMessage) (json.RawMessag
 // convertResponsesAssistantToAnthropicContent converts a Responses assistant
 // message content field into Anthropic content blocks JSON.
 func convertResponsesAssistantToAnthropicContent(raw json.RawMessage) (json.RawMessage, error) {
+	if err := rejectAnthropicAudio(raw); err != nil {
+		return nil, err
+	}
 	if len(raw) == 0 {
 		return json.Marshal([]AnthropicContentBlock{{Type: "text", Text: ""}})
 	}

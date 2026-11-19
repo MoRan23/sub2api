@@ -177,7 +177,7 @@ func TestNormalizeReasoningEffortMappings(t *testing.T) {
 		}
 
 		_, err := NormalizeReasoningEffortMappings(PlatformOpenAI, []ReasoningEffortMapping{{From: "ultra", To: "high"}})
-		require.ErrorContains(t, err, "empty or unknown")
+		require.ErrorContains(t, err, "explicit model scope")
 	})
 
 	t.Run("allows none only as a source for OpenAI routes", func(t *testing.T) {
@@ -333,8 +333,8 @@ func TestApplyOpenAIReasoningEffortPolicy(t *testing.T) {
 		{name: "prefix scope maps none", body: `{"model":"gpt-5-mini","reasoning_effort":"none"}`, mappings: []ReasoningEffortMapping{{From: "none", To: "low", MatchType: domain.ReasoningEffortMatchPrefix, Model: "gpt-5"}}, path: "reasoning_effort", want: "low", changed: true},
 		{name: "suffix scope maps none", body: `{"model":"gpt-5-mini","reasoning_effort":"none"}`, mappings: []ReasoningEffortMapping{{From: "none", To: "low", MatchType: domain.ReasoningEffortMatchSuffix, Model: "mini"}}, path: "reasoning_effort", want: "low", changed: true},
 		{name: "global scope maps none", body: `{"model":"o3","reasoning_effort":"none"}`, mappings: []ReasoningEffortMapping{{From: "none", To: "low"}}, path: "reasoning_effort", want: "low", changed: true},
-		{name: "keeps unknown without mapping", body: `{"reasoning_effort":"future"}`, max: "low", path: "reasoning_effort", want: "future", changed: false},
-		{name: "keeps non string value", body: `{"reasoning_effort":{"level":"high"}}`, max: "low", path: "reasoning_effort.level", want: "high", changed: false},
+		{name: "keeps unknown without cap or mapping", body: `{"reasoning_effort":"future"}`, path: "reasoning_effort", want: "future", changed: false},
+		{name: "keeps non string value without cap", body: `{"reasoning_effort":{"level":"high"}}`, path: "reasoning_effort.level", want: "high", changed: false},
 		{
 			name:     "prefix mapping applies to matching model",
 			body:     `{"model":"gpt-5.4","reasoning_effort":"max"}`,

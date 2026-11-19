@@ -281,6 +281,18 @@ describe('admin UsageTable tooltip', () => {
     expect(wrapper.text()).not.toContain('x2')
   })
 
+  it('shows full custom and numeric effort values with distinct requested and effective values', () => {
+    const effort = 'model-specific_Effort_with_more_than_twenty_characters'
+    const wrapper = mount(UsageTable, {
+      props: { data: [{ ...baseImageRow, reasoning_effort: effort, upstream_reasoning_effort: '18446744073709551615' }], loading: false, columns: [] },
+      global: { stubs: { DataTable: DataTableStub, EmptyState: true, Icon: true, Teleport: true } },
+    })
+    const cell = wrapper.get('[data-testid="reasoning-effort-cell"]')
+    expect(cell.text()).toContain(effort)
+    expect(cell.text()).toContain('18446744073709551615')
+    expect(cell.classes()).toContain('break-all')
+  })
+
   it('keeps the request type badge and adds a separate badge only for native compaction rows', () => {
     const DataTableStreamStub = {
       props: ['data'],

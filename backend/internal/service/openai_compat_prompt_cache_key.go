@@ -41,8 +41,12 @@ func deriveCompatPromptCacheKey(req *apicompat.ChatCompletionsRequest, mappedMod
 	}
 
 	seedParts := []string{"model=" + normalizedModel}
-	if req.ReasoningEffort != "" {
-		seedParts = append(seedParts, "reasoning_effort="+strings.TrimSpace(req.ReasoningEffort))
+	if effort := req.ReasoningEffortText(); effort != "" {
+		key := "reasoning_effort="
+		if req.NumericReasoningEffort() {
+			key = "reasoning_effort_number="
+		}
+		seedParts = append(seedParts, key+strings.TrimSpace(effort))
 	}
 	if len(req.ToolChoice) > 0 {
 		seedParts = append(seedParts, "tool_choice="+normalizeCompatSeedJSON(req.ToolChoice))

@@ -442,6 +442,7 @@ func captureOpenAIWSFrameIdentity(payload []byte, currentPlan *OpenAIOAuthIdenti
 	// logical turns, but cannot change the handshake's machine identity.
 	capture.UserAgent = currentPlan.Capture.UserAgent
 	capture.UserAgentVersion = currentPlan.Capture.UserAgentVersion
+	capture.ThreadOriginator = currentPlan.Capture.ThreadOriginator
 	capture.OSFamily, capture.OSSource = currentPlan.Capture.OSFamily, currentPlan.Capture.OSSource
 	capture.ReceivedAt = currentPlan.Capture.ReceivedAt
 	// Environment attributes are connection-stable defaults. A frame may

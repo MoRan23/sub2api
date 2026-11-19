@@ -13,6 +13,40 @@ vi.mock("vue-i18n", async () => {
 });
 
 describe("ReasoningEffortPolicyFields", () => {
+  it('does not offer custom or numeric source modes for Anthropic', () => {
+    const mapping = createReasoningEffortMappingRow({ from: 'high', to: 'low' });
+    const wrapper = mount(ReasoningEffortPolicyFields, {
+      props: { idPrefix: 'anthropic', platform: 'anthropic', maxEffort: '', overLimit: 'downgrade', mappings: [mapping] },
+      global: { stubs: { Icon: true, Select: { props: ['id', 'options'], template: '<div :id="id"><span v-for="option in options" :key="option.value" :data-value="option.value" /></div>' } } },
+    });
+    expect(wrapper.find(`#anthropic-${mapping.pairs[0].id}-source-kind`).exists()).toBe(false);
+  });
+
+  it('edits numeric sources without converting them to JavaScript numbers', async () => {
+    const mapping = createReasoningEffortMappingRow({ from: '18446744073709551615', from_type: 'number', to: 'high', model: 'gpt-example' });
+    const wrapper = mount(ReasoningEffortPolicyFields, {
+      props: { idPrefix: 'numeric', platform: 'openai', maxEffort: '', overLimit: 'downgrade', mappings: [mapping] },
+      global: { stubs: { Icon: true, Select: { props: ['id', 'modelValue', 'options'], emits: ['update:model-value'], template: '<select :id="id" :value="modelValue" @change="$emit(\'update:model-value\', $event.target.value)"><option value="preset">preset</option><option value="custom">custom</option><option value="number">number</option></select>' } } },
+    });
+    const input = wrapper.get(`#numeric-${mapping.pairs[0].id}-from`);
+    expect(input.attributes('type')).toBe('text');
+    expect(input.attributes('inputmode')).toBe('numeric');
+    await input.setValue('18446744073709551614');
+    expect(wrapper.emitted('update:mappings')?.[0]?.[0]).toMatchObject([{ pairs: [{ from: '18446744073709551614', from_type: 'number' }] }]);
+    await wrapper.get(`#numeric-${mapping.pairs[0].id}-source-kind`).setValue('custom');
+    expect(wrapper.emitted('update:mappings')?.[1]?.[0]).toMatchObject([{ pairs: [{ from: '', from_type: 'string', source_kind: 'custom' }] }]);
+  });
+
+  it('keeps a model-specific custom value available for editing', () => {
+    const mapping = createReasoningEffortMappingRow({ from: 'disabled', to: 'deny', model: 'gpt-example' });
+    const wrapper = mount(ReasoningEffortPolicyFields, {
+      props: { idPrefix: 'custom', platform: 'openai', maxEffort: 'high', overLimit: 'deny', mappings: [mapping] },
+      global: { stubs: { Icon: true, Select: true } },
+    });
+    expect(wrapper.get(`#custom-${mapping.pairs[0].id}-from`).element).toMatchObject({ value: 'disabled' });
+    expect(wrapper.text()).toContain('reasoningEffortCustomHint');
+  });
+
   it("offers none only in the mapping source selector", () => {
     const mapping = createReasoningEffortMappingRow({
       from: "none",

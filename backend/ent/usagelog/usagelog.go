@@ -24,6 +24,10 @@ const (
 	FieldRequestID = "request_id"
 	// FieldModel holds the string denoting the model field in the database.
 	FieldModel = "model"
+	// FieldReasoningEffort holds the string denoting the reasoning_effort field in the database.
+	FieldReasoningEffort = "reasoning_effort"
+	// FieldRequestedReasoningEffort holds the string denoting the requested_reasoning_effort field in the database.
+	FieldRequestedReasoningEffort = "requested_reasoning_effort"
 	// FieldRequestedModel holds the string denoting the requested_model field in the database.
 	FieldRequestedModel = "requested_model"
 	// FieldUpstreamModel holds the string denoting the upstream_model field in the database.
@@ -171,6 +175,8 @@ var Columns = []string{
 	FieldAccountID,
 	FieldRequestID,
 	FieldModel,
+	FieldReasoningEffort,
+	FieldRequestedReasoningEffort,
 	FieldRequestedModel,
 	FieldUpstreamModel,
 	FieldUpstreamResponseModel,
@@ -336,6 +342,16 @@ func ByRequestID(opts ...sql.OrderTermOption) OrderOption {
 // ByModel orders the results by the model field.
 func ByModel(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldModel, opts...).ToFunc()
+}
+
+// ByReasoningEffort orders the results by the reasoning_effort field.
+func ByReasoningEffort(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldReasoningEffort, opts...).ToFunc()
+}
+
+// ByRequestedReasoningEffort orders the results by the requested_reasoning_effort field.
+func ByRequestedReasoningEffort(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldRequestedReasoningEffort, opts...).ToFunc()
 }
 
 // ByRequestedModel orders the results by the requested_model field.

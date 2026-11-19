@@ -244,7 +244,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 
 		// 仅在确实需要修改 payload 且 sjson 失败时，退回 map 路径确保兼容性。
 		payload := make(map[string]any)
-		if unmarshalErr := json.Unmarshal(current, &payload); unmarshalErr != nil {
+		if unmarshalErr := decodeOpenAIJSONUseNumber(current, &payload); unmarshalErr != nil {
 			return nil, err
 		}
 		switch path {
@@ -314,12 +314,15 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		// A replacement attempt reruns admission and effort/model policies. Keep
 		// their original inputs so non-idempotent mappings are applied only once.
 		accountFailoverSourceRaw := append([]byte(nil), normalized...)
-		requestedReasoningEffort := CanonicalRequestedReasoningEffort(normalized, strings.TrimSpace(values[1].String()))
-		if next, policyErr := applyOpenAIWSReasoningEffortPolicy(normalized, hooks); policyErr != nil {
-			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, policyErr.Error(), policyErr)
-		} else {
-			normalized = next
+		if strings.TrimSpace(values[1].String()) == "" && ingressSessionOriginalModel != "" {
+			normalized, _ = applyPayloadMutation(normalized, "model", ingressSessionOriginalModel)
 		}
+		effortCtx, effortBody, policyErr := s.prepareOpenAIWSEffort(ctx, c, normalized, account, hooks)
+		if policyErr != nil {
+			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, policyErr.Error(), policyErr)
+		}
+		ctx, normalized = effortCtx, effortBody
+		requestedReasoningEffort := RequestedReasoningEffortFromContext(ctx)
 		responsesLite := isOpenAIResponsesLiteWebSocketPayload(normalized)
 		if compatibilityBody, compatibilityChanged, compatibilityErr := normalizeOpenAIResponsesWebSocketCompatibilityBodyWithConfig(s.cfg, normalized, account, responsesLite); compatibilityErr != nil {
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", compatibilityErr)
@@ -899,6 +902,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			if responseID != "" && stateStore != nil {
 				ttl := s.openAIWSResponseStickyTTL()
 				logOpenAIWSBindResponseAccountWarn(groupID, account.ID, responseID, stateStore.BindResponseAccount(ctx, groupID, responseID, account.ID, ttl))
+				_ = s.RecordOpenAIResponseEffort(ctx, c, nil, responseID, account)
 			}
 			nextClientMessage, readErr := readClientMessage()
 			if readErr != nil {
@@ -969,6 +973,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		HandshakeObserver: freezeFingerprintObservationWSHandshake(c, account),
 		ConnectObserver:   s.prepareCodexTelemetryConnect(ctx, account, wsHeaders, wsURL, strings.TrimSpace(gjson.GetBytes(firstPayload.payloadRaw, "model").String())),
 		IdentityDigest:    pinnedSocketDigest,
+		Routing:           s.prepareOpenAIGuardianRouting(c, account, pinnedIdentityPlan, wsURL, OpenAIOutboundRouteForAccount(c, account).ProxyURL, wsHeaders, firstPayload.payloadRaw),
 		HeadersFactory:    s.openAIWSHeadersFactory(ctx, account),
 		ProxyURL:          OpenAIOutboundRouteForAccount(c, account).ProxyURL,
 		ForceNewConn:      false,
@@ -1201,6 +1206,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			return nil, wrapOpenAIWSIngressTurnError("write_upstream_daybreak", daybreakErr, false)
 		}
 		payloadBytes = len(payload)
+		CaptureFinalOpenAIReasoningEffort(ctx, payload)
 		responseEvidence := beginOpenAIResponseEvidence(c, gjson.GetBytes(payload, "model").String())
 		observeOpenAIResponseEvidenceHeaders(responseEvidence, lease.ClaimResponseEvidenceHeaders(), "connection")
 		timezoneState, _ := RequestTimezoneStateFromContext(c)
@@ -1579,7 +1585,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					UpstreamResponseModelConflict: responseModelObserver.Conflict(),
 					UpstreamResponseServiceTier:   responseModelObserver.ServiceTier(),
 					ServiceTier:                   resolvedOpenAIUpstreamServiceTierFromObserver(responseModelObserver, extractOpenAIServiceTierFromBody(payload)),
-					ReasoningEffort:               ApplyThinkingEnabledFallback(extractOpenAIReasoningEffortFromBody(payload, mappedModel, originalModel), payload, mappedModel),
+					ReasoningEffort:               ApplyThinkingEnabledFallback(effectiveOpenAIEffortForBody(ctx, payload, mappedModel, originalModel), payload, mappedModel),
 					RequestedReasoningEffort:      requestedReasoningEffort,
 					Stream:                        reqStream,
 					OpenAIWSMode:                  true,
@@ -1922,7 +1928,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		}
 		if toolSignals.HasFunctionCallOutput {
 			var currentReqBody map[string]any
-			if err := json.Unmarshal(currentPayload, &currentReqBody); err == nil {
+			if err := decodeOpenAIJSONUseNumber(currentPayload, &currentReqBody); err == nil {
 				toolSignals = AnalyzeToolContinuationSignals(currentReqBody)
 			}
 		}
@@ -2350,6 +2356,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if responseID != "" && stateStore != nil {
 			ttl := s.openAIWSResponseStickyTTL()
 			logOpenAIWSBindResponseAccountWarn(groupID, account.ID, responseID, stateStore.BindResponseAccount(ctx, groupID, responseID, account.ID, ttl))
+			_ = s.RecordOpenAIResponseEffort(ctx, c, nil, responseID, account)
 			stateStore.BindResponseConn(responseID, connID, ttl)
 		}
 		if stateStore != nil && storeDisabled && sessionHash != "" {
@@ -2503,6 +2510,12 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			nextPayload.payloadRaw = mergedPayload
 			nextPayload.payloadBytes = len(mergedPayload)
 		}
+		nextRouting := s.prepareOpenAIGuardianRouting(c, account, pinnedIdentityPlan, wsURL, baseAcquireReq.ProxyURL, baseAcquireReq.Headers, nextPayload.payloadRaw)
+		if openAIGuardianRoutingPinID(nextRouting) != openAIGuardianRoutingPinID(baseAcquireReq.Routing) {
+			identityChangedForNextTurn = true
+			resetSessionLease(false)
+		}
+		baseAcquireReq.Routing = nextRouting
 		if nextPayload.previousResponseID != "" {
 			expectedPrev := strings.TrimSpace(lastTurnResponseID)
 			chainedFromLast := expectedPrev != "" && nextPayload.previousResponseID == expectedPrev

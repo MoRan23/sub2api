@@ -48275,6 +48275,8 @@ type UsageLogMutation struct {
 	id                           *int64
 	request_id                   *string
 	model                        *string
+	reasoning_effort             *string
+	requested_reasoning_effort   *string
 	requested_model              *string
 	upstream_model               *string
 	upstream_response_model      *string
@@ -48633,6 +48635,104 @@ func (m *UsageLogMutation) OldModel(ctx context.Context) (v string, err error) {
 // ResetModel resets all changes to the "model" field.
 func (m *UsageLogMutation) ResetModel() {
 	m.model = nil
+}
+
+// SetReasoningEffort sets the "reasoning_effort" field.
+func (m *UsageLogMutation) SetReasoningEffort(s string) {
+	m.reasoning_effort = &s
+}
+
+// ReasoningEffort returns the value of the "reasoning_effort" field in the mutation.
+func (m *UsageLogMutation) ReasoningEffort() (r string, exists bool) {
+	v := m.reasoning_effort
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldReasoningEffort returns the old "reasoning_effort" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldReasoningEffort(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldReasoningEffort is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldReasoningEffort requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldReasoningEffort: %w", err)
+	}
+	return oldValue.ReasoningEffort, nil
+}
+
+// ClearReasoningEffort clears the value of the "reasoning_effort" field.
+func (m *UsageLogMutation) ClearReasoningEffort() {
+	m.reasoning_effort = nil
+	m.clearedFields[usagelog.FieldReasoningEffort] = struct{}{}
+}
+
+// ReasoningEffortCleared returns if the "reasoning_effort" field was cleared in this mutation.
+func (m *UsageLogMutation) ReasoningEffortCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldReasoningEffort]
+	return ok
+}
+
+// ResetReasoningEffort resets all changes to the "reasoning_effort" field.
+func (m *UsageLogMutation) ResetReasoningEffort() {
+	m.reasoning_effort = nil
+	delete(m.clearedFields, usagelog.FieldReasoningEffort)
+}
+
+// SetRequestedReasoningEffort sets the "requested_reasoning_effort" field.
+func (m *UsageLogMutation) SetRequestedReasoningEffort(s string) {
+	m.requested_reasoning_effort = &s
+}
+
+// RequestedReasoningEffort returns the value of the "requested_reasoning_effort" field in the mutation.
+func (m *UsageLogMutation) RequestedReasoningEffort() (r string, exists bool) {
+	v := m.requested_reasoning_effort
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldRequestedReasoningEffort returns the old "requested_reasoning_effort" field's value of the UsageLog entity.
+// If the UsageLog object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *UsageLogMutation) OldRequestedReasoningEffort(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldRequestedReasoningEffort is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldRequestedReasoningEffort requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldRequestedReasoningEffort: %w", err)
+	}
+	return oldValue.RequestedReasoningEffort, nil
+}
+
+// ClearRequestedReasoningEffort clears the value of the "requested_reasoning_effort" field.
+func (m *UsageLogMutation) ClearRequestedReasoningEffort() {
+	m.requested_reasoning_effort = nil
+	m.clearedFields[usagelog.FieldRequestedReasoningEffort] = struct{}{}
+}
+
+// RequestedReasoningEffortCleared returns if the "requested_reasoning_effort" field was cleared in this mutation.
+func (m *UsageLogMutation) RequestedReasoningEffortCleared() bool {
+	_, ok := m.clearedFields[usagelog.FieldRequestedReasoningEffort]
+	return ok
+}
+
+// ResetRequestedReasoningEffort resets all changes to the "requested_reasoning_effort" field.
+func (m *UsageLogMutation) ResetRequestedReasoningEffort() {
+	m.requested_reasoning_effort = nil
+	delete(m.clearedFields, usagelog.FieldRequestedReasoningEffort)
 }
 
 // SetRequestedModel sets the "requested_model" field.
@@ -51188,7 +51288,7 @@ func (m *UsageLogMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *UsageLogMutation) Fields() []string {
-	fields := make([]string, 0, 50)
+	fields := make([]string, 0, 52)
 	if m.user != nil {
 		fields = append(fields, usagelog.FieldUserID)
 	}
@@ -51203,6 +51303,12 @@ func (m *UsageLogMutation) Fields() []string {
 	}
 	if m.model != nil {
 		fields = append(fields, usagelog.FieldModel)
+	}
+	if m.reasoning_effort != nil {
+		fields = append(fields, usagelog.FieldReasoningEffort)
+	}
+	if m.requested_reasoning_effort != nil {
+		fields = append(fields, usagelog.FieldRequestedReasoningEffort)
 	}
 	if m.requested_model != nil {
 		fields = append(fields, usagelog.FieldRequestedModel)
@@ -51357,6 +51463,10 @@ func (m *UsageLogMutation) Field(name string) (ent.Value, bool) {
 		return m.RequestID()
 	case usagelog.FieldModel:
 		return m.Model()
+	case usagelog.FieldReasoningEffort:
+		return m.ReasoningEffort()
+	case usagelog.FieldRequestedReasoningEffort:
+		return m.RequestedReasoningEffort()
 	case usagelog.FieldRequestedModel:
 		return m.RequestedModel()
 	case usagelog.FieldUpstreamModel:
@@ -51466,6 +51576,10 @@ func (m *UsageLogMutation) OldField(ctx context.Context, name string) (ent.Value
 		return m.OldRequestID(ctx)
 	case usagelog.FieldModel:
 		return m.OldModel(ctx)
+	case usagelog.FieldReasoningEffort:
+		return m.OldReasoningEffort(ctx)
+	case usagelog.FieldRequestedReasoningEffort:
+		return m.OldRequestedReasoningEffort(ctx)
 	case usagelog.FieldRequestedModel:
 		return m.OldRequestedModel(ctx)
 	case usagelog.FieldUpstreamModel:
@@ -51599,6 +51713,20 @@ func (m *UsageLogMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetModel(v)
+		return nil
+	case usagelog.FieldReasoningEffort:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetReasoningEffort(v)
+		return nil
+	case usagelog.FieldRequestedReasoningEffort:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetRequestedReasoningEffort(v)
 		return nil
 	case usagelog.FieldRequestedModel:
 		v, ok := value.(string)
@@ -52224,6 +52352,12 @@ func (m *UsageLogMutation) AddField(name string, value ent.Value) error {
 // mutation.
 func (m *UsageLogMutation) ClearedFields() []string {
 	var fields []string
+	if m.FieldCleared(usagelog.FieldReasoningEffort) {
+		fields = append(fields, usagelog.FieldReasoningEffort)
+	}
+	if m.FieldCleared(usagelog.FieldRequestedReasoningEffort) {
+		fields = append(fields, usagelog.FieldRequestedReasoningEffort)
+	}
 	if m.FieldCleared(usagelog.FieldRequestedModel) {
 		fields = append(fields, usagelog.FieldRequestedModel)
 	}
@@ -52307,6 +52441,12 @@ func (m *UsageLogMutation) FieldCleared(name string) bool {
 // error if the field is not defined in the schema.
 func (m *UsageLogMutation) ClearField(name string) error {
 	switch name {
+	case usagelog.FieldReasoningEffort:
+		m.ClearReasoningEffort()
+		return nil
+	case usagelog.FieldRequestedReasoningEffort:
+		m.ClearRequestedReasoningEffort()
+		return nil
 	case usagelog.FieldRequestedModel:
 		m.ClearRequestedModel()
 		return nil
@@ -52398,6 +52538,12 @@ func (m *UsageLogMutation) ResetField(name string) error {
 		return nil
 	case usagelog.FieldModel:
 		m.ResetModel()
+		return nil
+	case usagelog.FieldReasoningEffort:
+		m.ResetReasoningEffort()
+		return nil
+	case usagelog.FieldRequestedReasoningEffort:
+		m.ResetRequestedReasoningEffort()
 		return nil
 	case usagelog.FieldRequestedModel:
 		m.ResetRequestedModel()

@@ -886,6 +886,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthroughWithIdentity
 	if account.Platform == PlatformOpenAI {
 		req = ApplyOpenAIRequestPolicy(req, s.settingService)
 	}
+	CaptureFinalOpenAIReasoningEffort(ctx, body)
 	return req, nil
 }
 

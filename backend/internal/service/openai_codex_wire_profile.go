@@ -22,7 +22,7 @@ import (
 const (
 	CodexWireProfileRevision             = "responses_metadata"
 	CodexWireProfileCommit               = "316795b"
-	CodexWireProfileCompatibilityVersion = "0.169.0"
+	CodexWireProfileCompatibilityVersion = "0.170.0"
 )
 
 type CodexTurnIDKind string

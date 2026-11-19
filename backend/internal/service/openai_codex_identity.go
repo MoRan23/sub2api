@@ -126,9 +126,9 @@ func codexCanonicalUserAgent() string {
 	return codexCLIUserAgent
 }
 
-// codexOutboundIdentity 出站身份三元组，三者必须同源自洽：
-// originator 与 User-Agent 首段配套（否则上游 404，issue #3901），
-// version 等于 User-Agent 的版本段且不低于上游门槛。
+// codexOutboundIdentity is the final identity tuple. The canonical fallback
+// pairs its UA and originator; a valid native thread originator may override
+// only the originator when identity normalization is disabled.
 type codexOutboundIdentity struct {
 	userAgent  string
 	originator string
@@ -138,7 +138,7 @@ type codexOutboundIdentity struct {
 // CodexClientIdentityMode selects how the immutable OAuth outbound plan
 // projects the Codex client identity triplet at the final wire boundary.
 // Normalize uses the gateway/account canonical identity. SafePair preserves a
-// recognized client identity while keeping originator and version coherent.
+// recognized client identity, including an independent thread originator.
 type CodexClientIdentityMode string
 
 const (
@@ -337,7 +337,8 @@ func enforceCodexIdentityHeadersWithUA(h http.Header, overrideUA string) {
 }
 
 // pairCodexIdentityHeaders 是关闭强制统一后的兜底收口：保留客户端真实身份，
-// 仅保证 originator 与最终 User-Agent 首段配套、version 不低于上游门槛（issue #3901）。
+// Codex 0.170 permits a thread-owned originator independent of the process UA.
+// Invalid or ambiguous originators fall back to the recognized client identity.
 func pairCodexIdentityHeaders(h http.Header) {
 	pairCodexIdentityHeadersWithFallback(h, resolveCodexOutboundIdentity(""))
 }
@@ -348,15 +349,48 @@ func pairCodexIdentityHeaders(h http.Header) {
 // invalid or missing client UA consumes the frozen fallback triplet.
 func pairCodexIdentityHeadersWithFallback(h http.Header, fallback codexOutboundIdentity) {
 	originator, pairedUA, ok := openai.PairCodexClientIdentity(h.Get("user-agent"))
+	if ok {
+		if threadOriginator, valid := openAIValidThreadOriginator(h); valid {
+			originator = threadOriginator
+		}
+	}
 	if !ok {
 		originator, pairedUA = fallback.originator, fallback.userAgent
 		h.Set("version", fallback.version)
 	}
 	h.Set("user-agent", pairedUA)
+	for name := range h {
+		if strings.EqualFold(name, "originator") {
+			delete(h, name)
+		}
+	}
 	h.Set("originator", originator)
 	if v := strings.TrimSpace(h.Get("version")); v != "" && CompareVersions(v, codexUpstreamMinVersion) < 0 {
 		h.Set("version", fallback.version)
 	}
+}
+
+func openAIValidThreadOriginator(h http.Header) (string, bool) {
+	var value string
+	count := 0
+	for name, values := range h {
+		if !strings.EqualFold(name, "originator") {
+			continue
+		}
+		for _, candidate := range values {
+			count++
+			value = candidate
+		}
+	}
+	if count != 1 || len(value) == 0 || len(value) > 256 || value != strings.TrimSpace(value) {
+		return "", false
+	}
+	for _, c := range []byte(value) {
+		if c < 0x21 || c > 0x7e || c == ',' || c == ';' {
+			return "", false
+		}
+	}
+	return value, true
 }
 
 // applyCodexClientIdentityPlan is the single final projector used by OAuth

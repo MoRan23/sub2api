@@ -57,6 +57,34 @@ func (_c *UsageLogCreate) SetModel(v string) *UsageLogCreate {
 	return _c
 }
 
+// SetReasoningEffort sets the "reasoning_effort" field.
+func (_c *UsageLogCreate) SetReasoningEffort(v string) *UsageLogCreate {
+	_c.mutation.SetReasoningEffort(v)
+	return _c
+}
+
+// SetNillableReasoningEffort sets the "reasoning_effort" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableReasoningEffort(v *string) *UsageLogCreate {
+	if v != nil {
+		_c.SetReasoningEffort(*v)
+	}
+	return _c
+}
+
+// SetRequestedReasoningEffort sets the "requested_reasoning_effort" field.
+func (_c *UsageLogCreate) SetRequestedReasoningEffort(v string) *UsageLogCreate {
+	_c.mutation.SetRequestedReasoningEffort(v)
+	return _c
+}
+
+// SetNillableRequestedReasoningEffort sets the "requested_reasoning_effort" field if the given value is not nil.
+func (_c *UsageLogCreate) SetNillableRequestedReasoningEffort(v *string) *UsageLogCreate {
+	if v != nil {
+		_c.SetRequestedReasoningEffort(*v)
+	}
+	return _c
+}
+
 // SetRequestedModel sets the "requested_model" field.
 func (_c *UsageLogCreate) SetRequestedModel(v string) *UsageLogCreate {
 	_c.mutation.SetRequestedModel(v)
@@ -1023,6 +1051,14 @@ func (_c *UsageLogCreate) createSpec() (*UsageLog, *sqlgraph.CreateSpec) {
 		_spec.SetField(usagelog.FieldModel, field.TypeString, value)
 		_node.Model = value
 	}
+	if value, ok := _c.mutation.ReasoningEffort(); ok {
+		_spec.SetField(usagelog.FieldReasoningEffort, field.TypeString, value)
+		_node.ReasoningEffort = &value
+	}
+	if value, ok := _c.mutation.RequestedReasoningEffort(); ok {
+		_spec.SetField(usagelog.FieldRequestedReasoningEffort, field.TypeString, value)
+		_node.RequestedReasoningEffort = &value
+	}
 	if value, ok := _c.mutation.RequestedModel(); ok {
 		_spec.SetField(usagelog.FieldRequestedModel, field.TypeString, value)
 		_node.RequestedModel = &value
@@ -1389,6 +1425,42 @@ func (u *UsageLogUpsert) SetModel(v string) *UsageLogUpsert {
 // UpdateModel sets the "model" field to the value that was provided on create.
 func (u *UsageLogUpsert) UpdateModel() *UsageLogUpsert {
 	u.SetExcluded(usagelog.FieldModel)
+	return u
+}
+
+// SetReasoningEffort sets the "reasoning_effort" field.
+func (u *UsageLogUpsert) SetReasoningEffort(v string) *UsageLogUpsert {
+	u.Set(usagelog.FieldReasoningEffort, v)
+	return u
+}
+
+// UpdateReasoningEffort sets the "reasoning_effort" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateReasoningEffort() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldReasoningEffort)
+	return u
+}
+
+// ClearReasoningEffort clears the value of the "reasoning_effort" field.
+func (u *UsageLogUpsert) ClearReasoningEffort() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldReasoningEffort)
+	return u
+}
+
+// SetRequestedReasoningEffort sets the "requested_reasoning_effort" field.
+func (u *UsageLogUpsert) SetRequestedReasoningEffort(v string) *UsageLogUpsert {
+	u.Set(usagelog.FieldRequestedReasoningEffort, v)
+	return u
+}
+
+// UpdateRequestedReasoningEffort sets the "requested_reasoning_effort" field to the value that was provided on create.
+func (u *UsageLogUpsert) UpdateRequestedReasoningEffort() *UsageLogUpsert {
+	u.SetExcluded(usagelog.FieldRequestedReasoningEffort)
+	return u
+}
+
+// ClearRequestedReasoningEffort clears the value of the "requested_reasoning_effort" field.
+func (u *UsageLogUpsert) ClearRequestedReasoningEffort() *UsageLogUpsert {
+	u.SetNull(usagelog.FieldRequestedReasoningEffort)
 	return u
 }
 
@@ -2308,6 +2380,48 @@ func (u *UsageLogUpsertOne) SetModel(v string) *UsageLogUpsertOne {
 func (u *UsageLogUpsertOne) UpdateModel() *UsageLogUpsertOne {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateModel()
+	})
+}
+
+// SetReasoningEffort sets the "reasoning_effort" field.
+func (u *UsageLogUpsertOne) SetReasoningEffort(v string) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetReasoningEffort(v)
+	})
+}
+
+// UpdateReasoningEffort sets the "reasoning_effort" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateReasoningEffort() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateReasoningEffort()
+	})
+}
+
+// ClearReasoningEffort clears the value of the "reasoning_effort" field.
+func (u *UsageLogUpsertOne) ClearReasoningEffort() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearReasoningEffort()
+	})
+}
+
+// SetRequestedReasoningEffort sets the "requested_reasoning_effort" field.
+func (u *UsageLogUpsertOne) SetRequestedReasoningEffort(v string) *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetRequestedReasoningEffort(v)
+	})
+}
+
+// UpdateRequestedReasoningEffort sets the "requested_reasoning_effort" field to the value that was provided on create.
+func (u *UsageLogUpsertOne) UpdateRequestedReasoningEffort() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateRequestedReasoningEffort()
+	})
+}
+
+// ClearRequestedReasoningEffort clears the value of the "requested_reasoning_effort" field.
+func (u *UsageLogUpsertOne) ClearRequestedReasoningEffort() *UsageLogUpsertOne {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearRequestedReasoningEffort()
 	})
 }
 
@@ -3527,6 +3641,48 @@ func (u *UsageLogUpsertBulk) SetModel(v string) *UsageLogUpsertBulk {
 func (u *UsageLogUpsertBulk) UpdateModel() *UsageLogUpsertBulk {
 	return u.Update(func(s *UsageLogUpsert) {
 		s.UpdateModel()
+	})
+}
+
+// SetReasoningEffort sets the "reasoning_effort" field.
+func (u *UsageLogUpsertBulk) SetReasoningEffort(v string) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetReasoningEffort(v)
+	})
+}
+
+// UpdateReasoningEffort sets the "reasoning_effort" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateReasoningEffort() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateReasoningEffort()
+	})
+}
+
+// ClearReasoningEffort clears the value of the "reasoning_effort" field.
+func (u *UsageLogUpsertBulk) ClearReasoningEffort() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearReasoningEffort()
+	})
+}
+
+// SetRequestedReasoningEffort sets the "requested_reasoning_effort" field.
+func (u *UsageLogUpsertBulk) SetRequestedReasoningEffort(v string) *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.SetRequestedReasoningEffort(v)
+	})
+}
+
+// UpdateRequestedReasoningEffort sets the "requested_reasoning_effort" field to the value that was provided on create.
+func (u *UsageLogUpsertBulk) UpdateRequestedReasoningEffort() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.UpdateRequestedReasoningEffort()
+	})
+}
+
+// ClearRequestedReasoningEffort clears the value of the "requested_reasoning_effort" field.
+func (u *UsageLogUpsertBulk) ClearRequestedReasoningEffort() *UsageLogUpsertBulk {
+	return u.Update(func(s *UsageLogUpsert) {
+		s.ClearRequestedReasoningEffort()
 	})
 }
 

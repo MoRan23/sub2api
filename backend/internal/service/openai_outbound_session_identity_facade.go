@@ -144,6 +144,7 @@ type OpenAIOAuthIdentityCapture struct {
 	syncThreadID             string
 	UserAgent                string
 	UserAgentVersion         string
+	ThreadOriginator         string
 	OSFamily                 string
 	OSSource                 string
 	ReceivedAt               time.Time
@@ -183,10 +184,14 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthProfileIdentityPlan(
 	capture := OpenAIOAuthIdentityCapture{}
 	if current, ok := OpenAIOAuthIdentityCaptureFromContext(c); ok {
 		capture.UserAgent, capture.UserAgentVersion = current.UserAgent, current.UserAgentVersion
+		capture.ThreadOriginator = current.ThreadOriginator
 		capture.OSFamily, capture.OSSource = current.OSFamily, current.OSSource
 	} else if c != nil {
 		capture.UserAgent, capture.OSFamily, capture.OSSource = captureOpenAIRequestOS(c, nil)
 		capture.UserAgentVersion = c.GetHeader("version")
+		if c.Request != nil {
+			capture.ThreadOriginator, _ = openAIValidThreadOriginator(c.Request.Header)
+		}
 	}
 	return s.GetOrResolveOpenAIOAuthOutboundIdentity(ctx, c, account, capture, OpenAIOAuthIdentityPlanOptions{
 		TurnIdentityEnabled: false,
@@ -314,6 +319,9 @@ func captureOpenAIOAuthIdentity(c *gin.Context, body []byte, callerSeed, explici
 	capture.syncSessionID = captureOpenAISyncSession(c, body)
 	capture.syncThreadID = captureOpenAISyncThread(c, body)
 	capture.UserAgent, capture.OSFamily, capture.OSSource = captureOpenAIRequestOS(c, body)
+	if c != nil && c.Request != nil {
+		capture.ThreadOriginator, _ = openAIValidThreadOriginator(c.Request.Header)
+	}
 	if c != nil && c.Request != nil {
 		capture.UserAgentVersion = c.GetHeader("version")
 	}
@@ -851,6 +859,9 @@ func (s *OpenAIGatewayService) ResolveOpenAIOAuthIdentityPlan(
 			}
 		}
 		headers := http.Header{"User-Agent": []string{userAgent}, "Version": []string{version}}
+		if capture.ThreadOriginator != "" {
+			headers.Set("Originator", capture.ThreadOriginator)
+		}
 		pairCodexIdentityHeadersWithFallback(headers, codexOutboundIdentity{userAgent: fallback.UserAgent, originator: fallback.Originator, version: fallback.Version})
 		plan.ClientIdentity = CodexClientIdentityPlan{Mode: CodexClientIdentitySafePair, UserAgent: headers.Get("User-Agent"), Originator: headers.Get("originator"), Version: headers.Get("version"), Frozen: true}
 	}

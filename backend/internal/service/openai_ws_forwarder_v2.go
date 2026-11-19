@@ -204,7 +204,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 				return nil, wrapOpenAIWSFallback("request_metadata", mergeErr)
 			}
 			var merged map[string]any
-			if json.Unmarshal(mergedPayload, &merged) == nil && merged != nil {
+			if decodeOpenAIJSONUseNumber(mergedPayload, &merged) == nil && merged != nil {
 				payload = merged
 			}
 		}
@@ -251,6 +251,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		HandshakeObserver:    freezeFingerprintObservationWSHandshake(c, account),
 		ConnectObserver:      s.prepareCodexTelemetryConnect(ctx, account, wsHeaders, wsURL, mappedModel),
 		IdentityDigest:       outboundIdentityPlan.SocketDigest,
+		Routing:              s.prepareOpenAIGuardianRouting(c, account, outboundIdentityPlan, wsURL, OpenAIOutboundRouteForAccount(c, account).ProxyURL, wsHeaders, payloadBody),
 		HeadersFactory:       s.openAIWSHeadersFactory(ctx, account),
 		PreferredConnID:      preferredConnID,
 		ResponseContinuation: previousResponseID != "" && preferredConnID != "",
@@ -419,6 +420,7 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		return nil, wrapOpenAIWSFallback("write_request_daybreak", daybreakErr)
 	}
 	wirePayload = json.RawMessage(observationBody)
+	CaptureFinalOpenAIReasoningEffort(ctx, observationBody)
 	responseEvidence := beginOpenAIResponseEvidence(c, gjson.GetBytes(observationBody, "model").String())
 	observeOpenAIResponseEvidenceHeaders(responseEvidence, lease.ClaimResponseEvidenceHeaders(), "connection")
 	recordFrameObservation := s.freezeFingerprintObservationWSFrame(c, account, timezoneState, observationBody, lease.FingerprintObservationHeaders(), openAIWSObservationFramePlan(account, &outboundIdentityPlan), daybreakDecision)
@@ -548,6 +550,12 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 		}
 	}
 	resultWithUsage := func() *OpenAIForwardResult {
+		effectiveEffort := extractOpenAIReasoningEffort(reqBody, mappedModel, originalModel)
+		requestedEffort := CanonicalRequestedReasoningEffortFromReqBody(reqBody, originalModel, mappedModel)
+		if OpenAIReasoningEffortContextResolved(ctx) {
+			effectiveEffort = effectiveOpenAIEffortForBody(ctx, nil, mappedModel, originalModel)
+			requestedEffort = RequestedReasoningEffortFromContext(ctx)
+		}
 		return &OpenAIForwardResult{
 			RequestID:                     responseID,
 			ResponseID:                    responseID,
@@ -558,8 +566,8 @@ func (s *OpenAIGatewayService) forwardOpenAIWSV2(
 			UpstreamResponseModelConflict: responseModelObserver.Conflict(),
 			UpstreamResponseServiceTier:   responseModelObserver.ServiceTier(),
 			ServiceTier:                   resolvedOpenAIUpstreamServiceTierFromObserver(responseModelObserver, extractOpenAIServiceTier(reqBody)),
-			ReasoningEffort:               extractOpenAIReasoningEffort(reqBody, mappedModel, originalModel),
-			RequestedReasoningEffort:      CanonicalRequestedReasoningEffortFromReqBody(reqBody, originalModel, mappedModel),
+			ReasoningEffort:               effectiveEffort,
+			RequestedReasoningEffort:      requestedEffort,
 			Stream:                        reqStream,
 			OpenAIWSMode:                  true,
 			UpstreamTerminalEvent:         upstreamTerminalEvent,
@@ -1085,6 +1093,7 @@ readLoop:
 	if responseID != "" && stateStore != nil {
 		ttl := s.openAIWSResponseStickyTTL()
 		logOpenAIWSBindResponseAccountWarn(groupID, account.ID, responseID, stateStore.BindResponseAccount(ctx, groupID, responseID, account.ID, ttl))
+		_ = s.RecordOpenAIResponseEffort(ctx, c, nil, responseID, account)
 		stateStore.BindResponseConn(responseID, lease.ConnID(), ttl)
 	}
 	if stateStore != nil && storeDisabled && sessionHash != "" {

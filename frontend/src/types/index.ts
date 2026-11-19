@@ -566,6 +566,7 @@ export type ReasoningEffortMatchType = 'exact' | 'prefix' | 'suffix'
 
 export interface ReasoningEffortMapping {
   from: string
+  from_type?: 'string' | 'number'
   to: string
   match_type?: ReasoningEffortMatchType
   model?: string

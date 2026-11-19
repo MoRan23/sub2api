@@ -166,7 +166,7 @@ func traceResponsesChatMessageOrigins(built []ChatMessage, origins []map[string]
 			var fields map[string]string
 			var output string
 			if json.Unmarshal(item["output"], &output) == nil {
-				if _, _, rewritten := extractToolOutputMedia(item["output"]); !rewritten {
+				if _, _, rewritten, err := extractToolOutputMediaWithAudio(item["output"], true); !rewritten && err == nil {
 					fields = map[string]string{prefix + ".output": "content"}
 				}
 			}
@@ -179,7 +179,7 @@ func traceResponsesChatMessageOrigins(built []ChatMessage, origins []map[string]
 				return nil, false
 			}
 			continue
-		case "input_image":
+		case "input_image", "input_audio":
 			if !appendOrigin("user", nil) {
 				return nil, false
 			}
@@ -261,6 +261,9 @@ func responsesChatContentOrigins(raw json.RawMessage, prefix, role string) map[s
 				hasImage = true
 				partIndex++
 			}
+		case "input_audio":
+			hasImage = true // Any non-text content keeps Chat's parts-array shape.
+			partIndex++
 		default:
 			if _, exists := part["text"]; exists {
 				fields[path] = ""

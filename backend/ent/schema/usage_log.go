@@ -41,6 +41,14 @@ func (UsageLog) Fields() []ent.Field {
 		field.String("model").
 			MaxLen(100).
 			NotEmpty(),
+		field.String("reasoning_effort").
+			SchemaType(map[string]string{dialect.Postgres: "text"}).
+			Optional().
+			Nillable(),
+		field.String("requested_reasoning_effort").
+			SchemaType(map[string]string{dialect.Postgres: "text"}).
+			Optional().
+			Nillable(),
 		// RequestedModel stores the client-requested model name for stable display and analytics.
 		// NULL means historical rows written before requested_model dual-write was introduced.
 		field.String("requested_model").

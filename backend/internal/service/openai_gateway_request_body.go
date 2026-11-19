@@ -1016,23 +1016,21 @@ func (s *OpenAIGatewayService) replaceModelInResponseBody(body []byte, fromModel
 }
 
 func getOpenAIReasoningEffortFromReqBody(reqBody map[string]any, requestedModel string) (value string, present bool) {
-	if reqBody == nil {
+	effort, found := explicitOpenAIEffortFromMap(reqBody)
+	if !found {
 		return "", false
 	}
-
-	// Primary: reasoning.effort
-	if reasoning, ok := reqBody["reasoning"].(map[string]any); ok {
-		if effort, ok := reasoning["effort"].(string); ok {
-			return normalizeOpenAIReasoningEffortForModel(effort, requestedModel), true
-		}
+	if !effort.valid() {
+		return "", true
 	}
-
-	// Fallback: some clients may use a flat field.
-	if effort, ok := reqBody["reasoning_effort"].(string); ok {
-		return normalizeOpenAIReasoningEffortForModel(effort, requestedModel), true
+	if effort.Type == "number" {
+		return effort.Value, true
 	}
-
-	return "", false
+	normalized := normalizeOpenAIReasoningEffortForModel(effort.Value, requestedModel)
+	if normalized == "" {
+		normalized = effort.Value
+	}
+	return normalized, true
 }
 
 func deriveOpenAIReasoningEffortFromModel(model string) string {
@@ -1954,18 +1952,19 @@ func isOpenAICodexModel(model string) bool {
 // 非空候选；body 未携带 effort 时的模型后缀推导依次尝试每个候选——OAuth 的
 // normalizeCodexModel 会剥掉 upstreamModel 的 effort 后缀，只有原始模型名还留着。
 func extractOpenAIReasoningEffortFromBody(body []byte, modelCandidates ...string) *string {
-	reasoningEffort := strings.TrimSpace(gjson.GetBytes(body, "reasoning.effort").String())
-	if reasoningEffort == "" {
-		reasoningEffort = strings.TrimSpace(gjson.GetBytes(body, "reasoning_effort").String())
+	selected := selectOpenAIEffort(body, nil)
+	if selected.unknown {
+		return nil
 	}
-	if reasoningEffort != "" {
-		normalized := normalizeOpenAIReasoningEffortForModel(reasoningEffort, firstNonEmpty(modelCandidates...))
-		if normalized == "" {
-			return nil
+	if selected.value.valid() {
+		value := selected.value.Value
+		if selected.value.Type == "string" {
+			if normalized := normalizeOpenAIReasoningEffortForModel(value, firstNonEmpty(modelCandidates...)); normalized != "" {
+				value = normalized
+			}
 		}
-		return &normalized
+		return &value
 	}
-
 	value := deriveOpenAIReasoningEffortFromModelCandidates(modelCandidates)
 	if value == "" {
 		return nil
@@ -1974,14 +1973,8 @@ func extractOpenAIReasoningEffortFromBody(body []byte, modelCandidates ...string
 }
 
 func explicitRequestedReasoningEffortFromBody(body []byte) string {
-	raw := strings.TrimSpace(gjson.GetBytes(body, "reasoning.effort").String())
-	if raw == "" {
-		raw = strings.TrimSpace(gjson.GetBytes(body, "reasoning_effort").String())
-	}
-	if raw == "" {
-		raw = strings.TrimSpace(gjson.GetBytes(body, "output_config.effort").String())
-	}
-	return raw
+	selected := selectOpenAIEffort(body, nil)
+	return selected.value.Value
 }
 
 // CanonicalRequestedReasoningEffort extracts the client-requested effort before
@@ -1989,10 +1982,14 @@ func explicitRequestedReasoningEffortFromBody(body []byte) string {
 // Empty or unknown values return nil. "max" is preserved even for models that
 // later persist "xhigh".
 func CanonicalRequestedReasoningEffort(body []byte, modelCandidates ...string) *string {
-	if raw := explicitRequestedReasoningEffortFromBody(body); raw != "" {
+	selected := selectOpenAIEffort(body, nil)
+	if selected.unknown {
+		return nil
+	}
+	if raw := selected.value.Value; raw != "" {
 		canonical := NormalizeMaxReasoningEffort(raw)
 		if canonical == "" {
-			return nil
+			canonical = raw
 		}
 		return &canonical
 	}
@@ -2742,26 +2739,20 @@ func extractOpenAIReasoningEffort(reqBody map[string]any, modelCandidates ...str
 }
 
 func CanonicalRequestedReasoningEffortFromReqBody(reqBody map[string]any, modelCandidates ...string) *string {
-	if reqBody == nil {
-		return CanonicalRequestedReasoningEffort(nil, modelCandidates...)
-	}
-	raw := ""
-	if reasoning, ok := reqBody["reasoning"].(map[string]any); ok {
-		if effort, ok := reasoning["effort"].(string); ok {
-			raw = strings.TrimSpace(effort)
-		}
-	}
-	if raw == "" {
-		if effort, ok := reqBody["reasoning_effort"].(string); ok {
-			raw = strings.TrimSpace(effort)
-		}
-	}
-	if raw != "" {
-		canonical := NormalizeMaxReasoningEffort(raw)
-		if canonical == "" {
+	if value, found := explicitOpenAIEffortFromMap(reqBody); found {
+		if !value.valid() {
 			return nil
 		}
+		canonical := value.Value
+		if value.Type == "string" {
+			if known := NormalizeMaxReasoningEffort(canonical); known != "" {
+				canonical = known
+			}
+		}
 		return &canonical
+	}
+	if previous, ok := reqBody["previous_response_id"].(string); ok && strings.TrimSpace(previous) != "" {
+		return nil
 	}
 	return CanonicalRequestedReasoningEffort(nil, modelCandidates...)
 }
@@ -2781,7 +2772,6 @@ func normalizeOpenAIReasoningEffort(raw string) string {
 	case "xhigh", "extrahigh", "max":
 		return "xhigh"
 	default:
-		// Only store known effort levels for now to keep UI consistent.
 		return ""
 	}
 }

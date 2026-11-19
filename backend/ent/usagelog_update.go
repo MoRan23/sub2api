@@ -102,6 +102,46 @@ func (_u *UsageLogUpdate) SetNillableModel(v *string) *UsageLogUpdate {
 	return _u
 }
 
+// SetReasoningEffort sets the "reasoning_effort" field.
+func (_u *UsageLogUpdate) SetReasoningEffort(v string) *UsageLogUpdate {
+	_u.mutation.SetReasoningEffort(v)
+	return _u
+}
+
+// SetNillableReasoningEffort sets the "reasoning_effort" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableReasoningEffort(v *string) *UsageLogUpdate {
+	if v != nil {
+		_u.SetReasoningEffort(*v)
+	}
+	return _u
+}
+
+// ClearReasoningEffort clears the value of the "reasoning_effort" field.
+func (_u *UsageLogUpdate) ClearReasoningEffort() *UsageLogUpdate {
+	_u.mutation.ClearReasoningEffort()
+	return _u
+}
+
+// SetRequestedReasoningEffort sets the "requested_reasoning_effort" field.
+func (_u *UsageLogUpdate) SetRequestedReasoningEffort(v string) *UsageLogUpdate {
+	_u.mutation.SetRequestedReasoningEffort(v)
+	return _u
+}
+
+// SetNillableRequestedReasoningEffort sets the "requested_reasoning_effort" field if the given value is not nil.
+func (_u *UsageLogUpdate) SetNillableRequestedReasoningEffort(v *string) *UsageLogUpdate {
+	if v != nil {
+		_u.SetRequestedReasoningEffort(*v)
+	}
+	return _u
+}
+
+// ClearRequestedReasoningEffort clears the value of the "requested_reasoning_effort" field.
+func (_u *UsageLogUpdate) ClearRequestedReasoningEffort() *UsageLogUpdate {
+	_u.mutation.ClearRequestedReasoningEffort()
+	return _u
+}
+
 // SetRequestedModel sets the "requested_model" field.
 func (_u *UsageLogUpdate) SetRequestedModel(v string) *UsageLogUpdate {
 	_u.mutation.SetRequestedModel(v)
@@ -1195,6 +1235,18 @@ func (_u *UsageLogUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.Model(); ok {
 		_spec.SetField(usagelog.FieldModel, field.TypeString, value)
 	}
+	if value, ok := _u.mutation.ReasoningEffort(); ok {
+		_spec.SetField(usagelog.FieldReasoningEffort, field.TypeString, value)
+	}
+	if _u.mutation.ReasoningEffortCleared() {
+		_spec.ClearField(usagelog.FieldReasoningEffort, field.TypeString)
+	}
+	if value, ok := _u.mutation.RequestedReasoningEffort(); ok {
+		_spec.SetField(usagelog.FieldRequestedReasoningEffort, field.TypeString, value)
+	}
+	if _u.mutation.RequestedReasoningEffortCleared() {
+		_spec.ClearField(usagelog.FieldRequestedReasoningEffort, field.TypeString)
+	}
 	if value, ok := _u.mutation.RequestedModel(); ok {
 		_spec.SetField(usagelog.FieldRequestedModel, field.TypeString, value)
 	}
@@ -1685,6 +1737,46 @@ func (_u *UsageLogUpdateOne) SetNillableModel(v *string) *UsageLogUpdateOne {
 	if v != nil {
 		_u.SetModel(*v)
 	}
+	return _u
+}
+
+// SetReasoningEffort sets the "reasoning_effort" field.
+func (_u *UsageLogUpdateOne) SetReasoningEffort(v string) *UsageLogUpdateOne {
+	_u.mutation.SetReasoningEffort(v)
+	return _u
+}
+
+// SetNillableReasoningEffort sets the "reasoning_effort" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableReasoningEffort(v *string) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetReasoningEffort(*v)
+	}
+	return _u
+}
+
+// ClearReasoningEffort clears the value of the "reasoning_effort" field.
+func (_u *UsageLogUpdateOne) ClearReasoningEffort() *UsageLogUpdateOne {
+	_u.mutation.ClearReasoningEffort()
+	return _u
+}
+
+// SetRequestedReasoningEffort sets the "requested_reasoning_effort" field.
+func (_u *UsageLogUpdateOne) SetRequestedReasoningEffort(v string) *UsageLogUpdateOne {
+	_u.mutation.SetRequestedReasoningEffort(v)
+	return _u
+}
+
+// SetNillableRequestedReasoningEffort sets the "requested_reasoning_effort" field if the given value is not nil.
+func (_u *UsageLogUpdateOne) SetNillableRequestedReasoningEffort(v *string) *UsageLogUpdateOne {
+	if v != nil {
+		_u.SetRequestedReasoningEffort(*v)
+	}
+	return _u
+}
+
+// ClearRequestedReasoningEffort clears the value of the "requested_reasoning_effort" field.
+func (_u *UsageLogUpdateOne) ClearRequestedReasoningEffort() *UsageLogUpdateOne {
+	_u.mutation.ClearRequestedReasoningEffort()
 	return _u
 }
 
@@ -2810,6 +2902,18 @@ func (_u *UsageLogUpdateOne) sqlSave(ctx context.Context) (_node *UsageLog, err 
 	}
 	if value, ok := _u.mutation.Model(); ok {
 		_spec.SetField(usagelog.FieldModel, field.TypeString, value)
+	}
+	if value, ok := _u.mutation.ReasoningEffort(); ok {
+		_spec.SetField(usagelog.FieldReasoningEffort, field.TypeString, value)
+	}
+	if _u.mutation.ReasoningEffortCleared() {
+		_spec.ClearField(usagelog.FieldReasoningEffort, field.TypeString)
+	}
+	if value, ok := _u.mutation.RequestedReasoningEffort(); ok {
+		_spec.SetField(usagelog.FieldRequestedReasoningEffort, field.TypeString, value)
+	}
+	if _u.mutation.RequestedReasoningEffortCleared() {
+		_spec.ClearField(usagelog.FieldRequestedReasoningEffort, field.TypeString)
 	}
 	if value, ok := _u.mutation.RequestedModel(); ok {
 		_spec.SetField(usagelog.FieldRequestedModel, field.TypeString, value)

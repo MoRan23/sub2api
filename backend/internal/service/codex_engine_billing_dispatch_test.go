@@ -14,6 +14,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/config"
 	"github.com/gin-gonic/gin"
 	"github.com/stretchr/testify/require"
+	"github.com/tidwall/gjson"
 )
 
 type engineDispatchStore struct {
@@ -30,7 +31,7 @@ func (s *engineDispatchStore) MarkNotDispatched(ctx context.Context, id int64) e
 }
 
 func TestCodexEngineBillingDispatchDurableBeforeSend(t *testing.T) {
-	for _, scenario := range []string{"success", "missing_headers", "capacity_failed", "persist_failed", "cancel_before_send", "dial_failed", "unknown_write"} {
+	for _, scenario := range []string{"success", "configuration_update", "missing_headers", "capacity_failed", "persist_failed", "cancel_before_send", "dial_failed", "unknown_write"} {
 		t.Run(scenario, func(t *testing.T) {
 			ctx, cancel := context.WithCancel(t.Context())
 			defer cancel()
@@ -72,6 +73,9 @@ func TestCodexEngineBillingDispatchDurableBeforeSend(t *testing.T) {
 				require.NotEqual(t, "client-spoofed-correlation", pending.ClientRequestID)
 				require.Equal(t, billingTestInstance, pending.InstanceID)
 				require.NotContains(t, string(pending.Snapshot), account.GetOpenAIApiKey())
+				if scenario == "configuration_update" {
+					require.Equal(t, "18446744073709551615", gjson.GetBytes(pending.Snapshot, "reasoning_effort").String())
+				}
 				require.NoError(t, r.Context().Err())
 				if scenario == "dial_failed" {
 					httptrace.ContextClientTrace(r.Context()).GetConn(r.URL.Host)
@@ -98,13 +102,21 @@ func TestCodexEngineBillingDispatchDurableBeforeSend(t *testing.T) {
 			key := &APIKey{ID: 2, UserID: 1, User: &User{ID: 1}}
 			c.Set("api_key", key)
 			SetCodexEngineBillingInput(c, &OpenAIRecordUsageInput{Account: account, APIKey: key, User: key.User})
-			result, err := svc.forwardCodexEngine(ctx, c, account, []byte(`{"model":"gpt-5.4","input":"fixture"}`), "/v1/responses", "")
+			body := []byte(`{"model":"gpt-5.4","input":"fixture"}`)
+			if scenario == "configuration_update" {
+				body = []byte(`{"model":"gpt-5.4","reasoning":{"effort":"high"},"input":[{"type":"configuration_update","reasoning":{"effort":18446744073709551615}}]}`)
+			}
+			result, err := svc.forwardCodexEngine(ctx, c, account, body, "/v1/responses", "")
 			switch scenario {
-			case "success", "missing_headers":
+			case "success", "configuration_update", "missing_headers":
 				require.NoError(t, err)
 				require.NotNil(t, result)
 				require.Contains(t, writer.Body.String(), `"input_tokens":500`)
 				require.Equal(t, 1, dispatched)
+				if scenario == "configuration_update" {
+					require.NotNil(t, result.ReasoningEffort)
+					require.Equal(t, "18446744073709551615", *result.ReasoningEffort)
+				}
 			case "capacity_failed":
 				require.Error(t, err)
 				require.Zero(t, created)

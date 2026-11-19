@@ -106,7 +106,7 @@ func AnthropicToChatCompletionsRequestWithMinOutputTokens(req *AnthropicRequest,
 	}
 
 	// Match the Responses bridge, including an explicit thinking disable.
-	out.ReasoningEffort = anthropicReasoningEffort(req)
+	out.SetReasoningEffort(anthropicReasoningEffort(req), false)
 
 	parallelToolCalls := true
 	out.ParallelToolCalls = &parallelToolCalls
