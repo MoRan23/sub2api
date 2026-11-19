@@ -10,6 +10,23 @@ function render(evidence: OpenAIResponseEvidence = {}) {
 }
 
 describe('OpenAI response evidence after cache retirement', () => {
+  it('renders only bounded replay summary counts, not raw transformations', async () => {
+    const wrapper = render({ reasoning_replay: {
+      report: 'prefix_mismatch_reported',
+      removed_counts: { organization_mismatch: 0, end_user_mismatch: 1, model_mismatch: 0, prefix_mismatch: 2, turn_boundary: 0, other: 3, secret: 'private-reason' },
+      transformations: ['private-transformation'],
+    } } as unknown as OpenAIResponseEvidence)
+    expect(wrapper.get('[data-testid="openai-reasoning-replay"]').text()).toContain('prefix_mismatch_reported')
+    expect(wrapper.get('[data-testid="openai-replay-prefix_mismatch"]').text()).toBe('2')
+    expect(wrapper.get('[data-testid="openai-reasoning-replay-counts"]').findAll('dd')).toHaveLength(6)
+    expect(wrapper.text()).not.toContain('private-')
+    await wrapper.setProps({ evidence: { reasoning_replay: { report: 'unavailable', removed_counts: { prefix_mismatch: 9 } } } })
+    expect(wrapper.get('[data-testid="openai-reasoning-replay"]').text()).toContain('unavailable')
+    expect(wrapper.find('[data-testid="openai-reasoning-replay-counts"]').exists()).toBe(false)
+    await wrapper.setProps({ evidence: {} })
+    expect(wrapper.get('[data-testid="openai-reasoning-replay"]').text()).toContain('notRecorded')
+  })
+
   it.each(['review_required', 'review_not_required', 'mixed', 'invalid'] as const)('renders Guardian %s as response evidence', (status) => {
     const wrapper = render({ guardian_assessment: { status, invalid_present: true } })
     expect(wrapper.get('[data-testid="openai-guardian-assessment"]').text()).toContain(`guardianStatuses.${status}`)

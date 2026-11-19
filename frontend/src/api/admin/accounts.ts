@@ -215,6 +215,10 @@ export interface OpenAIHeaderDiagnostics {
 
 /** Model and header evidence captured from the same upstream response. */
 export interface OpenAIResponseEvidence {
+  reasoning_replay?: {
+    report: 'unavailable' | 'no_removals_reported' | 'prefix_mismatch_reported' | 'removals_reported'
+    removed_counts: Record<'organization_mismatch' | 'end_user_mismatch' | 'model_mismatch' | 'prefix_mismatch' | 'turn_boundary' | 'other', number>
+  }
   upstream_response_model?: string
   model_relation?: 'not_reported' | 'exact' | 'known_alias' | 'different' | 'conflicting'
   model_conflict?: boolean

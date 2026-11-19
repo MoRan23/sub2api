@@ -124,13 +124,13 @@ func TestCodexTelemetry0169PostgresConnectSnapshotRestartAndSealedRetry(t *testi
 
 	_, before, err := telemetry0169ReadMetrics(key)
 	require.NoError(t, err)
-	require.Equal(t, 3, before.Version)
+	require.Equal(t, 4, before.Version)
 	for _, state := range before.States {
 		require.Zero(t, state.Turns)
 		require.Zero(t, state.Attempts, "physical Dial must not invent a model attempt")
 	}
 
-	// A fresh service must restore and extend the same v3 aggregate, rather than
+	// A fresh service must restore and extend the same current aggregate, rather than
 	// resetting it or requiring a new snapshot/database schema version.
 	restarted := telemetry0169Runtime(t, telemetry0169NoSendStore{NewCodexTelemetryStore(integrationDB)})
 	factory = restarted.PrepareConnect(input)
@@ -143,7 +143,7 @@ func TestCodexTelemetry0169PostgresConnectSnapshotRestartAndSealedRetry(t *testi
 	restarted.Stop()
 	raw, restored, err := telemetry0169ReadMetrics(key)
 	require.NoError(t, err)
-	require.Equal(t, 3, restored.Version)
+	require.Equal(t, 4, restored.Version)
 	require.Contains(t, string(raw), "codex.websocket.connect.duration_ms")
 	var nonMetrics int
 	require.NoError(t, integrationDB.QueryRowContext(context.Background(), `SELECT COUNT(*) FROM codex_telemetry_activities a

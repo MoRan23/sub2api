@@ -52,4 +52,12 @@ describe('codexTelemetryAPI', () => {
     get.mockResolvedValueOnce({ data: { items: [] } })
     expect((await codexTelemetryAPI.list()).coverage).toEqual([])
   })
+
+  it('retains supported critical-path, tool-update and continuation coverage', async () => {
+    const coverage = ['turn_critical_path', 'tool_declaration_updates', 'websocket_continuation'].map((signal) => ({
+      signal, type: 'metrics', status: 'awaiting_source', reason: `client_${signal}_not_on_responses_wire`, event_names: [`codex.${signal}`],
+    }))
+    get.mockResolvedValueOnce({ data: { items: [], coverage } })
+    expect((await codexTelemetryAPI.list()).coverage).toEqual(coverage)
+  })
 })

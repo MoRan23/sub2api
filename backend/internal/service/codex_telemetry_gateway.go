@@ -688,5 +688,8 @@ func codexTelemetryResultFromResponse(raw []byte, status string, httpStatus int,
 	if root.Get("type").String() == "error" || root.Get("error").IsObject() || httpStatus >= 400 {
 		result.Status = "failed"
 	}
+	if httpStatus < 400 {
+		result.ReasoningReplay = codexReasoningReplayFromTerminal(root, root.Get("type").String())
+	}
 	return result
 }

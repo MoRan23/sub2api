@@ -61,6 +61,7 @@ var codexMetricDescriptors = []codexMetricDescriptor{
 	{"codex.shell_snapshot", "sum", "", "app.version,auth_mode,failure_reason,model,originator,session_source,success,version"},
 	{"codex.startup.phase.duration_ms", "histogram", "ms", "app.version,auth_mode,model,originator,phase,service_name,session_source,status"},
 	{"codex.websocket.request", "sum", "", "app.version,auth_mode,model,originator,service_name,session_source,success"},
+	{"codex.websocket.continuation", "sum", "", "app.version,auth_mode,model,originator,service_name,session_source,mode,reason,previous_item_type,current_item_type,phase,after_prewarm"},
 	{"codex.websocket.connect", "sum", "", "app.version,auth_mode,model,originator,service_name,session_source,success"},
 	{"codex.websocket.connect.duration_ms", "histogram", "ms", "app.version,auth_mode,model,originator,service_name,session_source,success"},
 	{"codex.websocket.request.duration_ms", "histogram", "ms", "app.version,auth_mode,model,originator,service_name,session_source,success"},
@@ -84,6 +85,8 @@ var codexMetricDescriptors = []codexMetricDescriptor{
 	{"codex.turn.ttft.duration_ms", "histogram", "ms", "app.version,auth_mode,model,originator,service_name,session_source"},
 	{"codex.turn.ttfm.duration_ms", "histogram", "ms", "app.version,auth_mode,model,originator,service_name,session_source"},
 	{"codex.responses_api_overhead.duration_ms", "histogram", "ms", "app.version,auth_mode,model,originator,service_name,session_source"},
+	{"codex.responses.reasoning_replay", "sum", "", "app.version,auth_mode,model,originator,service_name,session_source,report"},
+	{"codex.responses.reasoning_items_removed", "histogram", "", "app.version,auth_mode,model,originator,service_name,session_source,reason"},
 	{"codex.responses_api_inference_time.duration_ms", "histogram", "ms", "app.version,auth_mode,model,originator,service_name,session_source"},
 	{"codex.responses_api_engine_iapi_tbt.duration_ms", "histogram", "ms", "app.version,auth_mode,model,originator,service_name,session_source"},
 	{"codex.turn.e2e_duration_ms", "histogram", "ms", "app.version,auth_mode,model,originator,service_name,session_source"},
@@ -103,6 +106,7 @@ var codexMetricDescriptors = []codexMetricDescriptor{
 
 var codexHistogramBounds = []float64{0, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1000, 1250, 1500, 1750, 2000, 2250, 2500, 3000, 3500, 4000, 4500, 5000, 6000, 7000, 7500, 8000, 9000, 10000, 12000, 15000, 20000, 30000, 60000, 120000}
 var codexValueHistogramBounds = []float64{0, 5, 10, 25, 50, 75, 100, 250, 500, 750, 1000, 2500, 5000, 7500, 10000}
+var codexReasoningRemovalHistogramBounds = []float64{0, 1, 2, 4, 8, 16, 32, 64, 128, 256}
 var codexHomeSizeHistogramBounds = []float64{1048576, 10485760, 104857600, 1073741824, 10737418240, 107374182400, 1099511627776}
 var codexSQLiteBytesHistogramBounds = []float64{128, 256, 512, 1024, 2048, 4096, 8192, 16384, 32768, 65536, 131072, 262144, 524288, 1048576, 2097152, 4194304, 8388608, 16777216}
 var codexSkillsCountHistogramBounds = func() []float64 {
@@ -123,6 +127,8 @@ var codexSkillsDescriptionHistogramBounds = func() []float64 {
 
 func codexMetricBounds(descriptor codexMetricDescriptor) []float64 {
 	switch descriptor.name {
+	case "codex.responses.reasoning_items_removed":
+		return codexReasoningRemovalHistogramBounds
 	case "codex.app_server.codex_home.size_bytes":
 		return codexHomeSizeHistogramBounds
 	case "codex.sqlite.logs.write.bytes", "codex.sqlite.logs.write.max_entry_bytes":
@@ -313,7 +319,7 @@ func (s *codexTelemetryMetricStore) touch(profile codexTelemetryProfile) []codex
 func codexMetricIsStartup(name string) bool {
 	// These are explicitly simulated client initialization activities. Network
 	// request success and turn timings require an actual terminal response.
-	for _, prefix := range []string{"codex.auth_storage.", "codex.turn.", "codex.responses_api", "codex.websocket.", "codex.sse_event", "codex.thread.", "codex.hooks.", "codex.guardian.", "codex.tool."} {
+	for _, prefix := range []string{"codex.auth_storage.", "codex.turn.", "codex.responses_api", "codex.responses.", "codex.websocket.", "codex.sse_event", "codex.thread.", "codex.hooks.", "codex.guardian.", "codex.tool."} {
 		if strings.HasPrefix(name, prefix) {
 			return false
 		}
@@ -439,6 +445,33 @@ func (s *codexTelemetryMetricStore) recordAttempt(profile codexTelemetryProfile,
 	for _, descriptor := range codexMetricDescriptors {
 		var value float64
 		switch descriptor.name {
+		case "codex.responses.reasoning_replay", "codex.responses.reasoning_items_removed":
+			replay := measurement.ReasoningReplay
+			if replay == nil {
+				continue
+			}
+			switch replay.Report {
+			case "unavailable", "no_removals_reported", "removals_reported", "prefix_mismatch_reported":
+			default:
+				continue
+			}
+			tags := make(map[string]string, 2)
+			if sku := profile.input.ProductSKU; sku != "" {
+				tags["product_sku"] = "other"
+				if sku == "codex" {
+					tags["product_sku"] = "codex"
+				}
+			}
+			if descriptor.name == "codex.responses.reasoning_replay" {
+				tags["report"] = replay.Report
+				state.addWithSource(descriptor, 1, profile, "", now, tags, "observed")
+			} else if replay.Report != "unavailable" {
+				for index, count := range replay.RemovedCounts.values() {
+					tags["reason"] = codexReasoningRemovalReasons[index]
+					state.addWithSource(descriptor, float64(count), profile, "", now, tags, "observed")
+				}
+			}
+			continue
 		case "codex.websocket.request":
 			if !profile.websocket || measurement.SendSucceeded == nil {
 				continue
@@ -864,7 +897,7 @@ type codexMetricStoreSnapshot struct {
 }
 
 const (
-	codexMetricSnapshotVersion               = 3
+	codexMetricSnapshotVersion               = 4
 	codexMetricLegacyBytesDiscarded          = "legacy_byte_histogram_discarded"
 	codexMetricLegacySkillsDiscarded         = "legacy_skills_histogram_discarded"
 	codexMetricLegacyBytesAndSkillsDiscarded = "legacy_byte_and_skills_histograms_discarded"

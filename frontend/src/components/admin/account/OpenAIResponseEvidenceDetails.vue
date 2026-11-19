@@ -9,6 +9,10 @@
       <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.safetyBufferingFasterModel`) }}</dt><dd class="break-all font-mono" data-testid="openai-safety-buffering-faster-model">{{ evidence.safety_buffering_faster_model || t(`${prefix}.modelNotReported`) }}</dd></div>
       <div v-if="evidence.header_evidence_scope === 'response' || evidence.header_evidence_scope === 'connection'"><dt class="text-xs text-gray-500">{{ t(`${prefix}.headerEvidenceScope`) }}</dt><dd data-testid="openai-header-evidence-scope">{{ t(`${prefix}.headerEvidenceScopes.${evidence.header_evidence_scope}`) }}</dd></div>
       <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.guardianAssessment`) }}</dt><dd data-testid="openai-guardian-assessment">{{ guardianStatus }}</dd></div>
+      <div><dt class="text-xs text-gray-500">{{ t(`${prefix}.reasoningReplay`) }}</dt><dd data-testid="openai-reasoning-replay">{{ replayStatus }}</dd></div>
+    </dl>
+    <dl v-if="replayCounts.length" class="grid gap-3 sm:grid-cols-2" data-testid="openai-reasoning-replay-counts">
+      <div v-for="item in replayCounts" :key="item.reason"><dt class="text-xs text-gray-500">{{ t(`${prefix}.reasoningReplayReasons.${item.reason}`) }}</dt><dd :data-testid="`openai-replay-${item.reason}`">{{ item.count }}</dd></div>
     </dl>
     <p v-if="evidence.guardian_assessment?.invalid_present" class="text-xs text-amber-700 dark:text-amber-400" data-testid="openai-guardian-invalid">{{ t(`${prefix}.guardianInvalidPresent`) }}</p>
     <p v-if="evidence.guardian_assessment" class="text-xs text-gray-500 dark:text-gray-400">{{ t(`${prefix}.guardianHint`) }}</p>
@@ -29,6 +33,20 @@ const prefix = 'admin.accounts.responseEvidence'
 const relations = new Set(['not_reported', 'exact', 'known_alias', 'different', 'conflicting'])
 const relation = computed(() => t(`${prefix}.modelRelations.${props.evidence.model_conflict ? 'conflicting' : relations.has(props.evidence.model_relation || '') ? props.evidence.model_relation : 'not_reported'}`))
 const guardianStatuses = new Set(['review_required', 'review_not_required', 'mixed', 'invalid'])
+const replayReports = new Set(['unavailable', 'no_removals_reported', 'prefix_mismatch_reported', 'removals_reported'])
+const replayReasons = ['organization_mismatch', 'end_user_mismatch', 'model_mismatch', 'prefix_mismatch', 'turn_boundary', 'other'] as const
+const replayStatus = computed(() => {
+  const replay = props.evidence.reasoning_replay
+  return replay ? t(`${prefix}.reasoningReplayReports.${replayReports.has(replay.report) ? replay.report : 'unavailable'}`) : t(`${prefix}.notRecorded`)
+})
+const replayCounts = computed(() => {
+  const replay = props.evidence.reasoning_replay
+  if (!replay || replay.report === 'unavailable' || !replayReports.has(replay.report)) return []
+  return replayReasons.map((reason) => {
+    const count = replay.removed_counts?.[reason]
+    return { reason, count: Number.isSafeInteger(count) && count >= 0 ? count : '—' }
+  })
+})
 const guardianStatus = computed(() => {
   const assessment = props.evidence.guardian_assessment
   if (!assessment) return t(`${prefix}.notRecorded`)

@@ -244,6 +244,9 @@ describe('CodexTelemetryObservations', () => {
     list.mockResolvedValue(response({ configured_enabled: false, effective_enabled: false, items: [], total: 0, coverage: [
       { signal: 'skill_invocation', type: 'logs', status: 'unavailable', event_names: ['codex.skill_invocation'], reason: 'client_skill_event_not_on_responses_wire' },
       { signal: 'auth_storage', type: 'metrics', status: 'awaiting_source', event_names: ['codex.auth_storage.operation'], reason: 'client_auth_storage_not_on_responses_wire' },
+      { signal: 'turn_critical_path', type: 'metrics', status: 'awaiting_source', event_names: ['codex.turn.critical_path.capture'], reason: 'client_critical_path_not_on_responses_wire' },
+      { signal: 'tool_declaration_updates', type: 'metrics', status: 'awaiting_source', event_names: ['codex.tools.exec_entry_updates'], reason: 'client_tool_declaration_updates_not_on_responses_wire' },
+      { signal: 'websocket_continuation', type: 'metrics', status: 'awaiting_source', event_names: ['codex.websocket.continuation'], reason: 'client_websocket_continuation_not_on_responses_wire' },
     ] }))
     const wrapper = mountPanel(locale)
     await flushPromises()
@@ -253,6 +256,9 @@ describe('CodexTelemetryObservations', () => {
     expect(coverage.text()).toContain(status)
     expect(coverage.text()).toContain(reason)
     expect(coverage.find('[title="codex.skill_invocation"]').exists()).toBe(true)
+    expect(coverage.find('[title="codex.turn.critical_path.capture"]').exists()).toBe(true)
+    expect(coverage.find('[title="codex.tools.exec_entry_updates"]').exists()).toBe(true)
+    expect(coverage.find('[title="codex.websocket.continuation"]').exists()).toBe(true)
     expect(wrapper.findAll('details')).toHaveLength(0)
     expect(wrapper.text()).not.toContain('admin.fingerprintObservation')
   })

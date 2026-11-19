@@ -19,10 +19,13 @@ export default {
       reasons: '推定与跳过原因', fieldSources: '字段来源（仅本地诊断）',
       coverage: {
         title: '客户端事件采集范围',
-        signals: { skill_invocation: '技能调用', auth_storage: '凭据存储操作' },
+        signals: { skill_invocation: '技能调用', auth_storage: '凭据存储操作', turn_critical_path: '回合关键路径', tool_declaration_updates: '工具声明更新', websocket_continuation: 'WebSocket 续链' },
         status: { unavailable: '未采集', awaiting_source: '未采集（已兼容指标定义）' },
       },
       reasonLabels: {
+        client_critical_path_not_on_responses_wire: 'Responses 协议未提供客户端关键路径耗时，等待原始客户端指标接入。',
+        client_tool_declaration_updates_not_on_responses_wire: 'Responses 协议未提供客户端工具声明更新数据，等待原始客户端指标接入。',
+        client_websocket_continuation_not_on_responses_wire: 'Responses 协议未提供客户端 WebSocket 续链指标，等待原始客户端指标接入。',
         client_skill_event_not_on_responses_wire: 'Responses 请求不包含真实技能调用事件，当前也没有 OTLP 日志接入，无法采集。',
         client_auth_storage_not_on_responses_wire: 'Responses 请求不包含客户端凭据存储操作；已兼容官方指标定义，当前没有原始指标接入，不会生成模拟操作。',
         identity_unavailable: '无法确定出站安装身份，已跳过相关遥测。',

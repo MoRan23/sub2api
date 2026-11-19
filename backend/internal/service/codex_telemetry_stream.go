@@ -128,6 +128,15 @@ func (s *codexTelemetryStream) observeEvent(raw []byte, fallback string, at time
 		} else if typ == "response.cancelled" || typ == "response.canceled" {
 			status = "cancelled"
 		}
+		// Reuse the terminal status/error checks above. Capture once per physical
+		// attempt, and keep observed metadata even if delivery subsequently fails.
+		if s.result.ReasoningReplay == nil && !s.failed && response.Get("id").Type == gjson.String {
+			completed := status == "completed" && (typ == "response.completed" || typ == "")
+			interrupted := status == "incomplete" && (typ == "response.incomplete" || typ == "") && response.Get("incomplete_details.reason").String() == "interrupted"
+			if completed || interrupted {
+				s.result.ReasoningReplay = codexReasoningReplayFromTransformations(response.Get("input_transformations"))
+			}
+		}
 		if status != "completed" {
 			success = false
 			s.failed = true

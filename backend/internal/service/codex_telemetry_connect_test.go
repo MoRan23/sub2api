@@ -394,7 +394,7 @@ func TestCodexTelemetryConnectV3SnapshotAndFrozenSealedPayload(t *testing.T) {
 		Version int `json:"version"`
 	}
 	require.NoError(t, json.Unmarshal(snapshot, &version))
-	require.Equal(t, 3, version.Version)
+	require.Equal(t, codexMetricSnapshotVersion, version.Version)
 	restored, err := unmarshalCodexTelemetryMetricStore(snapshot)
 	require.NoError(t, err)
 	batches := restored.flush(now.Add(2 * time.Minute))

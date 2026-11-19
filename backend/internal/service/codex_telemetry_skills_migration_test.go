@@ -60,7 +60,7 @@ func TestCodexTelemetrySkillsBoundsAndV3RoundTrip(t *testing.T) {
 			require.NoError(t, err)
 			var snapshot codexMetricStoreSnapshot
 			require.NoError(t, json.Unmarshal(encoded, &snapshot))
-			require.Equal(t, 3, snapshot.Version)
+			require.Equal(t, codexMetricSnapshotVersion, snapshot.Version)
 			restored, err := unmarshalCodexTelemetryMetricStore(encoded)
 			require.NoError(t, err)
 			again, err := marshalCodexTelemetryMetricStore(restored)
@@ -152,7 +152,7 @@ func TestCodexTelemetryLegacySkillsMigrationPreservesPoolAndOtherData(t *testing
 			activity := store.activities[attempt.poolKey][CodexTelemetryActivityMapKey("metrics", "current")]
 			var saved codexMetricStoreSnapshot
 			require.NoError(t, json.Unmarshal(activity.Data, &saved))
-			require.Equal(t, 3, saved.Version)
+			require.Equal(t, codexMetricSnapshotVersion, saved.Version)
 			require.Equal(t, original.Clients, saved.Clients)
 			require.True(t, saved.States[0].ExternalAgentSent)
 			require.Empty(t, saved.States[0].Pending)

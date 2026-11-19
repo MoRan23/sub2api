@@ -219,7 +219,7 @@ func codexMetricKindLimitSnapshot(t *testing.T, profile codexTelemetryProfile, v
 }
 
 func TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions(t *testing.T) {
-	for _, version := range []int{1, 2, 3} {
+	for _, version := range []int{1, 2, 3, 4} {
 		for _, websocket := range []bool{false, true} {
 			for _, waitsFirst := range []bool{false, true} {
 				name := "codex.sse_event"

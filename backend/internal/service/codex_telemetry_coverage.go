@@ -42,5 +42,10 @@ func codexTelemetrySignalCoverage() []CodexTelemetrySignalCoverage {
 			},
 			Reason: "client_auth_storage_not_on_responses_wire",
 		},
+		{
+			Signal: "websocket_continuation", Type: "metrics", Status: "awaiting_source",
+			EventNames: []string{"codex.websocket.continuation"},
+			Reason:     "client_websocket_continuation_not_on_responses_wire",
+		},
 	}
 }

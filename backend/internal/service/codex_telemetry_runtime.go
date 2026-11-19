@@ -231,6 +231,7 @@ func (s *CodexTelemetryService) submitPersistentResult(a *CodexTelemetryAttempt,
 }
 
 func copyCodexTelemetryRuntimeResult(result CodexTelemetryResult) CodexTelemetryResult {
+	result.ReasoningReplay = cloneCodexReasoningReplay(result.ReasoningReplay)
 	if result.FinishedAt.IsZero() {
 		result.FinishedAt = time.Now()
 	}
@@ -612,6 +613,7 @@ func mergeRuntimeResult(total *CodexTelemetryResult, next CodexTelemetryResult) 
 	// Per-event measurements belong to the physical-attempt metrics, never a
 	// logical-turn summary or an accumulating persisted transcript.
 	total.EventMetrics, total.ServerTiming = nil, nil
+	total.ReasoningReplay = nil
 	total.EventCount, total.FailedEventCount = 0, 0
 	total.PendingToolCallIDs = nil
 }

@@ -10,15 +10,16 @@ import (
 // CodexModelEvidence contains only upstream declarations from one physical
 // response. Header hints never stand in for the response body's model.
 type CodexModelEvidence struct {
-	UpstreamResponseModel      string                   `json:"upstream_response_model,omitempty"`
-	ModelRelation              string                   `json:"model_relation"`
-	ModelConflict              bool                     `json:"model_conflict"`
-	ModelEvidenceSource        string                   `json:"model_evidence_source,omitempty"`
-	SafetyBufferingEnabled     *bool                    `json:"safety_buffering_enabled,omitempty"`
-	SafetyBufferingFasterModel string                   `json:"safety_buffering_faster_model,omitempty"`
-	HeaderEvidenceScope        string                   `json:"header_evidence_scope,omitempty"`
-	HeaderDiagnostics          *OpenAIHeaderDiagnostics `json:"header_diagnostics,omitempty"`
-	GuardianAssessment         *CodexGuardianEvidence   `json:"guardian_assessment,omitempty"`
+	UpstreamResponseModel      string                        `json:"upstream_response_model,omitempty"`
+	ModelRelation              string                        `json:"model_relation"`
+	ModelConflict              bool                          `json:"model_conflict"`
+	ModelEvidenceSource        string                        `json:"model_evidence_source,omitempty"`
+	SafetyBufferingEnabled     *bool                         `json:"safety_buffering_enabled,omitempty"`
+	SafetyBufferingFasterModel string                        `json:"safety_buffering_faster_model,omitempty"`
+	HeaderEvidenceScope        string                        `json:"header_evidence_scope,omitempty"`
+	HeaderDiagnostics          *OpenAIHeaderDiagnostics      `json:"header_diagnostics,omitempty"`
+	GuardianAssessment         *CodexGuardianEvidence        `json:"guardian_assessment,omitempty"`
+	ReasoningReplay            *CodexReasoningReplayEvidence `json:"reasoning_replay,omitempty"`
 }
 
 // CodexGuardianEvidence summarizes declarations, never execution permission.
@@ -30,6 +31,7 @@ type CodexGuardianEvidence struct {
 }
 
 func (e CodexModelEvidence) clone() CodexModelEvidence {
+	e.ReasoningReplay = cloneCodexReasoningReplay(e.ReasoningReplay)
 	e.HeaderDiagnostics = e.HeaderDiagnostics.clone()
 	if e.GuardianAssessment != nil {
 		v := *e.GuardianAssessment
@@ -47,6 +49,7 @@ type codexModelEvidenceObserver struct {
 	firstSource, terminalSource                                     string
 	headers                                                         CodexModelEvidence
 	guardianSeen, guardianInvalid, guardianReview, guardianNoReview bool
+	replayTerminalSeen                                              bool
 }
 
 func (o *codexModelEvidenceObserver) observePayload(payload []byte) {
@@ -54,6 +57,13 @@ func (o *codexModelEvidenceObserver) observePayload(payload []byte) {
 		return
 	}
 	eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
+	if !o.replayTerminalSeen && (isUpstreamResponseModelTerminalEvent(eventType) || eventType == "error" || eventType == "") {
+		// Borrow only during synchronous extraction: the retained result contains
+		// fixed counters, never strings into the response or the complete body.
+		root := gjson.Parse(openAIWSPayloadStringView(payload))
+		o.headers.ReasoningReplay = codexReasoningReplayFromTerminal(root, eventType)
+		o.replayTerminalSeen = eventType != "" || codexTelemetryUpstreamStatus(root.Get("status").String()) != ""
+	}
 	for _, path := range []string{"response.model", "model"} {
 		value := gjson.GetBytes(payload, path)
 		if value.Type != gjson.String || strings.TrimSpace(value.String()) == "" {

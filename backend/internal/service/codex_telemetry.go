@@ -78,6 +78,7 @@ type CodexTelemetryInput struct {
 
 // CodexTelemetryResult contains measurements, not the upstream response body.
 type CodexTelemetryResult struct {
+	ReasoningReplay         *CodexReasoningReplayEvidence `json:"reasoning_replay,omitempty"`
 	Status                  string
 	ResponseID              string
 	ServiceTier             string

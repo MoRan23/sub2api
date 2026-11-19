@@ -19,13 +19,14 @@ func TestCodexTelemetryCoverageReportsClientOnlySignalsWithoutCollection(t *test
 		require.Equal(t, policy.enabled && (policy.simulation || policy.observation), result.EffectiveEnabled)
 		require.Empty(t, result.Items, "capability diagnostics are not telemetry events")
 		require.Equal(t, CodexTelemetryCounters{}, result.Counters)
-		require.Len(t, result.Coverage, 4)
+		require.Len(t, result.Coverage, 5)
 		require.Equal(t, CodexTelemetrySignalCoverage{
 			Signal: "skill_invocation", Type: "logs", Status: "unavailable",
 			EventNames: []string{"codex.skill_invocation"}, Reason: "client_skill_event_not_on_responses_wire",
 		}, result.Coverage[2])
 		require.Equal(t, "awaiting_source", result.Coverage[3].Status, "a recognized metric schema is not a collected sample")
 		require.Equal(t, "client_auth_storage_not_on_responses_wire", result.Coverage[3].Reason)
+		require.Equal(t, CodexTelemetrySignalCoverage{Signal: "websocket_continuation", Type: "metrics", Status: "awaiting_source", EventNames: []string{"codex.websocket.continuation"}, Reason: "client_websocket_continuation_not_on_responses_wire"}, result.Coverage[4])
 		encoded, err := json.Marshal(result.Coverage)
 		require.NoError(t, err)
 		require.NotContains(t, string(encoded), "user.account_id")
@@ -42,7 +43,7 @@ func TestCodexTelemetryCoverageReportsClientOnlySignalsWithoutCollection(t *test
 	result := s.Observations(CodexTelemetryObservationQuery{})
 	require.False(t, result.EffectiveEnabled)
 	require.Equal(t, "CODEX_TELEMETRY_ENABLED", result.ForcedOffReason)
-	require.Len(t, result.Coverage, 4, "capabilities remain visible while collection is disabled")
+	require.Len(t, result.Coverage, 5, "capabilities remain visible while collection is disabled")
 }
 
 func TestCodexTelemetryClientOnlySignalsAreNeverInferredFromResponses(t *testing.T) {
@@ -58,6 +59,8 @@ func TestCodexTelemetryClientOnlySignalsAreNeverInferredFromResponses(t *testing
 			for _, batch := range store.flush(profile.started.Add(time.Minute)) {
 				require.NotContains(t, string(batch.body), "codex.auth_storage.")
 				require.NotContains(t, string(batch.body), "codex.skill_invocation")
+				require.NotContains(t, string(batch.body), "codex.websocket.continuation")
+				require.NotContains(t, string(batch.body), "codex.responses.reasoning", "missing collection must not synthesize an unavailable replay report")
 			}
 			for _, event := range append(codexInitializationEvents(profile), codexTerminalEvents(profile, result)...) {
 				require.NotEqual(t, "codex.skill_invocation", event.EventType)

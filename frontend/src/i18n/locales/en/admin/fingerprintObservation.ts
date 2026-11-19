@@ -19,10 +19,13 @@ export default {
       reasons: 'Inference and skip reasons', fieldSources: 'Field sources (local diagnostics only)',
       coverage: {
         title: 'Client event collection coverage',
-        signals: { skill_invocation: 'Skill invocation', auth_storage: 'Credential storage operations' },
+        signals: { skill_invocation: 'Skill invocation', auth_storage: 'Credential storage operations', turn_critical_path: 'Turn critical path', tool_declaration_updates: 'Tool declaration updates', websocket_continuation: 'WebSocket continuation' },
         status: { unavailable: 'Not collected', awaiting_source: 'Not collected (metric definitions supported)' },
       },
       reasonLabels: {
+        client_critical_path_not_on_responses_wire: 'Client critical-path timing is unavailable on the Responses wire; awaiting the original client metrics.',
+        client_tool_declaration_updates_not_on_responses_wire: 'Client tool declaration updates are unavailable on the Responses wire; awaiting the original client metrics.',
+        client_websocket_continuation_not_on_responses_wire: 'Client WebSocket continuation metrics are unavailable on the Responses wire; awaiting the original client metrics.',
         client_skill_event_not_on_responses_wire: 'Responses requests do not contain actual skill invocation events, and no OTLP log ingress is available for collection.',
         client_auth_storage_not_on_responses_wire: 'Responses requests do not contain client credential storage operations. Official metric definitions are supported, but no raw metric ingress is available and no simulated operations are generated.',
         identity_unavailable: 'The outbound installation identity could not be established; related telemetry was skipped.',
