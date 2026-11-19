@@ -1,0 +1,69 @@
+2026/11/19 09:14:55 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestCodexAliasFailoverMappingHonorsModelRouting
+=== RUN   TestCodexAliasFailoverMappingHonorsModelRouting/no_routing_rule_still_fails_closed
+=== RUN   TestCodexAliasFailoverMappingHonorsModelRouting/routing_rule_resolves_the_alias
+    openai_codex_model_metadata_test.go:890: 
+        	Error Trace:	C:/Users/Admin/AppData/Local/Temp/codex0170-baseline.TQH0IA/backend/internal/service/openai_codex_model_metadata_test.go:890
+        	Error:      	Not equal: 
+        	            	expected: "medium"
+        	            	actual  : "low"
+        	            	
+        	            	Diff:
+        	            	--- Expected
+        	            	+++ Actual
+        	            	@@ -1 +1 @@
+        	            	-medium
+        	            	+low
+        	Test:       	TestCodexAliasFailoverMappingHonorsModelRouting/routing_rule_resolves_the_alias
+=== RUN   TestCodexAliasFailoverMappingHonorsModelRouting/routing_disabled_falls_back_to_failing_closed
+=== RUN   TestCodexAliasFailoverMappingHonorsModelRouting/routing_rule_for_another_alias_does_not_leak
+--- FAIL: TestCodexAliasFailoverMappingHonorsModelRouting (0.00s)
+    --- PASS: TestCodexAliasFailoverMappingHonorsModelRouting/no_routing_rule_still_fails_closed (0.00s)
+    --- FAIL: TestCodexAliasFailoverMappingHonorsModelRouting/routing_rule_resolves_the_alias (0.00s)
+    --- PASS: TestCodexAliasFailoverMappingHonorsModelRouting/routing_disabled_falls_back_to_failing_closed (0.00s)
+    --- PASS: TestCodexAliasFailoverMappingHonorsModelRouting/routing_rule_for_another_alias_does_not_leak (0.00s)
+=== RUN   TestConvertOpenAIModelListToCodexManifestLeavesUnsupportedBodiesUnchanged
+=== RUN   TestConvertOpenAIModelListToCodexManifestLeavesUnsupportedBodiesUnchanged/codex_manifest_unchanged
+=== RUN   TestConvertOpenAIModelListToCodexManifestLeavesUnsupportedBodiesUnchanged/empty_data_unchanged
+    openai_codex_models_service_test.go:2555: got "{\"models\":[]}", want "{\"object\":\"list\",\"data\":[]}"
+=== RUN   TestConvertOpenAIModelListToCodexManifestLeavesUnsupportedBodiesUnchanged/data_not_an_array_unchanged
+=== RUN   TestConvertOpenAIModelListToCodexManifestLeavesUnsupportedBodiesUnchanged/entries_without_usable_IDs_unchanged
+=== RUN   TestConvertOpenAIModelListToCodexManifestLeavesUnsupportedBodiesUnchanged/invalid_JSON_unchanged
+=== RUN   TestConvertOpenAIModelListToCodexManifestLeavesUnsupportedBodiesUnchanged/non-object_unchanged
+--- FAIL: TestConvertOpenAIModelListToCodexManifestLeavesUnsupportedBodiesUnchanged (0.00s)
+    --- PASS: TestConvertOpenAIModelListToCodexManifestLeavesUnsupportedBodiesUnchanged/codex_manifest_unchanged (0.00s)
+    --- FAIL: TestConvertOpenAIModelListToCodexManifestLeavesUnsupportedBodiesUnchanged/empty_data_unchanged (0.00s)
+    --- PASS: TestConvertOpenAIModelListToCodexManifestLeavesUnsupportedBodiesUnchanged/data_not_an_array_unchanged (0.00s)
+    --- PASS: TestConvertOpenAIModelListToCodexManifestLeavesUnsupportedBodiesUnchanged/entries_without_usable_IDs_unchanged (0.00s)
+    --- PASS: TestConvertOpenAIModelListToCodexManifestLeavesUnsupportedBodiesUnchanged/invalid_JSON_unchanged (0.00s)
+    --- PASS: TestConvertOpenAIModelListToCodexManifestLeavesUnsupportedBodiesUnchanged/non-object_unchanged (0.00s)
+=== RUN   TestFetchCodexModelsManifestOAuth401OnlyCoolsSelectedAuthorization
+2026/11/19 09:14:55 WARN oauth_401_set_temp_unschedulable_failed account_id=1 error="OpenAI OAuth account state repository is not configured"
+    openai_codex_models_service_test.go:3371: 
+        	Error Trace:	C:/Users/Admin/AppData/Local/Temp/codex0170-baseline.TQH0IA/backend/internal/service/openai_codex_models_service_test.go:3371
+        	Error:      	Should be true
+        	Test:       	TestFetchCodexModelsManifestOAuth401OnlyCoolsSelectedAuthorization
+        	Messages:   	the failing slot should cool down
+--- FAIL: TestFetchCodexModelsManifestOAuth401OnlyCoolsSelectedAuthorization (0.01s)
+=== RUN   TestFetchCodexModelsManifestOAuth401TokenRevokedOnlyDisablesSelectedAuthorization
+2026/11/19 09:14:55 WARN account_set_error_failed account_id=1 error="OpenAI OAuth account state repository is not configured"
+    openai_codex_models_service_test.go:3395: 
+        	Error Trace:	C:/Users/Admin/AppData/Local/Temp/codex0170-baseline.TQH0IA/backend/internal/service/openai_codex_models_service_test.go:3395
+        	Error:      	Should NOT be empty, but was 
+        	Test:       	TestFetchCodexModelsManifestOAuth401TokenRevokedOnlyDisablesSelectedAuthorization
+        	Messages:   	the failing authorization requires reauthorization
+--- FAIL: TestFetchCodexModelsManifestOAuth401TokenRevokedOnlyDisablesSelectedAuthorization (0.00s)
+=== RUN   TestForwardAsAnthropic_TrimsFullReplayOnlyForCodexCompatModels
+=== PAUSE TestForwardAsAnthropic_TrimsFullReplayOnlyForCodexCompatModels
+=== CONT  TestForwardAsAnthropic_TrimsFullReplayOnlyForCodexCompatModels
+2026/11/19 09:14:55 WARN openai_codex_turn_identity_fallback reason=hmac_secret_unavailable mapping=session mapping_digest=944b8971cc3b
+    openai_compat_model_test.go:716: 
+        	Error Trace:	C:/Users/Admin/AppData/Local/Temp/codex0170-baseline.TQH0IA/backend/internal/service/openai_compat_model_test.go:716
+        	Error:      	Not equal: 
+        	            	expected: 13
+        	            	actual  : 16
+        	Test:       	TestForwardAsAnthropic_TrimsFullReplayOnlyForCodexCompatModels
+--- FAIL: TestForwardAsAnthropic_TrimsFullReplayOnlyForCodexCompatModels (0.00s)
+FAIL
+FAIL	github.com/Wei-Shaw/sub2api/internal/service	0.372s
+FAIL

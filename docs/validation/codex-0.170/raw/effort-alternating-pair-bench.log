@@ -1,0 +1,13 @@
+2026/11/19 09:36:31 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkOpenAIEffortConfigurationPrefilter/configuration_false/alternating_pair-16         	    1539	    752286 ns/op	    204653 prefilter-ns/op	    547667 structural-ns/op	       6 B/op	       2 allocs/op
+BenchmarkOpenAIEffortConfigurationPrefilter/configuration_false/alternating_pair-16         	    1862	    660036 ns/op	    185905 prefilter-ns/op	    473833 structural-ns/op	       6 B/op	       2 allocs/op
+BenchmarkOpenAIEffortConfigurationPrefilter/configuration_false/alternating_pair-16         	    1827	    593992 ns/op	    158287 prefilter-ns/op	    434912 structural-ns/op	       6 B/op	       2 allocs/op
+BenchmarkOpenAIEffortConfigurationPrefilter/configuration_true/alternating_pair-16          	    1815	    696280 ns/op	    361497 prefilter-ns/op	    335087 structural-ns/op	      54 B/op	       4 allocs/op
+BenchmarkOpenAIEffortConfigurationPrefilter/configuration_true/alternating_pair-16          	    1584	    684287 ns/op	    350006 prefilter-ns/op	    334055 structural-ns/op	      54 B/op	       4 allocs/op
+BenchmarkOpenAIEffortConfigurationPrefilter/configuration_true/alternating_pair-16          	    1626	    682321 ns/op	    344223 prefilter-ns/op	    338102 structural-ns/op	      54 B/op	       4 allocs/op
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/service	11.084s

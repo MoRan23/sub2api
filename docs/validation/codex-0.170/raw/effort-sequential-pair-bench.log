@@ -1,0 +1,19 @@
+2026/11/19 09:34:32 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkOpenAIEffortConfigurationPrefilter/configuration_false/prefilter_false-16         	    1387	    424240 ns/op	2471.88 MB/s	       3 B/op	       1 allocs/op
+BenchmarkOpenAIEffortConfigurationPrefilter/configuration_false/prefilter_false-16         	    1477	    424092 ns/op	2472.74 MB/s	       3 B/op	       1 allocs/op
+BenchmarkOpenAIEffortConfigurationPrefilter/configuration_false/prefilter_false-16         	    1290	    399164 ns/op	2627.16 MB/s	       3 B/op	       1 allocs/op
+BenchmarkOpenAIEffortConfigurationPrefilter/configuration_false/prefilter_true-16          	    4089	    156419 ns/op	6704.24 MB/s	       3 B/op	       1 allocs/op
+BenchmarkOpenAIEffortConfigurationPrefilter/configuration_false/prefilter_true-16          	    2815	    187778 ns/op	5584.63 MB/s	       3 B/op	       1 allocs/op
+BenchmarkOpenAIEffortConfigurationPrefilter/configuration_false/prefilter_true-16          	    3552	    172894 ns/op	6065.40 MB/s	       3 B/op	       1 allocs/op
+BenchmarkOpenAIEffortConfigurationPrefilter/configuration_true/prefilter_false-16          	    1494	    368962 ns/op	2842.39 MB/s	      27 B/op	       2 allocs/op
+BenchmarkOpenAIEffortConfigurationPrefilter/configuration_true/prefilter_false-16          	    1754	    305907 ns/op	3428.27 MB/s	      27 B/op	       2 allocs/op
+BenchmarkOpenAIEffortConfigurationPrefilter/configuration_true/prefilter_false-16          	    2106	    289055 ns/op	3628.14 MB/s	      27 B/op	       2 allocs/op
+BenchmarkOpenAIEffortConfigurationPrefilter/configuration_true/prefilter_true-16           	    1982	    292548 ns/op	3584.82 MB/s	      27 B/op	       2 allocs/op
+BenchmarkOpenAIEffortConfigurationPrefilter/configuration_true/prefilter_true-16           	    2142	    456058 ns/op	2299.55 MB/s	      27 B/op	       2 allocs/op
+BenchmarkOpenAIEffortConfigurationPrefilter/configuration_true/prefilter_true-16           	    1423	    423141 ns/op	2478.45 MB/s	      27 B/op	       2 allocs/op
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/service	11.864s

@@ -1,0 +1,25 @@
+2026/11/19 08:54:00 Timezone initialized: UTC (UTC offset: +00:00)
+--- FAIL: TestUsageExportDownloadLeaseCloseAndCancellation (0.01s)
+    --- FAIL: TestUsageExportDownloadLeaseCloseAndCancellation/close (0.00s)
+        usage_export_download_test.go:65: 
+            	Error Trace:	C:/Users/Admin/AppData/Local/Temp/codex0170-baseline.TQH0IA/backend/internal/service/usage_export_download_test.go:65
+            	Error:      	Should be true
+            	Test:       	TestUsageExportDownloadLeaseCloseAndCancellation/close
+    --- FAIL: TestUsageExportDownloadLeaseCloseAndCancellation/cancel (0.00s)
+        usage_export_download_test.go:65: 
+            	Error Trace:	C:/Users/Admin/AppData/Local/Temp/codex0170-baseline.TQH0IA/backend/internal/service/usage_export_download_test.go:65
+            	Error:      	Should be true
+            	Test:       	TestUsageExportDownloadLeaseCloseAndCancellation/cancel
+    --- FAIL: TestUsageExportDownloadLeaseCloseAndCancellation/expired (0.00s)
+        usage_export_download_test.go:65: 
+            	Error Trace:	C:/Users/Admin/AppData/Local/Temp/codex0170-baseline.TQH0IA/backend/internal/service/usage_export_download_test.go:65
+            	Error:      	Should be true
+            	Test:       	TestUsageExportDownloadLeaseCloseAndCancellation/expired
+    --- FAIL: TestUsageExportDownloadLeaseCloseAndCancellation/renew-failed (0.00s)
+        usage_export_download_test.go:65: 
+            	Error Trace:	C:/Users/Admin/AppData/Local/Temp/codex0170-baseline.TQH0IA/backend/internal/service/usage_export_download_test.go:65
+            	Error:      	Should be true
+            	Test:       	TestUsageExportDownloadLeaseCloseAndCancellation/renew-failed
+FAIL
+FAIL	github.com/Wei-Shaw/sub2api/internal/service	0.101s
+FAIL

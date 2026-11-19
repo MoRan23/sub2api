@@ -1,0 +1,12 @@
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/pkg/apicompat
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkCodex0170ExistingChatBridge/64KiB-16         	     775	    465580 ns/op	 1278321 B/op	     161 allocs/op
+BenchmarkCodex0170ExistingChatBridge/64KiB-16         	     746	    481934 ns/op	 1277301 B/op	     160 allocs/op
+BenchmarkCodex0170ExistingChatBridge/64KiB-16         	     789	    479056 ns/op	 1278269 B/op	     160 allocs/op
+BenchmarkCodex0170ExistingChatBridge/1024KiB-16       	      52	   6344771 ns/op	19039459 B/op	     210 allocs/op
+BenchmarkCodex0170ExistingChatBridge/1024KiB-16       	      60	   6421110 ns/op	19040105 B/op	     211 allocs/op
+BenchmarkCodex0170ExistingChatBridge/1024KiB-16       	      60	   6675110 ns/op	19021296 B/op	     206 allocs/op
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/pkg/apicompat	2.924s

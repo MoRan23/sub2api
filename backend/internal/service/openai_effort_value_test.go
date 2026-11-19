@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"net/http/httptest"
+	"strconv"
 	"strings"
 	"sync"
 	"testing"
@@ -271,4 +272,76 @@ func BenchmarkOpenAIEffortPreparedLargeInput(b *testing.B) {
 			})
 		}
 	}
+}
+
+// Compare the optional byte prefilter against the original structural walk in
+// the same process so machine clock/temperature does not skew the comparison.
+func BenchmarkOpenAIEffortConfigurationPrefilter(b *testing.B) {
+	for _, configuration := range []bool{false, true} {
+		input := `{"type":"message","content":"` + strings.Repeat("a", 1<<20) + `"}`
+		if configuration {
+			input += `,{"type":"configuration_update","reasoning":{"effort":"low"}}`
+		}
+		body := []byte(`{"model":"gpt-6.2-sol","reasoning":{"effort":"low"},"input":[` + input + `]}`)
+		b.Run(fmt.Sprintf("configuration_%v/alternating_pair", configuration), func(b *testing.B) {
+			var structuralTime, prefilterTime time.Duration
+			for i := 0; i < b.N; i++ {
+				for j := 0; j < 2; j++ {
+					start := time.Now()
+					if (i+j)%2 == 0 {
+						_ = selectOpenAIEffortStructuralBenchmark(body)
+						structuralTime += time.Since(start)
+					} else {
+						_ = selectOpenAIEffort(body, nil)
+						prefilterTime += time.Since(start)
+					}
+				}
+			}
+			b.ReportMetric(float64(structuralTime.Nanoseconds())/float64(b.N), "structural-ns/op")
+			b.ReportMetric(float64(prefilterTime.Nanoseconds())/float64(b.N), "prefilter-ns/op")
+		})
+		for _, prefilter := range []bool{false, true} {
+			b.Run(fmt.Sprintf("configuration_%v/prefilter_%v", configuration, prefilter), func(b *testing.B) {
+				b.ReportAllocs()
+				b.SetBytes(int64(len(body)))
+				for i := 0; i < b.N; i++ {
+					if prefilter {
+						_ = selectOpenAIEffort(body, nil)
+						continue
+					}
+					_ = selectOpenAIEffortStructuralBenchmark(body)
+				}
+			})
+		}
+	}
+}
+
+func selectOpenAIEffortStructuralBenchmark(body []byte) openAIEffortSelection {
+	selection := openAIEffortSelection{}
+	index := 0
+	view := parseRawJSONView(body)
+	view.Get("input").ForEach(func(_, item gjson.Result) bool {
+		if item.Get("type").Str == "configuration_update" {
+			if field := item.Get("reasoning.effort"); field.Exists() {
+				value, _ := effortScalar(field)
+				selection = openAIEffortSelection{value: value, path: "input." + strconv.Itoa(index) + ".reasoning.effort", override: true, unknown: !value.valid(), oversized: field.Type == gjson.String && len(field.Str) > maxReasoningEffortValueLen}
+			}
+		}
+		index++
+		return true
+	})
+	if selection.path != "" {
+		return selection
+	}
+	if strings.TrimSpace(view.Get("previous_response_id").Str) != "" {
+		return openAIEffortSelection{unknown: true}
+	}
+	for _, path := range []string{"reasoning.effort", "reasoning_effort", "output_config.effort"} {
+		field := view.Get(path)
+		if field.Exists() {
+			value, ok := effortScalar(field)
+			return openAIEffortSelection{value: value, path: path, unknown: !ok, oversized: field.Type == gjson.String && len(field.Str) > maxReasoningEffortValueLen}
+		}
+	}
+	return selection
 }

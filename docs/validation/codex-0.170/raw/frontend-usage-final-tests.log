@@ -1,0 +1,14 @@
+
+ RUN  v2.1.9 C:/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/frontend
+
+ ✓ src/utils/__tests__/formatReasoningEffort.spec.ts (5 tests) 2ms
+Browserslist: browsers data (caniuse-lite) is 11 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+ ✓ src/components/admin/usage/__tests__/UsageTable.spec.ts (37 tests) 191ms
+
+ Test Files  2 passed (2)
+      Tests  42 passed (42)
+   Start at  16:36:19
+   Duration  2.64s (transform 707ms, setup 229ms, collect 888ms, tests 193ms, environment 1.24s, prepare 228ms)
+

@@ -1,0 +1,141 @@
+
+ RUN  v2.1.9 C:/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/frontend
+
+ ✓ src/api/__tests__/admin.codexTelemetry.spec.ts (5 tests) 8ms
+ ✓ src/views/admin/__tests__/groupsReasoningEffort.spec.ts (27 tests) 11ms
+ ✓ src/utils/__tests__/formatReasoningEffort.spec.ts (5 tests) 4ms
+ ✓ src/components/admin/account/__tests__/OpenAIResponseEvidenceDetails.spec.ts (12 tests) 86ms
+Browserslist: browsers data (caniuse-lite) is 11 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+stderr | src/components/admin/group/__tests__/ReasoningEffortPolicyFields.spec.ts > ReasoningEffortPolicyFields > edits numeric sources without converting them to JavaScript numbers
+[Vue warn]: Failed setting prop "options" on <select>: value [object Object],[object Object],[object Object],[object Object],[object Object],[object Object] is invalid. TypeError: 'set' on proxy: trap returned falsish for property 'options'
+    at patchDOMProp (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-dom@3.5.43\node_modules\@vue\runtime-dom\dist\runtime-dom.cjs.js:622:13)
+    at patchProp (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-dom@3.5.43\node_modules\@vue\runtime-dom\dist\runtime-dom.cjs.js:743:5)
+    at mountElement (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:5751:11)
+    at processElement (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:5688:7)
+    at patch (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:5554:11)
+    at ReactiveEffect.componentUpdateFn [as fn] (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:6210:11)
+    at ReactiveEffect.run (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+reactivity@3.5.43\node_modules\@vue\reactivity\dist\reactivity.cjs.js:268:19)
+    at setupRenderEffect (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:6338:5)
+    at mountComponent (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:6109:7)
+    at processComponent (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:6061:9) 
+  at <Anonymous id="numeric-max-effort" model-value="" options= [
+  { value: 'minimal', label: 'minimal' },
+  { value: 'low', label: 'low' },
+  { value: 'medium', label: 'medium' },
+  { value: 'high', label: 'high' },
+  { value: 'xhigh', label: 'xhigh' },
+  { value: 'max', label: 'max' }
+]  ... > 
+  at <ReasoningEffortPolicyFields idPrefix="numeric" platform="openai" maxEffort=""  ... > 
+  at <VTUROOT>
+[Vue warn]: Failed setting prop "options" on <select>: value [object Object],[object Object] is invalid. TypeError: 'set' on proxy: trap returned falsish for property 'options'
+    at patchDOMProp (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-dom@3.5.43\node_modules\@vue\runtime-dom\dist\runtime-dom.cjs.js:622:13)
+    at patchProp (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-dom@3.5.43\node_modules\@vue\runtime-dom\dist\runtime-dom.cjs.js:743:5)
+    at mountElement (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:5751:11)
+    at processElement (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:5688:7)
+    at patch (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:5554:11)
+    at ReactiveEffect.componentUpdateFn [as fn] (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:6210:11)
+    at ReactiveEffect.run (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+reactivity@3.5.43\node_modules\@vue\reactivity\dist\reactivity.cjs.js:268:19)
+    at setupRenderEffect (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:6338:5)
+    at mountComponent (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:6109:7)
+    at processComponent (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:6061:9) 
+  at <Anonymous id="numeric-over-limit" model-value="downgrade" options= [
+  {
+    value: 'downgrade',
+    label: 'admin.groups.form.maxReasoningEffortOverLimitDowngrade'
+  },
+  {
+    value: 'deny',
+    label: 'admin.groups.form.maxReasoningEffortOverLimitDeny'
+  }
+]  ... > 
+  at <ReasoningEffortPolicyFields idPrefix="numeric" platform="openai" maxEffort=""  ... > 
+  at <VTUROOT>
+[Vue warn]: Failed setting prop "options" on <select>: value [object Object],[object Object],[object Object] is invalid. TypeError: 'set' on proxy: trap returned falsish for property 'options'
+    at patchDOMProp (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-dom@3.5.43\node_modules\@vue\runtime-dom\dist\runtime-dom.cjs.js:622:13)
+    at patchProp (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-dom@3.5.43\node_modules\@vue\runtime-dom\dist\runtime-dom.cjs.js:743:5)
+    at mountElement (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:5751:11)
+    at processElement (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:5688:7)
+    at patch (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:5554:11)
+    at ReactiveEffect.componentUpdateFn [as fn] (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:6210:11)
+    at ReactiveEffect.run (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+reactivity@3.5.43\node_modules\@vue\reactivity\dist\reactivity.cjs.js:268:19)
+    at setupRenderEffect (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:6338:5)
+    at mountComponent (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:6109:7)
+    at processComponent (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:6061:9) 
+  at <Anonymous id="numeric-reasoning-effort-group-1-match-type" model-value="" options= [
+  {
+    value: 'exact',
+    label: 'admin.groups.form.reasoningEffortMatchExact'
+  },
+  {
+    value: 'prefix',
+    label: 'admin.groups.form.reasoningEffortMatchPrefix'
+  },
+  {
+    value: 'suffix',
+    label: 'admin.groups.form.reasoningEffortMatchSuffix'
+  }
+]  ... > 
+  at <ReasoningEffortPolicyFields idPrefix="numeric" platform="openai" maxEffort=""  ... > 
+  at <VTUROOT>
+[Vue warn]: Failed setting prop "options" on <select>: value [object Object],[object Object],[object Object] is invalid. TypeError: 'set' on proxy: trap returned falsish for property 'options'
+    at patchDOMProp (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-dom@3.5.43\node_modules\@vue\runtime-dom\dist\runtime-dom.cjs.js:622:13)
+    at patchProp (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-dom@3.5.43\node_modules\@vue\runtime-dom\dist\runtime-dom.cjs.js:743:5)
+    at mountElement (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:5751:11)
+    at processElement (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:5688:7)
+    at patch (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:5554:11)
+    at ReactiveEffect.componentUpdateFn [as fn] (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:6210:11)
+    at ReactiveEffect.run (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+reactivity@3.5.43\node_modules\@vue\reactivity\dist\reactivity.cjs.js:268:19)
+    at setupRenderEffect (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:6338:5)
+    at mountComponent (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:6109:7)
+    at processComponent (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:6061:9) 
+  at <Anonymous id="numeric-reasoning-effort-pair-2-source-kind" model-value="number" options= [
+  {
+    value: 'preset',
+    label: 'admin.groups.form.reasoningEffortSourcePreset'
+  },
+  {
+    value: 'custom',
+    label: 'admin.groups.form.reasoningEffortSourceCustom'
+  },
+  {
+    value: 'number',
+    label: 'admin.groups.form.reasoningEffortSourceNumber'
+  }
+]  ... > 
+  at <ReasoningEffortPolicyFields idPrefix="numeric" platform="openai" maxEffort=""  ... > 
+  at <VTUROOT>
+[Vue warn]: Failed setting prop "options" on <select>: value [object Object],[object Object],[object Object],[object Object],[object Object],[object Object],[object Object] is invalid. TypeError: 'set' on proxy: trap returned falsish for property 'options'
+    at patchDOMProp (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-dom@3.5.43\node_modules\@vue\runtime-dom\dist\runtime-dom.cjs.js:622:13)
+    at patchProp (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-dom@3.5.43\node_modules\@vue\runtime-dom\dist\runtime-dom.cjs.js:743:5)
+    at mountElement (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:5751:11)
+    at processElement (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:5688:7)
+    at patch (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:5554:11)
+    at ReactiveEffect.componentUpdateFn [as fn] (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:6210:11)
+    at ReactiveEffect.run (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+reactivity@3.5.43\node_modules\@vue\reactivity\dist\reactivity.cjs.js:268:19)
+    at setupRenderEffect (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:6338:5)
+    at mountComponent (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:6109:7)
+    at processComponent (C:\Users\Admin\.codex\worktrees\merge-upstream-v0-2-22\sub2api\frontend\node_modules\.pnpm\@vue+runtime-core@3.5.43\node_modules\@vue\runtime-core\dist\runtime-core.cjs.js:6061:9) 
+  at <Anonymous id="numeric-reasoning-effort-pair-2-to" model-value="high" options= [
+  { value: 'minimal', label: 'minimal' },
+  { value: 'low', label: 'low' },
+  { value: 'medium', label: 'medium' },
+  { value: 'high', label: 'high' },
+  { value: 'xhigh', label: 'xhigh' },
+  { value: 'max', label: 'max' },
+  { value: 'deny', label: 'admin.groups.form.reasoningEffortToDeny' }
+]  ... > 
+  at <ReasoningEffortPolicyFields idPrefix="numeric" platform="openai" maxEffort=""  ... > 
+  at <VTUROOT>
+
+ ✓ src/components/admin/group/__tests__/ReasoningEffortPolicyFields.spec.ts (5 tests) 111ms
+ ✓ src/views/admin/__tests__/CodexTelemetryObservations.spec.ts (18 tests) 377ms
+ ✓ src/i18n/__tests__/localeKeyCompleteness.spec.ts (3 tests) 34ms
+
+ Test Files  7 passed (7)
+      Tests  75 passed (75)
+   Start at  16:24:34
+   Duration  13.96s (transform 9.20s, setup 1.67s, collect 15.96s, tests 631ms, environment 13.67s, prepare 1.92s)
+

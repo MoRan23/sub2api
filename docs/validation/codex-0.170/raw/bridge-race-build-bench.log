@@ -1,0 +1,20 @@
+ok  	github.com/Wei-Shaw/sub2api/internal/pkg/apicompat	1.795s
+ok  	github.com/Wei-Shaw/sub2api/internal/service	4.495s [no tests to run]
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/pkg/apicompat
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkCodex0170ExistingChatBridge/64KiB-16     	    2544	    449145 ns/op	 1277661 B/op	     162 allocs/op
+BenchmarkCodex0170ExistingChatBridge/64KiB-16     	    2672	    451912 ns/op	 1279279 B/op	     163 allocs/op
+BenchmarkCodex0170ExistingChatBridge/64KiB-16     	    2655	    451345 ns/op	 1278638 B/op	     163 allocs/op
+BenchmarkCodex0170ExistingChatBridge/1024KiB-16   	     177	   6515571 ns/op	19033106 B/op	     210 allocs/op
+BenchmarkCodex0170ExistingChatBridge/1024KiB-16   	     196	   6054853 ns/op	19027687 B/op	     209 allocs/op
+BenchmarkCodex0170ExistingChatBridge/1024KiB-16   	     190	   6356375 ns/op	19033525 B/op	     210 allocs/op
+BenchmarkResponsesInlineAudioPayload-16           	    2583	    456039 ns/op	2299.36 MB/s	      32 B/op	       1 allocs/op
+BenchmarkResponsesInlineAudioPayload-16           	    2744	    453734 ns/op	2311.04 MB/s	      32 B/op	       1 allocs/op
+BenchmarkResponsesInlineAudioPayload-16           	    2760	    476532 ns/op	2200.48 MB/s	      32 B/op	       1 allocs/op
+BenchmarkBridgeEffectiveReasoningLargeAudio-16    	    4608	    268954 ns/op	     168 B/op	       8 allocs/op
+BenchmarkBridgeEffectiveReasoningLargeAudio-16    	    4357	    265641 ns/op	     168 B/op	       8 allocs/op
+BenchmarkBridgeEffectiveReasoningLargeAudio-16    	    4399	    273426 ns/op	     168 B/op	       8 allocs/op
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/pkg/apicompat	15.142s

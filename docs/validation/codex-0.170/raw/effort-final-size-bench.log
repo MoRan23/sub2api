@@ -1,0 +1,28 @@
+2026/11/19 09:28:32 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkOpenAIEffortConfigurationLargeInput-16    	     595	    413316 ns/op	2537.36 MB/s	      40 B/op	       3 allocs/op
+BenchmarkOpenAIEffortConfigurationLargeInput-16    	     591	    431326 ns/op	2431.41 MB/s	      40 B/op	       3 allocs/op
+BenchmarkOpenAIEffortConfigurationLargeInput-16    	     578	    449754 ns/op	2331.79 MB/s	      40 B/op	       3 allocs/op
+BenchmarkOpenAIEffortPreparedLargeInput/bytes_65536/configuration_false-16         	    5214	     46194 ns/op	1420.74 MB/s	     560 B/op	      11 allocs/op
+BenchmarkOpenAIEffortPreparedLargeInput/bytes_65536/configuration_false-16         	    5335	     44853 ns/op	1463.22 MB/s	     560 B/op	      11 allocs/op
+BenchmarkOpenAIEffortPreparedLargeInput/bytes_65536/configuration_false-16         	    5029	     43627 ns/op	1504.34 MB/s	     560 B/op	      11 allocs/op
+BenchmarkOpenAIEffortPreparedLargeInput/bytes_65536/configuration_true-16          	    3562	     71982 ns/op	 912.60 MB/s	     608 B/op	      13 allocs/op
+BenchmarkOpenAIEffortPreparedLargeInput/bytes_65536/configuration_true-16          	    3523	     68161 ns/op	 963.76 MB/s	     608 B/op	      13 allocs/op
+BenchmarkOpenAIEffortPreparedLargeInput/bytes_65536/configuration_true-16          	    3464	     69546 ns/op	 944.57 MB/s	     608 B/op	      13 allocs/op
+BenchmarkOpenAIEffortPreparedLargeInput/bytes_1048576/configuration_false-16       	     362	    678060 ns/op	1546.57 MB/s	     560 B/op	      11 allocs/op
+BenchmarkOpenAIEffortPreparedLargeInput/bytes_1048576/configuration_false-16       	     379	    662269 ns/op	1583.45 MB/s	     560 B/op	      11 allocs/op
+BenchmarkOpenAIEffortPreparedLargeInput/bytes_1048576/configuration_false-16       	     476	    586681 ns/op	1787.46 MB/s	     560 B/op	      11 allocs/op
+BenchmarkOpenAIEffortPreparedLargeInput/bytes_1048576/configuration_true-16        	     259	   1025437 ns/op	1022.72 MB/s	     608 B/op	      13 allocs/op
+BenchmarkOpenAIEffortPreparedLargeInput/bytes_1048576/configuration_true-16        	     246	   1081036 ns/op	 970.12 MB/s	     608 B/op	      13 allocs/op
+BenchmarkOpenAIEffortPreparedLargeInput/bytes_1048576/configuration_true-16        	     273	   1001166 ns/op	1047.51 MB/s	     608 B/op	      13 allocs/op
+BenchmarkOpenAIEffortPreparedLargeInput/bytes_8388608/configuration_false-16       	      49	   4871471 ns/op	1722.01 MB/s	     560 B/op	      11 allocs/op
+BenchmarkOpenAIEffortPreparedLargeInput/bytes_8388608/configuration_false-16       	      43	   5057158 ns/op	1658.78 MB/s	     560 B/op	      11 allocs/op
+BenchmarkOpenAIEffortPreparedLargeInput/bytes_8388608/configuration_false-16       	      44	   4953059 ns/op	1693.64 MB/s	     560 B/op	      11 allocs/op
+BenchmarkOpenAIEffortPreparedLargeInput/bytes_8388608/configuration_true-16        	      27	   7855270 ns/op	1067.92 MB/s	     608 B/op	      13 allocs/op
+BenchmarkOpenAIEffortPreparedLargeInput/bytes_8388608/configuration_true-16        	      34	   8320588 ns/op	1008.19 MB/s	     608 B/op	      13 allocs/op
+BenchmarkOpenAIEffortPreparedLargeInput/bytes_8388608/configuration_true-16        	      31	   7679248 ns/op	1092.39 MB/s	     608 B/op	      13 allocs/op
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/service	10.197s

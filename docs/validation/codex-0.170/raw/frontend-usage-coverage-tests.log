@@ -1,0 +1,15 @@
+
+ RUN  v2.1.9 C:/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/frontend
+
+Browserslist: browsers data (caniuse-lite) is 11 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+ ✓ src/components/admin/group/__tests__/ReasoningEffortPolicyFields.spec.ts (5 tests) 65ms
+ ✓ src/views/admin/__tests__/CodexTelemetryObservations.spec.ts (18 tests) 247ms
+ ✓ src/components/admin/usage/__tests__/UsageTable.spec.ts (37 tests) 195ms
+
+ Test Files  3 passed (3)
+      Tests  60 passed (60)
+   Start at  16:30:22
+   Duration  2.82s (transform 1.12s, setup 375ms, collect 2.19s, tests 507ms, environment 2.07s, prepare 427ms)
+

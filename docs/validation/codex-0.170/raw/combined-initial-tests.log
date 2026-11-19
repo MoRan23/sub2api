@@ -1,0 +1,311 @@
+2026/11/19 16:51:29 [OpenAI WS Mode][openai_ws_mode=true] bootstrap enabled=false oauth_enabled=false apikey_enabled=false force_http=false responses_websockets_v2=false responses_websockets=false payload_log_sample_rate=0.000 event_flush_batch_size=0 event_flush_interval_ms=0 prewarm_cooldown_ms=0 retry_backoff_initial_ms=0 retry_backoff_max_ms=0 retry_jitter_ratio=0.000 retry_total_budget_ms=0 ws_read_limit_bytes=16777216
+2026/11/19 16:51:29 [OpenAI WS Mode][openai_ws_mode=true] bootstrap enabled=true oauth_enabled=false apikey_enabled=true force_http=false responses_websockets_v2=true responses_websockets=false payload_log_sample_rate=0.000 event_flush_batch_size=0 event_flush_interval_ms=0 prewarm_cooldown_ms=0 retry_backoff_initial_ms=0 retry_backoff_max_ms=0 retry_jitter_ratio=0.000 retry_total_budget_ms=0 ws_read_limit_bytes=16777216
+2026/11/19 16:51:29 [OpenAI WS v2 passthrough] ws_mode=passthrough ws_router=v2 relay_start account_id=9901 model=gpt-5.4 previous_response_id=- first_message_type=text first_message_bytes=89
+2026/11/19 16:51:29 [OpenAI WS v2 passthrough] ws_mode=passthrough ws_router=v2 relay_dial_start account_id=9901 ws_host=127.0.0.1:51139 ws_path=/v1/responses proxy_enabled=false
+2026/11/19 16:51:29 [OpenAI WS v2 passthrough] ws_mode=passthrough ws_router=v2 relay_dial_ok account_id=9901 status_code=0 upstream_request_id=-
+2026/11/19 16:51:29 [OpenAI WS v2 passthrough] ws_mode=passthrough ws_router=v2 relay_trace account_id=9901 stage=relay_start direction=- msg_type=text bytes=89 graceful=false wrote_downstream=false err=-
+2026/11/19 16:51:29 [OpenAI WS v2 passthrough] ws_mode=passthrough ws_router=v2 relay_trace account_id=9901 stage=write_first_message_skipped direction=client_to_upstream msg_type=text bytes=89 graceful=false wrote_downstream=false err=-
+2026/11/19 16:51:29 [OpenAI WS v2 passthrough] ws_mode=passthrough ws_router=v2 relay_turn_completed account_id=9901 turn=1 request_id=resp_usage_e2e_1 terminal_event=response.completed turn_requested_model=gpt-5.4 turn_upstream_model=gpt-5.4 duration_ms=3 first_token_ms=-1 input_tokens=2 output_tokens=1 cache_read_tokens=0
+2026/11/19 16:51:29 [Billing] Using fallback pricing for model: gpt-5.4
+2026/11/19 16:51:29 [SIMPLE MODE] Usage recorded (not billed): user=1701, tokens=3
+2026/11/19 16:51:29 [OpenAI WS v2 passthrough] ws_mode=passthrough ws_router=v2 relay_trace account_id=9901 stage=read_upstream_fail direction=upstream_to_client msg_type=- bytes=0 graceful=true wrote_downstream=true err=fail to get reader: fail to read frame header: EOF
+2026/11/19 16:51:29 [OpenAI WS v2 passthrough] ws_mode=passthrough ws_router=v2 relay_trace account_id=9901 stage=first_exit direction=upstream_to_client msg_type=- bytes=0 graceful=true wrote_downstream=true err=fail to get reader: fail to read frame header: EOF
+2026/11/19 16:51:29 [OpenAI WS v2 passthrough] ws_mode=passthrough ws_router=v2 relay_trace account_id=9901 stage=read_client_fail direction=client_to_upstream msg_type=- bytes=0 graceful=true wrote_downstream=false err=fail to get reader: received close frame: status = StatusNormalClosure and reason = "done"
+2026/11/19 16:51:29 [OpenAI WS v2 passthrough] ws_mode=passthrough ws_router=v2 relay_trace account_id=9901 stage=second_exit direction=client_to_upstream msg_type=- bytes=0 graceful=true wrote_downstream=false err=fail to get reader: received close frame: status = StatusNormalClosure and reason = "done"
+2026/11/19 16:51:29 [OpenAI WS v2 passthrough] ws_mode=passthrough ws_router=v2 relay_trace account_id=9901 stage=relay_complete direction=- msg_type=- bytes=0 graceful=true wrote_downstream=true err=-
+2026/11/19 16:51:29 [OpenAI WS v2 passthrough] ws_mode=passthrough ws_router=v2 relay_completed account_id=9901 request_id=resp_usage_e2e_1 terminal_event=response.completed duration_ms=2 c2u_frames=1 u2c_frames=1 dropped_frames=0 turns=1
+2026/11/19 16:51:29 [OpenAI WS Mode][openai_ws_mode=true] bootstrap enabled=true oauth_enabled=false apikey_enabled=true force_http=false responses_websockets_v2=true responses_websockets=false payload_log_sample_rate=0.000 event_flush_batch_size=0 event_flush_interval_ms=0 prewarm_cooldown_ms=0 retry_backoff_initial_ms=0 retry_backoff_max_ms=0 retry_jitter_ratio=0.000 retry_total_budget_ms=0 ws_read_limit_bytes=16777216
+2026/11/19 16:51:29 [OpenAI WS v2 passthrough] ws_mode=passthrough ws_router=v2 relay_start account_id=9901 model=gpt-5.4-xhigh previous_response_id=- first_message_type=text first_message_bytes=65
+2026/11/19 16:51:29 [OpenAI WS v2 passthrough] ws_mode=passthrough ws_router=v2 relay_dial_start account_id=9901 ws_host=127.0.0.1:51143 ws_path=/v1/responses proxy_enabled=false
+2026/11/19 16:51:29 [OpenAI WS v2 passthrough] ws_mode=passthrough ws_router=v2 relay_dial_ok account_id=9901 status_code=0 upstream_request_id=-
+2026/11/19 16:51:29 [OpenAI WS v2 passthrough] ws_mode=passthrough ws_router=v2 relay_trace account_id=9901 stage=relay_start direction=- msg_type=text bytes=59 graceful=false wrote_downstream=false err=-
+2026/11/19 16:51:29 [OpenAI WS v2 passthrough] ws_mode=passthrough ws_router=v2 relay_trace account_id=9901 stage=write_first_message_skipped direction=client_to_upstream msg_type=text bytes=59 graceful=false wrote_downstream=false err=-
+2026/11/19 16:51:29 [OpenAI WS v2 passthrough] ws_mode=passthrough ws_router=v2 relay_turn_completed account_id=9901 turn=1 request_id=resp_usage_e2e_1 terminal_event=response.completed turn_requested_model=gpt-5.4-xhigh turn_upstream_model=gpt-5.4 duration_ms=2 first_token_ms=-1 input_tokens=2 output_tokens=1 cache_read_tokens=0
+2026/11/19 16:51:29 [Billing] Using fallback pricing for model: gpt-5.4
+2026/11/19 16:51:29 [SIMPLE MODE] Usage recorded (not billed): user=1701, tokens=3
+2026/11/19 16:51:29 [OpenAI WS v2 passthrough] ws_mode=passthrough ws_router=v2 relay_trace account_id=9901 stage=read_upstream_fail direction=upstream_to_client msg_type=- bytes=0 graceful=true wrote_downstream=true err=fail to get reader: fail to read frame header: EOF
+2026/11/19 16:51:29 [OpenAI WS v2 passthrough] ws_mode=passthrough ws_router=v2 relay_trace account_id=9901 stage=first_exit direction=upstream_to_client msg_type=- bytes=0 graceful=true wrote_downstream=true err=fail to get reader: fail to read frame header: EOF
+2026/11/19 16:51:29 [OpenAI WS v2 passthrough] ws_mode=passthrough ws_router=v2 relay_trace account_id=9901 stage=read_client_fail direction=client_to_upstream msg_type=- bytes=0 graceful=true wrote_downstream=false err=fail to get reader: received close frame: status = StatusNormalClosure and reason = "done"
+2026/11/19 16:51:29 [OpenAI WS v2 passthrough] ws_mode=passthrough ws_router=v2 relay_trace account_id=9901 stage=second_exit direction=client_to_upstream msg_type=- bytes=0 graceful=true wrote_downstream=false err=fail to get reader: received close frame: status = StatusNormalClosure and reason = "done"
+2026/11/19 16:51:29 [OpenAI WS v2 passthrough] ws_mode=passthrough ws_router=v2 relay_trace account_id=9901 stage=relay_complete direction=- msg_type=- bytes=0 graceful=true wrote_downstream=true err=-
+2026/11/19 16:51:29 [OpenAI WS v2 passthrough] ws_mode=passthrough ws_router=v2 relay_completed account_id=9901 request_id=resp_usage_e2e_1 terminal_event=response.completed duration_ms=1 c2u_frames=1 u2c_frames=1 dropped_frames=0 turns=1
+--- FAIL: TestOpenAIResponsesWebSocket_PassthroughUsageLogInfersReasoningFromInitialRequestModel (0.01s)
+    openai_gateway_handler_test.go:1480: 
+        	Error Trace:	C:/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/backend/internal/handler/openai_gateway_handler_test.go:1480
+        	Error:      	Expected value not to be nil.
+        	Test:       	TestOpenAIResponsesWebSocket_PassthroughUsageLogInfersReasoningFromInitialRequestModel
+FAIL
+FAIL	github.com/Wei-Shaw/sub2api/internal/handler	5.886s
+ok  	github.com/Wei-Shaw/sub2api/internal/handler/dto	0.173s
+2026/11/19 08:51:57 Timezone initialized: UTC (UTC offset: +00:00)
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+2026/11/19 08:51:57 WARN openai_codex_turn_identity_fallback reason=hmac_secret_unavailable mapping=session mapping_digest=578e9668c743
+2026/11/19 08:51:57 [antigravity-Forward] account=acc-gemini-fallback mapped Gemini model gemini-primary to gemini-primary-upstream
+2026/11/19 08:51:57 [Antigravity] Cleaned request schema in forwarded request for account acc-gemini-fallback
+2026/11/19 08:51:57 [Antigravity] Model not found (gemini-primary-upstream), retrying with fallback model gemini-fallback-upstream (account: acc-gemini-fallback)
+2026/11/19 08:51:57 [OpenAI] Model mapping applied: gpt-5.4 -> gpt-5.3-codex (account: openai-oauth, isCodexCLI: false)
+2026/11/19 08:51:57 [OpenAI] Compact model mapping applied: gpt-5.4 -> gpt-5.4-openai-compact (account: openai-oauth, isCodexCLI: false)
+2026/11/19 08:51:57 [OpenAI 自动透传] 命中自动透传分支: account=3 name=openai-oauth-pass type=oauth model=gpt-5.4 stream=false
+2026/11/19 08:51:57 [OpenAI WS Mode][openai_ws_mode=true] bootstrap enabled=false oauth_enabled=false apikey_enabled=false force_http=false responses_websockets_v2=false responses_websockets=false payload_log_sample_rate=0.000 event_flush_batch_size=0 event_flush_interval_ms=0 prewarm_cooldown_ms=0 retry_backoff_initial_ms=0 retry_backoff_max_ms=0 retry_jitter_ratio=0.000 retry_total_budget_ms=0 ws_read_limit_bytes=16777216
+2026/11/19 08:51:57 [Billing] Using fallback pricing for model: deepseek-v4-flash
+2026/11/19 08:51:57 [OpenAI WS Mode][openai_ws_mode=true] bootstrap enabled=false oauth_enabled=false apikey_enabled=false force_http=false responses_websockets_v2=false responses_websockets=false payload_log_sample_rate=0.000 event_flush_batch_size=0 event_flush_interval_ms=0 prewarm_cooldown_ms=0 retry_backoff_initial_ms=0 retry_backoff_max_ms=0 retry_jitter_ratio=0.000 retry_total_budget_ms=0 ws_read_limit_bytes=16777216
+2026/11/19 08:51:57 [Billing] Using fallback pricing for model: deepseek-v4-flash
+2026/11/19 08:51:57 [OpenAI WS Mode][openai_ws_mode=true] bootstrap enabled=false oauth_enabled=false apikey_enabled=false force_http=false responses_websockets_v2=false responses_websockets=false payload_log_sample_rate=0.000 event_flush_batch_size=0 event_flush_interval_ms=0 prewarm_cooldown_ms=0 retry_backoff_initial_ms=0 retry_backoff_max_ms=0 retry_jitter_ratio=0.000 retry_total_budget_ms=0 ws_read_limit_bytes=16777216
+2026/11/19 08:51:57 [Billing] Using fallback pricing for model: deepseek-v4-pro
+2026/11/19 08:51:57 [OpenAI WS Mode][openai_ws_mode=true] bootstrap enabled=false oauth_enabled=false apikey_enabled=false force_http=false responses_websockets_v2=false responses_websockets=false payload_log_sample_rate=0.000 event_flush_batch_size=0 event_flush_interval_ms=0 prewarm_cooldown_ms=0 retry_backoff_initial_ms=0 retry_backoff_max_ms=0 retry_jitter_ratio=0.000 retry_total_budget_ms=0 ws_read_limit_bytes=16777216
+2026/11/19 08:51:57 [Billing] Using fallback pricing for model: deepseek-v4-pro
+2026/11/19 08:51:57 [OpenAI WS Mode][openai_ws_mode=true] bootstrap enabled=false oauth_enabled=false apikey_enabled=false force_http=false responses_websockets_v2=false responses_websockets=false payload_log_sample_rate=0.000 event_flush_batch_size=0 event_flush_interval_ms=0 prewarm_cooldown_ms=0 retry_backoff_initial_ms=0 retry_backoff_max_ms=0 retry_jitter_ratio=0.000 retry_total_budget_ms=0 ws_read_limit_bytes=16777216
+2026/11/19 08:51:57 [Billing] Using fallback pricing for model: gpt-5.1-codex
+2026/11/19 08:51:57 [OpenAI WS Mode][openai_ws_mode=true] bootstrap enabled=false oauth_enabled=false apikey_enabled=false force_http=false responses_websockets_v2=false responses_websockets=false payload_log_sample_rate=0.000 event_flush_batch_size=0 event_flush_interval_ms=0 prewarm_cooldown_ms=0 retry_backoff_initial_ms=0 retry_backoff_max_ms=0 retry_jitter_ratio=0.000 retry_total_budget_ms=0 ws_read_limit_bytes=16777216
+2026/11/19 08:51:57 [Billing] Using fallback pricing for model: gpt-5.4
+2026/11/19 08:51:57 [OpenAI WS Mode][openai_ws_mode=true] bootstrap enabled=false oauth_enabled=false apikey_enabled=false force_http=false responses_websockets_v2=false responses_websockets=false payload_log_sample_rate=0.000 event_flush_batch_size=0 event_flush_interval_ms=0 prewarm_cooldown_ms=0 retry_backoff_initial_ms=0 retry_backoff_max_ms=0 retry_jitter_ratio=0.000 retry_total_budget_ms=0 ws_read_limit_bytes=16777216
+2026/11/19 08:51:57 [Billing] Using fallback pricing for model: gpt-5.6-terra
+2026/11/19 08:51:57 [OpenAI WS Mode][openai_ws_mode=true] bootstrap enabled=false oauth_enabled=false apikey_enabled=false force_http=false responses_websockets_v2=false responses_websockets=false payload_log_sample_rate=0.000 event_flush_batch_size=0 event_flush_interval_ms=0 prewarm_cooldown_ms=0 retry_backoff_initial_ms=0 retry_backoff_max_ms=0 retry_jitter_ratio=0.000 retry_total_budget_ms=0 ws_read_limit_bytes=16777216
+2026/11/19 08:51:57 [Billing] Using fallback pricing for model: gpt-5.6-terra
+2026/11/19 08:51:57 [OpenAI WS Mode][openai_ws_mode=true] bootstrap enabled=false oauth_enabled=false apikey_enabled=false force_http=false responses_websockets_v2=false responses_websockets=false payload_log_sample_rate=0.000 event_flush_batch_size=0 event_flush_interval_ms=0 prewarm_cooldown_ms=0 retry_backoff_initial_ms=0 retry_backoff_max_ms=0 retry_jitter_ratio=0.000 retry_total_budget_ms=0 ws_read_limit_bytes=16777216
+2026/11/19 08:51:57 [Billing] Using fallback pricing for model: gpt-5.4
+2026/11/19 08:51:57 [OpenAI WS Mode][openai_ws_mode=true] continuation_probe account_id=96 account_type=apikey conn_id=oa_ws_96_1 previous_response_id=resp_prev_encrypted previous_response_id_kind=response_id preferred_conn_id=- conn_reused=false store_disabled=false session_hash=- header_session_id=- header_conversation_id=- session_id_source=none conversation_id_source=none has_turn_state=false turn_state_len=0 has_prompt_cache_key=false
+2026/11/19 08:51:57 [OpenAI WS Mode][openai_ws_mode=true] error_event account_id=96 conn_id=oa_ws_96_1 idx=1 fallback_reason=invalid_encrypted_content can_fallback=true err_code=invalid_encrypted_content err_type=invalid_request_err err_message=The encrypted content could not be verified.
+2026/11/19 08:51:57 [warn] [OpenAI WS Mode][openai_ws_mode=true] conn_reader_loop_closed conn_id=oa_ws_96_1 leased=true idle_ms=0 age_ms=0 upstream_pings=0 cause=fail to get reader: fail to read frame header: EOF
+2026/11/19 08:51:57 [OpenAI WS Mode][openai_ws_mode=true] reconnect_invalid_encrypted_content_recovery_skip account_id=96 attempt=1 reason=missing_encrypted_reasoning_items
+2026/11/19 08:51:57 [OpenAI WS Mode][openai_ws_mode=true] reconnect_stop account_id=96 attempt=1 reason=invalid_encrypted_content
+--- FAIL: TestSyncUpstreamModelCatalogAntigravityTieredReasoning (0.01s)
+    --- FAIL: TestSyncUpstreamModelCatalogAntigravityTieredReasoning/budget=-1 (0.00s)
+        upstream_models_antigravity_test.go:156: 
+            	Error Trace:	C:/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/backend/internal/service/upstream_models_antigravity_test.go:156
+            	Error:      	Not equal: 
+            	            	expected: []string{"low", "medium", "high"}
+            	            	actual  : []string{"tiered"}
+            	            	
+            	            	Diff:
+            	            	--- Expected
+            	            	+++ Actual
+            	            	@@ -1,5 +1,3 @@
+            	            	-([]string) (len=3) {
+            	            	- (string) (len=3) "low",
+            	            	- (string) (len=6) "medium",
+            	            	- (string) (len=4) "high"
+            	            	+([]string) (len=1) {
+            	            	+ (string) (len=6) "tiered"
+            	            	 }
+            	Test:       	TestSyncUpstreamModelCatalogAntigravityTieredReasoning/budget=-1
+    --- FAIL: TestSyncUpstreamModelCatalogAntigravityTieredReasoning/budget=0 (0.00s)
+        upstream_models_antigravity_test.go:156: 
+            	Error Trace:	C:/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/backend/internal/service/upstream_models_antigravity_test.go:156
+            	Error:      	Not equal: 
+            	            	expected: []string{"low", "medium", "high"}
+            	            	actual  : []string{"tiered"}
+            	            	
+            	            	Diff:
+            	            	--- Expected
+            	            	+++ Actual
+            	            	@@ -1,5 +1,3 @@
+            	            	-([]string) (len=3) {
+            	            	- (string) (len=3) "low",
+            	            	- (string) (len=6) "medium",
+            	            	- (string) (len=4) "high"
+            	            	+([]string) (len=1) {
+            	            	+ (string) (len=6) "tiered"
+            	            	 }
+            	Test:       	TestSyncUpstreamModelCatalogAntigravityTieredReasoning/budget=0
+    --- FAIL: TestSyncUpstreamModelCatalogAntigravityTieredReasoning/budget=1024 (0.00s)
+        upstream_models_antigravity_test.go:156: 
+            	Error Trace:	C:/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/backend/internal/service/upstream_models_antigravity_test.go:156
+            	Error:      	Not equal: 
+            	            	expected: []string{"low", "medium", "high"}
+            	            	actual  : []string{"tiered"}
+            	            	
+            	            	Diff:
+            	            	--- Expected
+            	            	+++ Actual
+            	            	@@ -1,5 +1,3 @@
+            	            	-([]string) (len=3) {
+            	            	- (string) (len=3) "low",
+            	            	- (string) (len=6) "medium",
+            	            	- (string) (len=4) "high"
+            	            	+([]string) (len=1) {
+            	            	+ (string) (len=6) "tiered"
+            	            	 }
+            	Test:       	TestSyncUpstreamModelCatalogAntigravityTieredReasoning/budget=1024
+    --- FAIL: TestSyncUpstreamModelCatalogAntigravityTieredReasoning/budget=1025 (0.00s)
+        upstream_models_antigravity_test.go:156: 
+            	Error Trace:	C:/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/backend/internal/service/upstream_models_antigravity_test.go:156
+            	Error:      	Not equal: 
+            	            	expected: []string{"low", "medium", "high"}
+            	            	actual  : []string{"tiered"}
+            	            	
+            	            	Diff:
+            	            	--- Expected
+            	            	+++ Actual
+            	            	@@ -1,5 +1,3 @@
+            	            	-([]string) (len=3) {
+            	            	- (string) (len=3) "low",
+            	            	- (string) (len=6) "medium",
+            	            	- (string) (len=4) "high"
+            	            	+([]string) (len=1) {
+            	            	+ (string) (len=6) "tiered"
+            	            	 }
+            	Test:       	TestSyncUpstreamModelCatalogAntigravityTieredReasoning/budget=1025
+    --- FAIL: TestSyncUpstreamModelCatalogAntigravityTieredReasoning/budget=4000 (0.00s)
+        upstream_models_antigravity_test.go:156: 
+            	Error Trace:	C:/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/backend/internal/service/upstream_models_antigravity_test.go:156
+            	Error:      	Not equal: 
+            	            	expected: []string{"low", "medium", "high"}
+            	            	actual  : []string{"tiered"}
+            	            	
+            	            	Diff:
+            	            	--- Expected
+            	            	+++ Actual
+            	            	@@ -1,5 +1,3 @@
+            	            	-([]string) (len=3) {
+            	            	- (string) (len=3) "low",
+            	            	- (string) (len=6) "medium",
+            	            	- (string) (len=4) "high"
+            	            	+([]string) (len=1) {
+            	            	+ (string) (len=6) "tiered"
+            	            	 }
+            	Test:       	TestSyncUpstreamModelCatalogAntigravityTieredReasoning/budget=4000
+    --- FAIL: TestSyncUpstreamModelCatalogAntigravityTieredReasoning/budget=8192 (0.00s)
+        upstream_models_antigravity_test.go:156: 
+            	Error Trace:	C:/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/backend/internal/service/upstream_models_antigravity_test.go:156
+            	Error:      	Not equal: 
+            	            	expected: []string{"low", "medium", "high"}
+            	            	actual  : []string{"tiered"}
+            	            	
+            	            	Diff:
+            	            	--- Expected
+            	            	+++ Actual
+            	            	@@ -1,5 +1,3 @@
+            	            	-([]string) (len=3) {
+            	            	- (string) (len=3) "low",
+            	            	- (string) (len=6) "medium",
+            	            	- (string) (len=4) "high"
+            	            	+([]string) (len=1) {
+            	            	+ (string) (len=6) "tiered"
+            	            	 }
+            	Test:       	TestSyncUpstreamModelCatalogAntigravityTieredReasoning/budget=8192
+    --- FAIL: TestSyncUpstreamModelCatalogAntigravityTieredReasoning/budget=8193 (0.00s)
+        upstream_models_antigravity_test.go:156: 
+            	Error Trace:	C:/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/backend/internal/service/upstream_models_antigravity_test.go:156
+            	Error:      	Not equal: 
+            	            	expected: []string{"low", "medium", "high"}
+            	            	actual  : []string{"tiered"}
+            	            	
+            	            	Diff:
+            	            	--- Expected
+            	            	+++ Actual
+            	            	@@ -1,5 +1,3 @@
+            	            	-([]string) (len=3) {
+            	            	- (string) (len=3) "low",
+            	            	- (string) (len=6) "medium",
+            	            	- (string) (len=4) "high"
+            	            	+([]string) (len=1) {
+            	            	+ (string) (len=6) "tiered"
+            	            	 }
+            	Test:       	TestSyncUpstreamModelCatalogAntigravityTieredReasoning/budget=8193
+    --- FAIL: TestSyncUpstreamModelCatalogAntigravityTieredReasoning/budget= (0.00s)
+        upstream_models_antigravity_test.go:156: 
+            	Error Trace:	C:/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/backend/internal/service/upstream_models_antigravity_test.go:156
+            	Error:      	Not equal: 
+            	            	expected: []string{"low", "medium", "high"}
+            	            	actual  : []string{"tiered"}
+            	            	
+            	            	Diff:
+            	            	--- Expected
+            	            	+++ Actual
+            	            	@@ -1,5 +1,3 @@
+            	            	-([]string) (len=3) {
+            	            	- (string) (len=3) "low",
+            	            	- (string) (len=6) "medium",
+            	            	- (string) (len=4) "high"
+            	            	+([]string) (len=1) {
+            	            	+ (string) (len=6) "tiered"
+            	            	 }
+            	Test:       	TestSyncUpstreamModelCatalogAntigravityTieredReasoning/budget=
+--- FAIL: TestSyncUpstreamModelCatalogAntigravityBudgetReasoningLevels (0.00s)
+    --- FAIL: TestSyncUpstreamModelCatalogAntigravityBudgetReasoningLevels/gemini-2.5-flash (0.00s)
+        upstream_models_antigravity_test.go:220: 
+            	Error Trace:	C:/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/backend/internal/service/upstream_models_antigravity_test.go:220
+            	Error:      	Not equal: 
+            	            	expected: []string{"low", "medium", "high"}
+            	            	actual  : []string{"flash"}
+            	            	
+            	            	Diff:
+            	            	--- Expected
+            	            	+++ Actual
+            	            	@@ -1,5 +1,3 @@
+            	            	-([]string) (len=3) {
+            	            	- (string) (len=3) "low",
+            	            	- (string) (len=6) "medium",
+            	            	- (string) (len=4) "high"
+            	            	+([]string) (len=1) {
+            	            	+ (string) (len=5) "flash"
+            	            	 }
+            	Test:       	TestSyncUpstreamModelCatalogAntigravityBudgetReasoningLevels/gemini-2.5-flash
+            	Messages:   	default budget must not restrict configurable models to one reasoning level
+    --- FAIL: TestSyncUpstreamModelCatalogAntigravityBudgetReasoningLevels/gemini-2.5-flash-lite (0.00s)
+        upstream_models_antigravity_test.go:220: 
+            	Error Trace:	C:/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/backend/internal/service/upstream_models_antigravity_test.go:220
+            	Error:      	Not equal: 
+            	            	expected: []string{"low", "medium", "high"}
+            	            	actual  : []string{"lite"}
+            	            	
+            	            	Diff:
+            	            	--- Expected
+            	            	+++ Actual
+            	            	@@ -1,5 +1,3 @@
+            	            	-([]string) (len=3) {
+            	            	- (string) (len=3) "low",
+            	            	- (string) (len=6) "medium",
+            	            	- (string) (len=4) "high"
+            	            	+([]string) (len=1) {
+            	            	+ (string) (len=4) "lite"
+            	            	 }
+            	Test:       	TestSyncUpstreamModelCatalogAntigravityBudgetReasoningLevels/gemini-2.5-flash-lite
+            	Messages:   	default budget must not restrict configurable models to one reasoning level
+2026/11/19 08:51:57 INFO upstream model list endpoint unavailable; using configured models for capability sync account_id=97 platform=openai status_code=404 model_count=1
+2026/11/19 08:51:57 WARN upstream model capability metadata enrichment failed account_id=93 platform=openai error="model metadata registry returned HTTP 502"
+2026/11/19 08:51:57 WARN upstream model capability metadata enrichment failed account_id=96 platform=openai error="model metadata registry returned HTTP 502"
+--- FAIL: TestUsageExportDownloadLeaseCloseAndCancellation (0.01s)
+    --- FAIL: TestUsageExportDownloadLeaseCloseAndCancellation/close (0.00s)
+        usage_export_download_test.go:65: 
+            	Error Trace:	C:/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/backend/internal/service/usage_export_download_test.go:65
+            	Error:      	Should be true
+            	Test:       	TestUsageExportDownloadLeaseCloseAndCancellation/close
+    --- FAIL: TestUsageExportDownloadLeaseCloseAndCancellation/cancel (0.00s)
+        usage_export_download_test.go:65: 
+            	Error Trace:	C:/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/backend/internal/service/usage_export_download_test.go:65
+            	Error:      	Should be true
+            	Test:       	TestUsageExportDownloadLeaseCloseAndCancellation/cancel
+    --- FAIL: TestUsageExportDownloadLeaseCloseAndCancellation/expired (0.00s)
+        usage_export_download_test.go:65: 
+            	Error Trace:	C:/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/backend/internal/service/usage_export_download_test.go:65
+            	Error:      	Should be true
+            	Test:       	TestUsageExportDownloadLeaseCloseAndCancellation/expired
+    --- FAIL: TestUsageExportDownloadLeaseCloseAndCancellation/renew-failed (0.00s)
+        usage_export_download_test.go:65: 
+            	Error Trace:	C:/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/backend/internal/service/usage_export_download_test.go:65
+            	Error:      	Should be true
+            	Test:       	TestUsageExportDownloadLeaseCloseAndCancellation/renew-failed
+2026/11/19 08:51:57 WARN usage export finish uncertain id=job error="connection closed during commit"
+2026/11/19 08:51:57 WARN usage export failed id=expired error="context deadline exceeded"
+--- FAIL: TestUsageExportPrecisionMatchesBrowser (0.00s)
+    usage_export_xlsx_test.go:135: 
+        	Error Trace:	C:/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/backend/internal/service/usage_export_xlsx_test.go:135
+        	Error:      	Not equal: 
+        	            	expected: "Maximum"
+        	            	actual  : "maximum"
+        	            	
+        	            	Diff:
+        	            	--- Expected
+        	            	+++ Actual
+        	            	@@ -1 +1 @@
+        	            	-Maximum
+        	            	+maximum
+        	Test:       	TestUsageExportPrecisionMatchesBrowser
+FAIL
+FAIL	github.com/Wei-Shaw/sub2api/internal/service	4.341s
+FAIL
