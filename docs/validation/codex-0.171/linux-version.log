@@ -1,0 +1,1 @@
+2026-11-20T17:40:56.437+0800	INFO	stdlog	Sub2API 0.2.23 (commit: unknown, built: unknown)	{"service": "sub2api", "env": "bootstrap", "legacy_stdlog": true}

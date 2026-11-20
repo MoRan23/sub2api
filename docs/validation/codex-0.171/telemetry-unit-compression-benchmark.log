@@ -1,0 +1,14 @@
+ok  	github.com/Wei-Shaw/sub2api/internal/service	5.624s
+2026/11/20 09:31:50 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkCodexTelemetry0171Compression/1-batch-16         	    8258	     80426 ns/op	 443.39 MB/s	     35660 body-bytes	         8.071 wire-percent	    9881 B/op	       6 allocs/op
+BenchmarkCodexTelemetry0171Compression/1-batch-16         	   10000	     61990 ns/op	 575.26 MB/s	     35660 body-bytes	         8.071 wire-percent	    9880 B/op	       6 allocs/op
+BenchmarkCodexTelemetry0171Compression/1-batch-16         	    9530	     77670 ns/op	 459.12 MB/s	     35660 body-bytes	         8.071 wire-percent	    9880 B/op	       6 allocs/op
+BenchmarkCodexTelemetry0171Compression/8-batch-16         	    3242	    190085 ns/op	1500.03 MB/s	    285133 body-bytes	         1.719 wire-percent	   12568 B/op	       5 allocs/op
+BenchmarkCodexTelemetry0171Compression/8-batch-16         	    5935	     78696 ns/op	3623.20 MB/s	    285133 body-bytes	         1.719 wire-percent	   12569 B/op	       5 allocs/op
+BenchmarkCodexTelemetry0171Compression/8-batch-16         	    7587	     75945 ns/op	3754.47 MB/s	    285133 body-bytes	         1.719 wire-percent	   12568 B/op	       5 allocs/op
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/service	4.667s

@@ -1,0 +1,8 @@
+2026/11/20 10:03:28 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkCodex0169Compatibility/normalize/8388608         	     260	   4566486 ns/op	1837.05 MB/s	    9734 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/8388608       	     232	   5139547 ns/op	1632.21 MB/s	    8291 B/op	     154 allocs/op
+PASS

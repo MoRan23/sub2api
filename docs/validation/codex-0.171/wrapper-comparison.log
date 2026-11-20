@@ -1,0 +1,18 @@
+2026/11/20 10:00:42 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkCodex0171WrapperComparison/marshal/unbounded         	  659488	      2072 ns/op	    2480 B/op	      31 allocs/op
+BenchmarkCodex0171WrapperComparison/marshal/unbounded         	  682383	      1920 ns/op	    2480 B/op	      31 allocs/op
+BenchmarkCodex0171WrapperComparison/marshal/unbounded         	  792418	      1953 ns/op	    2480 B/op	      31 allocs/op
+BenchmarkCodex0171WrapperComparison/capture8M/unbounded       	     315	   4129072 ns/op	2031.65 MB/s	    9722 B/op	     165 allocs/op
+BenchmarkCodex0171WrapperComparison/capture8M/unbounded       	     302	   3812803 ns/op	2200.18 MB/s	    9704 B/op	     165 allocs/op
+BenchmarkCodex0171WrapperComparison/capture8M/unbounded       	     310	   3936209 ns/op	2131.20 MB/s	    9704 B/op	     165 allocs/op
+BenchmarkCodex0171WrapperComparison/marshal/bounded           	  525794	      2028 ns/op	    2480 B/op	      31 allocs/op
+BenchmarkCodex0171WrapperComparison/marshal/bounded           	  674528	      2077 ns/op	    2480 B/op	      31 allocs/op
+BenchmarkCodex0171WrapperComparison/marshal/bounded           	  525712	      1943 ns/op	    2480 B/op	      31 allocs/op
+BenchmarkCodex0171WrapperComparison/capture8M/bounded         	     302	   4237473 ns/op	1979.68 MB/s	    9722 B/op	     165 allocs/op
+BenchmarkCodex0171WrapperComparison/capture8M/bounded         	     315	   4034522 ns/op	2079.27 MB/s	    9704 B/op	     165 allocs/op
+BenchmarkCodex0171WrapperComparison/capture8M/bounded         	     261	   5015866 ns/op	1672.46 MB/s	    9705 B/op	     165 allocs/op
+PASS

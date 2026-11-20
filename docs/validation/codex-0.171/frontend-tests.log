@@ -1,0 +1,17 @@
+
+ RUN  v2.1.9 C:/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/frontend
+
+ ✓ src/api/__tests__/admin.codexTelemetry.spec.ts (6 tests) 5ms
+Browserslist: browsers data (caniuse-lite) is 11 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+ ✓ src/features/channel-monitor-v2/__tests__/OfficialStatusCard.spec.ts (5 tests) 137ms
+ ✓ src/views/admin/__tests__/CodexOutboundMetadataDetails.spec.ts (16 tests) 150ms
+ ✓ src/views/admin/__tests__/CodexTelemetryObservations.spec.ts (18 tests) 315ms
+ ✓ src/features/channel-monitor-v2/__tests__/GroupOverview.spec.ts (26 tests) 607ms
+
+ Test Files  5 passed (5)
+      Tests  71 passed (71)
+   Start at  17:21:23
+   Duration  4.64s (transform 1.75s, setup 929ms, collect 3.32s, tests 1.21s, environment 7.20s, prepare 866ms)
+

@@ -1,0 +1,28 @@
+2026/11/20 09:18:20 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkCodex0169Compatibility/normalize/65536-16         	    5568	     54826 ns/op	1199.59 MB/s	    9729 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/normalize/65536-16         	    7262	     53585 ns/op	1227.37 MB/s	    9724 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/normalize/65536-16         	    5734	     55956 ns/op	1175.36 MB/s	    9722 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/65536-16       	    6201	     56091 ns/op	1172.53 MB/s	    8279 B/op	     154 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/65536-16       	    6561	     57722 ns/op	1139.42 MB/s	    8284 B/op	     154 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/65536-16       	    8563	     54900 ns/op	1197.98 MB/s	    8286 B/op	     154 allocs/op
+BenchmarkCodex0169Compatibility/normalize/1048576-16       	     724	    533311 ns/op	1966.60 MB/s	    9710 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/normalize/1048576-16       	     648	    492178 ns/op	2130.96 MB/s	    9720 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/normalize/1048576-16       	     738	    487926 ns/op	2149.53 MB/s	    9718 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/1048576-16     	     544	    618602 ns/op	1695.45 MB/s	    8276 B/op	     154 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/1048576-16     	     543	    608245 ns/op	1724.32 MB/s	    8286 B/op	     154 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/1048576-16     	     603	    609853 ns/op	1719.77 MB/s	    8284 B/op	     154 allocs/op
+BenchmarkCodex0169Compatibility/normalize/8388608-16       	      99	   4688343 ns/op	1789.30 MB/s	    9809 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/normalize/8388608-16       	      76	   4701071 ns/op	1784.45 MB/s	    9840 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/normalize/8388608-16       	      80	   4848712 ns/op	1730.12 MB/s	    9838 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/8388608-16     	      91	   4728320 ns/op	1774.17 MB/s	    8356 B/op	     154 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/8388608-16     	      81	   4854469 ns/op	1728.07 MB/s	    8366 B/op	     154 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/8388608-16     	      80	   4299350 ns/op	1951.19 MB/s	    8300 B/op	     154 allocs/op
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/service	6.857s
+2026/11/20 09:18:33 Timezone initialized: UTC (UTC offset: +00:00)
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/service	0.096s

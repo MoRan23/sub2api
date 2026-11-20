@@ -1,0 +1,26 @@
+2026/11/20 09:50:14 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkCodex0169Compatibility/normalize/65536         	    9656	     46038 ns/op	1428.57 MB/s	    9705 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/65536       	    8523	     45562 ns/op	1443.52 MB/s	    8272 B/op	     154 allocs/op
+BenchmarkCodex0169Compatibility/normalize/1048576       	     685	    530700 ns/op	1976.28 MB/s	    9705 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/1048576     	     595	    546213 ns/op	1920.15 MB/s	    8272 B/op	     154 allocs/op
+BenchmarkCodex0169Compatibility/normalize/8388608       	     100	   3678865 ns/op	2280.28 MB/s	    9764 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/8388608     	     100	   3446166 ns/op	2434.25 MB/s	    8273 B/op	     154 allocs/op
+PASS
+2026/11/20 09:50:16 Timezone initialized: UTC (UTC offset: +00:00)
+goos: windows
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkForwardingWSComparable/bytes=512/escaped=false/legacy=false         	  106789	      3531 ns/op	 160.28 MB/s	    2232 B/op	      38 allocs/op
+BenchmarkForwardingWSComparable/bytes=512/escaped=true/legacy=false          	  101726	      3717 ns/op	 152.28 MB/s	    2232 B/op	      38 allocs/op
+BenchmarkForwardingWSComparable/bytes=65536/escaped=false/legacy=false       	    7646	     48336 ns/op	1356.95 MB/s	    2232 B/op	      38 allocs/op
+BenchmarkForwardingWSComparable/bytes=65536/escaped=true/legacy=false        	    5138	     83244 ns/op	 787.92 MB/s	    2232 B/op	      38 allocs/op
+BenchmarkForwardingWSComparable/bytes=1048576/escaped=false/legacy=false     	     504	    728381 ns/op	1439.67 MB/s	    2232 B/op	      38 allocs/op
+BenchmarkForwardingWSComparable/bytes=1048576/escaped=true/legacy=false      	     294	   1118350 ns/op	 937.66 MB/s	    2233 B/op	      38 allocs/op
+BenchmarkForwardingWSComparable/bytes=16777216/escaped=false/legacy=false    	      32	  13407141 ns/op	1251.37 MB/s	    2245 B/op	      38 allocs/op
+BenchmarkForwardingWSComparable/bytes=16777216/escaped=true/legacy=false     	      16	  19061750 ns/op	 880.15 MB/s	    2259 B/op	      38 allocs/op
+PASS

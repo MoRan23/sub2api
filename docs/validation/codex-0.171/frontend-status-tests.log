@@ -1,0 +1,10 @@
+
+ RUN  v2.1.9 C:/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/frontend
+
+ ✓ src/features/channel-monitor-v2/__tests__/OfficialStatusCard.spec.ts (6 tests) 137ms
+
+ Test Files  1 passed (1)
+      Tests  6 passed (6)
+   Start at  17:25:59
+   Duration  2.52s (transform 172ms, setup 140ms, collect 216ms, tests 137ms, environment 764ms, prepare 143ms)
+

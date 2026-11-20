@@ -1,0 +1,38 @@
+File: baseline-unit.test.exe
+Build ID: C:\Users\Admin\AppData\Local\Temp\codex0171-baseline.nMqKMY\baseline-unit.test.exe2026-11-20 09:49:17.4112968 +0000 UTC
+Type: cpu
+Time: 2026-11-20 17:54:48 CST
+Duration: 3.76s, Total samples = 3640ms (96.83%)
+Showing nodes accounting for 3550ms, 97.53% of 3640ms total
+Dropped 34 nodes (cum <= 18.20ms)
+Showing top 10 nodes out of 29
+      flat  flat%   sum%        cum   cum%
+    2690ms 73.90% 73.90%     2690ms 73.90%  encoding/json/internal/jsonwire.ConsumeSimpleString (inline)
+     770ms 21.15% 95.05%      770ms 21.15%  github.com/tidwall/gjson.parseSquash
+      90ms  2.47% 97.53%      100ms  2.75%  unicode/utf8.Valid
+         0     0% 97.53%       50ms  1.37%  encoding/json.Unmarshal
+         0     0% 97.53%     2690ms 73.90%  encoding/json.Valid
+         0     0% 97.53%     2690ms 73.90%  encoding/json.checkValid
+         0     0% 97.53%     2690ms 73.90%  encoding/json/jsontext.(*Decoder).ReadValue (inline)
+         0     0% 97.53%     2690ms 73.90%  encoding/json/jsontext.(*decoderState).ReadValue
+         0     0% 97.53%     2690ms 73.90%  encoding/json/jsontext.(*decoderState).consumeArray
+         0     0% 97.53%     2690ms 73.90%  encoding/json/jsontext.(*decoderState).consumeObject
+File: current-unit.test.exe
+Build ID: C:\Users\Admin\AppData\Local\Temp\codex0171-baseline.nMqKMY\current-unit.test.exe2026-11-20 09:49:03.6524495 +0000 UTC
+Type: cpu
+Time: 2026-11-20 17:54:52 CST
+Duration: 3.36s, Total samples = 3.25s (96.80%)
+Showing nodes accounting for 3.22s, 99.08% of 3.25s total
+Dropped 9 nodes (cum <= 0.02s)
+Showing top 10 nodes out of 24
+      flat  flat%   sum%        cum   cum%
+     2.15s 66.15% 66.15%      2.15s 66.15%  encoding/json/internal/jsonwire.ConsumeSimpleString (inline)
+     0.95s 29.23% 95.38%      0.96s 29.54%  github.com/tidwall/gjson.parseSquash
+     0.12s  3.69% 99.08%      0.12s  3.69%  unicode/utf8.Valid
+         0     0% 99.08%      0.02s  0.62%  encoding/json.Unmarshal
+         0     0% 99.08%      2.15s 66.15%  encoding/json.Valid
+         0     0% 99.08%      2.15s 66.15%  encoding/json.checkValid
+         0     0% 99.08%      2.15s 66.15%  encoding/json/jsontext.(*Decoder).ReadValue (inline)
+         0     0% 99.08%      2.15s 66.15%  encoding/json/jsontext.(*decoderState).ReadValue
+         0     0% 99.08%      2.15s 66.15%  encoding/json/jsontext.(*decoderState).consumeArray
+         0     0% 99.08%      2.15s 66.15%  encoding/json/jsontext.(*decoderState).consumeObject

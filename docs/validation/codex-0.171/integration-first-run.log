@@ -1,0 +1,41 @@
+2026/11/20 09:34:59 Timezone initialized: UTC (UTC offset: +00:00)
+2026/11/20 09:35:00 github.com/testcontainers/testcontainers-go - Connected to docker: 
+  Server Version: 29.4.0
+  API Version: 1.51
+  Operating System: Ubuntu 24.04.3 LTS
+  Total Memory: 32099 MB
+  Testcontainers for Go Version: v0.40.0
+  Resolved Docker Host: unix:///var/run/docker.sock
+  Resolved Docker Socket Path: /var/run/docker.sock
+  Test SessionID: 550427b3fa942bfff46123863b4ceb8b3f4d4c3bd63a073faa281be73dbac5ab
+  Test ProcessID: bb1692ec-a2a7-440f-b6b7-4a17f3778edd
+2026/11/20 09:35:00 🐳 Creating container for image postgres:18.1-alpine3.23
+2026/11/20 09:35:00 🐳 Creating container for image testcontainers/ryuk:0.13.0
+2026/11/20 09:35:00 ✅ Container created: cdfe1094c627
+2026/11/20 09:35:00 🐳 Starting container: cdfe1094c627
+2026/11/20 09:35:00 ✅ Container started: cdfe1094c627
+2026/11/20 09:35:00 ⏳ Waiting for container id cdfe1094c627 image: testcontainers/ryuk:0.13.0. Waiting for: port 8080/tcp to be listening
+2026/11/20 09:35:00 Shell not found in container
+2026/11/20 09:35:00 🔔 Container is ready: cdfe1094c627
+2026/11/20 09:35:00 ✅ Container created: baed4af4a537
+2026/11/20 09:35:00 🐳 Starting container: baed4af4a537
+2026/11/20 09:35:00 ✅ Container started: baed4af4a537
+2026/11/20 09:35:00 ⏳ Waiting for container id baed4af4a537 image: postgres:18.1-alpine3.23. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2), port 5432/tcp to be listening]
+2026/11/20 09:35:02 🔔 Container is ready: baed4af4a537
+2026/11/20 09:35:02 🐳 Creating container for image redis:8.4-alpine
+2026/11/20 09:35:02 ✅ Container created: b13978f4e1f5
+2026/11/20 09:35:02 🐳 Starting container: b13978f4e1f5
+2026/11/20 09:35:02 ✅ Container started: b13978f4e1f5
+2026/11/20 09:35:02 ⏳ Waiting for container id b13978f4e1f5 image: redis:8.4-alpine. Waiting for: all of: [port 6379/tcp to be listening, log message "* Ready to accept connections"]
+2026/11/20 09:35:02 🔔 Container is ready: b13978f4e1f5
+=== RUN   TestCodexTelemetry0170PostgresReplayV3UpgradeV4Restart
+--- PASS: TestCodexTelemetry0170PostgresReplayV3UpgradeV4Restart (0.19s)
+=== RUN   TestOfficialStatusStoreRecoveryAndLease
+    openai_official_status_integration_test.go:61: 
+        	Error Trace:	/mnt/c/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/backend/internal/repository/openai_official_status_integration_test.go:61
+        	Error:      	"-2ns" is not greater than "1m59s"
+        	Test:       	TestOfficialStatusStoreRecoveryAndLease
+--- FAIL: TestOfficialStatusStoreRecoveryAndLease (0.01s)
+FAIL
+FAIL	github.com/Wei-Shaw/sub2api/internal/repository	5.892s
+FAIL
