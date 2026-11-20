@@ -9,7 +9,7 @@ import (
 	"github.com/redis/go-redis/v9"
 )
 
-const officialStatusSnapshotKey = "openai:official-status:snapshot:v1"
+const officialStatusSnapshotKey = "openai:official-status:snapshot:v2"
 
 type officialStatusStore struct{ client *redis.Client }
 

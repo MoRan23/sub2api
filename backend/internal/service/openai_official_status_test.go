@@ -159,10 +159,10 @@ func (*officialStatusMemoryStore) ReleaseLeaderLock(context.Context, string, str
 
 func TestOfficialStatusRefreshIndependentFailuresAndLease(t *testing.T) {
 	var calls atomic.Int32
-	var failFeed, failComponents atomic.Bool
+	var failFeed, failComponents, failHistory, failSummary atomic.Bool
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		calls.Add(1)
-		if (r.URL.Path == "/feed" && failFeed.Load()) || (r.URL.Path == "/components" && failComponents.Load()) {
+		if (r.URL.Path == "/feed" && failFeed.Load()) || (r.URL.Path == "/components" && failComponents.Load()) || (r.URL.Path == "/history" && failHistory.Load()) || (r.URL.Path == "/summary" && failSummary.Load()) {
 			w.WriteHeader(503)
 			return
 		}
@@ -170,19 +170,35 @@ func TestOfficialStatusRefreshIndependentFailuresAndLease(t *testing.T) {
 			_, _ = fmt.Fprint(w, officialStatusTestComponents)
 			return
 		}
+		if r.URL.Path == "/summary" {
+			_, _ = fmt.Fprint(w, officialStatusTestSummary)
+			return
+		}
+		if r.URL.Path == "/history" {
+			start, err := time.Parse(time.RFC3339Nano, r.URL.Query().Get("start_at"))
+			require.NoError(t, err)
+			end, err := time.Parse(time.RFC3339Nano, r.URL.Query().Get("end_at"))
+			require.NoError(t, err)
+			require.Equal(t, 91*24*time.Hour, end.Sub(start))
+			require.Equal(t, 23, end.Hour())
+			_, _ = fmt.Fprint(w, officialStatusTestHistory(""))
+			return
+		}
 		_, _ = fmt.Fprint(w, officialStatusTestFeed(officialStatusTestEntry("incident", "2026-11-19T13:00:00Z", `<b>Status: Resolved</b>`)))
 	}))
 	defer server.Close()
 	store := &officialStatusMemoryStore{}
-	s := &OfficialStatusService{client: server.Client(), store: store, locks: store, componentsURL: server.URL + "/components", feedURL: server.URL + "/feed"}
+	s := &OfficialStatusService{client: server.Client(), store: store, locks: store, componentsURL: server.URL + "/components", feedURL: server.URL + "/feed", summaryURL: server.URL + "/summary", historyURL: server.URL + "/history"}
 	s.refresh(context.Background())
 	first := s.Get()
 	require.False(t, first.IncidentsStale)
 	require.Len(t, first.Incidents, 1)
-	require.EqualValues(t, 2, calls.Load())
+	require.EqualValues(t, 4, calls.Load())
+	require.Len(t, first.Groups[0].History.Days, 91)
+	require.False(t, first.Groups[0].History.Stale)
 	peer := &OfficialStatusService{client: server.Client(), store: store, locks: store}
 	peer.refresh(context.Background())
-	require.EqualValues(t, 2, calls.Load())
+	require.EqualValues(t, 4, calls.Load())
 	require.Equal(t, first, peer.Get())
 	failFeed.Store(true)
 	store.held = false
@@ -191,6 +207,7 @@ func TestOfficialStatusRefreshIndependentFailuresAndLease(t *testing.T) {
 	require.True(t, second.IncidentsStale)
 	require.Equal(t, first.IncidentsFetchedAt, second.IncidentsFetchedAt)
 	require.False(t, second.Groups[0].Stale)
+	require.False(t, second.Groups[0].History.Stale)
 	failFeed.Store(false)
 	failComponents.Store(true)
 	store.held = false
@@ -199,6 +216,24 @@ func TestOfficialStatusRefreshIndependentFailuresAndLease(t *testing.T) {
 	require.False(t, third.IncidentsStale)
 	require.True(t, third.Groups[0].Stale)
 	require.Equal(t, second.Groups[0].FetchedAt, third.Groups[0].FetchedAt)
+	require.False(t, third.Groups[0].History.Stale, "history is independent of current components")
+	failComponents.Store(false)
+	for _, failed := range []*atomic.Bool{&failHistory, &failSummary} {
+		failed.Store(true)
+		store.held = false
+		s.refresh(context.Background())
+		got := s.Get()
+		require.False(t, got.Groups[0].Stale)
+		require.False(t, got.IncidentsStale)
+		require.True(t, got.Groups[0].History.Stale)
+		require.Equal(t, third.Groups[0].History.FetchedAt, got.Groups[0].History.FetchedAt)
+		require.Same(t, &third.Groups[0].History.Days[0], &got.Groups[0].History.Days[0])
+		failed.Store(false)
+	}
+	store.held = false
+	s.refresh(context.Background())
+	require.False(t, s.Get().Groups[0].History.Stale)
+	require.NoError(t, ValidateOfficialStatusSnapshot(s.snapshot.Load()))
 }
 
 func TestOfficialStatusReadSnapshotStalenessAndLimit(t *testing.T) {
@@ -236,9 +271,9 @@ func (c officialStatusBlockingClient) Do(r *http.Request) (*http.Response, error
 
 func TestOfficialStatusStopCancelsRequests(t *testing.T) {
 	store := &officialStatusMemoryStore{}
-	client := officialStatusBlockingClient{started: make(chan struct{}, 2)}
+	client := officialStatusBlockingClient{started: make(chan struct{}, 4)}
 	s := NewOfficialStatusService(client, store, store, func(context.Context) bool { return true })
-	for range 2 {
+	for range 4 {
 		select {
 		case <-client.started:
 		case <-time.After(time.Second):
@@ -272,17 +307,26 @@ func TestOfficialStatusFetchRejectsOversizeAndHTTPError(t *testing.T) {
 }
 
 func BenchmarkOfficialStatusGet(b *testing.B) {
-	s := &OfficialStatusService{}
-	snapshot := emptyOfficialStatus()
-	now := time.Now()
-	for i := range snapshot.Groups {
-		snapshot.Groups[i].FetchedAt = &now
-	}
-	snapshot.IncidentsFetchedAt = &now
-	snapshot.Incidents = make([]OfficialStatusIncident, 100)
-	s.snapshot.Store(snapshot)
-	b.ReportAllocs()
-	for b.Loop() {
-		_ = s.Get()
+	for _, withHistory := range []bool{false, true} {
+		b.Run(fmt.Sprintf("history=%t", withHistory), func(b *testing.B) {
+			s := &OfficialStatusService{}
+			snapshot := emptyOfficialStatus()
+			now := time.Now().UTC()
+			histories, err := parseOfficialStatusHistory([]byte(officialStatusTestSummary), []byte(officialStatusTestHistory("")), now)
+			require.NoError(b, err)
+			for i := range snapshot.Groups {
+				snapshot.Groups[i].FetchedAt = &now
+				if withHistory {
+					snapshot.Groups[i].History = histories[i]
+				}
+			}
+			snapshot.IncidentsFetchedAt = &now
+			snapshot.Incidents = make([]OfficialStatusIncident, 100)
+			s.snapshot.Store(snapshot)
+			b.ReportAllocs()
+			for b.Loop() {
+				_ = s.Get()
+			}
+		})
 	}
 }

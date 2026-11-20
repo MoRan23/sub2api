@@ -18,15 +18,16 @@ const (
 	officialStatusInterval  = 120 * time.Second
 	officialStatusTimeout   = 10 * time.Second
 	officialStatusBodyLimit = 1 << 20
-	officialStatusLeaseKey  = "openai:official-status:refresh:v1"
+	officialStatusLeaseKey  = "openai:official-status:refresh:v2"
 )
 
 type OfficialStatusGroup struct {
-	ID        string     `json:"id"`
-	Name      string     `json:"name"`
-	Status    string     `json:"status"`
-	FetchedAt *time.Time `json:"fetched_at"`
-	Stale     bool       `json:"stale"`
+	ID        string                `json:"id"`
+	Name      string                `json:"name"`
+	Status    string                `json:"status"`
+	FetchedAt *time.Time            `json:"fetched_at"`
+	Stale     bool                  `json:"stale"`
+	History   OfficialStatusHistory `json:"history"`
 }
 
 type OfficialStatusIncident struct {
@@ -71,6 +72,8 @@ type OfficialStatusService struct {
 	enabled       func(context.Context) bool
 	componentsURL string
 	feedURL       string
+	summaryURL    string
+	historyURL    string
 	owner         string
 	snapshot      atomic.Pointer[OfficialStatusSnapshot]
 	cancel        context.CancelFunc
@@ -81,7 +84,9 @@ func NewOfficialStatusService(client publicCodexHTTPClient, store OfficialStatus
 	ctx, cancel := context.WithCancel(context.Background())
 	s := &OfficialStatusService{client: client, store: store, locks: locks, enabled: enabled,
 		componentsURL: "https://status.openai.com/api/v2/components.json", feedURL: "https://status.openai.com/feed.atom",
-		owner: uuid.NewString(), cancel: cancel, done: make(chan struct{})}
+		summaryURL: "https://app.incident.io/api/status_page_content/status.openai.com",
+		historyURL: "https://app.incident.io/api/status_page_content/status.openai.com/component_impacts",
+		owner:      uuid.NewString(), cancel: cancel, done: make(chan struct{})}
 	go s.run(ctx)
 	return s
 }
@@ -108,10 +113,10 @@ func (s *OfficialStatusService) run(ctx context.Context) {
 }
 
 func emptyOfficialStatus() *OfficialStatusSnapshot {
-	return &OfficialStatusSnapshot{Version: 1, Groups: []OfficialStatusGroup{
-		{ID: "apis", Name: "APIs", Status: "unknown", Stale: true},
-		{ID: "chatgpt", Name: "ChatGPT", Status: "unknown", Stale: true},
-		{ID: "codex", Name: "Codex", Status: "unknown", Stale: true},
+	return &OfficialStatusSnapshot{Version: 2, Groups: []OfficialStatusGroup{
+		{ID: "apis", Name: "APIs", Status: "unknown", Stale: true, History: OfficialStatusHistory{Days: []OfficialStatusDay{}, Stale: true}},
+		{ID: "chatgpt", Name: "ChatGPT", Status: "unknown", Stale: true, History: OfficialStatusHistory{Days: []OfficialStatusDay{}, Stale: true}},
+		{ID: "codex", Name: "Codex", Status: "unknown", Stale: true, History: OfficialStatusHistory{Days: []OfficialStatusDay{}, Stale: true}},
 	}, Incidents: []OfficialStatusIncident{}, IncidentsStale: true}
 }
 
@@ -124,6 +129,7 @@ func (s *OfficialStatusService) Get() OfficialStatusResponse {
 	now := time.Now()
 	for i := range groups {
 		groups[i].Stale = groups[i].Stale || officialStatusExpired(groups[i].FetchedAt, now)
+		groups[i].History.Stale = groups[i].History.Stale || officialStatusExpired(groups[i].History.FetchedAt, now)
 	}
 	incidents := snapshot.Incidents
 	if len(incidents) > 20 {
@@ -164,20 +170,22 @@ func (s *OfficialStatusService) refresh(parent context.Context) {
 	next.Groups = append([]OfficialStatusGroup(nil), previous.Groups...)
 	for i := range next.Groups {
 		next.Groups[i].Stale = true
+		next.Groups[i].History.Stale = true
 	}
 	next.IncidentsStale = true
 	var wg sync.WaitGroup
-	wg.Add(2)
+	var groups []OfficialStatusGroup
+	var histories [3]OfficialStatusHistory
+	var historyErr error
+	now := time.Now().UTC()
+	wg.Add(3)
 	go func() {
 		defer wg.Done()
 		body, err := s.fetch(ctx, s.componentsURL)
 		if err != nil {
 			return
 		}
-		groups, err := parseOfficialStatusComponents(body, time.Now().UTC())
-		if err == nil {
-			next.Groups = groups
-		}
+		groups, _ = parseOfficialStatusComponents(body, time.Now().UTC())
 	}()
 	go func() {
 		defer wg.Done()
@@ -192,9 +200,23 @@ func (s *OfficialStatusService) refresh(parent context.Context) {
 		at := time.Now().UTC()
 		next.Incidents, next.IncidentsFetchedAt, next.IncidentsStale = incidents, &at, false
 	}()
+	go func() {
+		defer wg.Done()
+		histories, historyErr = s.fetchHistory(ctx, now)
+	}()
 	wg.Wait()
 	if ctx.Err() != nil {
 		return
+	}
+	for i := range next.Groups {
+		if groups != nil {
+			next.Groups[i].Status = groups[i].Status
+			next.Groups[i].FetchedAt = groups[i].FetchedAt
+			next.Groups[i].Stale = groups[i].Stale
+		}
+		if historyErr == nil {
+			next.Groups[i].History = histories[i]
+		}
 	}
 	next.CheckedAt = time.Now().UTC()
 	s.snapshot.Store(&next)
@@ -227,13 +249,16 @@ func (s *OfficialStatusService) fetch(parent context.Context, endpoint string) (
 }
 
 func ValidateOfficialStatusSnapshot(snapshot *OfficialStatusSnapshot) error {
-	if snapshot.Version != 1 || len(snapshot.Groups) != 3 || snapshot.Incidents == nil || len(snapshot.Incidents) > 100 || snapshot.CheckedAt.IsZero() || snapshot.CheckedAt.After(time.Now().Add(time.Minute)) {
+	if snapshot == nil || snapshot.Version != 2 || len(snapshot.Groups) != 3 || snapshot.Incidents == nil || len(snapshot.Incidents) > 100 || snapshot.CheckedAt.IsZero() || snapshot.CheckedAt.After(time.Now().Add(time.Minute)) {
 		return errors.New("invalid official status snapshot")
 	}
 	for i, id := range []string{"apis", "chatgpt", "codex"} {
 		group := snapshot.Groups[i]
 		if group.ID != id || officialStatusRank(group.Status) < 0 || len(group.Name) > 32 {
 			return errors.New("invalid official status group")
+		}
+		if err := validateOfficialStatusHistory(group.History, snapshot.CheckedAt); err != nil {
+			return err
 		}
 	}
 	for _, incident := range snapshot.Incidents {

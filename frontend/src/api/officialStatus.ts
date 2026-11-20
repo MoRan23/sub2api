@@ -2,12 +2,20 @@ import { apiClient } from './client'
 
 export type OfficialStatusGroupID = 'apis' | 'chatgpt' | 'codex'
 
+export interface OfficialStatusHistory {
+  days: { date: string; status: string }[]
+  uptime_percent: number | null
+  fetched_at: string | null
+  stale: boolean
+}
+
 export interface OfficialStatusGroup {
   id: OfficialStatusGroupID
   name: string
   status: string
   fetched_at: string | null
   stale: boolean
+  history?: OfficialStatusHistory
 }
 
 export interface OfficialStatusIncident {

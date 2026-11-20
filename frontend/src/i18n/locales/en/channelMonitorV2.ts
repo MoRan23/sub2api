@@ -5,6 +5,7 @@ export default {
       title: 'OpenAI official status', source: 'Official website', unavailable: 'Official status is currently unavailable',
       delayed: 'Official status updates are delayed. Showing the last successful sync.',
       showEvents: 'Recent incidents', hideEvents: 'Hide incidents', showMore: 'Show more', showLess: 'Show fewer', noEvents: 'No recent incidents',
+      historyLabel: '{product} official status history', historyPast: 'Past 90 days', historyToday: 'Today', historyUptime: '{value}% uptime', noHistory: 'No history available',
       states: {
         operational: 'Operational', degraded_performance: 'Degraded performance', partial_outage: 'Partial outage', major_outage: 'Major outage', under_maintenance: 'Under maintenance',
         investigating: 'Investigating', identified: 'Identified', monitoring: 'Monitoring recovery', resolved: 'Resolved', postmortem: 'Postmortem',

@@ -9,13 +9,18 @@
         </button>
       </div>
     </div>
-    <div class="mt-3 flex flex-wrap gap-x-6 gap-y-2" role="status">
-      <div v-for="group in groups" :key="group.id" class="flex items-center gap-2 text-sm" :data-official-group="group.id" :title="group.fetched_at ? t('channelMonitorV2.updatedTo', { time: formatTime(group.fetched_at) }) : undefined">
-        <span class="h-2 w-2 rounded-full" :class="statusClasses(group.stale || failed ? 'unknown' : group.status).dot" aria-hidden="true" />
-        <span class="font-medium text-gray-800 dark:text-gray-200">{{ group.name }}</span>
-        <span :class="statusClasses(group.stale || failed ? 'unknown' : group.status).text">{{ statusLabel(group.status) }}</span>
+    <OverviewHistoryTooltip>
+      <div class="mt-4 grid grid-cols-1 gap-5 md:grid-cols-3">
+        <div v-for="group in groups" :key="group.id" class="min-w-0" :data-official-group="group.id">
+          <div class="flex flex-wrap items-center gap-2 text-sm" role="status" :title="group.fetched_at ? t('channelMonitorV2.updatedTo', { time: formatTime(group.fetched_at) }) : undefined">
+            <span class="h-2 w-2 rounded-full" :class="statusClasses(group.stale || failed ? 'unknown' : group.status).dot" aria-hidden="true" />
+            <span class="font-medium text-gray-800 dark:text-gray-200">{{ group.name }}</span>
+            <span class="ml-auto text-xs" :class="statusClasses(group.stale || failed ? 'unknown' : group.status).text">{{ statusLabel(group.status) }}</span>
+          </div>
+          <OfficialStatusHistory :group="group" :today="today" :status-label="statusLabel" :status-classes="statusClasses" />
+        </div>
       </div>
-    </div>
+    </OverviewHistoryTooltip>
     <p v-if="loading && !data" class="mt-3 text-xs text-gray-500 dark:text-gray-400">{{ t('channelMonitorV2.updating') }}</p>
     <p v-else-if="!hasSnapshot" class="mt-3 text-xs text-gray-500 dark:text-gray-400">{{ t('channelMonitorV2.officialStatus.unavailable') }}</p>
     <p v-else-if="stale" class="mt-3 text-xs text-amber-700 dark:text-amber-300" data-testid="official-status-stale">{{ t('channelMonitorV2.officialStatus.delayed') }}</p>
@@ -45,6 +50,8 @@ import { computed, onBeforeUnmount, onMounted, ref, shallowRef } from 'vue'
 import { useI18n } from 'vue-i18n'
 import Icon from '@/components/icons/Icon.vue'
 import { getOfficialStatus, type OfficialStatusGroup, type OfficialStatusResponse } from '@/api/officialStatus'
+import OfficialStatusHistory from './OfficialStatusHistory.vue'
+import OverviewHistoryTooltip from './OverviewHistoryTooltip.vue'
 
 const { t, locale } = useI18n()
 const data = shallowRef<OfficialStatusResponse | null>(null)
@@ -52,6 +59,7 @@ const loading = ref(false)
 const failed = ref(false)
 const expanded = ref(false)
 const showMore = ref(false)
+const today = ref(new Date().toISOString().slice(0, 10))
 const emptyGroups: OfficialStatusGroup[] = [
   { id: 'apis', name: 'APIs', status: 'unknown', fetched_at: null, stale: true },
   { id: 'chatgpt', name: 'ChatGPT', status: 'unknown', fetched_at: null, stale: true },
@@ -59,8 +67,8 @@ const emptyGroups: OfficialStatusGroup[] = [
 ]
 const groups = computed(() => data.value?.groups || emptyGroups)
 const incidents = computed(() => data.value?.incidents.slice(0, showMore.value ? 20 : 5) || [])
-const hasSnapshot = computed(() => groups.value.some(group => group.fetched_at) || Boolean(data.value?.incidents_fetched_at))
-const stale = computed(() => failed.value || data.value?.incidents_stale || groups.value.some(group => group.stale))
+const hasSnapshot = computed(() => groups.value.some(group => group.fetched_at || group.history?.fetched_at) || Boolean(data.value?.incidents_fetched_at))
+const stale = computed(() => failed.value || data.value?.incidents_stale || groups.value.some(group => group.stale || group.history?.stale))
 const dateFormatter = computed(() => new Intl.DateTimeFormat(locale.value || undefined, { month: '2-digit', day: '2-digit', hour: '2-digit', minute: '2-digit' }))
 const knownStatuses = new Set(['operational', 'degraded_performance', 'partial_outage', 'major_outage', 'under_maintenance', 'investigating', 'identified', 'monitoring', 'resolved', 'postmortem', 'scheduled', 'in_progress', 'verifying', 'completed', 'unknown'])
 let timer: number | undefined
@@ -84,6 +92,7 @@ function formatTime(value: string) {
 }
 function load(): Promise<void> {
   if (disposed || document.hidden) return Promise.resolve()
+  today.value = new Date().toISOString().slice(0, 10)
   if (pending) return pending.promise
   const controller = new AbortController()
   const id = ++sequence

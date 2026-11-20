@@ -5,6 +5,7 @@ export default {
       title: 'OpenAI 官方状态', source: '查看官网', unavailable: '暂时无法获取官方状态',
       delayed: '官方状态更新延迟，当前显示上次同步结果。',
       showEvents: '近期事件', hideEvents: '收起事件', showMore: '查看更多', showLess: '收起更多', noEvents: '暂无近期事件',
+      historyLabel: '{product} 官方状态历史', historyPast: '过去 90 天', historyToday: '今天', historyUptime: '{value}% 可用率', noHistory: '暂无历史',
       states: {
         operational: '正常', degraded_performance: '性能下降', partial_outage: '部分故障', major_outage: '服务故障', under_maintenance: '维护中',
         investigating: '调查中', identified: '已定位', monitoring: '恢复观察中', resolved: '已恢复', postmortem: '事后分析',

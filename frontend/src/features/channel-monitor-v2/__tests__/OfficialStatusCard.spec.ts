@@ -29,7 +29,7 @@ function deferred<T>() {
   return { promise, resolve }
 }
 function mountCard() {
-  return mount(OfficialStatusCard, { global: {
+  return mount(OfficialStatusCard, { attachTo: document.body, global: {
     plugins: [createI18n({ legacy: false, locale: 'zh', messages: { zh: { ...messages, common: { refresh: '刷新' } } } })],
     stubs: { Icon: true },
   } })
@@ -52,6 +52,8 @@ describe('official status card', () => {
     wrapper = mountCard(); await flushPromises()
     expect(getOfficialStatus).toHaveBeenCalledTimes(1)
     expect(wrapper.findAll('[data-official-group]')).toHaveLength(3)
+    expect(wrapper.findAll('[data-testid="official-history-empty"]')).toHaveLength(3)
+    expect(wrapper.find('[data-testid="official-history-uptime"]').exists()).toBe(false)
     expect(wrapper.get('[data-official-group="apis"] span').classes()).toContain('bg-emerald-500')
     expect(wrapper.find('[data-testid="official-incident"]').exists()).toBe(false)
     await wrapper.get('[data-testid="official-status-toggle"]').trigger('click')
@@ -89,7 +91,7 @@ describe('official status card', () => {
     getOfficialStatus.mockResolvedValueOnce(cold)
     wrapper = mountCard(); await flushPromises()
     expect(wrapper.text()).toContain('暂时无法获取官方状态')
-    expect(wrapper.findAll('[data-official-group] > span:first-child').every(dot => dot.classes().includes('bg-gray-400'))).toBe(true)
+    expect(wrapper.findAll('[data-official-group] [role="status"] > span:first-child').every(dot => dot.classes().includes('bg-gray-400'))).toBe(true)
     await wrapper.get('[data-testid="official-status-refresh"]').trigger('click'); await flushPromises()
     expect(wrapper.get('[data-official-group="apis"]').text()).toContain('正常')
     getOfficialStatus.mockRejectedValueOnce(new Error('offline'))
@@ -156,5 +158,99 @@ describe('official status card', () => {
     pending.resolve(response()); await flushPromises()
     await vi.advanceTimersByTimeAsync(240000)
     expect(getOfficialStatus).toHaveBeenCalledTimes(3)
+  })
+
+  it('shows official daily colors and UTC dates in one hover, focus and touch tooltip', async () => {
+    const snapshot = response()
+    snapshot.groups[0]!.history = {
+      days: [
+        { date: '2026-11-17', status: 'operational' },
+        { date: '2026-11-18', status: 'degraded_performance' },
+        { date: '2026-11-19', status: 'major_outage' },
+        { date: '2026-11-20', status: 'unknown' },
+      ], uptime_percent: 99.12349, fetched_at: '2026-11-20T01:00:00Z', stale: false,
+    }
+    snapshot.groups[1]!.history = {
+      days: [{ date: '2026-11-20', status: 'operational' }], uptime_percent: null,
+      fetched_at: '2026-11-20T01:00:00Z', stale: false,
+    }
+    getOfficialStatus.mockResolvedValue(snapshot)
+    wrapper = mountCard(); await flushPromises()
+    const days = wrapper.findAll('[data-official-group="apis"] [data-official-day]')
+    for (const [index, color] of ['bg-emerald-500', 'bg-amber-400', 'bg-rose-500', 'bg-gray-400'].entries()) {
+      expect(days[index]!.classes()).toContain(color)
+    }
+    expect(wrapper.get('[data-testid="official-history-uptime"]').text()).toBe('99.123% 可用率')
+    expect(wrapper.findAll('[data-testid="official-history-uptime"]')).toHaveLength(1)
+    expect(document.querySelector('[role="tooltip"]')).toBeNull()
+    await days[0]!.trigger('mouseenter'); await flushPromises()
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toContain('2026-11-17 UTC')
+    await days[0]!.trigger('mouseleave')
+    expect(document.querySelector('[role="tooltip"]')).toBeNull()
+    await days[2]!.trigger('focus'); await flushPromises()
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toContain('2026-11-19 UTC')
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toContain('服务故障')
+    const otherProduct = wrapper.get('[data-official-group="chatgpt"] [data-official-day]')
+    await otherProduct.trigger('click'); await flushPromises()
+    await otherProduct.trigger('mouseleave')
+    expect(document.querySelectorAll('[role="tooltip"]')).toHaveLength(1)
+    expect(document.querySelector('[role="tooltip"]')?.textContent).toContain('2026-11-20 UTC')
+    document.dispatchEvent(new KeyboardEvent('keydown', { key: 'Escape' })); await flushPromises()
+    expect(document.querySelector('[role="tooltip"]')).toBeNull()
+    expect(getOfficialStatus).toHaveBeenCalledTimes(1)
+  })
+
+  it('retains historical colors through delayed history and request failures while graying the live status', async () => {
+    const snapshot = response()
+    snapshot.groups[0]!.history = {
+      days: [{ date: '2026-11-20', status: 'operational' }], uptime_percent: 100,
+      fetched_at: '2026-11-20T01:00:00Z', stale: true,
+    }
+    getOfficialStatus.mockResolvedValueOnce(snapshot)
+    wrapper = mountCard(); await flushPromises()
+    const group = wrapper.get('[data-official-group="apis"]')
+    expect(wrapper.get('[data-testid="official-status-stale"]').text()).toContain('上次同步结果')
+    expect(group.get('span').classes()).toContain('bg-emerald-500')
+    expect(group.get('[data-official-day]').classes()).toContain('bg-emerald-500')
+    expect(group.get('[data-testid="official-history-uptime"]').text()).toBe('100% 可用率')
+    getOfficialStatus.mockRejectedValueOnce(new Error('offline'))
+    await wrapper.get('[data-testid="official-status-refresh"]').trigger('click'); await flushPromises()
+    expect(group.get('span').classes()).toContain('bg-gray-400')
+    expect(group.get('[data-official-day]').classes()).toContain('bg-emerald-500')
+    expect(group.get('[data-testid="official-history-uptime"]').text()).toBe('100% 可用率')
+  })
+
+  it('bounds daily blocks without inventing successful days', async () => {
+    const snapshot = response()
+    snapshot.groups[0]!.history = {
+      days: Array.from({ length: 92 }, (_, index) => ({ date: new Date(Date.UTC(2026, 8, index + 1)).toISOString().slice(0, 10), status: 'unknown' })),
+      uptime_percent: null, fetched_at: '2026-11-20T01:00:00Z', stale: false,
+    }
+    getOfficialStatus.mockResolvedValueOnce(snapshot)
+    wrapper = mountCard(); await flushPromises()
+    const days = wrapper.findAll('[data-official-day]')
+    expect(days).toHaveLength(91)
+    expect(days[0]!.attributes('data-official-day')).toBe('2026-09-02')
+    expect(days.every(day => day.classes().includes('bg-gray-400'))).toBe(true)
+    expect(wrapper.findAll('[data-testid="official-history-empty"]')).toHaveLength(2)
+    expect(wrapper.find('[data-testid="official-history-uptime"]').exists()).toBe(false)
+  })
+
+  it('labels a retained window with its real final date after UTC midnight', async () => {
+    vi.setSystemTime(new Date('2026-11-20T23:59:00Z'))
+    const snapshot = response()
+    snapshot.groups[0]!.history = {
+      days: [{ date: '2026-11-20', status: 'operational' }], uptime_percent: 100,
+      fetched_at: '2026-11-20T23:59:00Z', stale: false,
+    }
+    getOfficialStatus.mockResolvedValueOnce(snapshot)
+    wrapper = mountCard(); await flushPromises()
+    expect(wrapper.get('[data-testid="official-history-end"]').text()).toBe('今天')
+    expect(wrapper.findAll('[data-testid="official-history-end"]')).toHaveLength(1)
+    getOfficialStatus.mockRejectedValueOnce(new Error('offline'))
+    await vi.advanceTimersByTimeAsync(120000)
+    expect(wrapper.get('[data-testid="official-history-end"]').text()).toBe('2026-11-20')
+    expect(wrapper.get('[data-official-day]').classes()).toContain('bg-emerald-500')
+    expect(wrapper.get('[data-testid="official-status-stale"]').text()).toContain('上次同步结果')
   })
 })
