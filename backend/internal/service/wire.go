@@ -1064,6 +1064,7 @@ var ProviderSet = wire.NewSet(
 	NewGatewayService,
 	ProvideOpenAIGatewayService,
 	ProvidePublicCodexCatalogService,
+	ProvideOfficialStatusService,
 	NewCodexEngineBillingService,
 	ProvideCodexTelemetryService,
 	ProvideOpenAIOutboundSessionV1CleanupWorker,

@@ -1,6 +1,16 @@
 /** Channel Monitor V2 (user + admin passive monitor UI) */
 export default {
   channelMonitorV2: {
+    officialStatus: {
+      title: 'OpenAI official status', source: 'Official website', unavailable: 'Official status is currently unavailable',
+      delayed: 'Official status updates are delayed. Showing the last successful sync.',
+      showEvents: 'Recent incidents', hideEvents: 'Hide incidents', showMore: 'Show more', showLess: 'Show fewer', noEvents: 'No recent incidents',
+      states: {
+        operational: 'Operational', degraded_performance: 'Degraded performance', partial_outage: 'Partial outage', major_outage: 'Major outage', under_maintenance: 'Under maintenance',
+        investigating: 'Investigating', identified: 'Identified', monitoring: 'Monitoring recovery', resolved: 'Resolved', postmortem: 'Postmortem',
+        scheduled: 'Scheduled maintenance', in_progress: 'In progress', verifying: 'Verifying', completed: 'Completed', unknown: 'Unknown',
+      },
+    },
     overview: {
       viewLabel: 'Channel status view', groups: 'Group overview', details: 'Detailed statistics',
       groupCount: '{count} groups', refreshIn: 'Refresh in {seconds}s',

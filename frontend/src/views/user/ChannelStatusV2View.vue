@@ -1,6 +1,7 @@
 <template>
   <AppLayout>
     <div class="space-y-5">
+      <OfficialStatusCard />
       <div class="tabs" role="tablist" :aria-label="t('channelMonitorV2.overview.viewLabel')">
         <button
           v-for="mode in modes"
@@ -28,6 +29,7 @@ import { defineAsyncComponent, ref } from 'vue'
 import { useI18n } from 'vue-i18n'
 import AppLayout from '@/components/layout/AppLayout.vue'
 import GroupOverview from '@/features/channel-monitor-v2/GroupOverview.vue'
+import OfficialStatusCard from '@/features/channel-monitor-v2/OfficialStatusCard.vue'
 
 // Detailed endpoints and charts are loaded only when this view is selected.
 const ChannelStatusV2Details = defineAsyncComponent(() => import('./ChannelStatusV2Details.vue').then(module => module.default))

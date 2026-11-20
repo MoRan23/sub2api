@@ -1,6 +1,16 @@
 /** Channel Monitor V2 (user + admin passive monitor UI) */
 export default {
   channelMonitorV2: {
+    officialStatus: {
+      title: 'OpenAI 官方状态', source: '查看官网', unavailable: '暂时无法获取官方状态',
+      delayed: '官方状态更新延迟，当前显示上次同步结果。',
+      showEvents: '近期事件', hideEvents: '收起事件', showMore: '查看更多', showLess: '收起更多', noEvents: '暂无近期事件',
+      states: {
+        operational: '正常', degraded_performance: '性能下降', partial_outage: '部分故障', major_outage: '服务故障', under_maintenance: '维护中',
+        investigating: '调查中', identified: '已定位', monitoring: '恢复观察中', resolved: '已恢复', postmortem: '事后分析',
+        scheduled: '计划维护', in_progress: '处理中', verifying: '验证中', completed: '已完成', unknown: '状态未知',
+      },
+    },
     overview: {
       viewLabel: '渠道状态视图', groups: '分组概览', details: '详细统计',
       groupCount: '{count} 个分组', refreshIn: '{seconds} 秒后刷新',
