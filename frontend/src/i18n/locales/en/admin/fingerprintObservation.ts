@@ -19,10 +19,12 @@ export default {
       reasons: 'Inference and skip reasons', fieldSources: 'Field sources (local diagnostics only)',
       coverage: {
         title: 'Client event collection coverage',
-        signals: { skill_invocation: 'Skill invocation', auth_storage: 'Credential storage operations', turn_critical_path: 'Turn critical path', tool_declaration_updates: 'Tool declaration updates', websocket_continuation: 'WebSocket continuation' },
-        status: { unavailable: 'Not collected', awaiting_source: 'Not collected (metric definitions supported)' },
+        signals: { skill_invocation: 'Skill invocation', auth_storage: 'Credential storage operations', turn_critical_path: 'Turn critical path', tool_declaration_updates: 'Tool declaration updates', websocket_continuation: 'WebSocket continuation', used_dictation: 'Dictation input source', guardian_v2_classification: 'Guardian V2 classification' },
+        status: { unavailable: 'Not collected', awaiting_source: 'Awaiting client data' },
       },
       reasonLabels: {
+        client_dictation_source_not_on_responses_wire: 'The client does not send its dictation source on the Responses wire; awaiting original client data.',
+        client_guardian_v2_classification_not_on_responses_wire: 'Guardian V2 classification and correlation IDs are unavailable on the Responses wire; awaiting original client events.',
         client_critical_path_not_on_responses_wire: 'Client critical-path timing is unavailable on the Responses wire; awaiting the original client metrics.',
         client_tool_declaration_updates_not_on_responses_wire: 'Client tool declaration updates are unavailable on the Responses wire; awaiting the original client metrics.',
         client_websocket_continuation_not_on_responses_wire: 'Client WebSocket continuation metrics are unavailable on the Responses wire; awaiting the original client metrics.',

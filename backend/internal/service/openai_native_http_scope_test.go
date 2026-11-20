@@ -10,6 +10,7 @@ import (
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/codexnative"
 	"github.com/Wei-Shaw/sub2api/internal/pkg/tlsfingerprint"
+	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/require"
 )
 
@@ -147,6 +148,11 @@ func TestOpenAINativeHTTPConcurrentAccountScopesRemainSeparate(t *testing.T) {
 
 func TestCodexTelemetryNativeHTTPPreservesExporterUAAndFrozenSource(t *testing.T) {
 	svc := &CodexTelemetryService{analyticsURL: "https://chatgpt.com/analytics", metricsURL: "https://ab.chatgpt.com/metrics"}
+	compressor := codexTelemetryCompressor{}
+	defer compressor.close()
+	decoder, err := zstd.NewReader(nil, zstd.WithDecoderConcurrency(1))
+	require.NoError(t, err)
+	defer decoder.Close()
 	sourceUA := "codex-tui/0.154.0 (Mac OS 26.4.1; arm64)"
 	scope := codexnative.Scope{AccountID: 42, SourceUserAgent: sourceUA, AccountUserAgent: "account (Windows)", CanonicalUserAgent: "canonical (Linux)", Purpose: "telemetry"}
 	firstProxyID, secondProxyID := int64(7), int64(8)
@@ -178,9 +184,13 @@ func TestCodexTelemetryNativeHTTPPreservesExporterUAAndFrozenSource(t *testing.T
 				}
 				body, err := io.ReadAll(req.Body)
 				require.NoError(t, err)
+				if isMetrics {
+					body, err = decoder.DecodeAll(body, nil)
+					require.NoError(t, err)
+				}
 				require.Equal(t, `{"events":[]}`, string(body))
 				return &http.Response{StatusCode: 204, Body: http.NoBody}, nil
-			}, codexTelemetryJob{profile: frozen, body: []byte(`{"events":[]}`), metrics: metrics})
+			}, codexTelemetryJob{profile: frozen, body: []byte(`{"events":[]}`), metrics: metrics}, &compressor)
 			require.Equal(t, 204, code)
 			require.Empty(t, reason)
 			require.False(t, cancelled)

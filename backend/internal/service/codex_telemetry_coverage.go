@@ -5,7 +5,7 @@ package service
 // was collected. Fixed diagnostics keep client contents and credentials out of
 // the observations API.
 // unavailable means the current exporter does not support that signal type;
-// awaiting_source means the metric schema is known but no current entry point
+// awaiting_source means the signal schema is known but no current entry point
 // receives the client's measurements. Both statuses mean uncollected.
 type CodexTelemetrySignalCoverage struct {
 	Signal     string   `json:"signal"`
@@ -39,6 +39,7 @@ func codexTelemetrySignalCoverage() []CodexTelemetrySignalCoverage {
 			EventNames: []string{
 				"codex.auth_storage.operation", "codex.auth_storage.duration",
 				"codex.auth_storage.refresh_persist", "codex.auth_storage.refresh_persist.duration",
+				"codex.auth_storage.lock_acquire", "codex.auth_storage.lock_wait.duration", "codex.auth_storage.lock_hold.duration",
 			},
 			Reason: "client_auth_storage_not_on_responses_wire",
 		},
@@ -46,6 +47,16 @@ func codexTelemetrySignalCoverage() []CodexTelemetrySignalCoverage {
 			Signal: "websocket_continuation", Type: "metrics", Status: "awaiting_source",
 			EventNames: []string{"codex.websocket.continuation"},
 			Reason:     "client_websocket_continuation_not_on_responses_wire",
+		},
+		{
+			Signal: "used_dictation", Type: "analytics", Status: "awaiting_source",
+			EventNames: []string{"codex_turn_event"},
+			Reason:     "client_dictation_source_not_on_responses_wire",
+		},
+		{
+			Signal: "guardian_v2_classification", Type: "analytics", Status: "awaiting_source",
+			EventNames: []string{"codex_guardian_v2_classification"},
+			Reason:     "client_guardian_v2_classification_not_on_responses_wire",
 		},
 	}
 }

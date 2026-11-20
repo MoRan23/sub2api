@@ -19,7 +19,7 @@ func TestCodexTelemetryCoverageReportsClientOnlySignalsWithoutCollection(t *test
 		require.Equal(t, policy.enabled && (policy.simulation || policy.observation), result.EffectiveEnabled)
 		require.Empty(t, result.Items, "capability diagnostics are not telemetry events")
 		require.Equal(t, CodexTelemetryCounters{}, result.Counters)
-		require.Len(t, result.Coverage, 5)
+		require.Len(t, result.Coverage, 7)
 		require.Equal(t, CodexTelemetrySignalCoverage{
 			Signal: "skill_invocation", Type: "logs", Status: "unavailable",
 			EventNames: []string{"codex.skill_invocation"}, Reason: "client_skill_event_not_on_responses_wire",
@@ -27,6 +27,11 @@ func TestCodexTelemetryCoverageReportsClientOnlySignalsWithoutCollection(t *test
 		require.Equal(t, "awaiting_source", result.Coverage[3].Status, "a recognized metric schema is not a collected sample")
 		require.Equal(t, "client_auth_storage_not_on_responses_wire", result.Coverage[3].Reason)
 		require.Equal(t, CodexTelemetrySignalCoverage{Signal: "websocket_continuation", Type: "metrics", Status: "awaiting_source", EventNames: []string{"codex.websocket.continuation"}, Reason: "client_websocket_continuation_not_on_responses_wire"}, result.Coverage[4])
+		require.Contains(t, result.Coverage[3].EventNames, "codex.auth_storage.lock_acquire")
+		require.Contains(t, result.Coverage[3].EventNames, "codex.auth_storage.lock_wait.duration")
+		require.Contains(t, result.Coverage[3].EventNames, "codex.auth_storage.lock_hold.duration")
+		require.Equal(t, CodexTelemetrySignalCoverage{Signal: "used_dictation", Type: "analytics", Status: "awaiting_source", EventNames: []string{"codex_turn_event"}, Reason: "client_dictation_source_not_on_responses_wire"}, result.Coverage[5])
+		require.Equal(t, CodexTelemetrySignalCoverage{Signal: "guardian_v2_classification", Type: "analytics", Status: "awaiting_source", EventNames: []string{"codex_guardian_v2_classification"}, Reason: "client_guardian_v2_classification_not_on_responses_wire"}, result.Coverage[6])
 		encoded, err := json.Marshal(result.Coverage)
 		require.NoError(t, err)
 		require.NotContains(t, string(encoded), "user.account_id")
@@ -43,7 +48,7 @@ func TestCodexTelemetryCoverageReportsClientOnlySignalsWithoutCollection(t *test
 	result := s.Observations(CodexTelemetryObservationQuery{})
 	require.False(t, result.EffectiveEnabled)
 	require.Equal(t, "CODEX_TELEMETRY_ENABLED", result.ForcedOffReason)
-	require.Len(t, result.Coverage, 5, "capabilities remain visible while collection is disabled")
+	require.Len(t, result.Coverage, 7, "capabilities remain visible while collection is disabled")
 }
 
 func TestCodexTelemetryClientOnlySignalsAreNeverInferredFromResponses(t *testing.T) {
@@ -64,6 +69,9 @@ func TestCodexTelemetryClientOnlySignalsAreNeverInferredFromResponses(t *testing
 			}
 			for _, event := range append(codexInitializationEvents(profile), codexTerminalEvents(profile, result)...) {
 				require.NotEqual(t, "codex.skill_invocation", event.EventType)
+				require.NotEqual(t, "codex_guardian_v2_classification", event.EventType)
+				require.NotContains(t, event.EventParams, "used_dictation")
+				require.NotContains(t, event.EventParams, "classifier_turn_id")
 				require.False(t, strings.HasPrefix(event.EventType, "codex.auth_storage."))
 			}
 		}

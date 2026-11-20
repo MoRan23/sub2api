@@ -19,10 +19,12 @@ export default {
       reasons: '推定与跳过原因', fieldSources: '字段来源（仅本地诊断）',
       coverage: {
         title: '客户端事件采集范围',
-        signals: { skill_invocation: '技能调用', auth_storage: '凭据存储操作', turn_critical_path: '回合关键路径', tool_declaration_updates: '工具声明更新', websocket_continuation: 'WebSocket 续链' },
-        status: { unavailable: '未采集', awaiting_source: '未采集（已兼容指标定义）' },
+        signals: { skill_invocation: '技能调用', auth_storage: '凭据存储操作', turn_critical_path: '回合关键路径', tool_declaration_updates: '工具声明更新', websocket_continuation: 'WebSocket 续链', used_dictation: '听写输入来源', guardian_v2_classification: 'Guardian V2 分类' },
+        status: { unavailable: '未采集', awaiting_source: '等待客户端数据' },
       },
       reasonLabels: {
+        client_dictation_source_not_on_responses_wire: '客户端未将听写来源发送至 Responses，等待原始客户端数据。',
+        client_guardian_v2_classification_not_on_responses_wire: 'Responses 未提供 Guardian V2 分类及关联 ID，等待原始客户端事件。',
         client_critical_path_not_on_responses_wire: 'Responses 协议未提供客户端关键路径耗时，等待原始客户端指标接入。',
         client_tool_declaration_updates_not_on_responses_wire: 'Responses 协议未提供客户端工具声明更新数据，等待原始客户端指标接入。',
         client_websocket_continuation_not_on_responses_wire: 'Responses 协议未提供客户端 WebSocket 续链指标，等待原始客户端指标接入。',

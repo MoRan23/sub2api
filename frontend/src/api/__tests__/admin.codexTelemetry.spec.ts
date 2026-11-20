@@ -60,4 +60,15 @@ describe('codexTelemetryAPI', () => {
     get.mockResolvedValueOnce({ data: { items: [], coverage } })
     expect((await codexTelemetryAPI.list()).coverage).toEqual(coverage)
   })
+
+  it('retains analytics coverage awaiting client sources without fabricating deliveries', async () => {
+    const coverage = [
+      { signal: 'used_dictation', type: 'analytics', status: 'awaiting_source', reason: 'client_dictation_source_not_on_responses_wire', event_names: ['codex_turn_event'] },
+      { signal: 'guardian_v2_classification', type: 'analytics', status: 'awaiting_source', reason: 'client_guardian_v2_classification_not_on_responses_wire', event_names: ['codex_guardian_v2_classification'] },
+    ]
+    get.mockResolvedValueOnce({ data: { items: [], coverage } })
+    const result = await codexTelemetryAPI.list()
+    expect(result.coverage).toEqual(coverage)
+    expect(result.items).toEqual([])
+  })
 })

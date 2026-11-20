@@ -44,10 +44,12 @@ func telemetryAuxiliaryTestSend(t *testing.T, profile codexTelemetryProfile, met
 	t.Helper()
 	s := &CodexTelemetryService{analyticsURL: "https://example.test/events", metricsURL: "https://example.test/metrics"}
 	var headers http.Header
+	compressor := codexTelemetryCompressor{}
+	defer compressor.close()
 	code, reason, cancelled := s.send(context.Background(), func(_ context.Context, request *http.Request, _ CodexTelemetryInput, _ bool) (*http.Response, error) {
 		headers = request.Header.Clone()
 		return &http.Response{StatusCode: 202, Body: io.NopCloser(strings.NewReader("{}"))}, nil
-	}, codexTelemetryJob{profile: profile, metrics: metrics, body: []byte(`{}`)})
+	}, codexTelemetryJob{profile: profile, metrics: metrics, body: []byte(`{}`)}, &compressor)
 	require.Equal(t, 202, code)
 	require.Empty(t, reason)
 	require.False(t, cancelled)

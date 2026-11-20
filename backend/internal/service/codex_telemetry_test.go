@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/require"
 )
 
@@ -34,12 +35,24 @@ func telemetryCaptureService(t *testing.T) (*CodexTelemetryService, func() []cod
 	t.Helper()
 	t.Setenv("CODEX_TELEMETRY_ENABLED", "true")
 	s := NewCodexTelemetryService(nil)
+	decoder, err := zstd.NewReader(nil, zstd.WithDecoderConcurrency(1))
+	require.NoError(t, err)
+	t.Cleanup(decoder.Close)
 	var mu sync.Mutex
 	var calls []codexTelemetrySent
 	s.SetSender(func(ctx context.Context, req *http.Request, input CodexTelemetryInput, metrics bool) (*http.Response, error) {
 		body, err := io.ReadAll(req.Body)
 		if err != nil {
 			return nil, err
+		}
+		if metrics {
+			if req.Header.Get("Content-Encoding") != "zstd" {
+				return nil, errors.New("metrics missing zstd encoding")
+			}
+			body, err = decoder.DecodeAll(body, nil)
+			if err != nil {
+				return nil, err
+			}
 		}
 		if !HTTPUpstreamRedirectsDisabled(ctx) || HTTPUpstreamProfileFromContext(ctx) != HTTPUpstreamProfileCodexAuxiliary {
 			return nil, errors.New("missing isolated transport policy")

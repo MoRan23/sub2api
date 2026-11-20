@@ -5,11 +5,11 @@ export type CodexTelemetryStatus = 'queued' | 'sent' | 'failed' | 'dropped' | 'c
 export type CodexTelemetryOS = 'windows' | 'macos' | 'linux'
 export type CodexTelemetrySource = 'observed' | 'simulated' | 'mixed'
 
-const coverageSignals = ['skill_invocation', 'auth_storage', 'turn_critical_path', 'tool_declaration_updates', 'websocket_continuation'] as const
+const coverageSignals = ['skill_invocation', 'auth_storage', 'turn_critical_path', 'tool_declaration_updates', 'websocket_continuation', 'used_dictation', 'guardian_v2_classification'] as const
 
 export interface CodexTelemetrySignalCoverage {
   signal: typeof coverageSignals[number]
-  type: 'logs' | 'metrics'
+  type: 'logs' | 'metrics' | 'analytics'
   status: 'unavailable' | 'awaiting_source'
   event_names: string[]
   reason: string
@@ -87,7 +87,7 @@ async function list(
     coverage: Array.isArray(data.coverage)
       ? data.coverage.filter((entry) => entry != null
         && coverageSignals.includes(entry.signal)
-        && ['logs', 'metrics'].includes(entry.type)
+        && ['logs', 'metrics', 'analytics'].includes(entry.type)
         && ['unavailable', 'awaiting_source'].includes(entry.status)
         && typeof entry.reason === 'string').map((entry) => ({
         ...entry,

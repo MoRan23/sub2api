@@ -152,7 +152,7 @@ func TestCodexTelemetry0166SealedLegacyBatchKeepsPayloadOnRecovery(t *testing.T)
 		require.NoError(t, err)
 		require.Equal(t, legacyPayload, body)
 		return &http.Response{StatusCode: http.StatusAccepted, Body: io.NopCloser(strings.NewReader("{}"))}, nil
-	}, codexTelemetryJob{profile: restoredProfile, body: reclaimed[0].Payload})
+	}, codexTelemetryJob{profile: restoredProfile, body: reclaimed[0].Payload}, nil)
 	require.Equal(t, http.StatusAccepted, code)
 	require.Empty(t, reason)
 	require.False(t, cancelled)

@@ -12,7 +12,32 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/codexnative"
+	"github.com/klauspost/compress/zstd"
 )
+
+// Each serial sender owns one lazy encoder; compressed output lives only for a send.
+type codexTelemetryCompressor struct {
+	encoder *zstd.Encoder
+}
+
+func (c *codexTelemetryCompressor) encode(body []byte) ([]byte, error) {
+	if c.encoder == nil {
+		encoder, err := zstd.NewWriter(nil, zstd.WithEncoderConcurrency(1), zstd.WithEncoderLevel(zstd.SpeedFastest), zstd.WithWindowSize(128<<10), zstd.WithLowerEncoderMem(true))
+		if err != nil {
+			return nil, err
+		}
+		c.encoder = encoder
+	}
+	return c.encoder.EncodeAll(body, nil), nil
+}
+
+func (c *codexTelemetryCompressor) close() {
+	if c.encoder == nil {
+		return
+	}
+	_ = c.encoder.Close()
+	c.encoder = nil
+}
 
 func (s *CodexTelemetryService) enqueueAnalyticsLocked(profile codexTelemetryProfile, attemptID uint64, events []codexAnalyticsEvent) {
 	if len(events) == 0 {
@@ -70,6 +95,8 @@ func (s *CodexTelemetryService) enqueueLocked(job codexTelemetryJob) {
 
 func (s *CodexTelemetryService) worker(shard int) {
 	defer s.wg.Done()
+	compressor := codexTelemetryCompressor{}
+	defer compressor.close()
 	for {
 		select {
 		case <-s.stop:
@@ -94,7 +121,7 @@ func (s *CodexTelemetryService) worker(shard int) {
 			ctx := s.epochCtx
 			sender := s.sender
 			s.mu.Unlock()
-			code, reason, status := s.deliverTelemetryJob(ctx, sender, job)
+			code, reason, status := s.deliverTelemetryJob(ctx, sender, job, &compressor)
 			s.mu.Lock()
 			switch {
 			case status == "unknown":
@@ -111,12 +138,12 @@ func (s *CodexTelemetryService) worker(shard int) {
 	}
 }
 
-func (s *CodexTelemetryService) deliverTelemetryJob(parent context.Context, sender CodexTelemetrySender, job codexTelemetryJob) (int, string, string) {
+func (s *CodexTelemetryService) deliverTelemetryJob(parent context.Context, sender CodexTelemetrySender, job codexTelemetryJob, compressor *codexTelemetryCompressor) (int, string, string) {
 	s.mu.Lock()
 	store := s.store
 	s.mu.Unlock()
 	if job.persisted == nil {
-		code, reason, cancelled := s.send(parent, sender, job)
+		code, reason, cancelled := s.send(parent, sender, job, compressor)
 		if cancelled {
 			return code, reason, "cancelled"
 		}
@@ -143,7 +170,7 @@ func (s *CodexTelemetryService) deliverTelemetryJob(parent context.Context, send
 	if !started {
 		return 0, "telemetry_disabled", "cancelled"
 	}
-	code, reason, cancelled := s.send(parent, sender, job)
+	code, reason, cancelled := s.send(parent, sender, job, compressor)
 	status := "sent"
 	if reason != "" {
 		status = "failed"
@@ -162,7 +189,7 @@ func (s *CodexTelemetryService) deliverTelemetryJob(parent context.Context, send
 	return code, reason, status
 }
 
-func (s *CodexTelemetryService) send(parent context.Context, sender CodexTelemetrySender, job codexTelemetryJob) (code int, reason string, cancelled bool) {
+func (s *CodexTelemetryService) send(parent context.Context, sender CodexTelemetrySender, job codexTelemetryJob, compressor *codexTelemetryCompressor) (code int, reason string, cancelled bool) {
 	ctx, cancel := context.WithTimeout(parent, codexTelemetryTimeout)
 	defer cancel()
 	ctx = WithHTTPUpstreamRedirectsDisabled(WithHTTPUpstreamProfile(ctx, HTTPUpstreamProfileCodexAuxiliary))
@@ -171,7 +198,15 @@ func (s *CodexTelemetryService) send(parent context.Context, sender CodexTelemet
 	if job.metrics {
 		url = s.metricsURL
 	}
-	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(job.body))
+	body := job.body
+	if job.metrics {
+		compressed, err := compressor.encode(body)
+		if err != nil {
+			return 0, "compression_failed", false
+		}
+		body = compressed
+	}
+	req, err := http.NewRequestWithContext(ctx, http.MethodPost, url, bytes.NewReader(body))
 	if err != nil {
 		return 0, "invalid_endpoint", false
 	}
@@ -179,6 +214,7 @@ func (s *CodexTelemetryService) send(parent context.Context, sender CodexTelemet
 	req.Header.Set("Accept", "*/*")
 	client := job.profile.client
 	if job.metrics {
+		req.Header.Set("Content-Encoding", "zstd")
 		key := strings.TrimSpace(os.Getenv("CODEX_STATSIG_API_KEY"))
 		if key == "" {
 			key = codexStatsigAPIKeyDefault

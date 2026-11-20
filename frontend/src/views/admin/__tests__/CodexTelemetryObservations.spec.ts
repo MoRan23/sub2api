@@ -238,8 +238,8 @@ describe('CodexTelemetryObservations', () => {
   })
 
   it.each([
-    ['zh', '客户端事件采集范围', '技能调用', '凭据存储操作', '未采集（已兼容指标定义）', '当前没有原始指标接入'],
-    ['en', 'Client event collection coverage', 'Skill invocation', 'Credential storage operations', 'Not collected (metric definitions supported)', 'no raw metric ingress'],
+    ['zh', '客户端事件采集范围', '技能调用', '凭据存储操作', '等待客户端数据', '当前没有原始指标接入'],
+    ['en', 'Client event collection coverage', 'Skill invocation', 'Credential storage operations', 'Awaiting client data', 'no raw metric ingress'],
   ] as const)('explains uncollected client-only signals without creating delivery records (%s)', async (locale, title, skill, storage, status, reason) => {
     list.mockResolvedValue(response({ configured_enabled: false, effective_enabled: false, items: [], total: 0, coverage: [
       { signal: 'skill_invocation', type: 'logs', status: 'unavailable', event_names: ['codex.skill_invocation'], reason: 'client_skill_event_not_on_responses_wire' },
@@ -247,6 +247,8 @@ describe('CodexTelemetryObservations', () => {
       { signal: 'turn_critical_path', type: 'metrics', status: 'awaiting_source', event_names: ['codex.turn.critical_path.capture'], reason: 'client_critical_path_not_on_responses_wire' },
       { signal: 'tool_declaration_updates', type: 'metrics', status: 'awaiting_source', event_names: ['codex.tools.exec_entry_updates'], reason: 'client_tool_declaration_updates_not_on_responses_wire' },
       { signal: 'websocket_continuation', type: 'metrics', status: 'awaiting_source', event_names: ['codex.websocket.continuation'], reason: 'client_websocket_continuation_not_on_responses_wire' },
+      { signal: 'used_dictation', type: 'analytics', status: 'awaiting_source', event_names: ['codex_turn_event'], reason: 'client_dictation_source_not_on_responses_wire' },
+      { signal: 'guardian_v2_classification', type: 'analytics', status: 'awaiting_source', event_names: ['codex_guardian_v2_classification'], reason: 'client_guardian_v2_classification_not_on_responses_wire' },
     ] }))
     const wrapper = mountPanel(locale)
     await flushPromises()
@@ -259,6 +261,8 @@ describe('CodexTelemetryObservations', () => {
     expect(coverage.find('[title="codex.turn.critical_path.capture"]').exists()).toBe(true)
     expect(coverage.find('[title="codex.tools.exec_entry_updates"]').exists()).toBe(true)
     expect(coverage.find('[title="codex.websocket.continuation"]').exists()).toBe(true)
+    expect(coverage.find('[title="codex_turn_event"]').exists()).toBe(true)
+    expect(coverage.find('[title="codex_guardian_v2_classification"]').exists()).toBe(true)
     expect(wrapper.findAll('details')).toHaveLength(0)
     expect(wrapper.text()).not.toContain('admin.fingerprintObservation')
   })
