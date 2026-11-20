@@ -811,6 +811,8 @@ func TestOpenAIWSConnPool_AcquireReusesSameStableIdentityWithDifferentTurnMetada
 	headers.Set("X-Codex-Beta-Features", "remote_compaction_v2,responses_websockets_v2")
 	headers.Set("Authorization", "Bearer token-a")
 	headers.Set("x-codex-turn-metadata", `{"turn_id":"turn-a"}`)
+	headers.Set("traceparent", "00-0123456789abcdef0123456789abcdef-0123456789abcdef-01")
+	headers.Set("tracestate", "first=one")
 
 	first, err := pool.Acquire(context.Background(), openAIWSAcquireRequest{
 		Account:        account,
@@ -826,6 +828,8 @@ func TestOpenAIWSConnPool_AcquireReusesSameStableIdentityWithDifferentTurnMetada
 	nextHeaders.Set("X-Codex-Beta-Features", "responses_websockets_v2,remote_compaction_v2")
 	nextHeaders.Set("Authorization", "Bearer token-b")
 	nextHeaders.Set("x-codex-turn-metadata", `{"turn_id":"turn-b"}`)
+	nextHeaders.Set("traceparent", "00-abcdef0123456789abcdef0123456789-abcdef0123456789-00")
+	nextHeaders.Set("tracestate", "second=two")
 	nextHeaders.Set(openAICodexRoutingHintHeader, "model=gpt-5.6-codex;tier=priority")
 	second, err := pool.Acquire(context.Background(), openAIWSAcquireRequest{
 		Account:        account,
@@ -837,7 +841,7 @@ func TestOpenAIWSConnPool_AcquireReusesSameStableIdentityWithDifferentTurnMetada
 	require.True(t, second.Reused())
 	require.Equal(t, firstConnID, second.ConnID())
 	second.Release()
-	require.Equal(t, 1, dialer.DialCount(), "stable digest match should ignore auth, turn metadata, and soft routing hints")
+	require.Equal(t, 1, dialer.DialCount(), "stable digest match should ignore auth, turn metadata, trace context, and soft routing hints")
 }
 
 func TestOpenAIWSConnPool_AcquireDoesNotReuseDifferentStableIdentity(t *testing.T) {

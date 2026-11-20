@@ -323,6 +323,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 	// 账号级请求头覆写（仅 openai api_key 账号启用时生效；OAuth 路径 no-op）。
 	// 覆盖所有 WS 模式（ctx_pool/dedicated/passthrough）的握手头。
 	account.ApplyHeaderOverrides(headers)
+	copyOpenAIWSTraceContext(headers, c)
 	projectOpenAIGuardianHeader(c, account, headers)
 	// Session-level beta features participate in WS pool compatibility, so
 	// finalize them before applying the identity plan and computing the digest.
@@ -820,6 +821,8 @@ func normalizeOpenAIWSPayloadWithoutInputAndPreviousResponseID(payload []byte) (
 	// from Codex's own websocket reuse comparison.
 	delete(decoded, "client_metadata")
 	delete(decoded, "stream_options")
+	delete(decoded, "request_country")
+	delete(decoded, "access_programs")
 	// Official Codex prewarms a connection with generate=false, then omits the
 	// field on the business request that continues from the prewarm response.
 	// Only normalize false so a meaningful generate=true change remains visible.

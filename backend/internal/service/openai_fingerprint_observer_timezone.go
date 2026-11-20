@@ -3,6 +3,7 @@ package service
 import (
 	"encoding/json"
 	"net/http"
+	"strconv"
 	"strings"
 
 	"github.com/gin-gonic/gin"
@@ -18,6 +19,15 @@ func cloneFingerprintObservationHeaders(headers http.Header) http.Header {
 		return nil
 	}
 	result := make(http.Header)
+	if headers.Get("traceparent") != "" {
+		result.Set(fingerprintTraceparentStatusHeader, fingerprintMetadataValid)
+	}
+	if headers.Get("tracestate") != "" {
+		result.Set(fingerprintTracestateStatusHeader, fingerprintMetadataValid)
+	}
+	if values := headerValuesCaseInsensitive(headers, openAIWSTurnMetadataHeader); len(values) == 1 {
+		result.Set(fingerprintMetadataHeaderBytes, strconv.Itoa(len(values[0])))
+	}
 	for name, values := range headers {
 		switch strings.ToLower(name) {
 		case openAIGuardianHeader:

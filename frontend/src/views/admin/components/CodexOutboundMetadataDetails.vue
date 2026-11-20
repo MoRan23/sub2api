@@ -15,6 +15,10 @@
         <dt class="text-gray-500 dark:text-gray-400">{{ t(`${prefix}.fields.prompt_cache_key`) }}</dt>
         <dd class="mt-1 break-words text-gray-800 dark:text-gray-200">{{ promptCacheSummary }}</dd>
       </div>
+      <div v-for="item in transportItems" :key="item.key" class="min-w-0" :data-testid="`codex-transport-${item.key}`">
+        <dt class="text-gray-500 dark:text-gray-400">{{ t(`${prefix}.transport.${item.key}`) }}</dt>
+        <dd class="mt-1 break-words font-mono text-gray-800 dark:text-gray-200">{{ item.value }}</dd>
+      </div>
     </dl>
 
     <details class="min-w-0 rounded-lg border border-gray-200 dark:border-dark-700" data-testid="codex-compaction" @toggle="compactionOpen = ($event.target as HTMLDetailsElement).open">
@@ -103,6 +107,16 @@ function scalarValue(key: typeof scalarKeys[number]): string {
   return valid ? String(value) : t(`${prefix}.status.invalid`)
 }
 const scalarItems = computed(() => scalarKeys.map(key => ({ key, value: scalarValue(key) })))
+const transportItems = computed(() => {
+  const notCollected = t(`${prefix}.status.not_collected`)
+  return [
+    { key: 'traceparent', value: props.observation.trace_context ? t(`${prefix}.traceStatus.${props.observation.trace_context.traceparent_status}`) : notCollected },
+    { key: 'tracestate', value: props.observation.trace_context ? t(`${prefix}.traceStatus.${props.observation.trace_context.tracestate_status}`) : notCollected },
+    { key: 'header_bytes', value: props.observation.metadata_budget?.header_bytes !== undefined ? `${props.observation.metadata_budget.header_bytes} B` : notCollected },
+    { key: 'body_bytes', value: props.observation.metadata_budget?.body_bytes !== undefined ? `${props.observation.metadata_budget.body_bytes} B` : notCollected },
+    { key: 'remotes_trimmed', value: props.observation.metadata_budget?.remotes_trimmed !== undefined ? t(`${prefix}.transport.${props.observation.metadata_budget.remotes_trimmed ? 'trimmed' : 'unchanged'}`) : notCollected },
+  ]
+})
 const mcpAttributionSummary = computed(() => {
   const entry = props.observation.mcp_attribution
   if (!entry) return t(`${prefix}.status.not_collected`)

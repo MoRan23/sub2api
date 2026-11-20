@@ -50,6 +50,29 @@ function fieldValue(wrapper: ReturnType<typeof mountMetadata>, label: string): s
 afterEach(() => { for (const wrapper of mounted.splice(0)) wrapper.unmount() })
 
 describe('CodexOutboundMetadataDetails', () => {
+  it('shows only trace validity and metadata budget scalars, preserving zero and false', async () => {
+    const wrapper = mountMetadata({})
+    expect(fieldValue(wrapper, 'WS traceparent')).toBe('Not collected')
+    expect(fieldValue(wrapper, 'Header metadata size')).toBe('Not collected')
+    await wrapper.setProps({ observation: {
+      trace_context: { traceparent_status: 'valid', tracestate_status: 'invalid', source: 'ws_handshake', traceparent: 'private-trace' },
+      metadata_budget: { header_bytes: 0, body_bytes: 8192, remotes_trimmed: false },
+    } as unknown as FingerprintObservationEntry })
+    expect(fieldValue(wrapper, 'WS traceparent')).toBe('Valid')
+    expect(fieldValue(wrapper, 'WS tracestate')).toBe('Invalid (omitted)')
+    expect(fieldValue(wrapper, 'Header metadata size')).toBe('0 B')
+    expect(fieldValue(wrapper, 'Body metadata size')).toBe('8192 B')
+    expect(fieldValue(wrapper, 'Workspace remote trimming')).toBe('Unchanged')
+    expect(wrapper.text()).not.toContain('private-trace')
+    await wrapper.setProps({ observation: {
+      trace_context: { traceparent_status: 'missing', tracestate_status: 'missing', source: 'ws_handshake' },
+      metadata_budget: { remotes_trimmed: true },
+    } as FingerprintObservationEntry })
+    expect(fieldValue(wrapper, 'WS traceparent')).toBe('Not provided')
+    expect(fieldValue(wrapper, 'Header metadata size')).toBe('Not collected')
+    expect(fieldValue(wrapper, 'Workspace remote trimming')).toBe('Trimmed')
+  })
+
   it.each(['new', 'cleared', 'cold_resume', 'warm_fork', 'cold_fork', 'supplied_history'] as const)(
     'shows the observed %s history state and preserves explicit false boolean metadata',
     historyInitialization => {

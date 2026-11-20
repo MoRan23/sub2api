@@ -22,7 +22,7 @@ import (
 const (
 	CodexWireProfileRevision             = "responses_metadata"
 	CodexWireProfileCommit               = "316795b"
-	CodexWireProfileCompatibilityVersion = "0.170.0"
+	CodexWireProfileCompatibilityVersion = "0.171.0"
 )
 
 type CodexTurnIDKind string
@@ -1159,6 +1159,14 @@ func putNonEmptyString(target map[string]any, key, value string) {
 // MarshalNestedJSON emits the canonical ASCII-safe metadata string. The body
 // form may include tool_namespaces_info; compatibility headers must not.
 func (profile CodexWireProfile) MarshalNestedJSON(includeToolNamespaces bool) (string, error) {
+	encoded, err := profile.marshalNestedJSON(includeToolNamespaces)
+	if err != nil {
+		return "", err
+	}
+	return boundCodexTurnMetadata(encoded)
+}
+
+func (profile CodexWireProfile) marshalNestedJSON(includeToolNamespaces bool) (string, error) {
 	metadata := profile.nestedObject(includeToolNamespaces)
 	orderedKeys := []string{
 		"guardian_recorded_items",

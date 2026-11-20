@@ -204,6 +204,8 @@ export default {
         },
       },
       outboundMetadata: {
+        transport: { traceparent: 'WS traceparent', tracestate: 'WS tracestate', header_bytes: '请求头元数据大小', body_bytes: '正文元数据大小', remotes_trimmed: 'Workspace remote 裁剪', trimmed: '已裁剪', unchanged: '未裁剪' },
+        traceStatus: { valid: '有效', invalid: '无效（已省略）', missing: '未提供' },
         title: '请求与工具元数据',
         sourceHint: '读取最终出站请求头、正文或 WS 帧中的实际字段；缺失字段不从入站内容补齐。',
         fields: { request_kind: '请求用途', history_ingest_requested: '请求历史导入', history_initialization: '历史初始化', guardian_recorded_items: 'Guardian 已记录条目', analytics_enabled: '分析已启用', mcp_attribution: 'MCP 归属', prompt_cache_key: '提示缓存键', compaction: '压缩信息', tool_namespaces_info: '工具命名空间' },

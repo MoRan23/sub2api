@@ -4,8 +4,11 @@ import (
 	"encoding/json"
 	"net/http"
 	"sort"
+	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/tidwall/gjson"
 )
 
 const (
@@ -30,6 +33,14 @@ type FingerprintMetadataStatus struct {
 	HistoryInitialization  string `json:"history_initialization"`
 	GuardianRecordedItems  string `json:"guardian_recorded_items"`
 	AnalyticsEnabled       string `json:"analytics_enabled"`
+}
+
+const fingerprintMetadataHeaderBytes = "X-Sub2-Observation-Metadata-Bytes"
+
+type FingerprintMetadataBudget struct {
+	HeaderBytes    *int  `json:"header_bytes,omitempty"`
+	BodyBytes      *int  `json:"body_bytes,omitempty"`
+	RemotesTrimmed *bool `json:"remotes_trimmed,omitempty"`
 }
 
 // FingerprintMCPAttribution retains only bounded wire shape and a known producer
@@ -75,6 +86,8 @@ type FingerprintToolSource struct {
 type fingerprintMetadataCarrier struct {
 	fields map[string]json.RawMessage
 	valid  bool
+	bytes  int
+	source string
 }
 
 // Match finalFingerprintCodexWireProfile's canonical-body, compatibility-body,
@@ -86,9 +99,9 @@ func fingerprintFinalMetadataCarriers(headers http.Header, body []byte) []finger
 
 func fingerprintFinalMetadataCarriersFromView(headers http.Header, view fingerprintObservationBodyView) []fingerprintMetadataCarrier {
 	var carriers []fingerprintMetadataCarrier
-	appendCarrier := func(raw json.RawMessage, requireString bool) {
-		_, fields, valid := decodeCodexWireNestedCarrier(raw, requireString)
-		carriers = append(carriers, fingerprintMetadataCarrier{fields: fields, valid: valid})
+	appendCarrier := func(raw json.RawMessage, requireString bool, source string) {
+		value, fields, valid := decodeCodexWireNestedCarrier(raw, requireString)
+		carriers = append(carriers, fingerprintMetadataCarrier{fields: fields, valid: valid, bytes: len(value), source: source})
 	}
 	if view.present {
 		if !view.validCarrier {
@@ -99,17 +112,82 @@ func fingerprintFinalMetadataCarriersFromView(headers http.Header, view fingerpr
 			if json.Unmarshal(view.clientCarrier, &client) != nil {
 				carriers = append(carriers, fingerprintMetadataCarrier{})
 			} else if raw, present := client[openAIWSTurnMetadataHeader]; present {
-				appendCarrier(raw, true)
+				appendCarrier(raw, true, "body")
 			}
 		}
 		if len(view.turnCarrier) > 0 {
-			appendCarrier(view.turnCarrier, false)
+			appendCarrier(view.turnCarrier, false, "body")
 		}
 	}
 	for _, value := range headerValuesCaseInsensitive(headers, openAIWSTurnMetadataHeader) {
-		appendCarrier(json.RawMessage(value), false)
+		appendCarrier(json.RawMessage(value), false, "header")
 	}
 	return carriers
+}
+
+func observeFingerprintMetadataBudget(headers http.Header, carriers []fingerprintMetadataCarrier) *FingerprintMetadataBudget {
+	result := &FingerprintMetadataBudget{}
+	for _, carrier := range carriers {
+		if !carrier.valid {
+			continue
+		}
+		if carrier.source == "body" && result.BodyBytes == nil {
+			count := carrier.bytes
+			result.BodyBytes = &count
+		}
+		if carrier.source == "header" && result.HeaderBytes == nil {
+			count := carrier.bytes
+			result.HeaderBytes = &count
+		}
+	}
+	if value := headers.Get(fingerprintMetadataHeaderBytes); value != "" {
+		if count, err := strconv.Atoi(value); err == nil {
+			result.HeaderBytes = &count
+		}
+	}
+	if result.HeaderBytes == nil && result.BodyBytes == nil {
+		return nil
+	}
+	return result
+}
+
+func observeCodexMetadataRemotesTrimmed(original json.RawMessage, headers http.Header, carriers []fingerprintMetadataCarrier) *bool {
+	countRemotes := func(raw json.RawMessage) int {
+		count := 0
+		gjson.ParseBytes(raw).ForEach(func(_, workspace gjson.Result) bool {
+			workspace.Get("associated_remote_urls").ForEach(func(_, _ gjson.Result) bool {
+				count++
+				return true
+			})
+			return true
+		})
+		return count
+	}
+	originalCount := countRemotes(original)
+	if originalCount == 0 {
+		return nil
+	}
+	observed := false
+	for _, carrier := range carriers {
+		if !carrier.valid {
+			continue
+		}
+		if carrier.source == "header" && headers.Get(fingerprintMetadataHeaderBytes) != "" {
+			continue
+		}
+		workspaces, exists := carrier.fields["workspaces"]
+		if !exists {
+			continue
+		}
+		observed = true
+		if countRemotes(workspaces) < originalCount {
+			return boolPointer(true)
+		}
+	}
+	if !observed {
+		return nil
+	}
+	return boolPointer(false)
 }
 
 func fingerprintMetadataField(carriers []fingerprintMetadataCarrier, field string) (json.RawMessage, string) {
@@ -463,6 +541,25 @@ func fingerprintObservationExtraMetadata(source map[string]string) map[string]st
 }
 
 func cloneFingerprintObservationMetadata(entry *FingerprintObservationEntry) {
+	if entry.TraceContext != nil {
+		value := *entry.TraceContext
+		entry.TraceContext = &value
+	}
+	if entry.MetadataBudget != nil {
+		value := *entry.MetadataBudget
+		if value.HeaderBytes != nil {
+			count := *value.HeaderBytes
+			value.HeaderBytes = &count
+		}
+		if value.BodyBytes != nil {
+			count := *value.BodyBytes
+			value.BodyBytes = &count
+		}
+		if value.RemotesTrimmed != nil {
+			value.RemotesTrimmed = boolPointer(*value.RemotesTrimmed)
+		}
+		entry.MetadataBudget = &value
+	}
 	if entry.WindowNumber != nil {
 		entry.WindowNumber = uint64Pointer(*entry.WindowNumber)
 	}

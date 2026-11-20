@@ -10,7 +10,7 @@ import (
 var codexToolCapabilityFields = []string{
 	"service_tiers",
 	"supports_search_tool", "apply_patch_tool_type", "comp_hash", "tool_mode", "use_responses_lite",
-	"multi_agent_reasoning_effort", "multi_agent_version",
+	"multi_agent_reasoning_effort", "multi_agent_version", "multi_agent_tools_in_code_mode",
 }
 
 func applyCodexToolCapabilities(dst, src map[string]json.RawMessage, overwrite bool) bool {
@@ -25,16 +25,17 @@ func applyCodexToolCapabilities(dst, src map[string]json.RawMessage, overwrite b
 		}
 		// These Codex fields are nullable booleans or strings, never arbitrary objects.
 		if !bytes.Equal(value, []byte("null")) {
-			if field == "service_tiers" {
+			switch field {
+			case "service_tiers":
 				var tiers []configuredCodexServiceTier
 				if json.Unmarshal(value, &tiers) != nil {
 					continue
 				}
-			} else if field == "supports_search_tool" || field == "use_responses_lite" {
+			case "supports_search_tool", "use_responses_lite", "multi_agent_tools_in_code_mode":
 				if !bytes.Equal(value, []byte("true")) && !bytes.Equal(value, []byte("false")) {
 					continue
 				}
-			} else {
+			default:
 				var text string
 				if json.Unmarshal(value, &text) != nil {
 					continue

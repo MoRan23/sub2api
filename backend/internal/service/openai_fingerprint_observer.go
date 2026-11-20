@@ -82,6 +82,8 @@ type FingerprintObservationEntry struct {
 	Compaction                   *CodexCompactionTurnMetadata   `json:"compaction,omitempty"`
 	ToolNamespacesInfo           []FingerprintToolNamespace     `json:"tool_namespaces_info,omitempty"`
 	MetadataStatus               *FingerprintMetadataStatus     `json:"metadata_status,omitempty"`
+	MetadataBudget               *FingerprintMetadataBudget     `json:"metadata_budget,omitempty"`
+	TraceContext                 *FingerprintTraceContext       `json:"trace_context,omitempty"`
 	DailyFixedRootEnabled        bool                           `json:"daily_fixed_root_enabled"`
 	DailyFixedRootKind           string                         `json:"daily_fixed_root_kind,omitempty"`
 	DailyFixedRootBusinessDate   string                         `json:"daily_fixed_root_business_date,omitempty"`
@@ -727,6 +729,10 @@ func buildFingerprintObservationEntry(c *gin.Context, account *Account, pin inst
 	carriers := fingerprintFinalMetadataCarriersFromView(outbound, bodyView)
 	profile := finalFingerprintCodexWireProfileFromView(outbound, bodyView, carriers)
 	populateFingerprintObservationMetadataFromCarriers(&entry, carriers)
+	entry.MetadataBudget = observeFingerprintMetadataBudget(outbound, carriers)
+	if plan, ok := OpenAIOAuthIdentityPlanFromContext(c); ok && plan.WireProfile.Finalized && entry.MetadataBudget != nil {
+		entry.MetadataBudget.RemotesTrimmed = observeCodexMetadataRemotesTrimmed(plan.WireProfile.Workspaces, outbound, carriers)
+	}
 	populateFingerprintObservationBodyMetadataFromView(&entry, bodyView, profile)
 	if !pin.Enabled {
 		// Without installation pinning the client-reported value is forwarded
@@ -1055,6 +1061,7 @@ func freezeFingerprintObservationWSHandshake(c *gin.Context, account *Account) f
 		pin = installationIDResolution{}
 	}
 	base := buildFingerprintObservationEntry(c, account, pin, nil, nil, identity, trusted, true)
+	traceContext := captureOpenAIWSTraceContext(c).observation
 	daily, _ := openAIDailyRootObservationFromContext(c)
 	// Capture only scalar provenance, not the full plan's request metadata.
 	var routingPlan OpenAIOAuthIdentityPlan
@@ -1075,6 +1082,7 @@ func freezeFingerprintObservationWSHandshake(c *gin.Context, account *Account) f
 		entry.APIKeyID, entry.APIKeyName = base.APIKeyID, base.APIKeyName
 		entry.InboundEndpoint = base.InboundEndpoint
 		entry.EventKind = FingerprintObservationEventWSHandshake
+		entry.TraceContext = &traceContext
 		entry.RuntimeTimingMetrics.Source = FingerprintObservationEventWSHandshake
 		entry.GuardianRequest.Source = FingerprintObservationEventWSHandshake
 		entry.TimezoneComparisonStatus = "not_applicable"
@@ -1100,6 +1108,8 @@ func (s *OpenAIGatewayService) recordFingerprintObservationWSHandshake(c *gin.Co
 	}
 	entry := buildFingerprintObservationEntry(c, account, pin, outbound, nil, identity, trusted, true)
 	entry.EventKind = FingerprintObservationEventWSHandshake
+	traceContext := captureOpenAIWSTraceContext(c).observation
+	entry.TraceContext = &traceContext
 	entry.RuntimeTimingMetrics.Source = FingerprintObservationEventWSHandshake
 	entry.GuardianRequest.Source = FingerprintObservationEventWSHandshake
 	entry.TimezoneComparisonStatus = "not_applicable"
@@ -1146,6 +1156,7 @@ func (s *OpenAIGatewayService) freezeFingerprintObservationWSFrameWithTierPolicy
 	entry := buildFingerprintObservationEntry(c, account, pin, handshakeHeaders, body, identity, trusted, false, serviceTierPolicy)
 	populateFingerprintObservationOS(&entry, plan)
 	entry.EventKind = FingerprintObservationEventWSFrame
+	entry.TraceContext = fingerprintWSHandshakeTraceContext(handshakeHeaders)
 	entry.RuntimeTimingMetrics.Source = FingerprintObservationEventWSHandshake
 	entry.GuardianRequest.Source = FingerprintObservationEventWSHandshake
 	entry.Daybreak = observeOpenAIDaybreak(body, daybreakDecision...)

@@ -210,6 +210,12 @@ export interface FingerprintObservationEntry {
   compaction?: CodexCompactionMetadata
   tool_namespaces_info?: CodexToolNamespaceMetadata[]
   metadata_status?: Partial<Record<CodexMetadataKey, CodexMetadataStatus>>
+  trace_context?: {
+    traceparent_status: 'missing' | 'valid' | 'invalid'
+    tracestate_status: 'missing' | 'valid' | 'invalid'
+    source: 'ws_handshake'
+  }
+  metadata_budget?: { header_bytes?: number; body_bytes?: number; remotes_trimmed?: boolean }
   daily_fixed_root_enabled: boolean
   routing_os_family?: 'windows' | 'macos' | 'linux'
   routing_os_source?: 'user_agent' | 'environment_context' | 'account_default'

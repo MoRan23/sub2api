@@ -1451,7 +1451,7 @@ func rewriteOpenAICodexTurnMetadataProjectionForCarrier(
 			profile.TurnStartedAtSet = true
 		}
 	}
-	encoded, err := profile.MarshalNestedJSON(includeToolNamespaces)
+	encoded, err := profile.marshalNestedJSON(includeToolNamespaces)
 	if err != nil {
 		return "", fmt.Errorf("encode OpenAI Codex turn metadata: %w", err)
 	}
@@ -1474,7 +1474,7 @@ func rewriteOpenAICodexTurnMetadataProjectionForCarrier(
 		}
 		encoded = string(legacyEncoded)
 	}
-	return encoded, nil
+	return boundCodexTurnMetadata(encoded)
 }
 
 func mustMarshalJSONString(value string) json.RawMessage {

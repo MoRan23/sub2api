@@ -51,7 +51,7 @@ func decodeOpenAIWSComparableObject(payload []byte) (map[string]any, error) {
 			return false
 		}
 		switch key {
-		case "input", "previous_response_id", "client_metadata", "stream_options":
+		case "input", "previous_response_id", "client_metadata", "stream_options", "request_country", "access_programs":
 			return true
 		}
 		var value any

@@ -205,6 +205,8 @@ export default {
         },
       },
       outboundMetadata: {
+        transport: { traceparent: 'WS traceparent', tracestate: 'WS tracestate', header_bytes: 'Header metadata size', body_bytes: 'Body metadata size', remotes_trimmed: 'Workspace remote trimming', trimmed: 'Trimmed', unchanged: 'Unchanged' },
+        traceStatus: { valid: 'Valid', invalid: 'Invalid (omitted)', missing: 'Not provided' },
         title: 'Request and tool metadata',
         sourceHint: 'Reads actual fields from the final outbound headers, body, or WS frame. Missing fields are not filled from inbound content.',
         fields: { request_kind: 'Request kind', history_ingest_requested: 'History ingest requested', history_initialization: 'History initialization', guardian_recorded_items: 'Guardian recorded items', analytics_enabled: 'Analytics enabled', mcp_attribution: 'MCP attribution', prompt_cache_key: 'Prompt cache key', compaction: 'Compaction', tool_namespaces_info: 'Tool namespaces' },

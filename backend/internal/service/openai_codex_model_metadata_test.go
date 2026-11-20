@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -105,8 +106,9 @@ func TestAstraUltraCatalogPreservesExplicitWorkflowOverrides(t *testing.T) {
 	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey,
 		Credentials: map[string]any{"base_url": "https://relay.example/v1"}}
 	for _, fields := range []string{
-		`"multi_agent_reasoning_effort":"high","multi_agent_version":"v1"`,
-		`"multi_agent_reasoning_effort":null,"multi_agent_version":null`,
+		`"multi_agent_reasoning_effort":"high","multi_agent_version":"v1","multi_agent_tools_in_code_mode":true`,
+		`"multi_agent_reasoning_effort":"high","multi_agent_version":"v1","multi_agent_tools_in_code_mode":false`,
+		`"multi_agent_reasoning_effort":null,"multi_agent_version":null,"multi_agent_tools_in_code_mode":null`,
 	} {
 		for _, source := range []string{
 			`{"models":[{"slug":"gpt-6-astra",` + fields + `}]}`,
@@ -123,6 +125,82 @@ func TestAstraUltraCatalogPreservesExplicitWorkflowOverrides(t *testing.T) {
 				require.Equal(t, value, model[key])
 			}
 		}
+	}
+}
+
+func TestCodexCatalogMultiAgentCodeModeCapabilities(t *testing.T) {
+	const field = "multi_agent_tools_in_code_mode"
+	for _, tt := range []struct {
+		name   string
+		values []string
+		want   string
+	}{
+		{"absent", []string{""}, ""},
+		{"null", []string{"null"}, "null"},
+		{"false", []string{"false"}, "false"},
+		{"true", []string{"true"}, "true"},
+		{"all absent", []string{"", ""}, ""},
+		{"all null", []string{"null", "null"}, "null"},
+		{"all false", []string{"false", "false"}, "false"},
+		{"all true", []string{"true", "true"}, "true"},
+		{"conflicting peers", []string{"true", "false"}, "null"},
+		{"missing first peer", []string{"", "true"}, "null"},
+		{"missing second peer", []string{"true", ""}, "null"},
+		{"false and absent", []string{"false", ""}, "null"},
+		{"null and absent", []string{"null", ""}, "null"},
+		{"string is invalid", []string{`"false"`}, ""},
+		{"number is invalid", []string{"0"}, ""},
+		{"object is invalid", []string{"{}"}, ""},
+		{"array is invalid", []string{"[]"}, ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			accounts := make([]Account, 0, len(tt.values))
+			for _, value := range tt.values {
+				fields := ""
+				if value != "" {
+					fields = `,"` + field + `":` + value
+				}
+				_, metadata, err := extractUpstreamModelCatalog([]byte(`{"models":[{"slug":"catalog-target"`+fields+`}]}`), false)
+				require.NoError(t, err)
+				account := Account{ID: int64(len(accounts) + 1), Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+				require.NoError(t, json.Unmarshal([]byte(`{"base_url":"https://relay.example/v1","model_mapping":{"public-custom":"catalog-target"}}`), &account.Credentials))
+				account.SetUpstreamModelMetadataSnapshot(UpstreamModelMetadataSnapshot{Models: metadata})
+				accounts = append(accounts, account)
+			}
+			body, err := buildCodexModelsManifestForAccounts(PlatformOpenAI, []string{"public-custom"}, accounts, nil, nil, true)
+			require.NoError(t, err)
+			var manifest struct {
+				Models []map[string]json.RawMessage `json:"models"`
+			}
+			require.NoError(t, json.Unmarshal(body, &manifest))
+			require.Len(t, manifest.Models, 1)
+			require.Equal(t, tt.want, string(manifest.Models[0][field]))
+		})
+	}
+}
+
+func TestCodexCatalogPreservesAppsUsageInstructions(t *testing.T) {
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	require.NoError(t, json.Unmarshal([]byte(`{"base_url":"https://relay.example/v1"}`), &account.Credentials))
+	for _, value := range []string{"null", `""`, `"  "`, `"Use the connected app."`, `"` + strings.Repeat("a", 801) + `"`} {
+		t.Run(value[:min(len(value), 30)], func(t *testing.T) {
+			messages := `{"apps":{"usage_instructions":` + value + `}}`
+			converted := convertOpenAIModelListToCodexManifestForAccount([]byte(`{"models":[{"slug":"gpt-6-astra","model_messages":`+messages+`}]}`), account)
+			body, err := completeAPIKeyCodexModelsManifestMetadata(converted, true, account)
+			require.NoError(t, err)
+			var manifest struct {
+				Models []struct {
+					Messages struct {
+						Apps struct {
+							UsageInstructions json.RawMessage `json:"usage_instructions"`
+						} `json:"apps"`
+					} `json:"model_messages"`
+				} `json:"models"`
+			}
+			require.NoError(t, json.Unmarshal(body, &manifest))
+			require.Len(t, manifest.Models, 1)
+			require.Equal(t, value, string(manifest.Models[0].Messages.Apps.UsageInstructions))
+		})
 	}
 }
 
