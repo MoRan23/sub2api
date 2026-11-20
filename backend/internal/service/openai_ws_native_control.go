@@ -178,7 +178,11 @@ func (c *openAIWSNativeControl) readLoop() {
 			c.readerStopped(NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "unsupported websocket client message type", nil))
 			return
 		}
-		if gjson.ValidBytes(payload) && gjson.GetBytes(payload, "type").String() == "response.interrupt" {
+		if gjson.GetBytes(payload, "type").String() == "response.interrupt" {
+			if err := validateOpenAIWSClientPayload(payload, nil); err != nil {
+				c.readerStopped(err)
+				return
+			}
 			if err := c.interrupt(payload); err != nil {
 				c.readerStopped(err)
 				return

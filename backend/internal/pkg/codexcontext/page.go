@@ -17,8 +17,8 @@ var selectedPageName = regexp.MustCompile(`^codex_apps_selected_page_part_([1-9]
 // named output. Forwarding and audit extraction share this exact boundary.
 func UntrustedOutput(kind, namespace, name, output string, callID any, hasCallID bool) (string, bool) {
 	switch name {
-	case "browser_info", "goal_objective", "untrusted_context":
-		if kind != "function_call_output" || namespace != "agent" || strings.TrimSpace(output) == "" {
+	case "browser_info", "goal_objective", "untrusted_context", "ide_context", "untrusted_content", "proposed_plan":
+		if kind != "function_call_output" || namespace != "agent" || !ValidUntrustedContext(name, output) {
 			return "", false
 		}
 		if hasCallID {
@@ -35,8 +35,12 @@ func UntrustedOutput(kind, namespace, name, output string, callID any, hasCallID
 
 func ValidUntrustedContext(name, output string) bool {
 	switch name {
-	case "browser_info", "goal_objective", "untrusted_context":
+	case "browser_info", "goal_objective", "untrusted_context", "ide_context":
 		return strings.TrimSpace(output) != ""
+	case "untrusted_content":
+		return true
+	case "proposed_plan":
+		return output != ""
 	default:
 		return ValidPageContext(name, output)
 	}

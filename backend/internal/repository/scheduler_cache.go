@@ -1228,6 +1228,10 @@ func newSchedulerAccountMetaRevision() string {
 }
 
 func marshalSchedulerCacheAccount(account service.Account) ([]byte, []byte, error) {
+	// Hydration needs account configuration and group membership, not expanded
+	// group objects (also repeated in AccountGroups). Keep the caller's graph intact.
+	account.Groups = nil
+	account.AccountGroups = filterSchedulerAccountGroups(account.AccountGroups)
 	fullPayload, err := json.Marshal(account)
 	if err != nil {
 		return nil, nil, fmt.Errorf("marshal account: %w", err)
@@ -1311,6 +1315,16 @@ func buildSchedulerMetadataAccount(account service.Account) service.Account {
 func filterSchedulerAccountGroups(accountGroups []service.AccountGroup) []service.AccountGroup {
 	if len(accountGroups) == 0 {
 		return nil
+	}
+	needsProjection := false
+	for _, group := range accountGroups {
+		if group.GroupID <= 0 || group.Account != nil || group.Group != nil {
+			needsProjection = true
+			break
+		}
+	}
+	if !needsProjection {
+		return accountGroups
 	}
 
 	filtered := make([]service.AccountGroup, 0, len(accountGroups))

@@ -8,7 +8,11 @@ import (
 	"testing"
 	"time"
 
+	"entgo.io/ent/dialect"
+	entsql "entgo.io/ent/dialect/sql"
+	"github.com/DATA-DOG/go-sqlmock"
 	dbent "github.com/Wei-Shaw/sub2api/ent"
+	"github.com/stretchr/testify/require"
 )
 
 // fakeInsertRecorder 记录 BulkInsertInitial 调用，实现 UserPlatformQuotaRepository port。
@@ -126,28 +130,42 @@ func TestSnapshotPlatformQuotaDefaults_AllUnlimitedSkipsInsert(t *testing.T) {
 // 历史 bug：snapshot 在 OAuth pending handler 的 binding tx 中执行，grok 违约毒化整个
 // 事务 → consumePendingOAuthBrowserSessionTx 撞 "transaction aborted" → 500 → 清 cookie → 404。
 func TestSnapshotPlatformQuotaDefaults_DetachesCallerTransaction(t *testing.T) {
-	fakeRepo := &fakeInsertRecorder{}
-	s := &AuthService{userPlatformQuotaRepo: fakeRepo}
-
-	five := 5.0
-	plan := &signupGrantPlan{
-		PlatformQuotas: map[string]*DefaultPlatformQuotaSetting{
-			"anthropic": {DailyLimitUSD: &five},
-		},
-	}
-
-	// 模拟调用方（OAuth pending handler）在事务 ctx 中调用快照
-	txCtx := dbent.NewTxContext(context.Background(), &dbent.Tx{})
-
-	if err := s.snapshotPlatformQuotaDefaults(txCtx, 999, plan); err != nil {
-		t.Fatalf("snapshot should not error (fail-open): %v", err)
-	}
-
-	if fakeRepo.lastCtx == nil {
-		t.Fatal("expected BulkInsertInitial to be called")
-	}
-	if dbent.TxFromContext(fakeRepo.lastCtx) != nil {
-		t.Error("快照必须脱离调用方事务执行（best-effort，失败不得毒化注册事务），但 repo 收到了仍携带事务的 ctx")
+	for _, outcome := range []string{"commit", "rollback", "commit_failure", "quota_failure"} {
+		t.Run(outcome, func(t *testing.T) {
+			db, mock, err := sqlmock.New()
+			require.NoError(t, err)
+			defer db.Close()
+			client := dbent.NewClient(dbent.Driver(entsql.OpenDB(dialect.Postgres, db)))
+			mock.ExpectBegin()
+			tx, err := client.Tx(context.Background())
+			require.NoError(t, err)
+			repo := &fakeInsertRecorder{}
+			if outcome == "quota_failure" {
+				repo.err = fmt.Errorf("quota insert failed")
+			}
+			s := &AuthService{userPlatformQuotaRepo: repo}
+			plan := &signupGrantPlan{PlatformQuotas: map[string]*DefaultPlatformQuotaSetting{
+				"anthropic": {DailyLimitUSD: new(float64(5))},
+			}}
+			require.NoError(t, s.snapshotPlatformQuotaDefaults(dbent.NewTxContext(context.Background(), tx), 999, plan))
+			require.Zero(t, repo.calls, "new user must commit before the quota foreign key can be inserted")
+			switch outcome {
+			case "rollback":
+				mock.ExpectRollback()
+				require.NoError(t, tx.Rollback())
+				require.Zero(t, repo.calls)
+			case "commit_failure":
+				mock.ExpectCommit().WillReturnError(fmt.Errorf("commit failed"))
+				require.Error(t, tx.Commit())
+				require.Zero(t, repo.calls)
+			default:
+				mock.ExpectCommit()
+				require.NoError(t, tx.Commit())
+				require.Equal(t, 1, repo.calls)
+				require.Nil(t, dbent.TxFromContext(repo.lastCtx))
+			}
+			require.NoError(t, mock.ExpectationsWereMet())
+		})
 	}
 }
 

@@ -13,30 +13,117 @@ import (
 // Counts: web_search_call, x_search_call, tool_search_call, and function_call
 // named tool_search / web_search / x_search, and custom_tool_call items the xAI
 // server runs itself (apicompat.IsServerSideSearchCall: call_id xs_ / as_).
+//
+// When usage.server_side_tool_usage_details is present, xAI's reported success
+// counts replace the item count (see grokSearchCountFromUsage).
 func countGrokNativeSearchCallsFromJSONBytes(body []byte) int {
 	if len(body) == 0 || !gjson.ValidBytes(body) {
 		return 0
+	}
+	root := parseRawJSONView(body)
+	for _, path := range []string{"response.usage", "usage"} {
+		if n, ok := grokSearchCountFromUsage(root.Get(path)); ok {
+			return n
+		}
 	}
 	// Responses envelopes normally expose either top-level output (JSON mode)
 	// or response.output (terminal SSE payload). Compatibility layers can retain
 	// both copies; counting both would bill the same search twice. Prefer the
 	// canonical nested response when present and fall back to top-level output.
-	if nested := gjson.GetBytes(body, "response.output"); nested.IsArray() {
+	if nested := root.Get("response.output"); nested.IsArray() {
 		return countGrokNativeSearchCallsInOutputArray(nested)
 	}
-	return countGrokNativeSearchCallsInOutputArray(gjson.GetBytes(body, "output"))
+	return countGrokNativeSearchCallsInOutputArray(root.Get("output"))
 }
 
 func countGrokNativeSearchCallsFromSSEBody(body string) int {
 	if strings.TrimSpace(body) == "" {
 		return 0
 	}
-	seen := make(map[string]struct{})
-	total := 0
+	var counter grokSearchCounter
 	forEachOpenAISSEDataPayload(body, func(data []byte) {
-		total += countGrokNativeSearchCallsInSSEDataDedup(data, seen)
+		counter.ObserveResponsesData(data)
 	})
-	return total
+	return counter.total
+}
+
+// grokSearchCounter belongs to one upstream call. A reported terminal total
+// replaces inferred items and cannot be increased by trailing or repeated events.
+type grokSearchCounter struct {
+	total    int
+	reported bool
+	seen     map[string]struct{}
+}
+
+func (c *grokSearchCounter) ObserveResponsesData(data []byte) {
+	if c.reported {
+		return
+	}
+	root := parseRawJSONView(data)
+	switch strings.TrimSpace(root.Get("type").String()) {
+	case "response.completed", "response.incomplete", "response.done":
+		if count, ok := grokSearchCountFromUsage(root.Get("response.usage")); ok && gjson.ValidBytes(data) {
+			c.total = count
+			c.reported = true
+			c.seen = nil
+			return
+		}
+	case "response.output_item.done":
+	default:
+		return
+	}
+	if c.seen == nil {
+		c.seen = make(map[string]struct{})
+	}
+	c.total += countGrokNativeSearchCallsInSSEDataDedup(data, c.seen)
+}
+
+func (c *grokSearchCounter) ObserveChatData(data string) {
+	if c.reported {
+		return
+	}
+	root := gjson.Parse(data)
+	count, ok := grokSearchCountFromUsage(root.Get("usage"))
+	if !ok {
+		return
+	}
+	choices := root.Get("choices")
+	if !choices.IsArray() {
+		return
+	}
+	completed := true
+	choices.ForEach(func(_, choice gjson.Result) bool {
+		completed = strings.TrimSpace(choice.Get("finish_reason").String()) != ""
+		return completed
+	})
+	if !completed || !gjson.Valid(data) {
+		return
+	}
+	c.total = count
+	c.reported = true
+}
+
+// grokSearchCountFromUsage reads xAI's per-class success counts from a usage
+// object. xAI documents these counts as what determines billing for per-call
+// tools (https://docs.x.ai/developers/tools/tool-usage-details#server-side-tool-calls-vs-tool-usage).
+// Only the classes the item counter also counts are read: web_search_calls
+// (web_search_call items), x_search_calls (xs_ custom_tool_call items) and
+// document_search_calls (as_ custom_tool_call items). Other classes and the
+// X Search item counts (x_posts_fetched, x_users_fetched) are not read. ok is
+// false when server_side_tool_usage_details is absent, so callers keep the
+// item count.
+func grokSearchCountFromUsage(usage gjson.Result) (int, bool) {
+	details := usage.Get("server_side_tool_usage_details")
+	if !details.IsObject() {
+		return 0, false
+	}
+	total := details.Get("web_search_calls").Int() +
+		details.Get("x_search_calls").Int() +
+		details.Get("document_search_calls").Int()
+	if total < 0 {
+		total = 0
+	}
+	return int(total), true
 }
 
 // countGrokNativeSearchCallsInSSEData counts search tool calls in one SSE

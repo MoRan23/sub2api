@@ -917,11 +917,11 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 			}
 		} else {
 			// 降级：直接调用 refresher（兼容旧路径）
+			attemptedAccount := snapshotOAuthRefreshAccount(account)
 			releaseRate := func() {}
 			if acquireRate != nil {
 				releaseRate, err = acquireRate(attemptCtx)
 			}
-			attemptedAccount := snapshotOAuthRefreshAccount(account)
 			if err == nil {
 				newCredentials, err = refresher.Refresh(attemptCtx, account)
 			}
@@ -929,7 +929,24 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 				releaseRate()
 			}
 			attemptTimedOut := errors.Is(attemptCtx.Err(), context.DeadlineExceeded) && ctx.Err() == nil
-			if err == nil && newCredentials != nil && !attemptTimedOut {
+			if err == nil && hasOpenAIRefreshCredentials(attemptedAccount, newCredentials) {
+				var durableAccount *Account
+				durableAccount, credentialsPersisted, err = persistOpenAIRefreshCredentials(attemptCtx, s.accountRepo, attemptedAccount, newCredentials)
+				if err != nil && credentialsPersisted && s.cacheInvalidator != nil {
+					cleanupCtx, cleanupCancel := context.WithTimeout(context.WithoutCancel(attemptCtx), defaultTokenRefreshCleanupTimeout)
+					if invalidateErr := s.cacheInvalidator.InvalidateToken(cleanupCtx, attemptedAccount); invalidateErr != nil {
+						slog.Warn("token_refresh.invalidate_token_cache_failed", "account_id", attemptedAccount.ID, "error", invalidateErr)
+					}
+					cleanupCancel()
+				}
+				if err == nil {
+					account = durableAccount
+					if !credentialsPersisted {
+						err = errRefreshSkipped
+						shortCircuit = true
+					}
+				}
+			} else if err == nil && newCredentials != nil && !attemptTimedOut {
 				newCredentials["_token_version"] = time.Now().UnixMilli()
 				if account.Platform == PlatformOpenAI && account.Type == AccountTypeOAuth {
 					durableAccount, applied, saveErr := persistOpenAIOAuthRefreshCredentials(attemptCtx, s.accountRepo, attemptedAccount, newCredentials)
@@ -961,7 +978,7 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 		cancelAttempt()
 		releaseAttempt()
 		persistedAfterAttemptDeadline := attemptTimedOut && credentialsPersisted && err == nil
-		if attemptTimedOut && !persistedAfterAttemptDeadline && !isProviderScopedTerminalRefreshError(err) {
+		if attemptTimedOut && !shortCircuit && !persistedAfterAttemptDeadline && !isProviderScopedTerminalRefreshError(err) {
 			cause := err
 			if cause == nil {
 				cause = context.DeadlineExceeded

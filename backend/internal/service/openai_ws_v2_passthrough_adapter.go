@@ -761,6 +761,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 	if account == nil {
 		return errors.New("account is nil")
 	}
+	if _, err := validateOpenAIWSInitialPayload(firstClientMessage, hooks); err != nil {
+		return err
+	}
 	bodyObservation := openAIWSBodyObservation(c)
 	if bodyObservation == nil {
 		bodyObservation = StartOpenAIWSBodyObservation(c, len(firstClientMessage))
@@ -1272,6 +1275,9 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 			}
 			if msgType != coderws.MessageText && msgType != coderws.MessageBinary {
 				return payload, nil, nil
+			}
+			if err := validateOpenAIWSClientPayload(payload, hooks); err != nil {
+				return payload, nil, err
 			}
 			eventType := strings.TrimSpace(gjson.GetBytes(payload, "type").String())
 			isResponseCreate := eventType == "response.create"

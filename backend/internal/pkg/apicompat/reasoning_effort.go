@@ -9,7 +9,9 @@ import (
 	"github.com/tidwall/gjson"
 )
 
-func parseWireReasoningEffort(raw json.RawMessage) (string, bool, error) {
+// ParseWireReasoningEffort decodes the provider's string-or-uint64 effort without
+// routing numbers through float64. The boolean reports the numeric form.
+func ParseWireReasoningEffort(raw json.RawMessage) (string, bool, error) {
 	raw = bytes.TrimSpace(raw)
 	if len(raw) == 0 || bytes.Equal(raw, []byte("null")) {
 		return "", false, nil
@@ -43,7 +45,7 @@ func (r *ResponsesReasoning) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return err
 	}
-	effort, numeric, err := parseWireReasoningEffort(wire.Effort)
+	effort, numeric, err := ParseWireReasoningEffort(wire.Effort)
 	if err != nil {
 		return err
 	}
@@ -72,7 +74,7 @@ func (r *ChatCompletionsRequest) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return err
 	}
-	effort, numeric, err := parseWireReasoningEffort(wire.Effort)
+	effort, numeric, err := ParseWireReasoningEffort(wire.Effort)
 	if err != nil {
 		return err
 	}
@@ -126,7 +128,7 @@ func effectiveResponsesReasoning(req *ResponsesRequest) (*ResponsesReasoning, er
 	}
 	var parseErr error
 	gjson.GetBytes(req.Input, `#(type=="configuration_update")#.reasoning.effort`).ForEach(func(_, effort gjson.Result) bool {
-		value, numeric, err := parseWireReasoningEffort(json.RawMessage(effort.Raw))
+		value, numeric, err := ParseWireReasoningEffort(json.RawMessage(effort.Raw))
 		if err != nil {
 			parseErr = err
 			return false

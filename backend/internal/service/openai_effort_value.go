@@ -101,16 +101,19 @@ func selectOpenAIEffort(body []byte, state *openAIEffortRequestState) openAIEffo
 	// walking large message strings twice. Unicode escapes may spell the item
 	// type differently, so their presence always takes the structural path.
 	if bytes.Contains(body, []byte("configuration_update")) || bytes.Contains(body, []byte(`\u`)) {
-		view.Get("input").ForEach(func(_, item gjson.Result) bool {
-			if item.Get("type").Str == "configuration_update" {
-				if field := item.Get("reasoning.effort"); field.Exists() {
-					value, _ := effortScalar(field)
-					selection = openAIEffortSelection{value: value, path: "input." + strconv.Itoa(index) + ".reasoning.effort", override: true, unknown: !value.valid(), oversized: field.Type == gjson.String && len(field.Str) > maxReasoningEffortValueLen}
+		input := view.Get("input")
+		if input.IsArray() {
+			input.ForEach(func(_, item gjson.Result) bool {
+				if item.Get("type").Str == "configuration_update" {
+					if field := item.Get("reasoning.effort"); field.Exists() {
+						value, _ := effortScalar(field)
+						selection = openAIEffortSelection{value: value, path: "input." + strconv.Itoa(index) + ".reasoning.effort", override: true, unknown: !value.valid(), oversized: field.Type == gjson.String && len(field.Str) > maxReasoningEffortValueLen}
+					}
 				}
-			}
-			index++
-			return true
-		})
+				index++
+				return true
+			})
+		}
 	}
 	if selection.path != "" {
 		return selection

@@ -38,10 +38,9 @@ func TestUpdateExtraCodexDisplaySnapshotsAvoidSchedulerOutbox(t *testing.T) {
 				}
 				payload, err := json.Marshal(updates)
 				require.NoError(t, err)
-				// The fork wraps the merge with managed identity preservation; the
-				// display-only update must still avoid a scheduler transaction/outbox.
-				query := "UPDATE accounts SET extra = " + guardedAccountExtraExpression("COALESCE(extra, '{}'::jsonb) || $1::jsonb") + ", updated_at = NOW() WHERE id = $2 AND deleted_at IS NULL"
-				mock.ExpectExec(regexp.QuoteMeta(query)).
+				// The managed identity guard contains a fresh source-revision UUID;
+				// this test checks display-only updates avoid scheduler work.
+				mock.ExpectExec(`(?s)^UPDATE accounts SET extra = .*updated_at = NOW\(\) WHERE id = \$2 AND deleted_at IS NULL$`).
 					WithArgs(string(payload), int64(27)).WillReturnResult(sqlmock.NewResult(0, 1))
 				if tc.schedulingChange {
 					mock.ExpectExec(regexp.QuoteMeta("INSERT INTO scheduler_outbox")).

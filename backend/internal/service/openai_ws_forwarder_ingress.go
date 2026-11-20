@@ -85,6 +85,11 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 	if account == nil {
 		return errors.New("account is nil")
 	}
+	var validationErr error
+	hooks, validationErr = validateOpenAIWSInitialPayload(firstClientMessage, hooks)
+	if validationErr != nil {
+		return validationErr
+	}
 	bodyObservation := openAIWSBodyObservation(c)
 	if bodyObservation == nil {
 		bodyObservation = StartOpenAIWSBodyObservation(c, len(firstClientMessage))
@@ -272,8 +277,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		if len(trimmed) == 0 {
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "empty websocket request payload", nil)
 		}
-		if !gjson.ValidBytes(trimmed) {
-			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", errors.New("invalid json"))
+		if turn > 1 {
+			if err := validateOpenAIWSClientPayload(trimmed, hooks); err != nil {
+				return openAIWSClientPayload{}, err
+			}
 		}
 
 		values := gjson.GetManyBytes(trimmed, "type", "model", "prompt_cache_key", "previous_response_id")
@@ -476,7 +483,9 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 			normalized = stripped
 			logOpenAIWSModeInfo("ingress_ws_codex_spark_image_tool_stripped account_id=%d", account.ID)
 		}
-		imageIntent := IsImageGenerationIntentForPlatform(openAIResponsesEndpoint, originalModel, normalized, account.Platform)
+		// normalized 由 parseClientPayload 中已通过 gjson.ValidBytes 校验的字节派生，
+		// 后续改写只走 sjson 或 decode→json.Marshal，合法性保持，因此跳过重复校验。
+		imageIntent := IsImageGenerationIntentForPlatformValidated(openAIResponsesEndpoint, originalModel, normalized, account.Platform)
 		if imageIntent && !imageGenerationAllowed {
 			return openAIWSClientPayload{}, NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, ImageGenerationPermissionMessage(), nil)
 		}
@@ -836,6 +845,10 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 				return errOpenAIWSSessionPreempted
 			}
 			cyberRejected := GetOpsCyberPolicy(c) != nil
+			if result != nil {
+				// The HTTP payload can contain a policy rewrite or replayed configuration from an earlier turn.
+				result.RequestedReasoningEffort = currentBridgePayload.requestedReasoningEffort
+			}
 			if hooks != nil && hooks.AfterTurn != nil {
 				hooks.AfterTurn(turn, result, bridgeErr)
 			}

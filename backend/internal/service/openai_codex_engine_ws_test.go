@@ -103,9 +103,13 @@ func TestCodexEngineWSUsesDedicatedHTTPAndDurableIDPerTurn(t *testing.T) {
 				billingService: &BillingService{fallbackPrices: map[string]*ModelPricing{"gpt-5.4": {InputPricePerToken: .01, OutputPricePerToken: .01}}}}
 			after := make(chan *OpenAIForwardResult, 2)
 			afterRequestIDs := make(chan string, 2)
+			var validationCalls atomic.Int32
 			client, done := engineWSFixture(t, svc, account, func(c *gin.Context) *OpenAIWSIngressHooks {
 				c.Writer.Header().Set("X-Request-Id", "req_handshake")
-				return &OpenAIWSIngressHooks{BeforeEngineDispatch: func(turn int, original []byte, model string) error {
+				return &OpenAIWSIngressHooks{ValidateClientPayload: func(payload []byte) error {
+					validationCalls.Add(1)
+					return validateOpenAIWSClientPayload(payload, nil)
+				}, BeforeEngineDispatch: func(turn int, original []byte, model string) error {
 					SetCodexEngineBillingInput(c, &OpenAIRecordUsageInput{Account: account, User: &User{ID: 1}, APIKey: &APIKey{ID: 2}, PricingAt: time.Now()})
 					return nil
 				}, AfterTurn: func(_ int, result *OpenAIForwardResult, _ error) {
@@ -129,6 +133,7 @@ func TestCodexEngineWSUsesDedicatedHTTPAndDurableIDPerTurn(t *testing.T) {
 			}
 			_ = client.CloseNow()
 			require.ErrorIs(t, <-done, context.Canceled)
+			require.EqualValues(t, 2, validationCalls.Load(), "validate each physical frame once")
 			mu.Lock()
 			defer mu.Unlock()
 			require.NoError(t, dispatchErr)

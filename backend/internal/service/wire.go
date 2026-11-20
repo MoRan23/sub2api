@@ -365,6 +365,7 @@ func ProvideAdminService(
 	affiliateService *AffiliateService, compositeRouteRepo CompositeModelRouteRepository,
 	compositeResolver *CompositeRouteResolver, egressLocation *OpenAIEgressLocationService,
 	channelCacheInvalidators []ChannelCacheInvalidator,
+	userPlatformQuotaRepo UserPlatformQuotaRepository,
 ) AdminService {
 	svc := NewAdminService(cfg, userRepo, groupRepo, accountRepo, proxyRepo,
 		apiKeyRepo, redeemCodeRepo, userGroupRateRepo, userRPMCache, billingCacheService,
@@ -372,6 +373,7 @@ func ProvideAdminService(
 		defaultSubAssigner, userSubRepo, privacyClientFactory, runtimeBlocker,
 		affiliateService, compositeRouteRepo, compositeResolver, channelCacheInvalidators...)
 	impl := svc.(*adminServiceImpl)
+	impl.userPlatformQuotaRepo = userPlatformQuotaRepo
 	impl.daybreakCapabilities, _ = runtimeBlocker.(OpenAIDaybreakCapabilityReader)
 	impl.egressLocationService = egressLocation
 	impl.proxyGeoStop = impl.startProxyGeoBackfill()

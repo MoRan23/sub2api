@@ -841,6 +841,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 
 	responseID := ""
 	usage := OpenAIUsage{}
+	var searchCounter grokSearchCounter
 	imageCounter := newOpenAIImageOutputCounter()
 	var firstTokenMs *int
 	reqStream := openAIWSPayloadBoolFromRaw(body, "stream", true)
@@ -886,6 +887,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		result := &OpenAIForwardResult{
 			RequestID:                     responseID,
 			Usage:                         usage,
+			SearchCount:                   searchCounter.total,
 			Model:                         originalModel,
 			UpstreamModel:                 mappedModel,
 			UpstreamResponseModel:         responseModelObserver.Model(),
@@ -1027,6 +1029,7 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 				}
 				return resultWithUsage(), ErrGrokSafetyRejected
 			}
+			searchCounter.ObserveResponsesData(upstreamMessage)
 		}
 		observeCodexTelemetryHTTPPayload(resp, upstreamMessage, pendingSSEEventType)
 		if normalized, changed := normalizeCompletedImageGenerationStatus(upstreamMessage); changed {

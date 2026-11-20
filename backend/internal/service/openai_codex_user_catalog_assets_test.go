@@ -38,7 +38,7 @@ func TestGPT62GroupCatalogUsesCompleteFallbackWithoutReplacingLiveFields(t *test
 			raw, sourceID := selectOpenAIGroupCodexDescriptor(model, model, nil, nil, nil)
 			require.Equal(t, model, sourceID)
 			require.NotEmpty(t, raw)
-			projected, err := projectOfficialCodexDescriptor(raw, model, sourceID, nil)
+			projected, err := projectOfficialCodexDescriptor(raw, model, sourceID, nil, true)
 			require.NoError(t, err)
 			var got map[string]json.RawMessage
 			require.NoError(t, json.Unmarshal(projected, &got))

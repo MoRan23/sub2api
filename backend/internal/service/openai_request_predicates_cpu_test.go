@@ -108,7 +108,7 @@ func TestOpenAIResponsesToolSchemasCPUParity(t *testing.T) {
 	}
 }
 
-func TestOpenAIResponsesToolSchemaValidatedStringCPUParity(t *testing.T) {
+func TestOpenAIResponsesToolSchemaStrictStringCPUParity(t *testing.T) {
 	for _, text := range []string{
 		"", "plain", `\`, `"`, `\"`, `\\"`, `\\\"`, "\x00\t\n\r", "😀你好", strings.Repeat(`\\\"hello`, 128),
 	} {
@@ -116,7 +116,7 @@ func TestOpenAIResponsesToolSchemaValidatedStringCPUParity(t *testing.T) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		current := openAIResponsesToolSchemaParser{body: body, validated: true}
+		current := openAIResponsesToolSchemaParser{body: body}
 		legacy := legacyCPUSchemaOpenAIResponsesToolSchemaParser{body: body}
 		gotStart, gotEnd, gotErr := current.parseString()
 		wantStart, wantEnd, wantErr := legacy.parseString()
@@ -127,8 +127,9 @@ func TestOpenAIResponsesToolSchemaValidatedStringCPUParity(t *testing.T) {
 }
 
 func TestOpenAIResponsesToolSchemaValidationCPUParity(t *testing.T) {
-	// Match the pre-merge validation contract, including the permissive JSON
-	// treatment of duplicate members and isolated surrogate escapes.
+	// The parser retains strict validation, including duplicate members and
+	// isolated surrogate escapes. Exercise it directly: repair entry points now
+	// skip bodies without schema candidates after ingress has validated JSON.
 	bodies := []string{
 		``, `null`, `true`, `false`, `0`, `-0.00`, `1e100000000`, `-1e-999999`, `01`, `1.`, `1e`, `+1`,
 		`[]`, `{}`, `"text"`, `"\uD800"`, `"\uDC00"`, `"\uD800\uDC00"`, `"\u0000"`,
@@ -144,8 +145,12 @@ func TestOpenAIResponsesToolSchemaValidationCPUParity(t *testing.T) {
 	}
 	for i, raw := range bodies {
 		body := []byte(raw)
-		want, wantChanged, wantErr := legacyCPUSchemaSanitizeOpenAIResponsesToolParameterTypes(body)
-		got, gotChanged, gotErr := sanitizeOpenAIResponsesToolParameterTypes(body)
+		want, wantChanged, wantErr := legacyCPUSchemaSanitizeOpenAIResponsesToolSchemas(body, legacyCPUSchemaOpenAIResponsesToolSchemaOptions{
+			replaceNullParameterTypes: true, injectObjectUnionRootObjectType: true, dropNullRequired: true,
+		})
+		got, gotChanged, gotErr := sanitizeOpenAIResponsesToolSchemas(body, openAIResponsesToolSchemaOptions{
+			replaceNullParameterTypes: true, injectObjectUnionRootObjectType: true, dropNullRequired: true,
+		})
 		if !bytes.Equal(got, want) || gotChanged != wantChanged || fmt.Sprint(gotErr) != fmt.Sprint(wantErr) {
 			t.Fatalf("case %d: validation changed: got changed=%v err=%v, want changed=%v err=%v", i, gotChanged, gotErr, wantChanged, wantErr)
 		}

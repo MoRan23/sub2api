@@ -23,19 +23,63 @@ import (
 	"go.uber.org/zap"
 )
 
-// cursorResponsesUnsupportedFields are top-level Responses API parameters that
-// Codex upstreams reject with "Unsupported parameter: ...". They must be
-// stripped when forwarding a raw client body through the Responses-shape
-// short-circuit in ForwardAsChatCompletions (see isResponsesShape branch).
-// The normal Chat Completions → Responses conversion path is unaffected
-// because ChatCompletionsRequest has no fields for these parameters — unknown
-// fields are dropped naturally by json.Unmarshal. Kept semantically in sync
-// with the list in openai_gateway_service.go:2034 used by the /v1/responses
-// passthrough path.
+// The Responses-shaped shortcut forwards a raw body. Strip fields that the
+// typed Chat Completions → Responses conversion omits for this upstream.
 var cursorResponsesUnsupportedFields = []string{
 	"prompt_cache_retention",
 	"safety_identifier",
 	"metadata",
+	"stop",
+}
+
+// Kimi Chat can append function declarations to the conversation in system
+// messages. Responses and Anthropic use a request-level tool list for the
+// current generation. Native Chat forwarding keeps the declarations in place.
+func parseChatRequestForBridge(body []byte, platform string, req *apicompat.ChatCompletionsRequest) error {
+	if platform != PlatformKimi {
+		return json.Unmarshal(body, req)
+	}
+	// Do not embed ChatCompletionsRequest's unmarshaler: it would consume the
+	// entire object and bypass the Kimi message-level tool declarations.
+	type plainRequest apicompat.ChatCompletionsRequest
+	var wire struct {
+		*plainRequest
+		Effort   json.RawMessage `json:"reasoning_effort"`
+		Messages []struct {
+			apicompat.ChatMessage
+			Tools json.RawMessage `json:"tools"`
+		} `json:"messages"`
+	}
+	wire.plainRequest = (*plainRequest)(req)
+	if err := json.Unmarshal(body, &wire); err != nil {
+		return err
+	}
+	effort, numeric, err := apicompat.ParseWireReasoningEffort(wire.Effort)
+	if err != nil {
+		return err
+	}
+	req.SetReasoningEffort(effort, numeric)
+	req.Messages = make([]apicompat.ChatMessage, 0, len(wire.Messages))
+	for i, msg := range wire.Messages {
+		if msg.Role != "system" || msg.Tools == nil {
+			req.Messages = append(req.Messages, msg.ChatMessage)
+			continue
+		}
+		if msg.Content != nil {
+			return fmt.Errorf("messages[%d]: Kimi system tools cannot be used with content", i)
+		}
+		var tools []apicompat.ChatTool
+		if err := json.Unmarshal(msg.Tools, &tools); err != nil {
+			return fmt.Errorf("messages[%d].tools: %w", i, err)
+		}
+		for j, tool := range tools {
+			if tool.Type != "function" || tool.Function == nil || strings.TrimSpace(tool.Function.Name) == "" {
+				return fmt.Errorf("messages[%d].tools[%d]: expected a named function", i, j)
+			}
+		}
+		req.Tools = append(req.Tools, tools...)
+	}
+	return nil
 }
 
 // ForwardAsChatCompletions accepts a Chat Completions request body, converts it
@@ -190,7 +234,10 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 
 	// 1. Parse Chat Completions request
 	var chatReq apicompat.ChatCompletionsRequest
-	if err := json.Unmarshal(body, &chatReq); err != nil {
+	if err := parseChatRequestForBridge(body, account.Platform, &chatReq); err != nil {
+		if account.Platform == PlatformKimi {
+			writeChatCompletionsError(c, http.StatusBadRequest, "invalid_request_error", err.Error())
+		}
 		return nil, fmt.Errorf("parse chat completions request: %w", err)
 	}
 	originalModel := chatReq.Model
@@ -293,6 +340,9 @@ func (s *OpenAIGatewayService) forwardAsChatCompletions(
 			return nil, fmt.Errorf("marshal responses request: %w", err)
 		}
 		responsesBody = applyDeferredOpenAIRequestTimezone(c, responsesBody)
+		// responsesReq lives until billing after the stream; only its scalar
+		// fields are read from here on, so drop the body-sized input.
+		responsesReq.Input = nil
 	}
 
 	logFields := []zap.Field{
@@ -922,8 +972,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 	var streamNonFailoverErr error
 	terminalEventType := ""
 	// Grok chat bridge reuses Responses SSE; count native search tools for surcharge.
-	searchCount := 0
-	streamSearchSeen := make(map[string]struct{})
+	var searchCounter grokSearchCounter
 	countSearch := account != nil && account.IsGrok()
 	observer := upstreamResponseModelObserverFromContext(c)
 	if observer == nil {
@@ -961,9 +1010,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			Duration:                      time.Since(startTime),
 			FirstTokenMs:                  firstTokenMs,
 		}
-		if searchCount > 0 {
-			out.SearchCount = searchCount
-		}
+		out.SearchCount = searchCounter.total
 		return out
 	}
 
@@ -988,7 +1035,7 @@ func (s *OpenAIGatewayService) handleChatStreamingResponse(
 			firstTokenMs = &ms
 		}
 		if countSearch {
-			searchCount += countGrokNativeSearchCallsInSSEDataDedup([]byte(payload), streamSearchSeen)
+			searchCounter.ObserveResponsesData([]byte(payload))
 		}
 
 		var event apicompat.ResponsesStreamEvent

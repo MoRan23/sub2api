@@ -12,7 +12,18 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func (r *refreshAPIAccountRepo) PatchOpenAIOAuthCredentialsIfUnchanged(_ context.Context, id int64, expectedAuth map[string]any, expectedProxyID *int64, patch map[string]any, removed []string) (bool, error) {
+func (r *refreshAPIAccountRepo) PatchOpenAIOAuthCredentialsIfUnchanged(ctx context.Context, id int64, expectedAuth map[string]any, expectedProxyID *int64, patch map[string]any, removed []string) (bool, error) {
+	r.openAISuccessCASCalls++
+	r.openAIPersistCtxErr = ctx.Err()
+	r.openAIPersistDeadline, _ = ctx.Deadline()
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
+	r.lastExpectedCredentials = shallowCopyMap(expectedAuth)
+	r.lastExpectedProxyID = expectedProxyID
+	if r.beforeSuccessCAS != nil {
+		r.beforeSuccessCAS(r)
+	}
 	if r.updateErr != nil {
 		return false, r.updateErr
 	}
@@ -24,11 +35,20 @@ func (r *refreshAPIAccountRepo) PatchOpenAIOAuthCredentialsIfUnchanged(_ context
 	return applied, nil
 }
 
-func (r *tokenRefreshAccountRepo) PatchOpenAIOAuthCredentialsIfUnchanged(_ context.Context, id int64, expectedAuth map[string]any, expectedProxyID *int64, patch map[string]any, removed []string) (bool, error) {
+func (r *tokenRefreshAccountRepo) PatchOpenAIOAuthCredentialsIfUnchanged(ctx context.Context, id int64, expectedAuth map[string]any, expectedProxyID *int64, patch map[string]any, removed []string) (bool, error) {
+	r.openAISuccessCASCalls++
+	r.openAIPersistCtxErr = ctx.Err()
+	r.openAIPersistDeadline, _ = ctx.Deadline()
+	if err := ctx.Err(); err != nil {
+		return false, err
+	}
 	if r.updateErr != nil {
 		return false, r.updateErr
 	}
 	account := r.accountsByID[id]
+	if r.conditionalSuccessErr != nil {
+		return false, r.conditionalSuccessErr
+	}
 	applied := applyOpenAIRefreshTestPatch(account, id, expectedAuth, expectedProxyID, patch, removed)
 	if applied {
 		r.updateCalls++
@@ -199,6 +219,46 @@ func TestOpenAIRefreshCredentialsDoesNotRetryAmbiguousPersistence(t *testing.T) 
 	var containmentErr *providerCycleContainmentRefreshError
 	require.ErrorAs(t, err, &containmentErr)
 	require.False(t, applied)
+}
+
+func TestOpenAIRotationRebasesOnlyProviderPatchAfterProxyEdit(t *testing.T) {
+	stored := openAIRefreshMappingAccount()
+	expected := snapshotOAuthRefreshAccount(stored)
+	repo := &refreshAPIAccountRepo{account: stored}
+	repo.beforeSuccessCAS = func(repo *refreshAPIAccountRepo) {
+		repo.beforeSuccessCAS = nil
+		repo.account.ProxyID = new(int64(42))
+		changeOpenAIRefreshMapping(repo.account)
+	}
+	next := shallowCopyMap(expected.Credentials)
+	next["access_token"] = "rotated-access"
+	next["refresh_token"] = "rotated-refresh"
+	durable, applied, err := persistOpenAIRefreshCredentials(context.Background(), repo, expected, next)
+	require.NoError(t, err)
+	require.True(t, applied)
+	require.Equal(t, 2, repo.openAISuccessCASCalls)
+	require.Equal(t, "rotated-access", durable.GetOpenAIAccessToken())
+	require.Equal(t, int64(42), *durable.ProxyID)
+	require.Equal(t, "plus", durable.GetCredential("plan_type"))
+	require.False(t, durable.IsModelSupported("gpt-6-astra"))
+}
+
+func TestOpenAIRotationBoundsConcurrentProxyRetries(t *testing.T) {
+	stored := openAIRefreshMappingAccount()
+	expected := snapshotOAuthRefreshAccount(stored)
+	repo := &refreshAPIAccountRepo{account: stored}
+	repo.beforeSuccessCAS = func(repo *refreshAPIAccountRepo) {
+		repo.account.ProxyID = new(int64(repo.openAISuccessCASCalls))
+	}
+	next := shallowCopyMap(expected.Credentials)
+	next["access_token"] = "rotated-access"
+	next["refresh_token"] = "rotated-refresh"
+	_, applied, err := persistOpenAIRefreshCredentials(context.Background(), repo, expected, next)
+	var containment *providerCycleContainmentRefreshError
+	require.ErrorAs(t, err, &containment)
+	require.False(t, applied)
+	require.Equal(t, 3, repo.openAISuccessCASCalls)
+	require.Equal(t, "old-access", stored.GetOpenAIAccessToken())
 }
 
 type openAIRefreshDurableReadFailureRepo struct {

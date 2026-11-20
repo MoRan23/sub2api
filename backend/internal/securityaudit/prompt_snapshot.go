@@ -274,11 +274,14 @@ func extractResponses(value any) []promptSegment {
 				result = append(result, promptSegment{text: entry, user: true, role: "user"})
 			case map[string]any:
 				callID, hasCallID := entry["call_id"]
-				if text, ok := codexcontext.UntrustedOutput(stringValue(entry["type"]), stringValue(entry["namespace"]), stringValue(entry["name"]), stringValue(entry["output"]), callID, hasCallID); ok {
-					// External context is inspected as untrusted context, not a new
-					// user instruction for latest-turn combination matching.
-					result = append(result, promptSegment{text: text, role: "tool"})
-					continue
+				output, outputIsString := entry["output"].(string)
+				namespace, namespaceIsString := entry["namespace"].(string)
+				if outputIsString && (entry["namespace"] == nil || namespaceIsString) {
+					if text, ok := codexcontext.UntrustedOutput(stringValue(entry["type"]), namespace, stringValue(entry["name"]), output, callID, hasCallID); ok {
+						// External context is evidence, not the latest user's intent.
+						result = append(result, promptSegment{text: text, role: "tool"})
+						continue
+					}
 				}
 				role := strings.ToLower(stringValue(entry["role"]))
 				if role != "" && !isClientInstructionRole(role) {

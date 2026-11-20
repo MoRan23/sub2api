@@ -9,7 +9,9 @@ import (
 	"time"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	"github.com/Wei-Shaw/sub2api/internal/pkg/requestmodel"
 	coderws "github.com/coder/websocket"
+	"github.com/tidwall/gjson"
 	"go.uber.org/zap"
 )
 
@@ -285,6 +287,10 @@ func (e *OpenAIWSClientCloseError) Reason() string {
 
 // OpenAIWSIngressHooks 定义入站 WS 每个 turn 的生命周期回调。
 type OpenAIWSIngressHooks struct {
+	// InitialPayloadValidated covers only the first frame of this invocation,
+	// including successful JSON rewrites of the handler-validated input.
+	InitialPayloadValidated bool
+	ValidateClientPayload   func(payload []byte) error
 	// ClientLifecycleContext is the request context before an ingress lease
 	// adds its independent cancellation signal. Downstream writes bind to it
 	// so shutdown and disconnect cancellation remain direct during lease loss.
@@ -313,6 +319,34 @@ type OpenAIWSIngressHooks struct {
 	// every physical Engine HTTP request, never once per WebSocket handshake.
 	BeforeEngineDispatch func(turn int, payload []byte, originalModel string) error
 	AfterTurn            func(turn int, result *OpenAIForwardResult, turnErr error)
+}
+
+func validateOpenAIWSClientPayload(payload []byte, hooks *OpenAIWSIngressHooks) error {
+	if hooks != nil && hooks.ValidateClientPayload != nil {
+		return hooks.ValidateClientPayload(payload)
+	}
+	if !gjson.ValidBytes(payload) {
+		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "invalid websocket request payload", errors.New("invalid json"))
+	}
+	if field, conflict := requestmodel.ConflictingField("application/json", payload); conflict {
+		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, fmt.Sprintf("websocket request payload declares field %.64q more than once", field), nil)
+	}
+	return nil
+}
+
+func validateOpenAIWSInitialPayload(payload []byte, hooks *OpenAIWSIngressHooks) (*OpenAIWSIngressHooks, error) {
+	if hooks != nil && hooks.InitialPayloadValidated {
+		return hooks, nil
+	}
+	if err := validateOpenAIWSClientPayload(payload, hooks); err != nil {
+		return nil, err
+	}
+	checked := OpenAIWSIngressHooks{InitialPayloadValidated: true}
+	if hooks != nil {
+		checked = *hooks
+		checked.InitialPayloadValidated = true
+	}
+	return &checked, nil
 }
 
 func (s *OpenAIGatewayService) getOpenAIWSConnPool() *openAIWSConnPool {

@@ -9,7 +9,10 @@ import (
 // Codex injects external context as standalone outputs, without a model tool call.
 // Use the legacy user-message representation for HTTP Responses interoperability.
 func normalizeCodexUntrustedContext(body []byte) ([]byte, bool) {
-	if !mayContainCodexCallOutputCandidate(body, "codex_apps_open_page", "codex_apps_selected_page_part_", "browser_info", "goal_objective", "untrusted_context") || !hasUniqueJSONMembers(body) {
+	if !mayContainCodexCallOutputCandidate(body,
+		"codex_apps_open_page", "codex_apps_selected_page_part_",
+		"browser_info", "goal_objective", "untrusted_context", "untrusted_content", "ide_context", "proposed_plan",
+	) || !hasUniqueJSONMembers(body) {
 		return body, false
 	}
 	var request map[string]json.RawMessage
@@ -36,8 +39,11 @@ func normalizeCodexUntrustedContext(body []byte) ([]byte, bool) {
 		if hasCallID && json.Unmarshal(callID, &callIDValue) != nil {
 			continue
 		}
-		name, output := readString("name"), readString("output")
-		text, valid := codexcontext.UntrustedOutput(readString("type"), readString("namespace"), name, output, callIDValue, hasCallID)
+		var output *string
+		if json.Unmarshal(item["output"], &output) != nil || output == nil {
+			continue
+		}
+		text, valid := codexcontext.UntrustedOutput(readString("type"), readString("namespace"), readString("name"), *output, callIDValue, hasCallID)
 		if !valid {
 			continue
 		}

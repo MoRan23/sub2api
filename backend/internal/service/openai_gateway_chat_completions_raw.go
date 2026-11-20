@@ -338,6 +338,11 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	refusalDetector := newOpenAIChatSilentRefusalDetector(requestBodyLen)
 	var terminal openAIRawStreamTerminalState
 	var safetyParser openAICompatSSEFrameParser
+	var searchCounter grokSearchCounter
+	observeGrokFrame := func(data string) {
+		ObserveGrokSafetyPayload(c.Request.Context(), []byte(data), false)
+		searchCounter.ObserveChatData(data)
+	}
 
 	writeLine := func(line string) {
 		if clientDisconnected {
@@ -375,7 +380,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 		line := scanner.Text()
 		if account != nil && account.IsGrok() {
 			if frame, ok := safetyParser.AddLine(line); ok {
-				ObserveGrokSafetyPayload(c.Request.Context(), []byte(frame.Data), false)
+				observeGrokFrame(frame.Data)
 			}
 		}
 		refusalDetector.ObserveSSELine(line)
@@ -408,7 +413,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 	}
 	if account != nil && account.IsGrok() {
 		if frame, ok := safetyParser.Finish(); ok {
-			ObserveGrokSafetyPayload(c.Request.Context(), []byte(frame.Data), false)
+			observeGrokFrame(frame.Data)
 		}
 	}
 	if GrokSafetyRejected(c.Request.Context()) && !clientOutputStarted && !clientDisconnected {
@@ -440,6 +445,7 @@ func (s *OpenAIGatewayService) streamRawChatCompletions(
 			Stream:                        true,
 			Duration:                      time.Since(startTime),
 			FirstTokenMs:                  firstTokenMs,
+			SearchCount:                   searchCounter.total,
 		}
 	}
 	if GrokSafetyRejected(c.Request.Context()) {
@@ -585,6 +591,12 @@ func (s *OpenAIGatewayService) bufferRawChatCompletions(
 	if parsedUsage, ok := extractOpenAIUsageFromJSONBytes(respBody); ok {
 		usage = parsedUsage
 	}
+	searchCount := 0
+	if account != nil && account.IsGrok() {
+		if count, ok := grokSearchCountFromUsage(parseRawJSONView(respBody).Get("usage")); ok && gjson.ValidBytes(respBody) {
+			searchCount = count
+		}
+	}
 	responseModel := gjson.GetBytes(respBody, "model").String()
 	if !GrokSafetyRejected(c.Request.Context()) && requiresBillableGrokChatUsage(account, billingModel, upstreamModel, responseModel) && !hasBillableGrokChatUsage(usage) {
 		upstreamRequestID := firstNonEmpty(requestID, resp.Header.Get("xai-request-id"))
@@ -618,6 +630,7 @@ func (s *OpenAIGatewayService) bufferRawChatCompletions(
 		ServiceTier:                   resolvedOpenAIUpstreamServiceTier(c, serviceTier),
 		Stream:                        false,
 		Duration:                      time.Since(startTime),
+		SearchCount:                   searchCount,
 	}, nil
 }
 

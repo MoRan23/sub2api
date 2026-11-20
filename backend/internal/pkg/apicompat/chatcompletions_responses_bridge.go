@@ -67,6 +67,7 @@ func ResponsesToChatCompletionsRequestWithOptions(req *ResponsesRequest, opts *R
 		Stream:              req.Stream,
 		ServiceTier:         req.ServiceTier,
 		ParallelToolCalls:   req.ParallelToolCalls,
+		Stop:                req.Stop,
 	}
 	reasoning, err := effectiveResponsesReasoning(req)
 	if err != nil {

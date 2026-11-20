@@ -37,6 +37,31 @@ func TestExtractPromptSnapshotProtocols(t *testing.T) {
 	}
 }
 
+func TestSnapshotCodexContextRequiresStringOutput(t *testing.T) {
+	for _, tc := range []struct {
+		name, fields, evidence string
+	}{
+		{"empty untrusted content", `"name":"untrusted_content","output":""`, "<external_untrusted_content></external_untrusted_content>"},
+		{"whitespace proposed plan", `"name":"proposed_plan","output":"  "`, "<external_proposed_plan>  </external_proposed_plan>"},
+		{"missing output", `"name":"untrusted_content"`, ""},
+		{"null output", `"name":"untrusted_content","output":null`, ""},
+		{"numeric output", `"name":"untrusted_content","output":123`, ""},
+		{"empty proposed plan", `"name":"proposed_plan","output":""`, ""},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := `{"input":[{"role":"user","content":"hello"},{"type":"function_call_output","namespace":"agent",` + tc.fields + `}]}`
+			snapshot, err := ExtractPromptSnapshot(Request{Protocol: "openai_responses", Body: []byte(body)})
+			require.NoError(t, err)
+			if tc.evidence == "" {
+				require.NotContains(t, snapshot.ScanText, "<external_")
+				return
+			}
+			require.Contains(t, snapshot.ScanText, tc.evidence)
+			require.True(t, strings.HasPrefix(snapshot.ScanText, "hello"))
+		})
+	}
+}
+
 func TestSnapshotRedactsCanariesAndPreservesHashOfScanText(t *testing.T) {
 	body := `{"messages":[{"role":"user","content":"PROMPT_CANARY_ABC123 email@example.com +86 138 0013 8000 Bearer AUTH_CANARY_XYZ sk-secretvalue123 password=supersecret123"}]}`
 	snapshot, err := ExtractPromptSnapshot(Request{Protocol: "openai_chat_completions", Body: []byte(body)})

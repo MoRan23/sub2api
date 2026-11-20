@@ -31,6 +31,11 @@ func (s *OpenAIGatewayService) proxyCodexEngineWebSocket(ctx context.Context, c 
 	if s.cfg != nil && s.cfg.Gateway.OpenAIWS.ModeRouterV2Enabled && account.ResolveOpenAIResponsesWebSocketV2Mode(s.cfg.Gateway.OpenAIWS.IngressModeDefault) == OpenAIWSIngressModeOff {
 		return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "websocket mode is disabled for this account", nil)
 	}
+	validatedHooks, err := validateOpenAIWSInitialPayload(first, hooks)
+	if err != nil {
+		return err
+	}
+	hooks = validatedHooks
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	if hooks != nil && hooks.ClientLifecycleContext != nil {
@@ -64,7 +69,12 @@ func (s *OpenAIGatewayService) proxyCodexEngineWebSocket(ctx context.Context, c 
 				cancel()
 				return
 			}
-			if gjson.ValidBytes(payload) && gjson.GetBytes(payload, "type").String() == "response.interrupt" {
+			if gjson.GetBytes(payload, "type").String() == "response.interrupt" {
+				if err := validateOpenAIWSClientPayload(payload, nil); err != nil {
+					_ = conn.Close(coderws.StatusPolicyViolation, "invalid websocket control payload")
+					cancel()
+					return
+				}
 				// This is a control frame, not another billable turn. The public
 				// HTTP contract cannot acknowledge a native response interrupt.
 				failure, _ := json.Marshal(map[string]any{
@@ -118,7 +128,12 @@ func (s *OpenAIGatewayService) proxyCodexEngineWebSocket(ctx context.Context, c 
 		if turn == 1 && hooks != nil && !hooks.InitialTurnStartedAt.IsZero() {
 			startedAt = hooks.InitialTurnStartedAt
 		}
-		body, currentModel, err := prepareCodexEngineWSBody(payload, model)
+		if turn > 1 {
+			if err := validateOpenAIWSClientPayload(payload, hooks); err != nil {
+				return err
+			}
+		}
+		body, currentModel, err := prepareCodexEngineWSBodyValidated(payload, model)
 		if err != nil {
 			return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), nil)
 		}
@@ -220,7 +235,15 @@ func (s *OpenAIGatewayService) proxyCodexEngineWebSocket(ctx context.Context, c 
 }
 
 func prepareCodexEngineWSBody(payload []byte, fallbackModel string) ([]byte, string, error) {
-	if !gjson.ValidBytes(payload) || len(bytes.TrimSpace(payload)) == 0 || bytes.TrimSpace(payload)[0] != '{' {
+	if !gjson.ValidBytes(payload) {
+		return nil, "", errors.New("response.create payload must be a JSON object")
+	}
+	return prepareCodexEngineWSBodyValidated(payload, fallbackModel)
+}
+
+func prepareCodexEngineWSBodyValidated(payload []byte, fallbackModel string) ([]byte, string, error) {
+	trimmed := bytes.TrimSpace(payload)
+	if len(trimmed) == 0 || trimmed[0] != '{' {
 		return nil, "", errors.New("response.create payload must be a JSON object")
 	}
 	if kind := gjson.GetBytes(payload, "type").String(); kind != "" && kind != "response.create" {

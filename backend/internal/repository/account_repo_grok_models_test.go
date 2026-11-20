@@ -210,9 +210,11 @@ func TestGrokCatalogCASRefreshesSingleAccountOutsideTransaction(t *testing.T) {
 		WillReturnResult(sqlmock.NewResult(0, 1))
 	mock.ExpectQuery(`(?s)SELECT .* FROM "accounts" WHERE .*`).
 		WithArgs(int64(25)).
-		WillReturnRows(updatedAccountRows(25, `{"unrelated":"keep","grok_observed_models":{"models":["grok-4.7"],"fetched_at":"2026-10-25T02:00:01Z"}}`))
+		WillReturnRows(updatedAccountRows(25, `{"unrelated":"keep","grok_observed_models":{"models":["grok-4.7"],"fetched_at":"2026-10-25T02:00:01Z"}}`, service.PlatformGrok))
 	mock.ExpectQuery(`(?s)account_groups`).
 		WillReturnRows(sqlmock.NewRows([]string{"account_id", "group_id", "priority", "created_at"}))
+	mock.ExpectQuery(`(?s)FROM account_openai_oauth_os_profiles`).
+		WillReturnRows(sqlmock.NewRows([]string{"account_id"}))
 
 	applied, err := repo.CompareAndSwapGrokObservedModels(context.Background(), 25, nil, nextJSON)
 

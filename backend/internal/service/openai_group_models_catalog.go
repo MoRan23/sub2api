@@ -182,9 +182,20 @@ func buildOpenAIGroupModelsCatalog(group *Group, visible, accounts []Account, fi
 	// discards Codex fields. These are metadata only; membership is filtered below.
 	fixedByID := make(map[string]json.RawMessage)
 	fixedMetadata := make(map[string]map[string]json.RawMessage)
+	fixedAudio := make(map[int64]map[string]bool, len(fixed))
 	for _, result := range fixed {
+		audio := fixedAudio[result.account.ID]
+		if audio == nil {
+			audio = make(map[string]bool)
+			fixedAudio[result.account.ID] = audio
+		}
 		if _, entries, sourceErr := modelCatalogEntries(result.response.upstreamSourceBody, "models"); sourceErr == nil {
 			for id, raw := range indexCodexCatalogModels(entries) {
+				if _, exists := audio[id]; !exists {
+					if supported, declared := catalogModelAudioDeclaration(raw); declared {
+						audio[id] = supported
+					}
+				}
 				if fixedByID[id] == nil && fixedMetadata[id] == nil {
 					fixedByID[id] = raw
 				}
@@ -204,6 +215,11 @@ func buildOpenAIGroupModelsCatalog(group *Group, visible, accounts []Account, fi
 					delete(fields, key)
 				}
 				id = strings.TrimSpace(id)
+				if _, exists := audio[id]; !exists {
+					if supported, declared := catalogModelAudioDeclaration(raw); declared {
+						audio[id] = supported
+					}
+				}
 				if len(fields) != 0 && fixedMetadata[id] == nil && fixedByID[id] == nil {
 					fixedMetadata[id] = fields
 				}
@@ -310,7 +326,8 @@ func buildOpenAIGroupModelsCatalog(group *Group, visible, accounts []Account, fi
 			unknownIDs = append(unknownIDs, id)
 			continue
 		}
-		descriptors[id], err = projectOfficialCodexDescriptor(raw, id, metadataID, fixedMetadata[id])
+		descriptors[id], err = projectOfficialCodexDescriptor(raw, id, metadataID, fixedMetadata[id],
+			openAIGroupCatalogSupportsAudioInput(group, accounts, fixedAudio, id, metadataID, raw))
 		if err != nil {
 			return nil, nil, err
 		}
@@ -329,7 +346,8 @@ func buildOpenAIGroupModelsCatalog(group *Group, visible, accounts []Account, fi
 			if fixedMetadata[id] != nil {
 				metadataID = id
 			}
-			descriptors[id], err = projectOfficialCodexDescriptor(raw, id, metadataID, fixedMetadata[id])
+			descriptors[id], err = projectOfficialCodexDescriptor(raw, id, metadataID, fixedMetadata[id],
+				openAIGroupCatalogSupportsAudioInput(group, accounts, fixedAudio, id, metadataID, raw))
 			if err != nil {
 				return nil, nil, err
 			}
@@ -454,7 +472,7 @@ func selectOpenAIGroupCodexDescriptor(publicID, targetID string, fixed, official
 	return nil, targetID
 }
 
-func projectOfficialCodexDescriptor(raw json.RawMessage, publicID, metadataID string, upstreamFields map[string]json.RawMessage) (json.RawMessage, error) {
+func projectOfficialCodexDescriptor(raw json.RawMessage, publicID, metadataID string, upstreamFields map[string]json.RawMessage, audioInput bool) (json.RawMessage, error) {
 	var fields map[string]json.RawMessage
 	if err := json.Unmarshal(raw, &fields); err != nil {
 		return nil, err
@@ -473,6 +491,12 @@ func projectOfficialCodexDescriptor(raw json.RawMessage, publicID, metadataID st
 		sourceID = publicID
 	}
 	fields["shell_type"] = json.RawMessage(`"unified_exec"`)
+	if !audioInput {
+		var modalities []string
+		if json.Unmarshal(fields["input_modalities"], &modalities) == nil && stringSliceContains(modalities, "audio") {
+			fields["input_modalities"], _ = json.Marshal(codexAudioInputModalities(modalities, false))
+		}
+	}
 	// Add Fast to the client-facing Blue descriptor, including public aliases.
 	// Keep the raw upstream catalog unchanged for capability checks.
 	if sourceID == "gpt-daybreak-blue-latest" || publicID == "gpt-daybreak-blue-latest" || metadataID == "gpt-daybreak-blue-latest" {

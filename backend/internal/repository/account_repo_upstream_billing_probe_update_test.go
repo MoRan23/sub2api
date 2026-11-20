@@ -478,10 +478,14 @@ func TestBulkUpdateRollsBackWhenOutboxFails(t *testing.T) {
 	require.NoError(t, mock.ExpectationsWereMet())
 }
 
-func updatedAccountRows(id int64, extra string) *sqlmock.Rows {
+func updatedAccountRows(id int64, extra string, platforms ...string) *sqlmock.Rows {
 	now := time.Now()
+	platform := service.PlatformOpenAI
+	if len(platforms) > 0 {
+		platform = platforms[0]
+	}
 	return sqlmock.NewRows(dbaccount.Columns).AddRow(
-		id, now, now, nil, "test", nil, service.PlatformOpenAI, service.AccountTypeAPIKey,
+		id, now, now, nil, "test", nil, platform, service.AccountTypeAPIKey,
 		[]byte(`{"api_key":"sk-test"}`), []byte(extra), nil, nil, 1, nil, 1, 1.0,
 		service.StatusActive, nil, nil, nil, false, true, int64(0), nil, nil, nil, nil, nil, nil,
 		nil, nil, nil, service.QuotaDimensionGlobal,
