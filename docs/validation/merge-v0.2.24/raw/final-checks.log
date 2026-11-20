@@ -1,0 +1,8 @@
+go version go1.27.4 linux/amd64
+ok  	github.com/Wei-Shaw/sub2api/internal/service	1.417s
+ok  	github.com/Wei-Shaw/sub2api/internal/securityaudit	15.811s
+ok  	github.com/Wei-Shaw/sub2api/internal/pkg/requestmodel	2.558s
+ok  	github.com/Wei-Shaw/sub2api/internal/pkg/codexcontext	1.013s
+ok  	github.com/Wei-Shaw/sub2api/internal/server/middleware	1.278s
+ok  	github.com/Wei-Shaw/sub2api/internal/pkg/apicompat	1.279s
+Final Linux production build: passed

@@ -1,0 +1,437 @@
+# base-audit-1.txt
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/securityaudit
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkPromptAuditMemory/text/65536/keyword-2         	    1498	    218120 ns/op	 301.05 MB/s	  290888 B/op	      67 allocs/op
+BenchmarkPromptAuditMemory/text/65536/combination-2     	    1572	    218708 ns/op	 300.24 MB/s	  292581 B/op	      84 allocs/op
+BenchmarkPromptAuditMemory/text/65536/snapshot-2        	      48	   7297118 ns/op	   9.00 MB/s	  439433 B/op	      75 allocs/op
+BenchmarkPromptAuditMemory/text/1048576/keyword-2       	     100	   3116301 ns/op	 336.52 MB/s	 4223692 B/op	      69 allocs/op
+BenchmarkPromptAuditMemory/text/1048576/combination-2   	     100	   3113581 ns/op	 336.82 MB/s	 4227092 B/op	      86 allocs/op
+BenchmarkPromptAuditMemory/text/1048576/snapshot-2      	       3	 125296164 ns/op	   8.37 MB/s	 5360565 B/op	      98 allocs/op
+BenchmarkPromptAuditMemory/text/4194304/keyword-2       	      28	  11750261 ns/op	 356.97 MB/s	16807840 B/op	      73 allocs/op
+BenchmarkPromptAuditMemory/text/4194304/combination-2   	      26	  12242170 ns/op	 342.62 MB/s	16822320 B/op	      94 allocs/op
+BenchmarkPromptAuditMemory/text/4194304/snapshot-2      	       1	 475567894 ns/op	   8.82 MB/s	21095096 B/op	     119 allocs/op
+BenchmarkPromptAuditMemory/text/8388608/keyword-2       	      12	  25421229 ns/op	 329.99 MB/s	33578338 B/op	      78 allocs/op
+BenchmarkPromptAuditMemory/text/8388608/combination-2   	      15	  24485313 ns/op	 342.60 MB/s	33598774 B/op	      97 allocs/op
+BenchmarkPromptAuditMemory/text/8388608/snapshot-2      	       1	 907641042 ns/op	   9.24 MB/s	42053208 B/op	     104 allocs/op
+BenchmarkPromptAuditMemory/image/65536/keyword-2        	    7269	     49657 ns/op	1322.87 MB/s	   76879 B/op	      54 allocs/op
+BenchmarkPromptAuditMemory/image/65536/combination-2    	    6640	     51865 ns/op	1266.56 MB/s	   78272 B/op	      71 allocs/op
+BenchmarkPromptAuditMemory/image/65536/snapshot-2       	    6462	     49628 ns/op	1323.65 MB/s	   76765 B/op	      54 allocs/op
+BenchmarkPromptAuditMemory/image/1048576/keyword-2      	     507	    704456 ns/op	1488.71 MB/s	 1059951 B/op	      54 allocs/op
+BenchmarkPromptAuditMemory/image/1048576/combination-2  	     529	    673553 ns/op	1557.01 MB/s	 1061353 B/op	      71 allocs/op
+BenchmarkPromptAuditMemory/image/1048576/snapshot-2     	     530	    673172 ns/op	1557.89 MB/s	 1059839 B/op	      54 allocs/op
+BenchmarkPromptAuditMemory/image/4194304/keyword-2      	     134	   2718557 ns/op	1542.90 MB/s	 4205749 B/op	      54 allocs/op
+BenchmarkPromptAuditMemory/image/4194304/combination-2  	     126	   2786115 ns/op	1505.49 MB/s	 4207145 B/op	      71 allocs/op
+BenchmarkPromptAuditMemory/image/4194304/snapshot-2     	     140	   2587952 ns/op	1620.76 MB/s	 4205675 B/op	      54 allocs/op
+BenchmarkPromptAuditMemory/image/8388608/keyword-2      	      68	   5182073 ns/op	1618.80 MB/s	 8400113 B/op	      54 allocs/op
+BenchmarkPromptAuditMemory/image/8388608/combination-2  	      66	   5364697 ns/op	1563.70 MB/s	 8401510 B/op	      71 allocs/op
+BenchmarkPromptAuditMemory/image/8388608/snapshot-2     	      73	   5797669 ns/op	1446.92 MB/s	 8399999 B/op	      54 allocs/op
+PASS
+peak-rss-kib: 137532
+
+# base-audit-2.txt
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/securityaudit
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkPromptAuditMemory/text/65536/keyword-2         	    1382	    220996 ns/op	 297.14 MB/s	  290909 B/op	      67 allocs/op
+BenchmarkPromptAuditMemory/text/65536/combination-2     	    1609	    221751 ns/op	 296.13 MB/s	  292423 B/op	      84 allocs/op
+BenchmarkPromptAuditMemory/text/65536/snapshot-2        	      51	   7032624 ns/op	   9.34 MB/s	  439378 B/op	      74 allocs/op
+BenchmarkPromptAuditMemory/text/1048576/keyword-2       	     100	   3010341 ns/op	 348.37 MB/s	 4223694 B/op	      69 allocs/op
+BenchmarkPromptAuditMemory/text/1048576/combination-2   	     100	   3054870 ns/op	 343.29 MB/s	 4229462 B/op	      87 allocs/op
+BenchmarkPromptAuditMemory/text/1048576/snapshot-2      	       3	 110442175 ns/op	   9.50 MB/s	 5358789 B/op	      93 allocs/op
+BenchmarkPromptAuditMemory/text/4194304/keyword-2       	      27	  12457532 ns/op	 336.70 MB/s	16807950 B/op	      74 allocs/op
+BenchmarkPromptAuditMemory/text/4194304/combination-2   	      28	  12411618 ns/op	 337.94 MB/s	16826019 B/op	      97 allocs/op
+BenchmarkPromptAuditMemory/text/4194304/snapshot-2      	       1	 481644924 ns/op	   8.71 MB/s	21095096 B/op	     119 allocs/op
+BenchmarkPromptAuditMemory/text/8388608/keyword-2       	      13	  24898702 ns/op	 336.91 MB/s	33578097 B/op	      77 allocs/op
+BenchmarkPromptAuditMemory/text/8388608/combination-2   	      15	  25322444 ns/op	 331.28 MB/s	33596267 B/op	      96 allocs/op
+BenchmarkPromptAuditMemory/text/8388608/snapshot-2      	       1	 898752806 ns/op	   9.33 MB/s	42058424 B/op	     119 allocs/op
+BenchmarkPromptAuditMemory/image/65536/keyword-2        	    7075	     51217 ns/op	1282.58 MB/s	   76880 B/op	      54 allocs/op
+BenchmarkPromptAuditMemory/image/65536/combination-2    	    6783	     50663 ns/op	1296.62 MB/s	   78275 B/op	      71 allocs/op
+BenchmarkPromptAuditMemory/image/65536/snapshot-2       	    5994	     51194 ns/op	1283.16 MB/s	   76764 B/op	      54 allocs/op
+BenchmarkPromptAuditMemory/image/1048576/keyword-2      	     471	    706297 ns/op	1484.83 MB/s	 1059953 B/op	      54 allocs/op
+BenchmarkPromptAuditMemory/image/1048576/combination-2  	     506	    689848 ns/op	1520.23 MB/s	 1061333 B/op	      71 allocs/op
+BenchmarkPromptAuditMemory/image/1048576/snapshot-2     	     471	    726019 ns/op	1444.49 MB/s	 1059829 B/op	      54 allocs/op
+BenchmarkPromptAuditMemory/image/4194304/keyword-2      	     135	   2656495 ns/op	1578.94 MB/s	 4205747 B/op	      54 allocs/op
+BenchmarkPromptAuditMemory/image/4194304/combination-2  	     120	   2953123 ns/op	1420.35 MB/s	 4207145 B/op	      71 allocs/op
+BenchmarkPromptAuditMemory/image/4194304/snapshot-2     	     128	   2731032 ns/op	1535.85 MB/s	 4205681 B/op	      54 allocs/op
+BenchmarkPromptAuditMemory/image/8388608/keyword-2      	      62	   4989368 ns/op	1681.33 MB/s	 8400480 B/op	      56 allocs/op
+BenchmarkPromptAuditMemory/image/8388608/combination-2  	      72	   5034175 ns/op	1666.36 MB/s	 8401505 B/op	      71 allocs/op
+BenchmarkPromptAuditMemory/image/8388608/snapshot-2     	      74	   5128934 ns/op	1635.58 MB/s	 8399924 B/op	      54 allocs/op
+PASS
+peak-rss-kib: 143508
+
+# base-audit-3.txt
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/securityaudit
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkPromptAuditMemory/text/65536/keyword-2         	    1467	    228629 ns/op	 287.22 MB/s	  290914 B/op	      67 allocs/op
+BenchmarkPromptAuditMemory/text/65536/combination-2     	    1598	    221865 ns/op	 295.97 MB/s	  292477 B/op	      84 allocs/op
+BenchmarkPromptAuditMemory/text/65536/snapshot-2        	      50	   7469509 ns/op	   8.79 MB/s	  439388 B/op	      74 allocs/op
+BenchmarkPromptAuditMemory/text/1048576/keyword-2       	     100	   3095935 ns/op	 338.74 MB/s	 4223526 B/op	      68 allocs/op
+BenchmarkPromptAuditMemory/text/1048576/combination-2   	     120	   3060775 ns/op	 342.63 MB/s	 4228793 B/op	      87 allocs/op
+BenchmarkPromptAuditMemory/text/1048576/snapshot-2      	       3	 112669327 ns/op	   9.31 MB/s	 5358397 B/op	      89 allocs/op
+BenchmarkPromptAuditMemory/text/4194304/keyword-2       	      26	  13153371 ns/op	 318.89 MB/s	16807813 B/op	      73 allocs/op
+BenchmarkPromptAuditMemory/text/4194304/combination-2   	      27	  13191927 ns/op	 317.95 MB/s	16826495 B/op	      96 allocs/op
+BenchmarkPromptAuditMemory/text/4194304/snapshot-2      	       1	 457299882 ns/op	   9.17 MB/s	21095096 B/op	     119 allocs/op
+BenchmarkPromptAuditMemory/text/8388608/keyword-2       	      14	  24659355 ns/op	 340.18 MB/s	33578271 B/op	      78 allocs/op
+BenchmarkPromptAuditMemory/text/8388608/combination-2   	      15	  24708987 ns/op	 339.50 MB/s	33602283 B/op	     100 allocs/op
+BenchmarkPromptAuditMemory/text/8388608/snapshot-2      	       1	 922745233 ns/op	   9.09 MB/s	42058424 B/op	     119 allocs/op
+BenchmarkPromptAuditMemory/image/65536/keyword-2        	    6878	     53911 ns/op	1218.50 MB/s	   76881 B/op	      54 allocs/op
+BenchmarkPromptAuditMemory/image/65536/combination-2    	    5965	     54110 ns/op	1214.02 MB/s	   78275 B/op	      71 allocs/op
+BenchmarkPromptAuditMemory/image/65536/snapshot-2       	    6420	     51775 ns/op	1268.77 MB/s	   76767 B/op	      54 allocs/op
+BenchmarkPromptAuditMemory/image/1048576/keyword-2      	     512	    693124 ns/op	1513.05 MB/s	 1059961 B/op	      54 allocs/op
+BenchmarkPromptAuditMemory/image/1048576/combination-2  	     499	    686554 ns/op	1527.53 MB/s	 1061353 B/op	      71 allocs/op
+BenchmarkPromptAuditMemory/image/1048576/snapshot-2     	     432	    759592 ns/op	1380.65 MB/s	 1059854 B/op	      54 allocs/op
+BenchmarkPromptAuditMemory/image/4194304/keyword-2      	     132	   2774303 ns/op	1511.90 MB/s	 4205793 B/op	      54 allocs/op
+BenchmarkPromptAuditMemory/image/4194304/combination-2  	     133	   2677906 ns/op	1566.32 MB/s	 4207142 B/op	      71 allocs/op
+BenchmarkPromptAuditMemory/image/4194304/snapshot-2     	     135	   2643414 ns/op	1586.76 MB/s	 4205679 B/op	      54 allocs/op
+BenchmarkPromptAuditMemory/image/8388608/keyword-2      	      73	   5302034 ns/op	1582.18 MB/s	 8400183 B/op	      55 allocs/op
+BenchmarkPromptAuditMemory/image/8388608/combination-2  	      68	   5245338 ns/op	1599.28 MB/s	 8401429 B/op	      71 allocs/op
+BenchmarkPromptAuditMemory/image/8388608/snapshot-2     	      68	   5181212 ns/op	1619.07 MB/s	 8400005 B/op	      54 allocs/op
+PASS
+peak-rss-kib: 137572
+
+# base-image-1.txt
+2026/11/20 11:14:02 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkIsImageGenerationIntent/1MiBInputNoImage-2         	     553	    643894 ns/op	1628.59 MB/s	       0 B/op	       0 allocs/op
+BenchmarkIsImageGenerationIntent/1MiBInputLeadingImageTool-2         	     866	    417009 ns/op	2514.68 MB/s	       0 B/op	       0 allocs/op
+BenchmarkIsImageGenerationIntent/1MiBInputTrailingToolChoice-2       	     535	    690996 ns/op	1517.61 MB/s	       0 B/op	       0 allocs/op
+BenchmarkIsImageGenerationIntent/Invalid1MiBJSON-2                   	     868	    419258 ns/op	2501.10 MB/s	       0 B/op	       0 allocs/op
+BenchmarkIsImageGenerationIntent/DuplicateKeysFirstWins-2            	     559	    655875 ns/op	1598.99 MB/s	       0 B/op	       0 allocs/op
+PASS
+peak-rss-kib: 74240
+
+# base-image-2.txt
+2026/11/20 11:15:40 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkIsImageGenerationIntent/1MiBInputNoImage-2         	     535	    662788 ns/op	1582.16 MB/s	       0 B/op	       0 allocs/op
+BenchmarkIsImageGenerationIntent/1MiBInputLeadingImageTool-2         	     880	    418703 ns/op	2504.51 MB/s	       0 B/op	       0 allocs/op
+BenchmarkIsImageGenerationIntent/1MiBInputTrailingToolChoice-2       	     552	    676132 ns/op	1550.97 MB/s	       0 B/op	       0 allocs/op
+BenchmarkIsImageGenerationIntent/Invalid1MiBJSON-2                   	     904	    409489 ns/op	2560.76 MB/s	       0 B/op	       0 allocs/op
+BenchmarkIsImageGenerationIntent/DuplicateKeysFirstWins-2            	     549	    653813 ns/op	1604.04 MB/s	       0 B/op	       0 allocs/op
+PASS
+peak-rss-kib: 73376
+
+# base-image-3.txt
+2026/11/20 11:17:18 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkIsImageGenerationIntent/1MiBInputNoImage-2         	     549	    646658 ns/op	1621.63 MB/s	       0 B/op	       0 allocs/op
+BenchmarkIsImageGenerationIntent/1MiBInputLeadingImageTool-2         	     896	    411856 ns/op	2546.14 MB/s	       0 B/op	       0 allocs/op
+BenchmarkIsImageGenerationIntent/1MiBInputTrailingToolChoice-2       	     561	    652620 ns/op	1606.84 MB/s	       0 B/op	       0 allocs/op
+BenchmarkIsImageGenerationIntent/Invalid1MiBJSON-2                   	     901	    399362 ns/op	2625.70 MB/s	       0 B/op	       0 allocs/op
+BenchmarkIsImageGenerationIntent/DuplicateKeysFirstWins-2            	     519	    665030 ns/op	1576.98 MB/s	       0 B/op	       0 allocs/op
+PASS
+peak-rss-kib: 73108
+
+# base-namespace-1.txt
+2026/11/20 11:14:16 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkStripOpenAIResponsesInputNamespaces/tools_only/1MiB-2         	     790	    494125 ns/op	2122.29 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStripOpenAIResponsesInputNamespaces/nested_only/1MiB-2        	     752	    491172 ns/op	2135.12 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStripOpenAIResponsesInputNamespaces/keep_calls/1MiB-2         	     702	    480272 ns/op	2183.63 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStripOpenAIResponsesInputNamespaces/strip_first/1MiB-2        	     430	    798513 ns/op	1313.36 MB/s	 2113856 B/op	       7 allocs/op
+BenchmarkStripOpenAIResponsesInputNamespaces/strip_last/1MiB-2         	     441	    780775 ns/op	1343.20 MB/s	 2113856 B/op	       7 allocs/op
+BenchmarkStripOpenAIResponsesInputNamespaces/tools_only/8MiB-2         	      98	   3815531 ns/op	2198.57 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStripOpenAIResponsesInputNamespaces/nested_only/8MiB-2        	      94	   3821587 ns/op	2195.09 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStripOpenAIResponsesInputNamespaces/keep_calls/8MiB-2         	      93	   3862607 ns/op	2171.79 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStripOpenAIResponsesInputNamespaces/strip_first/8MiB-2        	      54	   6378102 ns/op	1315.25 MB/s	16793920 B/op	       7 allocs/op
+BenchmarkStripOpenAIResponsesInputNamespaces/strip_last/8MiB-2         	      57	   6571130 ns/op	1276.61 MB/s	16793920 B/op	       7 allocs/op
+PASS
+peak-rss-kib: 199176
+
+# base-namespace-2.txt
+2026/11/20 11:15:54 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkStripOpenAIResponsesInputNamespaces/tools_only/1MiB-2         	     804	    443357 ns/op	2365.31 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStripOpenAIResponsesInputNamespaces/nested_only/1MiB-2        	     804	    467608 ns/op	2242.72 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStripOpenAIResponsesInputNamespaces/keep_calls/1MiB-2         	     762	    475175 ns/op	2207.05 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStripOpenAIResponsesInputNamespaces/strip_first/1MiB-2        	     423	    801892 ns/op	1307.83 MB/s	 2113856 B/op	       7 allocs/op
+BenchmarkStripOpenAIResponsesInputNamespaces/strip_last/1MiB-2         	     427	    817135 ns/op	1283.43 MB/s	 2113856 B/op	       7 allocs/op
+BenchmarkStripOpenAIResponsesInputNamespaces/tools_only/8MiB-2         	      92	   3910711 ns/op	2145.06 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStripOpenAIResponsesInputNamespaces/nested_only/8MiB-2        	      80	   3752163 ns/op	2235.71 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStripOpenAIResponsesInputNamespaces/keep_calls/8MiB-2         	      98	   3867806 ns/op	2168.87 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStripOpenAIResponsesInputNamespaces/strip_first/8MiB-2        	      52	   6366696 ns/op	1317.60 MB/s	16793920 B/op	       7 allocs/op
+BenchmarkStripOpenAIResponsesInputNamespaces/strip_last/8MiB-2         	      52	   6446590 ns/op	1301.27 MB/s	16793920 B/op	       7 allocs/op
+PASS
+peak-rss-kib: 198608
+
+# base-namespace-3.txt
+2026/11/20 11:17:32 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkStripOpenAIResponsesInputNamespaces/tools_only/1MiB-2         	     754	    475960 ns/op	2203.28 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStripOpenAIResponsesInputNamespaces/nested_only/1MiB-2        	     786	    472201 ns/op	2220.90 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStripOpenAIResponsesInputNamespaces/keep_calls/1MiB-2         	     750	    454726 ns/op	2306.30 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStripOpenAIResponsesInputNamespaces/strip_first/1MiB-2        	     424	    781671 ns/op	1341.66 MB/s	 2113856 B/op	       7 allocs/op
+BenchmarkStripOpenAIResponsesInputNamespaces/strip_last/1MiB-2         	     417	    804508 ns/op	1303.58 MB/s	 2113856 B/op	       7 allocs/op
+BenchmarkStripOpenAIResponsesInputNamespaces/tools_only/8MiB-2         	      88	   3845048 ns/op	2181.69 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStripOpenAIResponsesInputNamespaces/nested_only/8MiB-2        	      90	   3859809 ns/op	2173.36 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStripOpenAIResponsesInputNamespaces/keep_calls/8MiB-2         	      80	   3753585 ns/op	2234.87 MB/s	       0 B/op	       0 allocs/op
+BenchmarkStripOpenAIResponsesInputNamespaces/strip_first/8MiB-2        	      54	   6149807 ns/op	1364.07 MB/s	16793920 B/op	       7 allocs/op
+BenchmarkStripOpenAIResponsesInputNamespaces/strip_last/8MiB-2         	      58	   6550083 ns/op	1280.71 MB/s	16793920 B/op	       7 allocs/op
+PASS
+peak-rss-kib: 197832
+
+# base-parser-1.txt
+2026/11/20 11:13:58 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkParseGatewayRequest_LargeAnthropicMessages/4MB-2         	      60	   5623642 ns/op	 746.01 MB/s	     440 B/op	       4 allocs/op
+BenchmarkParseGatewayRequest_LargeAnthropicMessages/8MB-2         	      28	  12873475 ns/op	 651.66 MB/s	     440 B/op	       4 allocs/op
+BenchmarkParseGatewayRequest_LargeAnthropicMessages/16MB-2        	      14	  24802681 ns/op	 676.47 MB/s	     440 B/op	       4 allocs/op
+BenchmarkParseGatewayRequest_LargeAnthropicMessages/32MB-2        	       7	  46548418 ns/op	 720.87 MB/s	     440 B/op	       4 allocs/op
+BenchmarkParseGatewayRequest_LargeGeminiContents/4MB-2            	      67	   5342885 ns/op	 785.04 MB/s	     432 B/op	       4 allocs/op
+BenchmarkParseGatewayRequest_LargeGeminiContents/8MB-2            	      33	  11016558 ns/op	 761.47 MB/s	     432 B/op	       4 allocs/op
+BenchmarkParseGatewayRequest_LargeGeminiContents/16MB-2           	      15	  21998213 ns/op	 762.71 MB/s	     432 B/op	       4 allocs/op
+BenchmarkParseGatewayRequest_LargeGeminiContents/32MB-2           	       7	  45695637 ns/op	 734.32 MB/s	     432 B/op	       4 allocs/op
+PASS
+peak-rss-kib: 166692
+
+# base-parser-2.txt
+2026/11/20 11:15:36 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkParseGatewayRequest_LargeAnthropicMessages/4MB-2         	      61	   5735219 ns/op	 731.49 MB/s	     440 B/op	       4 allocs/op
+BenchmarkParseGatewayRequest_LargeAnthropicMessages/8MB-2         	      32	  10916258 ns/op	 768.50 MB/s	     440 B/op	       4 allocs/op
+BenchmarkParseGatewayRequest_LargeAnthropicMessages/16MB-2        	      15	  21754595 ns/op	 771.25 MB/s	     440 B/op	       4 allocs/op
+BenchmarkParseGatewayRequest_LargeAnthropicMessages/32MB-2        	       7	  43781983 ns/op	 766.42 MB/s	     440 B/op	       4 allocs/op
+BenchmarkParseGatewayRequest_LargeGeminiContents/4MB-2            	      72	   5288295 ns/op	 793.14 MB/s	     432 B/op	       4 allocs/op
+BenchmarkParseGatewayRequest_LargeGeminiContents/8MB-2            	      36	  14139756 ns/op	 593.27 MB/s	     432 B/op	       4 allocs/op
+BenchmarkParseGatewayRequest_LargeGeminiContents/16MB-2           	      16	  20461216 ns/op	 820.00 MB/s	     432 B/op	       4 allocs/op
+BenchmarkParseGatewayRequest_LargeGeminiContents/32MB-2           	       8	  42314539 ns/op	 793.00 MB/s	     432 B/op	       4 allocs/op
+PASS
+peak-rss-kib: 166340
+
+# base-parser-3.txt
+2026/11/20 11:17:14 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkParseGatewayRequest_LargeAnthropicMessages/4MB-2         	      61	   5842070 ns/op	 718.11 MB/s	     440 B/op	       4 allocs/op
+BenchmarkParseGatewayRequest_LargeAnthropicMessages/8MB-2         	      30	  11243248 ns/op	 746.15 MB/s	     440 B/op	       4 allocs/op
+BenchmarkParseGatewayRequest_LargeAnthropicMessages/16MB-2        	      15	  22577302 ns/op	 743.15 MB/s	     440 B/op	       4 allocs/op
+BenchmarkParseGatewayRequest_LargeAnthropicMessages/32MB-2        	       7	  46939394 ns/op	 714.87 MB/s	     440 B/op	       4 allocs/op
+BenchmarkParseGatewayRequest_LargeGeminiContents/4MB-2            	      69	   5383263 ns/op	 779.15 MB/s	     432 B/op	       4 allocs/op
+BenchmarkParseGatewayRequest_LargeGeminiContents/8MB-2            	      36	  10635554 ns/op	 788.74 MB/s	     432 B/op	       4 allocs/op
+BenchmarkParseGatewayRequest_LargeGeminiContents/16MB-2           	      16	  20839136 ns/op	 805.13 MB/s	     432 B/op	       4 allocs/op
+BenchmarkParseGatewayRequest_LargeGeminiContents/32MB-2           	       8	  42116093 ns/op	 796.74 MB/s	     432 B/op	       4 allocs/op
+PASS
+peak-rss-kib: 165568
+
+# base-schema-1.txt
+2026/11/20 11:14:04 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkOpenAIResponsesToolSchemasCPU/image/1MiB/repair=false/current-2         	    1002	    365636 ns/op	2868.46 MB/s	      16 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/1MiB/repair=true/current-2          	     236	   1527848 ns/op	 686.48 MB/s	 2113887 B/op	      12 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/1MiB/repair=false/current-2          	     872	    347001 ns/op	3022.51 MB/s	      16 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/1MiB/repair=true/current-2           	     237	   1545950 ns/op	 678.44 MB/s	 2113879 B/op	      12 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/8MiB/repair=false/current-2         	     127	   2703550 ns/op	3102.90 MB/s	      20 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/8MiB/repair=true/current-2          	      27	  11881691 ns/op	 706.03 MB/s	16794161 B/op	      13 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/8MiB/repair=false/current-2          	     134	   2692406 ns/op	3115.74 MB/s	      17 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/8MiB/repair=true/current-2           	      28	  12094522 ns/op	 693.61 MB/s	16794161 B/op	      13 allocs/op
+PASS
+peak-rss-kib: 190044
+
+# base-schema-2.txt
+2026/11/20 11:15:42 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkOpenAIResponsesToolSchemasCPU/image/1MiB/repair=false/current-2         	    1063	    354598 ns/op	2957.76 MB/s	      16 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/1MiB/repair=true/current-2          	     248	   1588137 ns/op	 660.42 MB/s	 2113888 B/op	      12 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/1MiB/repair=false/current-2          	     942	    339932 ns/op	3085.36 MB/s	      16 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/1MiB/repair=true/current-2           	     214	   1562388 ns/op	 671.31 MB/s	 2113878 B/op	      12 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/8MiB/repair=false/current-2         	     123	   2886021 ns/op	2906.72 MB/s	      20 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/8MiB/repair=true/current-2          	      27	  11706349 ns/op	 716.61 MB/s	16794136 B/op	      13 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/8MiB/repair=false/current-2          	     123	   2625015 ns/op	3195.73 MB/s	      18 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/8MiB/repair=true/current-2           	      30	  11661456 ns/op	 719.37 MB/s	16794118 B/op	      13 allocs/op
+PASS
+peak-rss-kib: 181924
+
+# base-schema-3.txt
+2026/11/20 11:17:20 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkOpenAIResponsesToolSchemasCPU/image/1MiB/repair=false/current-2         	    1098	    347680 ns/op	3016.61 MB/s	      16 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/1MiB/repair=true/current-2          	     228	   1501005 ns/op	 698.76 MB/s	 2113887 B/op	      12 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/1MiB/repair=false/current-2          	    1041	    361117 ns/op	2904.35 MB/s	      16 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/1MiB/repair=true/current-2           	     249	   1436739 ns/op	 730.02 MB/s	 2113882 B/op	      12 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/8MiB/repair=false/current-2         	     138	   2545132 ns/op	3296.04 MB/s	      20 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/image/8MiB/repair=true/current-2          	      28	  12834251 ns/op	 653.63 MB/s	16794149 B/op	      13 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/8MiB/repair=false/current-2          	     134	   2957492 ns/op	2836.47 MB/s	      17 B/op	       1 allocs/op
+BenchmarkOpenAIResponsesToolSchemasCPU/text/8MiB/repair=true/current-2           	      31	  11848085 ns/op	 708.04 MB/s	16794110 B/op	      13 allocs/op
+PASS
+peak-rss-kib: 189224
+
+# base-sharedcache-1.txt
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/repository
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_1-2         	    2119	    168052 ns/op	   7121504 decoded-retained-B	    229885 p95-ns	   50784 B/op	      64 allocs/op
+BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_10-2        	    2150	    166394 ns/op	  11312632 decoded-retained-B	    224414 p95-ns	   50784 B/op	      64 allocs/op
+BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_100-2       	    2061	    166933 ns/op	  47902624 decoded-retained-B	    225828 p95-ns	   50784 B/op	      64 allocs/op
+PASS
+peak-rss-kib: 403260
+
+# base-sharedcache-2.txt
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/repository
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_1-2         	    2158	    171973 ns/op	   7109488 decoded-retained-B	    230952 p95-ns	   50784 B/op	      64 allocs/op
+BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_10-2        	    2272	    156742 ns/op	  11312888 decoded-retained-B	    214716 p95-ns	   50784 B/op	      64 allocs/op
+BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_100-2       	    2270	    157505 ns/op	  47903064 decoded-retained-B	    220216 p95-ns	   50784 B/op	      64 allocs/op
+PASS
+peak-rss-kib: 410236
+
+# base-sharedcache-3.txt
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/repository
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_1-2         	    2062	    168282 ns/op	   7109280 decoded-retained-B	    250604 p95-ns	   50784 B/op	      64 allocs/op
+BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_10-2        	    2340	    161176 ns/op	  11312424 decoded-retained-B	    226729 p95-ns	   50784 B/op	      64 allocs/op
+BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_100-2       	    2217	    162281 ns/op	  47903904 decoded-retained-B	    228713 p95-ns	   50784 B/op	      64 allocs/op
+PASS
+peak-rss-kib: 403472
+
+# base-timezone-1.txt
+2026/11/20 11:14:08 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkOpenAIRequestTimezoneRetryCPU/1MiB/1_attempts/sources_only-2         	     230	   1531540 ns/op	 684.98 MB/s	 2128080 B/op	     168 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/1MiB/5_attempts/sources_only-2         	      46	   7591117 ns/op	 690.99 MB/s	10640289 B/op	     840 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/1MiB/8_attempts/sources_only-2         	      26	  11962832 ns/op	 701.56 MB/s	17024524 B/op	    1344 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/8MiB/1_attempts/sources_only-2         	      32	  10584188 ns/op	 792.61 MB/s	16808611 B/op	     172 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/8MiB/5_attempts/sources_only-2         	       6	  53271162 ns/op	 787.40 MB/s	84042860 B/op	     858 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/8MiB/8_attempts/sources_only-2         	       4	  86099474 ns/op	 779.48 MB/s	134469590 B/op	    1382 allocs/op
+PASS
+peak-rss-kib: 260040
+
+# base-timezone-2.txt
+2026/11/20 11:15:46 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkOpenAIRequestTimezoneRetryCPU/1MiB/1_attempts/sources_only-2         	     217	   1592467 ns/op	 658.77 MB/s	 2128065 B/op	     168 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/1MiB/5_attempts/sources_only-2         	      43	   8194689 ns/op	 640.09 MB/s	10640326 B/op	     840 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/1MiB/8_attempts/sources_only-2         	      27	  12543911 ns/op	 669.06 MB/s	17024769 B/op	    1346 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/8MiB/1_attempts/sources_only-2         	      34	  11044566 ns/op	 759.57 MB/s	16808562 B/op	     171 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/8MiB/5_attempts/sources_only-2         	       6	  55736673 ns/op	 752.57 MB/s	84043328 B/op	     862 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/8MiB/8_attempts/sources_only-2         	       4	  88323846 ns/op	 759.85 MB/s	134469122 B/op	    1378 allocs/op
+PASS
+peak-rss-kib: 260852
+
+# base-timezone-3.txt
+2026/11/20 11:17:24 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkOpenAIRequestTimezoneRetryCPU/1MiB/1_attempts/sources_only-2         	     241	   1482300 ns/op	 707.73 MB/s	 2128083 B/op	     168 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/1MiB/5_attempts/sources_only-2         	      42	   7404699 ns/op	 708.38 MB/s	10640337 B/op	     840 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/1MiB/8_attempts/sources_only-2         	      27	  12226512 ns/op	 686.43 MB/s	17024521 B/op	    1344 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/8MiB/1_attempts/sources_only-2         	      27	  11942393 ns/op	 702.46 MB/s	16808479 B/op	     170 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/8MiB/5_attempts/sources_only-2         	       6	  53133008 ns/op	 789.44 MB/s	84043328 B/op	     862 allocs/op
+BenchmarkOpenAIRequestTimezoneRetryCPU/8MiB/8_attempts/sources_only-2         	       4	 102843755 ns/op	 652.57 MB/s	134469122 B/op	    1378 allocs/op
+PASS
+peak-rss-kib: 262568
+
+# base-transform-1.txt
+2026/11/20 11:14:12 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkCodexTransformRetryCPU/1MiB/image_false/attempts_1/sparse-2         	     210	   1649027 ns/op	 635.96 MB/s	 5245766 B/op	      74 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_false/attempts_5/sparse-2         	      43	   8130968 ns/op	 644.89 MB/s	26228383 B/op	     372 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_false/attempts_15/sparse-2        	      12	  26552146 ns/op	 592.45 MB/s	78685630 B/op	    1119 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_true/attempts_1/sparse-2          	     210	   1722579 ns/op	 608.82 MB/s	 5253895 B/op	      76 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_true/attempts_5/sparse-2          	      38	   8481657 ns/op	 618.24 MB/s	26269570 B/op	     382 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_true/attempts_15/sparse-2         	      13	  25891765 ns/op	 607.57 MB/s	78811933 B/op	    1157 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_false/attempts_1/sparse-2         	      30	  12043116 ns/op	 696.56 MB/s	41948267 B/op	      87 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_false/attempts_5/sparse-2         	       6	  57535280 ns/op	 729.01 MB/s	209744968 B/op	     451 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_false/attempts_15/sparse-2        	       2	 174430444 ns/op	 721.38 MB/s	629232168 B/op	    1344 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_true/attempts_1/sparse-2          	      31	  11457909 ns/op	 732.14 MB/s	41956387 B/op	      88 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_true/attempts_5/sparse-2          	       6	  58696896 ns/op	 714.58 MB/s	209781474 B/op	     439 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_true/attempts_15/sparse-2         	       2	 181690830 ns/op	 692.56 MB/s	629358016 B/op	    1365 allocs/op
+PASS
+peak-rss-kib: 156904
+
+# base-transform-2.txt
+2026/11/20 11:15:49 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkCodexTransformRetryCPU/1MiB/image_false/attempts_1/sparse-2         	     202	   1837114 ns/op	 570.85 MB/s	 5245761 B/op	      74 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_false/attempts_5/sparse-2         	      36	   9302321 ns/op	 563.68 MB/s	26228550 B/op	     373 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_false/attempts_15/sparse-2        	      13	  25318479 ns/op	 621.31 MB/s	78686257 B/op	    1121 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_true/attempts_1/sparse-2          	     204	   1723319 ns/op	 608.56 MB/s	 5253912 B/op	      76 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_true/attempts_5/sparse-2          	      37	   8324921 ns/op	 629.88 MB/s	26269054 B/op	     380 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_true/attempts_15/sparse-2         	      13	  25864774 ns/op	 608.21 MB/s	78810202 B/op	    1151 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_false/attempts_1/sparse-2         	      25	  12018171 ns/op	 698.01 MB/s	41948377 B/op	      87 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_false/attempts_5/sparse-2         	       6	  58350444 ns/op	 718.82 MB/s	209739525 B/op	     430 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_false/attempts_15/sparse-2        	       2	 178629069 ns/op	 704.43 MB/s	629240328 B/op	    1375 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_true/attempts_1/sparse-2          	      28	  11995925 ns/op	 699.30 MB/s	41955884 B/op	      86 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_true/attempts_5/sparse-2          	       6	  58404069 ns/op	 718.17 MB/s	209790530 B/op	     471 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_true/attempts_15/sparse-2         	       2	 171501129 ns/op	 733.71 MB/s	629349840 B/op	    1337 allocs/op
+PASS
+peak-rss-kib: 158664
+
+# base-transform-3.txt
+2026/11/20 11:17:28 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkCodexTransformRetryCPU/1MiB/image_false/attempts_1/sparse-2         	     208	   1726682 ns/op	 607.36 MB/s	 5245876 B/op	      75 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_false/attempts_5/sparse-2         	      40	   8630506 ns/op	 607.56 MB/s	26229096 B/op	     375 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_false/attempts_15/sparse-2        	      12	  25423122 ns/op	 618.76 MB/s	78685230 B/op	    1118 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_true/attempts_1/sparse-2          	     206	   1739421 ns/op	 602.93 MB/s	 5254012 B/op	      76 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_true/attempts_5/sparse-2          	      36	   8562917 ns/op	 612.37 MB/s	26268986 B/op	     380 allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_true/attempts_15/sparse-2         	      12	  26473087 ns/op	 594.23 MB/s	78809997 B/op	    1150 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_false/attempts_1/sparse-2         	      28	  12022072 ns/op	 697.78 MB/s	41947684 B/op	      85 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_false/attempts_5/sparse-2         	       5	  60720224 ns/op	 690.77 MB/s	209737524 B/op	     422 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_false/attempts_15/sparse-2        	       2	 177490991 ns/op	 708.94 MB/s	629221304 B/op	    1302 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_true/attempts_1/sparse-2          	      22	  14783137 ns/op	 567.46 MB/s	41956217 B/op	      87 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_true/attempts_5/sparse-2          	       5	  64650673 ns/op	 648.78 MB/s	209779656 B/op	     433 allocs/op
+BenchmarkCodexTransformRetryCPU/8MiB/image_true/attempts_15/sparse-2         	       2	 182378419 ns/op	 689.95 MB/s	629344424 B/op	    1318 allocs/op
+PASS
+peak-rss-kib: 165920

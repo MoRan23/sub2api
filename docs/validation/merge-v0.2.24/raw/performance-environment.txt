@@ -1,0 +1,6 @@
+go version go1.27.4 linux/amd64
+greenteagc,jsonv2
+local
+GOMAXPROCS=2
+benchtime=300ms
+rounds=3

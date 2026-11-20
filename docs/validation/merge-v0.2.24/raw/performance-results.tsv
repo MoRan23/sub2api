@@ -1,0 +1,85 @@
+benchmark	base ns/op	merged ns/op	delta %	base B/op	merged B/op	base allocs/op	merged allocs/op
+BenchmarkCodexTransformRetryCPU/1MiB/image_false/attempts_1/sparse	1726682.0	1595304.0	-7.61	5245766.0	5245783.0	74.0	74.0
+BenchmarkCodexTransformRetryCPU/1MiB/image_false/attempts_15/sparse	25423122.0	23839056.0	-6.23	78685630.0	78687345.0	1119.0	1125.0
+BenchmarkCodexTransformRetryCPU/1MiB/image_false/attempts_5/sparse	8630506.0	7770618.0	-9.96	26228550.0	26229173.0	373.0	375.0
+BenchmarkCodexTransformRetryCPU/1MiB/image_true/attempts_1/sparse	1723319.0	1577271.0	-8.47	5253912.0	5254023.0	76.0	76.0
+BenchmarkCodexTransformRetryCPU/1MiB/image_true/attempts_15/sparse	25891765.0	23940133.0	-7.54	78810202.0	78809248.0	1151.0	1148.0
+BenchmarkCodexTransformRetryCPU/1MiB/image_true/attempts_5/sparse	8481657.0	7904787.0	-6.8	26269054.0	26270360.0	380.0	384.0
+BenchmarkCodexTransformRetryCPU/8MiB/image_false/attempts_1/sparse	12022072.0	11000230.0	-8.5	41948267.0	41948180.0	87.0	87.0
+BenchmarkCodexTransformRetryCPU/8MiB/image_false/attempts_15/sparse	177490991.0	162905743.0	-8.22	629232168.0	629213136.0	1344.0	1270.0
+BenchmarkCodexTransformRetryCPU/8MiB/image_false/attempts_5/sparse	58350444.0	53891298.0	-7.64	209739525.0	209741341.0	430.0	437.0
+BenchmarkCodexTransformRetryCPU/8MiB/image_true/attempts_1/sparse	11995925.0	10733026.0	-10.53	41956217.0	41955448.0	87.0	84.0
+BenchmarkCodexTransformRetryCPU/8MiB/image_true/attempts_15/sparse	181690830.0	165476377.0	-8.92	629349840.0	629347128.0	1337.0	1327.0
+BenchmarkCodexTransformRetryCPU/8MiB/image_true/attempts_5/sparse	58696896.0	52792310.0	-10.06	209781474.0	209780560.0	439.0	436.0
+BenchmarkConflictingFieldLargeBody/1048576/duplicate=false		18026.0	0		144.0		5.0
+BenchmarkConflictingFieldLargeBody/1048576/duplicate=true		17087.0	0		112.0		6.0
+BenchmarkConflictingFieldLargeBody/4194304/duplicate=false		72905.0	0		144.0		5.0
+BenchmarkConflictingFieldLargeBody/4194304/duplicate=true		71793.0	0		112.0		6.0
+BenchmarkConflictingFieldLargeBody/65536/duplicate=false		1159.0	0		144.0		5.0
+BenchmarkConflictingFieldLargeBody/65536/duplicate=true		1130.0	0		112.0		6.0
+BenchmarkConflictingFieldLargeBody/8388608/duplicate=false		145350.0	0		144.0		5.0
+BenchmarkConflictingFieldLargeBody/8388608/duplicate=true		152571.0	0		112.0		6.0
+BenchmarkIsImageGenerationIntent/1MiBInputLeadingImageTool	417009.0	409360.0	-1.83	0.0	0.0	0.0	0.0
+BenchmarkIsImageGenerationIntent/1MiBInputNoImage	646658.0	33847.0	-94.77	0.0	0.0	0.0	0.0
+BenchmarkIsImageGenerationIntent/1MiBInputTrailingToolChoice	676132.0	684327.0	1.21	0.0	0.0	0.0	0.0
+BenchmarkIsImageGenerationIntent/DuplicateKeysFirstWins	655875.0	688762.0	5.01	0.0	0.0	0.0	0.0
+BenchmarkIsImageGenerationIntent/Invalid1MiBJSON	409489.0	34716.0	-91.52	0.0	0.0	0.0	0.0
+BenchmarkOpenAIRequestTimezoneRetryCPU/1MiB/1_attempts/sources_only	1531540.0	1409044.0	-8.0	2128080.0	2128064.0	168.0	168.0
+BenchmarkOpenAIRequestTimezoneRetryCPU/1MiB/5_attempts/sources_only	7591117.0	6663875.0	-12.21	10640326.0	10640415.0	840.0	841.0
+BenchmarkOpenAIRequestTimezoneRetryCPU/1MiB/8_attempts/sources_only	12226512.0	10304977.0	-15.72	17024524.0	17024550.0	1344.0	1345.0
+BenchmarkOpenAIRequestTimezoneRetryCPU/8MiB/1_attempts/sources_only	11044566.0	9108380.0	-17.53	16808562.0	16808650.0	171.0	172.0
+BenchmarkOpenAIRequestTimezoneRetryCPU/8MiB/5_attempts/sources_only	53271162.0	46318264.0	-13.05	84043328.0	84043210.0	862.0	861.0
+BenchmarkOpenAIRequestTimezoneRetryCPU/8MiB/8_attempts/sources_only	88323846.0	75158769.0	-14.91	134469122.0	134468326.0	1378.0	1371.0
+BenchmarkOpenAIResponsesToolSchemasCPU/image/1MiB/repair=false/current	354598.0	54401.0	-84.66	16.0	0.0	1.0	0.0
+BenchmarkOpenAIResponsesToolSchemasCPU/image/1MiB/repair=true/current	1527848.0	1239650.0	-18.86	2113887.0	2113875.0	12.0	11.0
+BenchmarkOpenAIResponsesToolSchemasCPU/image/8MiB/repair=false/current	2703550.0	440540.0	-83.71	20.0	0.0	1.0	0.0
+BenchmarkOpenAIResponsesToolSchemasCPU/image/8MiB/repair=true/current	11881691.0	9729827.0	-18.11	16794149.0	16794096.0	13.0	12.0
+BenchmarkOpenAIResponsesToolSchemasCPU/text/1MiB/repair=false/current	347001.0	53728.0	-84.52	16.0	0.0	1.0	0.0
+BenchmarkOpenAIResponsesToolSchemasCPU/text/1MiB/repair=true/current	1545950.0	1216369.0	-21.32	2113879.0	2113878.0	12.0	11.0
+BenchmarkOpenAIResponsesToolSchemasCPU/text/8MiB/repair=false/current	2692406.0	470040.0	-82.54	17.0	0.0	1.0	0.0
+BenchmarkOpenAIResponsesToolSchemasCPU/text/8MiB/repair=true/current	11848085.0	9663266.0	-18.44	16794118.0	16794123.0	13.0	12.0
+BenchmarkParseGatewayRequest_LargeAnthropicMessages/16MB	22577302.0	9750232.0	-56.81	440.0	440.0	4.0	4.0
+BenchmarkParseGatewayRequest_LargeAnthropicMessages/32MB	46548418.0	19533803.0	-58.04	440.0	440.0	4.0	4.0
+BenchmarkParseGatewayRequest_LargeAnthropicMessages/4MB	5735219.0	2476489.0	-56.82	440.0	440.0	4.0	4.0
+BenchmarkParseGatewayRequest_LargeAnthropicMessages/8MB	11243248.0	4878886.0	-56.61	440.0	440.0	4.0	4.0
+BenchmarkParseGatewayRequest_LargeGeminiContents/16MB	20839136.0	9778252.0	-53.08	432.0	432.0	4.0	4.0
+BenchmarkParseGatewayRequest_LargeGeminiContents/32MB	42314539.0	19565295.0	-53.76	432.0	432.0	4.0	4.0
+BenchmarkParseGatewayRequest_LargeGeminiContents/4MB	5342885.0	2461721.0	-53.93	432.0	432.0	4.0	4.0
+BenchmarkParseGatewayRequest_LargeGeminiContents/8MB	11016558.0	4874474.0	-55.75	432.0	432.0	4.0	4.0
+BenchmarkPromptAuditMemory/image/1048576/combination	686554.0	752244.0	9.57	1061353.0	1061344.0	71.0	71.0
+BenchmarkPromptAuditMemory/image/1048576/keyword	704456.0	724269.0	2.81	1059953.0	1059952.0	54.0	54.0
+BenchmarkPromptAuditMemory/image/1048576/snapshot	726019.0	763866.0	5.21	1059839.0	1059829.0	54.0	54.0
+BenchmarkPromptAuditMemory/image/4194304/combination	2786115.0	2628902.0	-5.64	4207145.0	4207140.0	71.0	71.0
+BenchmarkPromptAuditMemory/image/4194304/keyword	2718557.0	2718963.0	0.01	4205749.0	4205755.0	54.0	54.0
+BenchmarkPromptAuditMemory/image/4194304/snapshot	2643414.0	2634741.0	-0.33	4205679.0	4205634.0	54.0	54.0
+BenchmarkPromptAuditMemory/image/65536/combination	51865.0	52281.0	0.8	78275.0	78274.0	71.0	71.0
+BenchmarkPromptAuditMemory/image/65536/keyword	51217.0	51136.0	-0.16	76880.0	76878.0	54.0	54.0
+BenchmarkPromptAuditMemory/image/65536/snapshot	51194.0	50713.0	-0.94	76765.0	76766.0	54.0	54.0
+BenchmarkPromptAuditMemory/image/8388608/combination	5245338.0	5445090.0	3.81	8401505.0	8401502.0	71.0	71.0
+BenchmarkPromptAuditMemory/image/8388608/keyword	5182073.0	5281581.0	1.92	8400183.0	8400108.0	55.0	54.0
+BenchmarkPromptAuditMemory/image/8388608/snapshot	5181212.0	5184260.0	0.06	8399999.0	8399923.0	54.0	54.0
+BenchmarkPromptAuditMemory/text/1048576/combination	3060775.0	3196183.0	4.42	4228793.0	4230854.0	87.0	88.0
+BenchmarkPromptAuditMemory/text/1048576/keyword	3095935.0	3121886.0	0.84	4223692.0	4223799.0	69.0	69.0
+BenchmarkPromptAuditMemory/text/1048576/snapshot	112669327.0	116409299.0	3.32	5358789.0	5360602.0	93.0	98.0
+BenchmarkPromptAuditMemory/text/4194304/combination	12411618.0	12547938.0	1.1	16826019.0	16830283.0	96.0	98.0
+BenchmarkPromptAuditMemory/text/4194304/keyword	12457532.0	12201848.0	-2.05	16807840.0	16808059.0	73.0	74.0
+BenchmarkPromptAuditMemory/text/4194304/snapshot	475567894.0	489508632.0	2.93	21095096.0	21095096.0	119.0	119.0
+BenchmarkPromptAuditMemory/text/65536/combination	221751.0	224064.0	1.04	292477.0	292598.0	84.0	84.0
+BenchmarkPromptAuditMemory/text/65536/keyword	220996.0	228285.0	3.3	290909.0	290918.0	67.0	67.0
+BenchmarkPromptAuditMemory/text/65536/snapshot	7297118.0	7529295.0	3.18	439388.0	439425.0	74.0	75.0
+BenchmarkPromptAuditMemory/text/8388608/combination	24708987.0	24730266.0	0.09	33598774.0	33597991.0	97.0	94.0
+BenchmarkPromptAuditMemory/text/8388608/keyword	24898702.0	24703707.0	-0.78	33578271.0	33577687.0	78.0	76.0
+BenchmarkPromptAuditMemory/text/8388608/snapshot	907641042.0	959147723.0	5.67	42058424.0	42058424.0	119.0	119.0
+BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_1	168282.0	174547.0	3.72	50784.0	50784.0	64.0	64.0
+BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_10	161176.0	164449.0	2.03	50784.0	50784.0	64.0	64.0
+BenchmarkSchedulerCacheReadSharing/accounts_2000_groups_100	162281.0	164213.0	1.19	50784.0	50784.0	64.0	64.0
+BenchmarkStripOpenAIResponsesInputNamespaces/keep_calls/1MiB	475175.0	460401.0	-3.11	0.0	0.0	0.0	0.0
+BenchmarkStripOpenAIResponsesInputNamespaces/keep_calls/8MiB	3862607.0	3800420.0	-1.61	0.0	0.0	0.0	0.0
+BenchmarkStripOpenAIResponsesInputNamespaces/nested_only/1MiB	472201.0	471990.0	-0.04	0.0	0.0	0.0	0.0
+BenchmarkStripOpenAIResponsesInputNamespaces/nested_only/8MiB	3821587.0	3628260.0	-5.06	0.0	0.0	0.0	0.0
+BenchmarkStripOpenAIResponsesInputNamespaces/strip_first/1MiB	798513.0	568799.0	-28.77	2113856.0	1056928.0	7.0	4.0
+BenchmarkStripOpenAIResponsesInputNamespaces/strip_first/8MiB	6366696.0	4733004.0	-25.66	16793920.0	8396960.0	7.0	4.0
+BenchmarkStripOpenAIResponsesInputNamespaces/strip_last/1MiB	804508.0	585718.0	-27.2	2113856.0	1056928.0	7.0	4.0
+BenchmarkStripOpenAIResponsesInputNamespaces/strip_last/8MiB	6550083.0	4617999.0	-29.5	16793920.0	8396960.0	7.0	4.0
+BenchmarkStripOpenAIResponsesInputNamespaces/tools_only/1MiB	475960.0	455567.0	-4.28	0.0	0.0	0.0	0.0
+BenchmarkStripOpenAIResponsesInputNamespaces/tools_only/8MiB	3845048.0	3696123.0	-3.87	0.0	0.0	0.0	0.0

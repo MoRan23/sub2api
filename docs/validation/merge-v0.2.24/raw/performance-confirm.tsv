@@ -1,0 +1,5 @@
+benchmark	base ns/op	merged ns/op	delta %	base B/op	merged B/op	base allocs/op	merged allocs/op
+BenchmarkIsImageGenerationIntent/DuplicateKeysFirstWins	670205.0	683097.0	1.92	0.0	0.0	0.0	0.0
+BenchmarkPromptAuditMemory/image/1048576/combination	683737.0	687964.0	0.62	1061349.0	1061342.0	71.0	71.0
+BenchmarkPromptAuditMemory/image/1048576/snapshot	680230.0	682418.0	0.32	1059835.0	1059835.0	54.0	54.0
+BenchmarkPromptAuditMemory/text/8388608/snapshot	924690367.0	915758541.0	-0.97	42055176.0	42055240.0	106.0	107.0

@@ -1,0 +1,129 @@
+# base-audit-image-1.txt
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/securityaudit
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkPromptAuditMemory/image/1048576/combination-2         	    1646	    683737 ns/op	1533.82 MB/s	 1061343 B/op	      71 allocs/op
+BenchmarkPromptAuditMemory/image/1048576/snapshot-2            	    1746	    680230 ns/op	1541.73 MB/s	 1059829 B/op	      54 allocs/op
+PASS
+
+# base-audit-image-2.txt
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/securityaudit
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkPromptAuditMemory/image/1048576/combination-2         	    1705	    671282 ns/op	1562.28 MB/s	 1061349 B/op	      71 allocs/op
+BenchmarkPromptAuditMemory/image/1048576/snapshot-2            	    1821	    691918 ns/op	1515.68 MB/s	 1059835 B/op	      54 allocs/op
+PASS
+
+# base-audit-image-3.txt
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/securityaudit
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkPromptAuditMemory/image/1048576/combination-2         	    1782	    679358 ns/op	1543.71 MB/s	 1061357 B/op	      71 allocs/op
+BenchmarkPromptAuditMemory/image/1048576/snapshot-2            	    1764	    707653 ns/op	1481.98 MB/s	 1059835 B/op	      54 allocs/op
+PASS
+
+# base-audit-image-4.txt
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/securityaudit
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkPromptAuditMemory/image/1048576/combination-2         	    1635	    703888 ns/op	1489.91 MB/s	 1061349 B/op	      71 allocs/op
+BenchmarkPromptAuditMemory/image/1048576/snapshot-2            	    1712	    675757 ns/op	1551.93 MB/s	 1059842 B/op	      54 allocs/op
+PASS
+
+# base-audit-image-5.txt
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/securityaudit
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkPromptAuditMemory/image/1048576/combination-2         	    1524	    698129 ns/op	1502.20 MB/s	 1061351 B/op	      71 allocs/op
+BenchmarkPromptAuditMemory/image/1048576/snapshot-2            	    1694	    664106 ns/op	1579.16 MB/s	 1059842 B/op	      54 allocs/op
+PASS
+
+# base-audit-text-1.txt
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/securityaudit
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkPromptAuditMemory/text/8388608/snapshot-2         	       2	 935952620 ns/op	   8.96 MB/s	42052520 B/op	      98 allocs/op
+PASS
+
+# base-audit-text-2.txt
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/securityaudit
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkPromptAuditMemory/text/8388608/snapshot-2         	       2	 928634104 ns/op	   9.03 MB/s	42055764 B/op	     111 allocs/op
+PASS
+
+# base-audit-text-3.txt
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/securityaudit
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkPromptAuditMemory/text/8388608/snapshot-2         	       2	 924690367 ns/op	   9.07 MB/s	42055176 B/op	     106 allocs/op
+PASS
+
+# base-audit-text-4.txt
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/securityaudit
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkPromptAuditMemory/text/8388608/snapshot-2         	       2	 917731390 ns/op	   9.14 MB/s	42052520 B/op	      98 allocs/op
+PASS
+
+# base-audit-text-5.txt
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/securityaudit
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkPromptAuditMemory/text/8388608/snapshot-2         	       2	 910806342 ns/op	   9.21 MB/s	42055764 B/op	     111 allocs/op
+PASS
+
+# base-image-1.txt
+2026/11/20 11:19:52 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkIsImageGenerationIntent/DuplicateKeysFirstWins-2         	    1803	    670355 ns/op	1564.46 MB/s	       0 B/op	       0 allocs/op
+PASS
+
+# base-image-2.txt
+2026/11/20 11:20:03 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkIsImageGenerationIntent/DuplicateKeysFirstWins-2         	    1741	    642979 ns/op	1631.06 MB/s	       0 B/op	       0 allocs/op
+PASS
+
+# base-image-3.txt
+2026/11/20 11:20:14 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkIsImageGenerationIntent/DuplicateKeysFirstWins-2         	    1815	    672537 ns/op	1559.38 MB/s	       0 B/op	       0 allocs/op
+PASS
+
+# base-image-4.txt
+2026/11/20 11:20:25 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkIsImageGenerationIntent/DuplicateKeysFirstWins-2         	    1764	    670205 ns/op	1564.81 MB/s	       0 B/op	       0 allocs/op
+PASS
+
+# base-image-5.txt
+2026/11/20 11:20:36 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkIsImageGenerationIntent/DuplicateKeysFirstWins-2         	    1759	    666950 ns/op	1572.44 MB/s	       0 B/op	       0 allocs/op
+PASS
