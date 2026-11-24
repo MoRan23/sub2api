@@ -24,6 +24,7 @@ const (
 	NotificationEmailEventAuthPasswordReset           = "auth.password_reset"
 	NotificationEmailEventNotificationEmailVerifyCode = "notification_email.verify_code"
 	NotificationEmailEventSubscriptionPurchaseSuccess = "subscription.purchase_success"
+	NotificationEmailEventSubscriptionTopupDelivery   = "subscription_topup.delivery"
 	NotificationEmailEventSubscriptionExpiryReminder  = "subscription.expiry_reminder"
 	NotificationEmailEventBalanceLow                  = "balance.low"
 	NotificationEmailEventBalanceRechargeSuccess      = "balance.recharge_success"
@@ -126,6 +127,7 @@ type NotificationEmailSendInput struct {
 	SourceType       string
 	SourceID         string
 	ReminderKey      string
+	MessageID        string
 	Variables        map[string]string
 	RawHTMLVariables map[string]string
 }
@@ -422,7 +424,7 @@ func (s *NotificationEmailService) Send(ctx context.Context, input NotificationE
 	if s.emailService == nil {
 		return notificationEmailConfigErr(errors.New("email service is not configured"))
 	}
-	if err := s.emailService.SendEmail(ctx, recipient, rendered.Subject, rendered.HTML); err != nil {
+	if err := s.emailService.SendEmailWithOptions(ctx, recipient, rendered.Subject, rendered.HTML, EmailSendOptions{MessageID: input.MessageID}); err != nil {
 		return notificationEmailDeliveryErr(err)
 	}
 	if deliveryKey != "" {
@@ -520,6 +522,13 @@ func (s *NotificationEmailService) sampleVariables(ctx context.Context, event, l
 		variables[key] = value
 	}
 	addNotificationEmailPromptAuditSampleVariables(variables, event, locale)
+	if event == NotificationEmailEventSubscriptionTopupDelivery {
+		variables["product_name"] = "Example subscription"
+		variables["sku_name"] = "Monthly CDK"
+		variables["quantity"] = "2"
+		variables["cards"] = "EXAMPLE-CDK-001\nEXAMPLE-CDK-002"
+		variables["instructions"] = "Use these sample codes on the redemption page."
+	}
 	variables["site_name"] = s.siteName(ctx)
 	if variables["unsubscribe_url"] == "" && info.Optional {
 		variables["unsubscribe_url"] = "https://example.com/unsubscribe"
@@ -529,6 +538,11 @@ func (s *NotificationEmailService) sampleVariables(ctx context.Context, event, l
 
 func (s *NotificationEmailService) runtimeVariables(ctx context.Context, event, locale string, input NotificationEmailSendInput) map[string]string {
 	variables := s.sampleVariables(ctx, event, locale)
+	if event == NotificationEmailEventSubscriptionTopupDelivery {
+		for _, key := range []string{"product_name", "sku_name", "quantity", "cards", "instructions", "order_id"} {
+			delete(variables, key)
+		}
+	}
 	for key, value := range input.Variables {
 		variables[key] = value
 	}
@@ -1038,6 +1052,7 @@ var notificationEmailEventOrder = []string{
 	NotificationEmailEventAuthPasswordReset,
 	NotificationEmailEventNotificationEmailVerifyCode,
 	NotificationEmailEventSubscriptionPurchaseSuccess,
+	NotificationEmailEventSubscriptionTopupDelivery,
 	NotificationEmailEventSubscriptionExpiryReminder,
 	NotificationEmailEventBalanceLow,
 	NotificationEmailEventBalanceRechargeSuccess,
@@ -1091,6 +1106,11 @@ var notificationEmailEventDefinitions = map[string]NotificationEmailEventInfo{
 		Category:     "subscription",
 		Optional:     false,
 		Placeholders: append(append([]string{}, notificationEmailCommonPlaceholders...), "subscription_group", "subscription_days", "expiry_time", "order_id"),
+	},
+	NotificationEmailEventSubscriptionTopupDelivery: {
+		Event: NotificationEmailEventSubscriptionTopupDelivery, Label: "Subscription top-up CDK delivery", Category: "subscription", Optional: false,
+		Description:  "Delivers purchased CDKs and redemption instructions after successful payment.",
+		Placeholders: append(append([]string{}, notificationEmailCommonPlaceholders...), "product_name", "sku_name", "quantity", "cards", "instructions", "order_id"),
 	},
 	NotificationEmailEventSubscriptionExpiryReminder: {
 		Event:        NotificationEmailEventSubscriptionExpiryReminder,
@@ -1259,6 +1279,28 @@ var notificationEmailOfficialTemplates = map[string]map[string]notificationEmail
 <p>您的 <strong>{{subscription_group}}</strong> 订阅已成功开通，有效期 <strong>{{subscription_days}}</strong> 天。</p>
 <p>到期时间：<strong>{{expiry_time}}</strong></p>
 <p>订单号：{{order_id}}</p>`),
+		},
+	},
+	NotificationEmailEventSubscriptionTopupDelivery: {
+		notificationEmailDefaultLocale: {
+			Subject: "[{{site_name}}] Your subscription top-up CDKs",
+			HTML: notificationEmailCard("#2563eb", "Your CDKs are ready", `
+<p>Hello {{recipient_name}},</p>
+<p>{{product_name}} · {{sku_name}} × {{quantity}}</p>
+<pre style="white-space:pre-wrap;overflow-wrap:anywhere">{{cards}}</pre>
+<p style="white-space:pre-wrap">{{instructions}}</p>
+<p>Order ID: {{order_id}}</p>
+<p>You can also view these same CDKs in your order details. Contact the administrator for refunds.</p>`),
+		},
+		notificationEmailLocaleChinese: {
+			Subject: "[{{site_name}}] 您购买的订阅代充卡密",
+			HTML: notificationEmailCard("#2563eb", "卡密已发货", `
+<p>{{recipient_name}}，您好：</p>
+<p>{{product_name}} · {{sku_name}} × {{quantity}}</p>
+<pre style="white-space:pre-wrap;overflow-wrap:anywhere">{{cards}}</pre>
+<p style="white-space:pre-wrap">{{instructions}}</p>
+<p>订单号：{{order_id}}</p>
+<p>您也可以在站内订单详情查看相同卡密。退款请联系管理员。</p>`),
 		},
 	},
 	NotificationEmailEventSubscriptionExpiryReminder: {

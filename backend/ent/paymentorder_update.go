@@ -333,6 +333,80 @@ func (_u *PaymentOrderUpdate) ClearQrCodeImg() *PaymentOrderUpdate {
 	return _u
 }
 
+// SetTopupSkuID sets the "topup_sku_id" field.
+func (_u *PaymentOrderUpdate) SetTopupSkuID(v int64) *PaymentOrderUpdate {
+	_u.mutation.ResetTopupSkuID()
+	_u.mutation.SetTopupSkuID(v)
+	return _u
+}
+
+// SetNillableTopupSkuID sets the "topup_sku_id" field if the given value is not nil.
+func (_u *PaymentOrderUpdate) SetNillableTopupSkuID(v *int64) *PaymentOrderUpdate {
+	if v != nil {
+		_u.SetTopupSkuID(*v)
+	}
+	return _u
+}
+
+// AddTopupSkuID adds value to the "topup_sku_id" field.
+func (_u *PaymentOrderUpdate) AddTopupSkuID(v int64) *PaymentOrderUpdate {
+	_u.mutation.AddTopupSkuID(v)
+	return _u
+}
+
+// ClearTopupSkuID clears the value of the "topup_sku_id" field.
+func (_u *PaymentOrderUpdate) ClearTopupSkuID() *PaymentOrderUpdate {
+	_u.mutation.ClearTopupSkuID()
+	return _u
+}
+
+// SetTopupQuantity sets the "topup_quantity" field.
+func (_u *PaymentOrderUpdate) SetTopupQuantity(v int) *PaymentOrderUpdate {
+	_u.mutation.ResetTopupQuantity()
+	_u.mutation.SetTopupQuantity(v)
+	return _u
+}
+
+// SetNillableTopupQuantity sets the "topup_quantity" field if the given value is not nil.
+func (_u *PaymentOrderUpdate) SetNillableTopupQuantity(v *int) *PaymentOrderUpdate {
+	if v != nil {
+		_u.SetTopupQuantity(*v)
+	}
+	return _u
+}
+
+// AddTopupQuantity adds value to the "topup_quantity" field.
+func (_u *PaymentOrderUpdate) AddTopupQuantity(v int) *PaymentOrderUpdate {
+	_u.mutation.AddTopupQuantity(v)
+	return _u
+}
+
+// SetTopupSnapshot sets the "topup_snapshot" field.
+func (_u *PaymentOrderUpdate) SetTopupSnapshot(v map[string]interface{}) *PaymentOrderUpdate {
+	_u.mutation.SetTopupSnapshot(v)
+	return _u
+}
+
+// ClearTopupSnapshot clears the value of the "topup_snapshot" field.
+func (_u *PaymentOrderUpdate) ClearTopupSnapshot() *PaymentOrderUpdate {
+	_u.mutation.ClearTopupSnapshot()
+	return _u
+}
+
+// SetTopupDeliveryStatus sets the "topup_delivery_status" field.
+func (_u *PaymentOrderUpdate) SetTopupDeliveryStatus(v string) *PaymentOrderUpdate {
+	_u.mutation.SetTopupDeliveryStatus(v)
+	return _u
+}
+
+// SetNillableTopupDeliveryStatus sets the "topup_delivery_status" field if the given value is not nil.
+func (_u *PaymentOrderUpdate) SetNillableTopupDeliveryStatus(v *string) *PaymentOrderUpdate {
+	if v != nil {
+		_u.SetTopupDeliveryStatus(*v)
+	}
+	return _u
+}
+
 // SetOrderType sets the "order_type" field.
 func (_u *PaymentOrderUpdate) SetOrderType(v string) *PaymentOrderUpdate {
 	_u.mutation.SetOrderType(v)
@@ -861,6 +935,11 @@ func (_u *PaymentOrderUpdate) check() error {
 			return &ValidationError{Name: "payment_trade_no", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.payment_trade_no": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.TopupDeliveryStatus(); ok {
+		if err := paymentorder.TopupDeliveryStatusValidator(v); err != nil {
+			return &ValidationError{Name: "topup_delivery_status", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.topup_delivery_status": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.OrderType(); ok {
 		if err := paymentorder.OrderTypeValidator(v); err != nil {
 			return &ValidationError{Name: "order_type", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.order_type": %w`, err)}
@@ -991,6 +1070,30 @@ func (_u *PaymentOrderUpdate) sqlSave(ctx context.Context) (_node int, err error
 	}
 	if _u.mutation.QrCodeImgCleared() {
 		_spec.ClearField(paymentorder.FieldQrCodeImg, field.TypeString)
+	}
+	if value, ok := _u.mutation.TopupSkuID(); ok {
+		_spec.SetField(paymentorder.FieldTopupSkuID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedTopupSkuID(); ok {
+		_spec.AddField(paymentorder.FieldTopupSkuID, field.TypeInt64, value)
+	}
+	if _u.mutation.TopupSkuIDCleared() {
+		_spec.ClearField(paymentorder.FieldTopupSkuID, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.TopupQuantity(); ok {
+		_spec.SetField(paymentorder.FieldTopupQuantity, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedTopupQuantity(); ok {
+		_spec.AddField(paymentorder.FieldTopupQuantity, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.TopupSnapshot(); ok {
+		_spec.SetField(paymentorder.FieldTopupSnapshot, field.TypeJSON, value)
+	}
+	if _u.mutation.TopupSnapshotCleared() {
+		_spec.ClearField(paymentorder.FieldTopupSnapshot, field.TypeJSON)
+	}
+	if value, ok := _u.mutation.TopupDeliveryStatus(); ok {
+		_spec.SetField(paymentorder.FieldTopupDeliveryStatus, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.OrderType(); ok {
 		_spec.SetField(paymentorder.FieldOrderType, field.TypeString, value)
@@ -1474,6 +1577,80 @@ func (_u *PaymentOrderUpdateOne) SetNillableQrCodeImg(v *string) *PaymentOrderUp
 // ClearQrCodeImg clears the value of the "qr_code_img" field.
 func (_u *PaymentOrderUpdateOne) ClearQrCodeImg() *PaymentOrderUpdateOne {
 	_u.mutation.ClearQrCodeImg()
+	return _u
+}
+
+// SetTopupSkuID sets the "topup_sku_id" field.
+func (_u *PaymentOrderUpdateOne) SetTopupSkuID(v int64) *PaymentOrderUpdateOne {
+	_u.mutation.ResetTopupSkuID()
+	_u.mutation.SetTopupSkuID(v)
+	return _u
+}
+
+// SetNillableTopupSkuID sets the "topup_sku_id" field if the given value is not nil.
+func (_u *PaymentOrderUpdateOne) SetNillableTopupSkuID(v *int64) *PaymentOrderUpdateOne {
+	if v != nil {
+		_u.SetTopupSkuID(*v)
+	}
+	return _u
+}
+
+// AddTopupSkuID adds value to the "topup_sku_id" field.
+func (_u *PaymentOrderUpdateOne) AddTopupSkuID(v int64) *PaymentOrderUpdateOne {
+	_u.mutation.AddTopupSkuID(v)
+	return _u
+}
+
+// ClearTopupSkuID clears the value of the "topup_sku_id" field.
+func (_u *PaymentOrderUpdateOne) ClearTopupSkuID() *PaymentOrderUpdateOne {
+	_u.mutation.ClearTopupSkuID()
+	return _u
+}
+
+// SetTopupQuantity sets the "topup_quantity" field.
+func (_u *PaymentOrderUpdateOne) SetTopupQuantity(v int) *PaymentOrderUpdateOne {
+	_u.mutation.ResetTopupQuantity()
+	_u.mutation.SetTopupQuantity(v)
+	return _u
+}
+
+// SetNillableTopupQuantity sets the "topup_quantity" field if the given value is not nil.
+func (_u *PaymentOrderUpdateOne) SetNillableTopupQuantity(v *int) *PaymentOrderUpdateOne {
+	if v != nil {
+		_u.SetTopupQuantity(*v)
+	}
+	return _u
+}
+
+// AddTopupQuantity adds value to the "topup_quantity" field.
+func (_u *PaymentOrderUpdateOne) AddTopupQuantity(v int) *PaymentOrderUpdateOne {
+	_u.mutation.AddTopupQuantity(v)
+	return _u
+}
+
+// SetTopupSnapshot sets the "topup_snapshot" field.
+func (_u *PaymentOrderUpdateOne) SetTopupSnapshot(v map[string]interface{}) *PaymentOrderUpdateOne {
+	_u.mutation.SetTopupSnapshot(v)
+	return _u
+}
+
+// ClearTopupSnapshot clears the value of the "topup_snapshot" field.
+func (_u *PaymentOrderUpdateOne) ClearTopupSnapshot() *PaymentOrderUpdateOne {
+	_u.mutation.ClearTopupSnapshot()
+	return _u
+}
+
+// SetTopupDeliveryStatus sets the "topup_delivery_status" field.
+func (_u *PaymentOrderUpdateOne) SetTopupDeliveryStatus(v string) *PaymentOrderUpdateOne {
+	_u.mutation.SetTopupDeliveryStatus(v)
+	return _u
+}
+
+// SetNillableTopupDeliveryStatus sets the "topup_delivery_status" field if the given value is not nil.
+func (_u *PaymentOrderUpdateOne) SetNillableTopupDeliveryStatus(v *string) *PaymentOrderUpdateOne {
+	if v != nil {
+		_u.SetTopupDeliveryStatus(*v)
+	}
 	return _u
 }
 
@@ -2018,6 +2195,11 @@ func (_u *PaymentOrderUpdateOne) check() error {
 			return &ValidationError{Name: "payment_trade_no", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.payment_trade_no": %w`, err)}
 		}
 	}
+	if v, ok := _u.mutation.TopupDeliveryStatus(); ok {
+		if err := paymentorder.TopupDeliveryStatusValidator(v); err != nil {
+			return &ValidationError{Name: "topup_delivery_status", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.topup_delivery_status": %w`, err)}
+		}
+	}
 	if v, ok := _u.mutation.OrderType(); ok {
 		if err := paymentorder.OrderTypeValidator(v); err != nil {
 			return &ValidationError{Name: "order_type", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.order_type": %w`, err)}
@@ -2165,6 +2347,30 @@ func (_u *PaymentOrderUpdateOne) sqlSave(ctx context.Context) (_node *PaymentOrd
 	}
 	if _u.mutation.QrCodeImgCleared() {
 		_spec.ClearField(paymentorder.FieldQrCodeImg, field.TypeString)
+	}
+	if value, ok := _u.mutation.TopupSkuID(); ok {
+		_spec.SetField(paymentorder.FieldTopupSkuID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.AddedTopupSkuID(); ok {
+		_spec.AddField(paymentorder.FieldTopupSkuID, field.TypeInt64, value)
+	}
+	if _u.mutation.TopupSkuIDCleared() {
+		_spec.ClearField(paymentorder.FieldTopupSkuID, field.TypeInt64)
+	}
+	if value, ok := _u.mutation.TopupQuantity(); ok {
+		_spec.SetField(paymentorder.FieldTopupQuantity, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.AddedTopupQuantity(); ok {
+		_spec.AddField(paymentorder.FieldTopupQuantity, field.TypeInt, value)
+	}
+	if value, ok := _u.mutation.TopupSnapshot(); ok {
+		_spec.SetField(paymentorder.FieldTopupSnapshot, field.TypeJSON, value)
+	}
+	if _u.mutation.TopupSnapshotCleared() {
+		_spec.ClearField(paymentorder.FieldTopupSnapshot, field.TypeJSON)
+	}
+	if value, ok := _u.mutation.TopupDeliveryStatus(); ok {
+		_spec.SetField(paymentorder.FieldTopupDeliveryStatus, field.TypeString, value)
 	}
 	if value, ok := _u.mutation.OrderType(); ok {
 		_spec.SetField(paymentorder.FieldOrderType, field.TypeString, value)

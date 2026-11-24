@@ -42,8 +42,9 @@ const (
 
 // Order types distinguish balance recharges from subscription purchases.
 const (
-	OrderTypeBalance      = "balance"
-	OrderTypeSubscription = "subscription"
+	OrderTypeBalance           = "balance"
+	OrderTypeSubscription      = "subscription"
+	OrderTypeSubscriptionTopup = "subscription_topup"
 )
 
 // Entity statuses shared across users, groups, etc.

@@ -46,6 +46,7 @@ func RegisterPaymentRoutes(
 		authenticated.GET("/config", paymentHandler.GetPaymentConfig)
 		authenticated.GET("/checkout-info", paymentHandler.GetCheckoutInfo)
 		authenticated.GET("/plans", paymentHandler.GetPlans)
+		authenticated.GET("/topup-products", paymentHandler.ListTopupProducts)
 		authenticated.GET("/limits", paymentHandler.GetLimits)
 
 		orders := authenticated.Group("/orders")
@@ -54,6 +55,7 @@ func RegisterPaymentRoutes(
 			orders.POST("/verify", paymentHandler.VerifyOrder)
 			orders.GET("/my", paymentHandler.GetMyOrders)
 			orders.GET("/:id", paymentHandler.GetOrder)
+			orders.GET("/:id/cards", paymentHandler.GetTopupOrderCards)
 			orders.POST("/:id/cancel", paymentHandler.CancelOrder)
 			orders.POST("/:id/refund-request", paymentHandler.RequestRefund)
 			orders.GET("/refund-eligible-providers", paymentHandler.GetRefundEligibleProviders)
@@ -109,6 +111,7 @@ func RegisterPaymentRoutes(
 			adminOrders.GET("/:id", adminPaymentHandler.GetOrderDetail)
 			adminOrders.POST("/:id/cancel", adminPaymentHandler.CancelOrder)
 			adminOrders.POST("/:id/retry", adminPaymentHandler.RetryFulfillment)
+			adminOrders.POST("/:id/resend-cards", adminPaymentHandler.ResendTopupCards)
 			adminOrders.POST("/:id/refund", adminPaymentHandler.ProcessRefund)
 			adminOrders.POST("/:id/refund/query", adminPaymentHandler.QueryAndFinalizeRefund)
 		}
@@ -121,6 +124,18 @@ func RegisterPaymentRoutes(
 			plans.PUT("/:id", adminPaymentHandler.UpdatePlan)
 			plans.DELETE("/:id", adminPaymentHandler.DeletePlan)
 		}
+
+		adminGroup.GET("/topup-products", adminPaymentHandler.ListTopupProducts)
+		adminGroup.POST("/topup-products", adminPaymentHandler.CreateTopupProduct)
+		adminGroup.PUT("/topup-products/:id", adminPaymentHandler.UpdateTopupProduct)
+		adminGroup.DELETE("/topup-products/:id", adminPaymentHandler.ArchiveTopupProduct)
+		adminGroup.POST("/topup-products/:id/skus", adminPaymentHandler.CreateTopupSKU)
+		adminGroup.PUT("/topup-skus/:id", adminPaymentHandler.UpdateTopupSKU)
+		adminGroup.DELETE("/topup-skus/:id", adminPaymentHandler.ArchiveTopupSKU)
+		adminGroup.GET("/topup-skus/:id/cards", adminPaymentHandler.ListTopupCards)
+		adminGroup.POST("/topup-skus/:id/cards/import", adminPaymentHandler.ImportTopupCards)
+		adminGroup.POST("/topup-cards/:id/reveal", adminPaymentHandler.RevealTopupCard)
+		adminGroup.PUT("/topup-cards/:id", adminPaymentHandler.SetTopupCardEnabled)
 
 		// Provider Instances
 		providers := adminGroup.Group("/providers")

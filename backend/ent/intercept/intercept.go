@@ -43,6 +43,10 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/setting"
 	"github.com/Wei-Shaw/sub2api/ent/subscriptionplan"
 	"github.com/Wei-Shaw/sub2api/ent/tlsfingerprintprofile"
+	"github.com/Wei-Shaw/sub2api/ent/topupcard"
+	"github.com/Wei-Shaw/sub2api/ent/topupmail"
+	"github.com/Wei-Shaw/sub2api/ent/topupproduct"
+	"github.com/Wei-Shaw/sub2api/ent/topupsku"
 	"github.com/Wei-Shaw/sub2api/ent/usagecleanuptask"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
@@ -1028,6 +1032,114 @@ func (f TraverseTLSFingerprintProfile) Traverse(ctx context.Context, q ent.Query
 	return fmt.Errorf("unexpected query type %T. expect *ent.TLSFingerprintProfileQuery", q)
 }
 
+// The TopupCardFunc type is an adapter to allow the use of ordinary function as a Querier.
+type TopupCardFunc func(context.Context, *ent.TopupCardQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f TopupCardFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.TopupCardQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.TopupCardQuery", q)
+}
+
+// The TraverseTopupCard type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseTopupCard func(context.Context, *ent.TopupCardQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseTopupCard) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseTopupCard) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.TopupCardQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.TopupCardQuery", q)
+}
+
+// The TopupMailFunc type is an adapter to allow the use of ordinary function as a Querier.
+type TopupMailFunc func(context.Context, *ent.TopupMailQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f TopupMailFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.TopupMailQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.TopupMailQuery", q)
+}
+
+// The TraverseTopupMail type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseTopupMail func(context.Context, *ent.TopupMailQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseTopupMail) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseTopupMail) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.TopupMailQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.TopupMailQuery", q)
+}
+
+// The TopupProductFunc type is an adapter to allow the use of ordinary function as a Querier.
+type TopupProductFunc func(context.Context, *ent.TopupProductQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f TopupProductFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.TopupProductQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.TopupProductQuery", q)
+}
+
+// The TraverseTopupProduct type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseTopupProduct func(context.Context, *ent.TopupProductQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseTopupProduct) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseTopupProduct) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.TopupProductQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.TopupProductQuery", q)
+}
+
+// The TopupSKUFunc type is an adapter to allow the use of ordinary function as a Querier.
+type TopupSKUFunc func(context.Context, *ent.TopupSKUQuery) (ent.Value, error)
+
+// Query calls f(ctx, q).
+func (f TopupSKUFunc) Query(ctx context.Context, q ent.Query) (ent.Value, error) {
+	if q, ok := q.(*ent.TopupSKUQuery); ok {
+		return f(ctx, q)
+	}
+	return nil, fmt.Errorf("unexpected query type %T. expect *ent.TopupSKUQuery", q)
+}
+
+// The TraverseTopupSKU type is an adapter to allow the use of ordinary function as Traverser.
+type TraverseTopupSKU func(context.Context, *ent.TopupSKUQuery) error
+
+// Intercept is a dummy implementation of Intercept that returns the next Querier in the pipeline.
+func (f TraverseTopupSKU) Intercept(next ent.Querier) ent.Querier {
+	return next
+}
+
+// Traverse calls f(ctx, q).
+func (f TraverseTopupSKU) Traverse(ctx context.Context, q ent.Query) error {
+	if q, ok := q.(*ent.TopupSKUQuery); ok {
+		return f(ctx, q)
+	}
+	return fmt.Errorf("unexpected query type %T. expect *ent.TopupSKUQuery", q)
+}
+
 // The UsageCleanupTaskFunc type is an adapter to allow the use of ordinary function as a Querier.
 type UsageCleanupTaskFunc func(context.Context, *ent.UsageCleanupTaskQuery) (ent.Value, error)
 
@@ -1342,6 +1454,14 @@ func NewQuery(q ent.Query) (Query, error) {
 		return &query[*ent.SubscriptionPlanQuery, predicate.SubscriptionPlan, subscriptionplan.OrderOption]{typ: ent.TypeSubscriptionPlan, tq: q}, nil
 	case *ent.TLSFingerprintProfileQuery:
 		return &query[*ent.TLSFingerprintProfileQuery, predicate.TLSFingerprintProfile, tlsfingerprintprofile.OrderOption]{typ: ent.TypeTLSFingerprintProfile, tq: q}, nil
+	case *ent.TopupCardQuery:
+		return &query[*ent.TopupCardQuery, predicate.TopupCard, topupcard.OrderOption]{typ: ent.TypeTopupCard, tq: q}, nil
+	case *ent.TopupMailQuery:
+		return &query[*ent.TopupMailQuery, predicate.TopupMail, topupmail.OrderOption]{typ: ent.TypeTopupMail, tq: q}, nil
+	case *ent.TopupProductQuery:
+		return &query[*ent.TopupProductQuery, predicate.TopupProduct, topupproduct.OrderOption]{typ: ent.TypeTopupProduct, tq: q}, nil
+	case *ent.TopupSKUQuery:
+		return &query[*ent.TopupSKUQuery, predicate.TopupSKU, topupsku.OrderOption]{typ: ent.TypeTopupSKU, tq: q}, nil
 	case *ent.UsageCleanupTaskQuery:
 		return &query[*ent.UsageCleanupTaskQuery, predicate.UsageCleanupTask, usagecleanuptask.OrderOption]{typ: ent.TypeUsageCleanupTask, tq: q}, nil
 	case *ent.UsageLogQuery:

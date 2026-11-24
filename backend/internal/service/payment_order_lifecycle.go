@@ -127,6 +127,19 @@ func (s *PaymentService) cancelCore(ctx context.Context, o *dbent.PaymentOrder, 
 			return checkPaidResultAlreadyPaid, nil
 		}
 	}
+	if o.OrderType == payment.OrderTypeSubscriptionTopup {
+		if err := s.subscriptionTopupService.ChangeUnpaidStatus(ctx, o.ID, fs, op, ad); err != nil {
+			return "", err
+		}
+		current, err := s.entClient.PaymentOrder.Get(ctx, o.ID)
+		if err != nil {
+			return "", err
+		}
+		if current.PaidAt != nil {
+			return checkPaidResultAlreadyPaid, nil
+		}
+		return checkPaidResultCancelled, nil
+	}
 	c, err := s.entClient.PaymentOrder.Update().Where(paymentorder.IDEQ(o.ID), paymentorder.StatusEQ(OrderStatusPending)).SetStatus(fs).Save(ctx)
 	if err != nil {
 		return "", fmt.Errorf("update order status: %w", err)
@@ -289,8 +302,9 @@ func (s *PaymentService) VerifyOrderByOutTradeNo(ctx context.Context, outTradeNo
 	if o.UserID != userID {
 		return nil, infraerrors.Forbidden("FORBIDDEN", "no permission for this order")
 	}
-	// Only verify orders that are still pending or recently expired
-	if o.Status == OrderStatusPending || o.Status == OrderStatusExpired {
+	// Topup orders may recover verified payments after their stock reservation was released.
+	if o.Status == OrderStatusPending || o.Status == OrderStatusExpired ||
+		(o.OrderType == payment.OrderTypeSubscriptionTopup && (o.Status == OrderStatusCancelled || o.Status == OrderStatusFailed)) {
 		result := s.reconcilePaid(ctx, o)
 		if result == checkPaidResultAlreadyPaid {
 			// Reload order to get updated status

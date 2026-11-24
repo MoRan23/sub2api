@@ -417,6 +417,54 @@ func (f TLSFingerprintProfileFunc) Mutate(ctx context.Context, m ent.Mutation) (
 	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.TLSFingerprintProfileMutation", m)
 }
 
+// The TopupCardFunc type is an adapter to allow the use of ordinary
+// function as TopupCard mutator.
+type TopupCardFunc func(context.Context, *ent.TopupCardMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f TopupCardFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.TopupCardMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.TopupCardMutation", m)
+}
+
+// The TopupMailFunc type is an adapter to allow the use of ordinary
+// function as TopupMail mutator.
+type TopupMailFunc func(context.Context, *ent.TopupMailMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f TopupMailFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.TopupMailMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.TopupMailMutation", m)
+}
+
+// The TopupProductFunc type is an adapter to allow the use of ordinary
+// function as TopupProduct mutator.
+type TopupProductFunc func(context.Context, *ent.TopupProductMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f TopupProductFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.TopupProductMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.TopupProductMutation", m)
+}
+
+// The TopupSKUFunc type is an adapter to allow the use of ordinary
+// function as TopupSKU mutator.
+type TopupSKUFunc func(context.Context, *ent.TopupSKUMutation) (ent.Value, error)
+
+// Mutate calls f(ctx, m).
+func (f TopupSKUFunc) Mutate(ctx context.Context, m ent.Mutation) (ent.Value, error) {
+	if mv, ok := m.(*ent.TopupSKUMutation); ok {
+		return f(ctx, mv)
+	}
+	return nil, fmt.Errorf("unexpected mutation type %T. expect *ent.TopupSKUMutation", m)
+}
+
 // The UsageCleanupTaskFunc type is an adapter to allow the use of ordinary
 // function as UsageCleanupTask mutator.
 type UsageCleanupTaskFunc func(context.Context, *ent.UsageCleanupTaskMutation) (ent.Value, error)

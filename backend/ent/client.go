@@ -49,6 +49,10 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/setting"
 	"github.com/Wei-Shaw/sub2api/ent/subscriptionplan"
 	"github.com/Wei-Shaw/sub2api/ent/tlsfingerprintprofile"
+	"github.com/Wei-Shaw/sub2api/ent/topupcard"
+	"github.com/Wei-Shaw/sub2api/ent/topupmail"
+	"github.com/Wei-Shaw/sub2api/ent/topupproduct"
+	"github.com/Wei-Shaw/sub2api/ent/topupsku"
 	"github.com/Wei-Shaw/sub2api/ent/usagecleanuptask"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
@@ -135,6 +139,14 @@ type Client struct {
 	SubscriptionPlan *SubscriptionPlanClient
 	// TLSFingerprintProfile is the client for interacting with the TLSFingerprintProfile builders.
 	TLSFingerprintProfile *TLSFingerprintProfileClient
+	// TopupCard is the client for interacting with the TopupCard builders.
+	TopupCard *TopupCardClient
+	// TopupMail is the client for interacting with the TopupMail builders.
+	TopupMail *TopupMailClient
+	// TopupProduct is the client for interacting with the TopupProduct builders.
+	TopupProduct *TopupProductClient
+	// TopupSKU is the client for interacting with the TopupSKU builders.
+	TopupSKU *TopupSKUClient
 	// UsageCleanupTask is the client for interacting with the UsageCleanupTask builders.
 	UsageCleanupTask *UsageCleanupTaskClient
 	// UsageLog is the client for interacting with the UsageLog builders.
@@ -198,6 +210,10 @@ func (c *Client) init() {
 	c.Setting = NewSettingClient(c.config)
 	c.SubscriptionPlan = NewSubscriptionPlanClient(c.config)
 	c.TLSFingerprintProfile = NewTLSFingerprintProfileClient(c.config)
+	c.TopupCard = NewTopupCardClient(c.config)
+	c.TopupMail = NewTopupMailClient(c.config)
+	c.TopupProduct = NewTopupProductClient(c.config)
+	c.TopupSKU = NewTopupSKUClient(c.config)
 	c.UsageCleanupTask = NewUsageCleanupTaskClient(c.config)
 	c.UsageLog = NewUsageLogClient(c.config)
 	c.User = NewUserClient(c.config)
@@ -333,6 +349,10 @@ func (c *Client) Tx(ctx context.Context) (*Tx, error) {
 		Setting:                         NewSettingClient(cfg),
 		SubscriptionPlan:                NewSubscriptionPlanClient(cfg),
 		TLSFingerprintProfile:           NewTLSFingerprintProfileClient(cfg),
+		TopupCard:                       NewTopupCardClient(cfg),
+		TopupMail:                       NewTopupMailClient(cfg),
+		TopupProduct:                    NewTopupProductClient(cfg),
+		TopupSKU:                        NewTopupSKUClient(cfg),
 		UsageCleanupTask:                NewUsageCleanupTaskClient(cfg),
 		UsageLog:                        NewUsageLogClient(cfg),
 		User:                            NewUserClient(cfg),
@@ -395,6 +415,10 @@ func (c *Client) BeginTx(ctx context.Context, opts *sql.TxOptions) (*Tx, error) 
 		Setting:                         NewSettingClient(cfg),
 		SubscriptionPlan:                NewSubscriptionPlanClient(cfg),
 		TLSFingerprintProfile:           NewTLSFingerprintProfileClient(cfg),
+		TopupCard:                       NewTopupCardClient(cfg),
+		TopupMail:                       NewTopupMailClient(cfg),
+		TopupProduct:                    NewTopupProductClient(cfg),
+		TopupSKU:                        NewTopupSKUClient(cfg),
 		UsageCleanupTask:                NewUsageCleanupTaskClient(cfg),
 		UsageLog:                        NewUsageLogClient(cfg),
 		User:                            NewUserClient(cfg),
@@ -442,8 +466,9 @@ func (c *Client) Use(hooks ...Hook) {
 		c.OpenAIOAuthDailySessionPool, c.OpenAIOAuthSyncSession, c.PaymentAuditLog,
 		c.PaymentOrder, c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode,
 		c.PromoCodeUsage, c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting,
-		c.SubscriptionPlan, c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog,
-		c.User, c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
+		c.SubscriptionPlan, c.TLSFingerprintProfile, c.TopupCard, c.TopupMail,
+		c.TopupProduct, c.TopupSKU, c.UsageCleanupTask, c.UsageLog, c.User,
+		c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
 		c.UserPlatformQuota, c.UserSubscription, c.UserSubscriptionQuotaEvent,
 	} {
 		n.Use(hooks...)
@@ -463,8 +488,9 @@ func (c *Client) Intercept(interceptors ...Interceptor) {
 		c.OpenAIOAuthDailySessionPool, c.OpenAIOAuthSyncSession, c.PaymentAuditLog,
 		c.PaymentOrder, c.PaymentProviderInstance, c.PendingAuthSession, c.PromoCode,
 		c.PromoCodeUsage, c.Proxy, c.RedeemCode, c.SecuritySecret, c.Setting,
-		c.SubscriptionPlan, c.TLSFingerprintProfile, c.UsageCleanupTask, c.UsageLog,
-		c.User, c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
+		c.SubscriptionPlan, c.TLSFingerprintProfile, c.TopupCard, c.TopupMail,
+		c.TopupProduct, c.TopupSKU, c.UsageCleanupTask, c.UsageLog, c.User,
+		c.UserAllowedGroup, c.UserAttributeDefinition, c.UserAttributeValue,
 		c.UserPlatformQuota, c.UserSubscription, c.UserSubscriptionQuotaEvent,
 	} {
 		n.Intercept(interceptors...)
@@ -542,6 +568,14 @@ func (c *Client) Mutate(ctx context.Context, m Mutation) (Value, error) {
 		return c.SubscriptionPlan.mutate(ctx, m)
 	case *TLSFingerprintProfileMutation:
 		return c.TLSFingerprintProfile.mutate(ctx, m)
+	case *TopupCardMutation:
+		return c.TopupCard.mutate(ctx, m)
+	case *TopupMailMutation:
+		return c.TopupMail.mutate(ctx, m)
+	case *TopupProductMutation:
+		return c.TopupProduct.mutate(ctx, m)
+	case *TopupSKUMutation:
+		return c.TopupSKU.mutate(ctx, m)
 	case *UsageCleanupTaskMutation:
 		return c.UsageCleanupTask.mutate(ctx, m)
 	case *UsageLogMutation:
@@ -5784,6 +5818,538 @@ func (c *TLSFingerprintProfileClient) mutate(ctx context.Context, m *TLSFingerpr
 	}
 }
 
+// TopupCardClient is a client for the TopupCard schema.
+type TopupCardClient struct {
+	config
+}
+
+// NewTopupCardClient returns a client for the TopupCard from the given config.
+func NewTopupCardClient(c config) *TopupCardClient {
+	return &TopupCardClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `topupcard.Hooks(f(g(h())))`.
+func (c *TopupCardClient) Use(hooks ...Hook) {
+	c.hooks.TopupCard = append(c.hooks.TopupCard, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `topupcard.Intercept(f(g(h())))`.
+func (c *TopupCardClient) Intercept(interceptors ...Interceptor) {
+	c.inters.TopupCard = append(c.inters.TopupCard, interceptors...)
+}
+
+// Create returns a builder for creating a TopupCard entity.
+func (c *TopupCardClient) Create() *TopupCardCreate {
+	mutation := newTopupCardMutation(c.config, OpCreate)
+	return &TopupCardCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of TopupCard entities.
+func (c *TopupCardClient) CreateBulk(builders ...*TopupCardCreate) *TopupCardCreateBulk {
+	return &TopupCardCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *TopupCardClient) MapCreateBulk(slice any, setFunc func(*TopupCardCreate, int)) *TopupCardCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &TopupCardCreateBulk{err: fmt.Errorf("calling to TopupCardClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*TopupCardCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &TopupCardCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for TopupCard.
+func (c *TopupCardClient) Update() *TopupCardUpdate {
+	mutation := newTopupCardMutation(c.config, OpUpdate)
+	return &TopupCardUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *TopupCardClient) UpdateOne(_m *TopupCard) *TopupCardUpdateOne {
+	mutation := newTopupCardMutation(c.config, OpUpdateOne, withTopupCard(_m))
+	return &TopupCardUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *TopupCardClient) UpdateOneID(id int64) *TopupCardUpdateOne {
+	mutation := newTopupCardMutation(c.config, OpUpdateOne, withTopupCardID(id))
+	return &TopupCardUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for TopupCard.
+func (c *TopupCardClient) Delete() *TopupCardDelete {
+	mutation := newTopupCardMutation(c.config, OpDelete)
+	return &TopupCardDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *TopupCardClient) DeleteOne(_m *TopupCard) *TopupCardDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *TopupCardClient) DeleteOneID(id int64) *TopupCardDeleteOne {
+	builder := c.Delete().Where(topupcard.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &TopupCardDeleteOne{builder}
+}
+
+// Query returns a query builder for TopupCard.
+func (c *TopupCardClient) Query() *TopupCardQuery {
+	return &TopupCardQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeTopupCard},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a TopupCard entity by its id.
+func (c *TopupCardClient) Get(ctx context.Context, id int64) (*TopupCard, error) {
+	return c.Query().Where(topupcard.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *TopupCardClient) GetX(ctx context.Context, id int64) *TopupCard {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *TopupCardClient) Hooks() []Hook {
+	return c.hooks.TopupCard
+}
+
+// Interceptors returns the client interceptors.
+func (c *TopupCardClient) Interceptors() []Interceptor {
+	return c.inters.TopupCard
+}
+
+func (c *TopupCardClient) mutate(ctx context.Context, m *TopupCardMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&TopupCardCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&TopupCardUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&TopupCardUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&TopupCardDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown TopupCard mutation op: %q", m.Op())
+	}
+}
+
+// TopupMailClient is a client for the TopupMail schema.
+type TopupMailClient struct {
+	config
+}
+
+// NewTopupMailClient returns a client for the TopupMail from the given config.
+func NewTopupMailClient(c config) *TopupMailClient {
+	return &TopupMailClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `topupmail.Hooks(f(g(h())))`.
+func (c *TopupMailClient) Use(hooks ...Hook) {
+	c.hooks.TopupMail = append(c.hooks.TopupMail, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `topupmail.Intercept(f(g(h())))`.
+func (c *TopupMailClient) Intercept(interceptors ...Interceptor) {
+	c.inters.TopupMail = append(c.inters.TopupMail, interceptors...)
+}
+
+// Create returns a builder for creating a TopupMail entity.
+func (c *TopupMailClient) Create() *TopupMailCreate {
+	mutation := newTopupMailMutation(c.config, OpCreate)
+	return &TopupMailCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of TopupMail entities.
+func (c *TopupMailClient) CreateBulk(builders ...*TopupMailCreate) *TopupMailCreateBulk {
+	return &TopupMailCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *TopupMailClient) MapCreateBulk(slice any, setFunc func(*TopupMailCreate, int)) *TopupMailCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &TopupMailCreateBulk{err: fmt.Errorf("calling to TopupMailClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*TopupMailCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &TopupMailCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for TopupMail.
+func (c *TopupMailClient) Update() *TopupMailUpdate {
+	mutation := newTopupMailMutation(c.config, OpUpdate)
+	return &TopupMailUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *TopupMailClient) UpdateOne(_m *TopupMail) *TopupMailUpdateOne {
+	mutation := newTopupMailMutation(c.config, OpUpdateOne, withTopupMail(_m))
+	return &TopupMailUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *TopupMailClient) UpdateOneID(id int64) *TopupMailUpdateOne {
+	mutation := newTopupMailMutation(c.config, OpUpdateOne, withTopupMailID(id))
+	return &TopupMailUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for TopupMail.
+func (c *TopupMailClient) Delete() *TopupMailDelete {
+	mutation := newTopupMailMutation(c.config, OpDelete)
+	return &TopupMailDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *TopupMailClient) DeleteOne(_m *TopupMail) *TopupMailDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *TopupMailClient) DeleteOneID(id int64) *TopupMailDeleteOne {
+	builder := c.Delete().Where(topupmail.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &TopupMailDeleteOne{builder}
+}
+
+// Query returns a query builder for TopupMail.
+func (c *TopupMailClient) Query() *TopupMailQuery {
+	return &TopupMailQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeTopupMail},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a TopupMail entity by its id.
+func (c *TopupMailClient) Get(ctx context.Context, id int64) (*TopupMail, error) {
+	return c.Query().Where(topupmail.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *TopupMailClient) GetX(ctx context.Context, id int64) *TopupMail {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *TopupMailClient) Hooks() []Hook {
+	return c.hooks.TopupMail
+}
+
+// Interceptors returns the client interceptors.
+func (c *TopupMailClient) Interceptors() []Interceptor {
+	return c.inters.TopupMail
+}
+
+func (c *TopupMailClient) mutate(ctx context.Context, m *TopupMailMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&TopupMailCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&TopupMailUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&TopupMailUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&TopupMailDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown TopupMail mutation op: %q", m.Op())
+	}
+}
+
+// TopupProductClient is a client for the TopupProduct schema.
+type TopupProductClient struct {
+	config
+}
+
+// NewTopupProductClient returns a client for the TopupProduct from the given config.
+func NewTopupProductClient(c config) *TopupProductClient {
+	return &TopupProductClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `topupproduct.Hooks(f(g(h())))`.
+func (c *TopupProductClient) Use(hooks ...Hook) {
+	c.hooks.TopupProduct = append(c.hooks.TopupProduct, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `topupproduct.Intercept(f(g(h())))`.
+func (c *TopupProductClient) Intercept(interceptors ...Interceptor) {
+	c.inters.TopupProduct = append(c.inters.TopupProduct, interceptors...)
+}
+
+// Create returns a builder for creating a TopupProduct entity.
+func (c *TopupProductClient) Create() *TopupProductCreate {
+	mutation := newTopupProductMutation(c.config, OpCreate)
+	return &TopupProductCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of TopupProduct entities.
+func (c *TopupProductClient) CreateBulk(builders ...*TopupProductCreate) *TopupProductCreateBulk {
+	return &TopupProductCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *TopupProductClient) MapCreateBulk(slice any, setFunc func(*TopupProductCreate, int)) *TopupProductCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &TopupProductCreateBulk{err: fmt.Errorf("calling to TopupProductClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*TopupProductCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &TopupProductCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for TopupProduct.
+func (c *TopupProductClient) Update() *TopupProductUpdate {
+	mutation := newTopupProductMutation(c.config, OpUpdate)
+	return &TopupProductUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *TopupProductClient) UpdateOne(_m *TopupProduct) *TopupProductUpdateOne {
+	mutation := newTopupProductMutation(c.config, OpUpdateOne, withTopupProduct(_m))
+	return &TopupProductUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *TopupProductClient) UpdateOneID(id int64) *TopupProductUpdateOne {
+	mutation := newTopupProductMutation(c.config, OpUpdateOne, withTopupProductID(id))
+	return &TopupProductUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for TopupProduct.
+func (c *TopupProductClient) Delete() *TopupProductDelete {
+	mutation := newTopupProductMutation(c.config, OpDelete)
+	return &TopupProductDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *TopupProductClient) DeleteOne(_m *TopupProduct) *TopupProductDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *TopupProductClient) DeleteOneID(id int64) *TopupProductDeleteOne {
+	builder := c.Delete().Where(topupproduct.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &TopupProductDeleteOne{builder}
+}
+
+// Query returns a query builder for TopupProduct.
+func (c *TopupProductClient) Query() *TopupProductQuery {
+	return &TopupProductQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeTopupProduct},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a TopupProduct entity by its id.
+func (c *TopupProductClient) Get(ctx context.Context, id int64) (*TopupProduct, error) {
+	return c.Query().Where(topupproduct.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *TopupProductClient) GetX(ctx context.Context, id int64) *TopupProduct {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *TopupProductClient) Hooks() []Hook {
+	return c.hooks.TopupProduct
+}
+
+// Interceptors returns the client interceptors.
+func (c *TopupProductClient) Interceptors() []Interceptor {
+	return c.inters.TopupProduct
+}
+
+func (c *TopupProductClient) mutate(ctx context.Context, m *TopupProductMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&TopupProductCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&TopupProductUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&TopupProductUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&TopupProductDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown TopupProduct mutation op: %q", m.Op())
+	}
+}
+
+// TopupSKUClient is a client for the TopupSKU schema.
+type TopupSKUClient struct {
+	config
+}
+
+// NewTopupSKUClient returns a client for the TopupSKU from the given config.
+func NewTopupSKUClient(c config) *TopupSKUClient {
+	return &TopupSKUClient{config: c}
+}
+
+// Use adds a list of mutation hooks to the hooks stack.
+// A call to `Use(f, g, h)` equals to `topupsku.Hooks(f(g(h())))`.
+func (c *TopupSKUClient) Use(hooks ...Hook) {
+	c.hooks.TopupSKU = append(c.hooks.TopupSKU, hooks...)
+}
+
+// Intercept adds a list of query interceptors to the interceptors stack.
+// A call to `Intercept(f, g, h)` equals to `topupsku.Intercept(f(g(h())))`.
+func (c *TopupSKUClient) Intercept(interceptors ...Interceptor) {
+	c.inters.TopupSKU = append(c.inters.TopupSKU, interceptors...)
+}
+
+// Create returns a builder for creating a TopupSKU entity.
+func (c *TopupSKUClient) Create() *TopupSKUCreate {
+	mutation := newTopupSKUMutation(c.config, OpCreate)
+	return &TopupSKUCreate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// CreateBulk returns a builder for creating a bulk of TopupSKU entities.
+func (c *TopupSKUClient) CreateBulk(builders ...*TopupSKUCreate) *TopupSKUCreateBulk {
+	return &TopupSKUCreateBulk{config: c.config, builders: builders}
+}
+
+// MapCreateBulk creates a bulk creation builder from the given slice. For each item in the slice, the function creates
+// a builder and applies setFunc on it.
+func (c *TopupSKUClient) MapCreateBulk(slice any, setFunc func(*TopupSKUCreate, int)) *TopupSKUCreateBulk {
+	rv := reflect.ValueOf(slice)
+	if rv.Kind() != reflect.Slice {
+		return &TopupSKUCreateBulk{err: fmt.Errorf("calling to TopupSKUClient.MapCreateBulk with wrong type %T, need slice", slice)}
+	}
+	builders := make([]*TopupSKUCreate, rv.Len())
+	for i := 0; i < rv.Len(); i++ {
+		builders[i] = c.Create()
+		setFunc(builders[i], i)
+	}
+	return &TopupSKUCreateBulk{config: c.config, builders: builders}
+}
+
+// Update returns an update builder for TopupSKU.
+func (c *TopupSKUClient) Update() *TopupSKUUpdate {
+	mutation := newTopupSKUMutation(c.config, OpUpdate)
+	return &TopupSKUUpdate{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOne returns an update builder for the given entity.
+func (c *TopupSKUClient) UpdateOne(_m *TopupSKU) *TopupSKUUpdateOne {
+	mutation := newTopupSKUMutation(c.config, OpUpdateOne, withTopupSKU(_m))
+	return &TopupSKUUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// UpdateOneID returns an update builder for the given id.
+func (c *TopupSKUClient) UpdateOneID(id int64) *TopupSKUUpdateOne {
+	mutation := newTopupSKUMutation(c.config, OpUpdateOne, withTopupSKUID(id))
+	return &TopupSKUUpdateOne{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// Delete returns a delete builder for TopupSKU.
+func (c *TopupSKUClient) Delete() *TopupSKUDelete {
+	mutation := newTopupSKUMutation(c.config, OpDelete)
+	return &TopupSKUDelete{config: c.config, hooks: c.Hooks(), mutation: mutation}
+}
+
+// DeleteOne returns a builder for deleting the given entity.
+func (c *TopupSKUClient) DeleteOne(_m *TopupSKU) *TopupSKUDeleteOne {
+	return c.DeleteOneID(_m.ID)
+}
+
+// DeleteOneID returns a builder for deleting the given entity by its id.
+func (c *TopupSKUClient) DeleteOneID(id int64) *TopupSKUDeleteOne {
+	builder := c.Delete().Where(topupsku.ID(id))
+	builder.mutation.id = &id
+	builder.mutation.op = OpDeleteOne
+	return &TopupSKUDeleteOne{builder}
+}
+
+// Query returns a query builder for TopupSKU.
+func (c *TopupSKUClient) Query() *TopupSKUQuery {
+	return &TopupSKUQuery{
+		config: c.config,
+		ctx:    &QueryContext{Type: TypeTopupSKU},
+		inters: c.Interceptors(),
+	}
+}
+
+// Get returns a TopupSKU entity by its id.
+func (c *TopupSKUClient) Get(ctx context.Context, id int64) (*TopupSKU, error) {
+	return c.Query().Where(topupsku.ID(id)).Only(ctx)
+}
+
+// GetX is like Get, but panics if an error occurs.
+func (c *TopupSKUClient) GetX(ctx context.Context, id int64) *TopupSKU {
+	obj, err := c.Get(ctx, id)
+	if err != nil {
+		panic(err)
+	}
+	return obj
+}
+
+// Hooks returns the client hooks.
+func (c *TopupSKUClient) Hooks() []Hook {
+	return c.hooks.TopupSKU
+}
+
+// Interceptors returns the client interceptors.
+func (c *TopupSKUClient) Interceptors() []Interceptor {
+	return c.inters.TopupSKU
+}
+
+func (c *TopupSKUClient) mutate(ctx context.Context, m *TopupSKUMutation) (Value, error) {
+	switch m.Op() {
+	case OpCreate:
+		return (&TopupSKUCreate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdate:
+		return (&TopupSKUUpdate{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpUpdateOne:
+		return (&TopupSKUUpdateOne{config: c.config, hooks: c.Hooks(), mutation: m}).Save(ctx)
+	case OpDelete, OpDeleteOne:
+		return (&TopupSKUDelete{config: c.config, hooks: c.Hooks(), mutation: m}).Exec(ctx)
+	default:
+		return nil, fmt.Errorf("ent: unknown TopupSKU mutation op: %q", m.Op())
+	}
+}
+
 // UsageCleanupTaskClient is a client for the UsageCleanupTask schema.
 type UsageCleanupTaskClient struct {
 	config
@@ -7447,10 +8013,10 @@ type (
 		OpenAIOAuthDailySessionAffinity, OpenAIOAuthDailySessionPool,
 		OpenAIOAuthSyncSession, PaymentAuditLog, PaymentOrder, PaymentProviderInstance,
 		PendingAuthSession, PromoCode, PromoCodeUsage, Proxy, RedeemCode,
-		SecuritySecret, Setting, SubscriptionPlan, TLSFingerprintProfile,
-		UsageCleanupTask, UsageLog, User, UserAllowedGroup, UserAttributeDefinition,
-		UserAttributeValue, UserPlatformQuota, UserSubscription,
-		UserSubscriptionQuotaEvent []ent.Hook
+		SecuritySecret, Setting, SubscriptionPlan, TLSFingerprintProfile, TopupCard,
+		TopupMail, TopupProduct, TopupSKU, UsageCleanupTask, UsageLog, User,
+		UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
+		UserPlatformQuota, UserSubscription, UserSubscriptionQuotaEvent []ent.Hook
 	}
 	inters struct {
 		APIKey, Account, AccountGroup, Announcement, AnnouncementRead, AuthIdentity,
@@ -7461,9 +8027,10 @@ type (
 		OpenAIOAuthDailySessionAffinity, OpenAIOAuthDailySessionPool,
 		OpenAIOAuthSyncSession, PaymentAuditLog, PaymentOrder, PaymentProviderInstance,
 		PendingAuthSession, PromoCode, PromoCodeUsage, Proxy, RedeemCode,
-		SecuritySecret, Setting, SubscriptionPlan, TLSFingerprintProfile,
-		UsageCleanupTask, UsageLog, User, UserAllowedGroup, UserAttributeDefinition,
-		UserAttributeValue, UserPlatformQuota, UserSubscription,
+		SecuritySecret, Setting, SubscriptionPlan, TLSFingerprintProfile, TopupCard,
+		TopupMail, TopupProduct, TopupSKU, UsageCleanupTask, UsageLog, User,
+		UserAllowedGroup, UserAttributeDefinition, UserAttributeValue,
+		UserPlatformQuota, UserSubscription,
 		UserSubscriptionQuotaEvent []ent.Interceptor
 	}
 )

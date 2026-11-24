@@ -75,6 +75,47 @@ func TestApplyWeChatPaymentResumeClaimsRejectsPaymentTypeMismatch(t *testing.T) 
 	}
 }
 
+func TestApplyWeChatPaymentResumeClaimsRestoresTopupSKUQuantity(t *testing.T) {
+	t.Parallel()
+	req := CreateOrderRequest{PaymentType: payment.TypeWxpay, SKUID: 999, Quantity: 100}
+	err := applyWeChatPaymentResumeClaims(&req, &service.WeChatPaymentResumeClaims{
+		OpenID: "topup-payer", PaymentType: payment.TypeWxpay,
+		OrderType: payment.OrderTypeSubscriptionTopup, SKUID: 23, Quantity: 3,
+	})
+	require.NoError(t, err)
+	require.Equal(t, payment.OrderTypeSubscriptionTopup, req.OrderType)
+	require.Equal(t, int64(23), req.SKUID)
+	require.Equal(t, 3, req.Quantity)
+	for _, quantity := range []int{0, 101} {
+		err = applyWeChatPaymentResumeClaims(&req, &service.WeChatPaymentResumeClaims{
+			OpenID: "topup-payer", OrderType: payment.OrderTypeSubscriptionTopup, SKUID: 23, Quantity: quantity,
+		})
+		require.Error(t, err)
+	}
+}
+
+func TestSanitizeTopupOrderDoesNotReturnUnexpectedSnapshotFields(t *testing.T) {
+	t.Parallel()
+	skuID := int64(23)
+	order := &dbent.PaymentOrder{
+		ID: 5, OrderType: payment.OrderTypeSubscriptionTopup,
+		TopupSkuID: &skuID, TopupQuantity: 3, TopupDeliveryStatus: "delivered",
+	}
+	require.NoError(t, json.Unmarshal([]byte(`{"product_id":1,"product_name":"Service","sku_id":23,"sku_name":"Monthly","unit_price":9.99,"quantity":3,"currency":"CNY","instructions":"Redeem on the product site","codes":["secret-card"]}`), &order.TopupSnapshot))
+	result := sanitizePaymentOrderForResponse(order)
+	require.Equal(t, skuID, *result.TopupSKUID)
+	require.Equal(t, 3, result.TopupQuantity)
+	require.Equal(t, "Service", result.TopupSnapshot.ProductName)
+	encoded, err := json.Marshal(result)
+	require.NoError(t, err)
+	require.NotContains(t, string(encoded), "secret-card")
+	require.NotContains(t, string(encoded), `"codes"`)
+	public, err := json.Marshal(buildPublicOrderResult(order))
+	require.NoError(t, err)
+	require.NotContains(t, string(public), "topup_snapshot")
+	require.NotContains(t, string(public), "secret-card")
+}
+
 func TestVerifyOrderPublicReturnsLegacyOrderState(t *testing.T) {
 	t.Parallel()
 

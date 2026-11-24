@@ -238,6 +238,8 @@ type CreateOrderRequest struct {
 	PaymentSource     string  `json:"payment_source"`
 	OrderType         string  `json:"order_type"`
 	PlanID            int64   `json:"plan_id"`
+	SKUID             int64   `json:"sku_id"`
+	Quantity          int     `json:"quantity"`
 	// IsMobile lets the frontend declare its mobile status directly. When
 	// nil we fall back to User-Agent heuristics (which miss iPadOS / some
 	// embedded browsers that strip the "Mobile" keyword).
@@ -287,6 +289,8 @@ func (h *PaymentHandler) CreateOrder(c *gin.Context) {
 		PaymentSource:   req.PaymentSource,
 		OrderType:       req.OrderType,
 		PlanID:          req.PlanID,
+		SKUID:           req.SKUID,
+		Quantity:        req.Quantity,
 		Locale:          c.GetHeader("Accept-Language"),
 	})
 	if err != nil {
@@ -330,6 +334,13 @@ func applyWeChatPaymentResumeClaims(req *CreateOrderRequest, claims *service.WeC
 	}
 	if claims.PlanID > 0 {
 		req.PlanID = claims.PlanID
+	}
+	if claims.OrderType == payment.OrderTypeSubscriptionTopup {
+		if claims.SKUID <= 0 || claims.Quantity < 1 || claims.Quantity > 100 {
+			return infraerrors.BadRequest("INVALID_WECHAT_PAYMENT_RESUME_TOKEN", "invalid topup resume context")
+		}
+		req.SKUID = claims.SKUID
+		req.Quantity = claims.Quantity
 	}
 	return nil
 }
@@ -626,29 +637,33 @@ func isMobile(c *gin.Context) bool {
 }
 
 type PaymentOrderResult struct {
-	ID                  int64      `json:"id"`
-	UserID              int64      `json:"user_id"`
-	Amount              float64    `json:"amount"`
-	GiftRatio           float64    `json:"gift_ratio"`
-	GiftAmount          float64    `json:"gift_amount"`
-	PayAmount           float64    `json:"pay_amount"`
-	FeeRate             float64    `json:"fee_rate"`
-	Currency            string     `json:"currency"`
-	PaymentType         string     `json:"payment_type"`
-	OutTradeNo          string     `json:"out_trade_no"`
-	Status              string     `json:"status"`
-	OrderType           string     `json:"order_type"`
-	CreatedAt           time.Time  `json:"created_at"`
-	ExpiresAt           time.Time  `json:"expires_at"`
-	PaidAt              *time.Time `json:"paid_at,omitempty"`
-	CompletedAt         *time.Time `json:"completed_at,omitempty"`
-	RefundAmount        float64    `json:"refund_amount"`
-	RefundReason        *string    `json:"refund_reason,omitempty"`
-	RefundRequestedAt   *time.Time `json:"refund_requested_at,omitempty"`
-	RefundRequestedBy   *string    `json:"refund_requested_by,omitempty"`
-	RefundRequestReason *string    `json:"refund_request_reason,omitempty"`
-	PlanID              *int64     `json:"plan_id,omitempty"`
-	ProviderInstanceID  *string    `json:"provider_instance_id,omitempty"`
+	ID                  int64                  `json:"id"`
+	UserID              int64                  `json:"user_id"`
+	Amount              float64                `json:"amount"`
+	GiftRatio           float64                `json:"gift_ratio"`
+	GiftAmount          float64                `json:"gift_amount"`
+	PayAmount           float64                `json:"pay_amount"`
+	FeeRate             float64                `json:"fee_rate"`
+	Currency            string                 `json:"currency"`
+	PaymentType         string                 `json:"payment_type"`
+	OutTradeNo          string                 `json:"out_trade_no"`
+	Status              string                 `json:"status"`
+	OrderType           string                 `json:"order_type"`
+	CreatedAt           time.Time              `json:"created_at"`
+	ExpiresAt           time.Time              `json:"expires_at"`
+	PaidAt              *time.Time             `json:"paid_at,omitempty"`
+	CompletedAt         *time.Time             `json:"completed_at,omitempty"`
+	RefundAmount        float64                `json:"refund_amount"`
+	RefundReason        *string                `json:"refund_reason,omitempty"`
+	RefundRequestedAt   *time.Time             `json:"refund_requested_at,omitempty"`
+	RefundRequestedBy   *string                `json:"refund_requested_by,omitempty"`
+	RefundRequestReason *string                `json:"refund_request_reason,omitempty"`
+	PlanID              *int64                 `json:"plan_id,omitempty"`
+	ProviderInstanceID  *string                `json:"provider_instance_id,omitempty"`
+	TopupSKUID          *int64                 `json:"topup_sku_id,omitempty"`
+	TopupQuantity       int                    `json:"topup_quantity,omitempty"`
+	TopupSnapshot       *service.TopupSnapshot `json:"topup_snapshot,omitempty"`
+	TopupDeliveryStatus string                 `json:"topup_delivery_status,omitempty"`
 }
 
 func sanitizePaymentOrdersForResponse(orders []*dbent.PaymentOrder) []PaymentOrderResult {
@@ -689,6 +704,10 @@ func sanitizePaymentOrderForResponse(order *dbent.PaymentOrder) *PaymentOrderRes
 		RefundRequestReason: order.RefundRequestReason,
 		PlanID:              order.PlanID,
 		ProviderInstanceID:  order.ProviderInstanceID,
+		TopupSKUID:          order.TopupSkuID,
+		TopupQuantity:       order.TopupQuantity,
+		TopupSnapshot:       service.TopupOrderSnapshot(order),
+		TopupDeliveryStatus: order.TopupDeliveryStatus,
 	}
 }
 

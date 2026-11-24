@@ -176,6 +176,9 @@ func expectedNotificationProviderKey(registry *payment.Registry, orderPaymentTyp
 }
 
 func (s *PaymentService) toPaid(ctx context.Context, o *dbent.PaymentOrder, tradeNo string, paid float64, pk string) error {
+	if o.OrderType == payment.OrderTypeSubscriptionTopup {
+		return s.subscriptionTopupService.ConfirmPayment(ctx, o.ID, tradeNo, paid)
+	}
 	previousStatus := o.Status
 	now := time.Now()
 	grace := now.Add(-paymentGraceMinutes * time.Minute)
@@ -247,6 +250,8 @@ func (s *PaymentService) executeFulfillment(ctx context.Context, oid int64) erro
 		return fmt.Errorf("get order: %w", err)
 	}
 	switch o.OrderType {
+	case payment.OrderTypeSubscriptionTopup:
+		return s.subscriptionTopupService.Fulfill(ctx, oid)
 	case payment.OrderTypeSubscription:
 		return s.ExecuteSubscriptionFulfillment(ctx, oid)
 	case payment.OrderTypeBalance:
@@ -259,7 +264,7 @@ func (s *PaymentService) executeFulfillment(ctx context.Context, oid int64) erro
 }
 
 func isSupportedPaymentOrderType(orderType string) bool {
-	return orderType == payment.OrderTypeBalance || orderType == payment.OrderTypeSubscription
+	return orderType == payment.OrderTypeBalance || orderType == payment.OrderTypeSubscription || orderType == payment.OrderTypeSubscriptionTopup
 }
 
 func (s *PaymentService) rejectUnsupportedOrderType(ctx context.Context, o *dbent.PaymentOrder) {

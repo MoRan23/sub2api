@@ -48,6 +48,14 @@ const (
 	FieldQrCode = "qr_code"
 	// FieldQrCodeImg holds the string denoting the qr_code_img field in the database.
 	FieldQrCodeImg = "qr_code_img"
+	// FieldTopupSkuID holds the string denoting the topup_sku_id field in the database.
+	FieldTopupSkuID = "topup_sku_id"
+	// FieldTopupQuantity holds the string denoting the topup_quantity field in the database.
+	FieldTopupQuantity = "topup_quantity"
+	// FieldTopupSnapshot holds the string denoting the topup_snapshot field in the database.
+	FieldTopupSnapshot = "topup_snapshot"
+	// FieldTopupDeliveryStatus holds the string denoting the topup_delivery_status field in the database.
+	FieldTopupDeliveryStatus = "topup_delivery_status"
 	// FieldOrderType holds the string denoting the order_type field in the database.
 	FieldOrderType = "order_type"
 	// FieldPlanID holds the string denoting the plan_id field in the database.
@@ -131,6 +139,10 @@ var Columns = []string{
 	FieldPayURL,
 	FieldQrCode,
 	FieldQrCodeImg,
+	FieldTopupSkuID,
+	FieldTopupQuantity,
+	FieldTopupSnapshot,
+	FieldTopupDeliveryStatus,
 	FieldOrderType,
 	FieldPlanID,
 	FieldSubscriptionGroupID,
@@ -191,6 +203,12 @@ var (
 	PaymentTypeValidator func(string) error
 	// PaymentTradeNoValidator is a validator for the "payment_trade_no" field. It is called by the builders before save.
 	PaymentTradeNoValidator func(string) error
+	// DefaultTopupQuantity holds the default value on creation for the "topup_quantity" field.
+	DefaultTopupQuantity int
+	// DefaultTopupDeliveryStatus holds the default value on creation for the "topup_delivery_status" field.
+	DefaultTopupDeliveryStatus string
+	// TopupDeliveryStatusValidator is a validator for the "topup_delivery_status" field. It is called by the builders before save.
+	TopupDeliveryStatusValidator func(string) error
 	// DefaultOrderType holds the default value on creation for the "order_type" field.
 	DefaultOrderType string
 	// OrderTypeValidator is a validator for the "order_type" field. It is called by the builders before save.
@@ -312,6 +330,21 @@ func ByQrCode(opts ...sql.OrderTermOption) OrderOption {
 // ByQrCodeImg orders the results by the qr_code_img field.
 func ByQrCodeImg(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldQrCodeImg, opts...).ToFunc()
+}
+
+// ByTopupSkuID orders the results by the topup_sku_id field.
+func ByTopupSkuID(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldTopupSkuID, opts...).ToFunc()
+}
+
+// ByTopupQuantity orders the results by the topup_quantity field.
+func ByTopupQuantity(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldTopupQuantity, opts...).ToFunc()
+}
+
+// ByTopupDeliveryStatus orders the results by the topup_delivery_status field.
+func ByTopupDeliveryStatus(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldTopupDeliveryStatus, opts...).ToFunc()
 }
 
 // ByOrderType orders the results by the order_type field.

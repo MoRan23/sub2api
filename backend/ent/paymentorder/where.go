@@ -140,6 +140,21 @@ func QrCodeImg(v string) predicate.PaymentOrder {
 	return predicate.PaymentOrder(sql.FieldEQ(FieldQrCodeImg, v))
 }
 
+// TopupSkuID applies equality check predicate on the "topup_sku_id" field. It's identical to TopupSkuIDEQ.
+func TopupSkuID(v int64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldEQ(FieldTopupSkuID, v))
+}
+
+// TopupQuantity applies equality check predicate on the "topup_quantity" field. It's identical to TopupQuantityEQ.
+func TopupQuantity(v int) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldEQ(FieldTopupQuantity, v))
+}
+
+// TopupDeliveryStatus applies equality check predicate on the "topup_delivery_status" field. It's identical to TopupDeliveryStatusEQ.
+func TopupDeliveryStatus(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldEQ(FieldTopupDeliveryStatus, v))
+}
+
 // OrderType applies equality check predicate on the "order_type" field. It's identical to OrderTypeEQ.
 func OrderType(v string) predicate.PaymentOrder {
 	return predicate.PaymentOrder(sql.FieldEQ(FieldOrderType, v))
@@ -1208,6 +1223,171 @@ func QrCodeImgEqualFold(v string) predicate.PaymentOrder {
 // QrCodeImgContainsFold applies the ContainsFold predicate on the "qr_code_img" field.
 func QrCodeImgContainsFold(v string) predicate.PaymentOrder {
 	return predicate.PaymentOrder(sql.FieldContainsFold(FieldQrCodeImg, v))
+}
+
+// TopupSkuIDEQ applies the EQ predicate on the "topup_sku_id" field.
+func TopupSkuIDEQ(v int64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldEQ(FieldTopupSkuID, v))
+}
+
+// TopupSkuIDNEQ applies the NEQ predicate on the "topup_sku_id" field.
+func TopupSkuIDNEQ(v int64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldNEQ(FieldTopupSkuID, v))
+}
+
+// TopupSkuIDIn applies the In predicate on the "topup_sku_id" field.
+func TopupSkuIDIn(vs ...int64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldIn(FieldTopupSkuID, vs...))
+}
+
+// TopupSkuIDNotIn applies the NotIn predicate on the "topup_sku_id" field.
+func TopupSkuIDNotIn(vs ...int64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldNotIn(FieldTopupSkuID, vs...))
+}
+
+// TopupSkuIDGT applies the GT predicate on the "topup_sku_id" field.
+func TopupSkuIDGT(v int64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldGT(FieldTopupSkuID, v))
+}
+
+// TopupSkuIDGTE applies the GTE predicate on the "topup_sku_id" field.
+func TopupSkuIDGTE(v int64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldGTE(FieldTopupSkuID, v))
+}
+
+// TopupSkuIDLT applies the LT predicate on the "topup_sku_id" field.
+func TopupSkuIDLT(v int64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldLT(FieldTopupSkuID, v))
+}
+
+// TopupSkuIDLTE applies the LTE predicate on the "topup_sku_id" field.
+func TopupSkuIDLTE(v int64) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldLTE(FieldTopupSkuID, v))
+}
+
+// TopupSkuIDIsNil applies the IsNil predicate on the "topup_sku_id" field.
+func TopupSkuIDIsNil() predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldIsNull(FieldTopupSkuID))
+}
+
+// TopupSkuIDNotNil applies the NotNil predicate on the "topup_sku_id" field.
+func TopupSkuIDNotNil() predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldNotNull(FieldTopupSkuID))
+}
+
+// TopupQuantityEQ applies the EQ predicate on the "topup_quantity" field.
+func TopupQuantityEQ(v int) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldEQ(FieldTopupQuantity, v))
+}
+
+// TopupQuantityNEQ applies the NEQ predicate on the "topup_quantity" field.
+func TopupQuantityNEQ(v int) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldNEQ(FieldTopupQuantity, v))
+}
+
+// TopupQuantityIn applies the In predicate on the "topup_quantity" field.
+func TopupQuantityIn(vs ...int) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldIn(FieldTopupQuantity, vs...))
+}
+
+// TopupQuantityNotIn applies the NotIn predicate on the "topup_quantity" field.
+func TopupQuantityNotIn(vs ...int) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldNotIn(FieldTopupQuantity, vs...))
+}
+
+// TopupQuantityGT applies the GT predicate on the "topup_quantity" field.
+func TopupQuantityGT(v int) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldGT(FieldTopupQuantity, v))
+}
+
+// TopupQuantityGTE applies the GTE predicate on the "topup_quantity" field.
+func TopupQuantityGTE(v int) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldGTE(FieldTopupQuantity, v))
+}
+
+// TopupQuantityLT applies the LT predicate on the "topup_quantity" field.
+func TopupQuantityLT(v int) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldLT(FieldTopupQuantity, v))
+}
+
+// TopupQuantityLTE applies the LTE predicate on the "topup_quantity" field.
+func TopupQuantityLTE(v int) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldLTE(FieldTopupQuantity, v))
+}
+
+// TopupSnapshotIsNil applies the IsNil predicate on the "topup_snapshot" field.
+func TopupSnapshotIsNil() predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldIsNull(FieldTopupSnapshot))
+}
+
+// TopupSnapshotNotNil applies the NotNil predicate on the "topup_snapshot" field.
+func TopupSnapshotNotNil() predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldNotNull(FieldTopupSnapshot))
+}
+
+// TopupDeliveryStatusEQ applies the EQ predicate on the "topup_delivery_status" field.
+func TopupDeliveryStatusEQ(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldEQ(FieldTopupDeliveryStatus, v))
+}
+
+// TopupDeliveryStatusNEQ applies the NEQ predicate on the "topup_delivery_status" field.
+func TopupDeliveryStatusNEQ(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldNEQ(FieldTopupDeliveryStatus, v))
+}
+
+// TopupDeliveryStatusIn applies the In predicate on the "topup_delivery_status" field.
+func TopupDeliveryStatusIn(vs ...string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldIn(FieldTopupDeliveryStatus, vs...))
+}
+
+// TopupDeliveryStatusNotIn applies the NotIn predicate on the "topup_delivery_status" field.
+func TopupDeliveryStatusNotIn(vs ...string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldNotIn(FieldTopupDeliveryStatus, vs...))
+}
+
+// TopupDeliveryStatusGT applies the GT predicate on the "topup_delivery_status" field.
+func TopupDeliveryStatusGT(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldGT(FieldTopupDeliveryStatus, v))
+}
+
+// TopupDeliveryStatusGTE applies the GTE predicate on the "topup_delivery_status" field.
+func TopupDeliveryStatusGTE(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldGTE(FieldTopupDeliveryStatus, v))
+}
+
+// TopupDeliveryStatusLT applies the LT predicate on the "topup_delivery_status" field.
+func TopupDeliveryStatusLT(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldLT(FieldTopupDeliveryStatus, v))
+}
+
+// TopupDeliveryStatusLTE applies the LTE predicate on the "topup_delivery_status" field.
+func TopupDeliveryStatusLTE(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldLTE(FieldTopupDeliveryStatus, v))
+}
+
+// TopupDeliveryStatusContains applies the Contains predicate on the "topup_delivery_status" field.
+func TopupDeliveryStatusContains(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldContains(FieldTopupDeliveryStatus, v))
+}
+
+// TopupDeliveryStatusHasPrefix applies the HasPrefix predicate on the "topup_delivery_status" field.
+func TopupDeliveryStatusHasPrefix(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldHasPrefix(FieldTopupDeliveryStatus, v))
+}
+
+// TopupDeliveryStatusHasSuffix applies the HasSuffix predicate on the "topup_delivery_status" field.
+func TopupDeliveryStatusHasSuffix(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldHasSuffix(FieldTopupDeliveryStatus, v))
+}
+
+// TopupDeliveryStatusEqualFold applies the EqualFold predicate on the "topup_delivery_status" field.
+func TopupDeliveryStatusEqualFold(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldEqualFold(FieldTopupDeliveryStatus, v))
+}
+
+// TopupDeliveryStatusContainsFold applies the ContainsFold predicate on the "topup_delivery_status" field.
+func TopupDeliveryStatusContainsFold(v string) predicate.PaymentOrder {
+	return predicate.PaymentOrder(sql.FieldContainsFold(FieldTopupDeliveryStatus, v))
 }
 
 // OrderTypeEQ applies the EQ predicate on the "order_type" field.

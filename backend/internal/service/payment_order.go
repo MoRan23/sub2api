@@ -40,6 +40,14 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 	if err != nil {
 		return nil, err
 	}
+	if req.OrderType == payment.OrderTypeSubscriptionTopup {
+		req.topupQuote, err = s.subscriptionTopupService.GetQuote(ctx, req.SKUID, req.Quantity)
+		if err != nil {
+			return nil, err
+		}
+		req.Amount = req.topupQuote.Amount
+		req.topupQuote.Locale = req.Locale
+	}
 	if err := s.checkCancelRateLimit(ctx, req.UserID, cfg); err != nil {
 		return nil, err
 	}
@@ -106,6 +114,14 @@ func (s *PaymentService) CreateOrder(ctx context.Context, req CreateOrderRequest
 	}
 	resp, err := s.invokeProvider(ctx, order, req, cfg, limitAmount, payAmountStr, payAmount, plan, sel)
 	if err != nil {
+		if req.OrderType == payment.OrderTypeSubscriptionTopup {
+			releaseCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 10*time.Second)
+			defer cancel()
+			if releaseErr := s.subscriptionTopupService.ChangeUnpaidStatus(releaseCtx, order.ID, OrderStatusFailed, "system", "payment provider creation failed"); releaseErr != nil {
+				slog.Error("release topup reservation after payment creation failure", "orderID", order.ID, "error", releaseErr)
+			}
+			return nil, err
+		}
 		_, _ = s.entClient.PaymentOrder.UpdateOneID(order.ID).
 			SetStatus(OrderStatusFailed).
 			Save(ctx)
@@ -123,6 +139,11 @@ func (s *PaymentService) validateOrderInput(ctx context.Context, req CreateOrder
 		}
 	case payment.OrderTypeSubscription:
 		return s.validateSubOrder(ctx, req)
+	case payment.OrderTypeSubscriptionTopup:
+		if s.subscriptionTopupService == nil {
+			return nil, infraerrors.ServiceUnavailable("TOPUP_UNAVAILABLE", "subscription topup is unavailable")
+		}
+		return nil, nil
 	default:
 		return nil, infraerrors.BadRequest("INVALID_ORDER_TYPE", "unsupported order type")
 	}
@@ -222,6 +243,19 @@ func (s *PaymentService) createOrderInTx(ctx context.Context, req CreateOrderReq
 	order, err := b.Save(ctx)
 	if err != nil {
 		return nil, fmt.Errorf("create order: %w", err)
+	}
+	if req.OrderType == payment.OrderTypeSubscriptionTopup {
+		if req.topupQuote == nil {
+			return nil, infraerrors.BadRequest("INVALID_TOPUP_QUOTE", "subscription topup quote is required")
+		}
+		order, err = s.subscriptionTopupService.ReserveInTx(ctx, tx, order, req.topupQuote)
+		if err != nil {
+			return nil, err
+		}
+		if err := tx.Commit(); err != nil {
+			return nil, fmt.Errorf("commit topup order transaction: %w", err)
+		}
+		return order, nil
 	}
 	code := fmt.Sprintf("PAY-%d-%d", order.ID, time.Now().UnixNano()%100000)
 	order, err = tx.PaymentOrder.UpdateOneID(order.ID).SetRechargeCode(code).Save(ctx)
@@ -424,6 +458,9 @@ func (s *PaymentService) invokeProvider(ctx context.Context, order *dbent.Paymen
 			WithMetadata(map[string]string{"provider": sel.ProviderKey, "instance_id": sel.InstanceID})
 	}
 	subject := s.buildPaymentSubject(plan, limitAmount, cfg, sel)
+	if req.topupQuote != nil {
+		subject = fmt.Sprintf("%s / %s × %d", req.topupQuote.ProductName, req.topupQuote.SKUName, req.Quantity)
+	}
 	outTradeNo := order.OutTradeNo
 	canonicalReturnURL, err := CanonicalizeReturnURL(req.ReturnURL, req.SrcHost, req.SrcURL)
 	if err != nil {
@@ -656,6 +693,9 @@ func calculateCreateOrderPayAmount(limitAmount, feeRate float64, currency string
 }
 
 func calculateCreateOrderPayAmountForOrderType(limitAmount, feeRate float64, currency, orderType string, usdToCnyRate float64) (string, float64, error) {
+	if orderType == payment.OrderTypeSubscriptionTopup && currency != payment.DefaultPaymentCurrency {
+		return "", 0, infraerrors.BadRequest("TOPUP_CURRENCY_UNSUPPORTED", "subscription topup requires a CNY payment method")
+	}
 	paymentAmount := limitAmount
 	if orderType == payment.OrderTypeSubscription {
 		paymentAmount = calculateSubscriptionGatewayBaseAmount(limitAmount, usdToCnyRate, currency)
@@ -783,6 +823,10 @@ func buildWeChatPaymentOAuthStartURL(req CreateOrderRequest, scope string) (stri
 	}
 	if req.PlanID > 0 {
 		q.Set("plan_id", strconv.FormatInt(req.PlanID, 10))
+	}
+	if req.OrderType == payment.OrderTypeSubscriptionTopup {
+		q.Set("sku_id", strconv.FormatInt(req.SKUID, 10))
+		q.Set("quantity", strconv.Itoa(req.Quantity))
 	}
 	if scope = strings.TrimSpace(scope); scope != "" {
 		q.Set("scope", scope)

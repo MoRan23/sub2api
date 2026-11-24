@@ -189,6 +189,9 @@ func (s *PaymentService) validateRefundRequest(ctx context.Context, oid, uid int
 	if o.UserID != uid {
 		return nil, infraerrors.Forbidden("FORBIDDEN", "no permission")
 	}
+	if o.OrderType == payment.OrderTypeSubscriptionTopup {
+		return nil, infraerrors.BadRequest("TOPUP_REFUND_CONTACT_ADMIN", "退款请联系管理员。")
+	}
 	if o.OrderType != payment.OrderTypeBalance {
 		return nil, infraerrors.BadRequest("INVALID_ORDER_TYPE", "only balance orders can request refund")
 	}
@@ -210,6 +213,9 @@ func (s *PaymentService) PrepareRefund(ctx context.Context, oid int64, amt float
 	o, err := s.entClient.PaymentOrder.Get(ctx, oid)
 	if err != nil {
 		return nil, nil, infraerrors.NotFound("NOT_FOUND", "order not found")
+	}
+	if o.OrderType == payment.OrderTypeSubscriptionTopup {
+		return nil, nil, infraerrors.BadRequest("TOPUP_REFUND_CONTACT_ADMIN", "退款请联系管理员。")
 	}
 	// REFUND_PENDING 只能通过 QueryAndFinalizeRefund 收敛：重新发起会重复扣减并向网关重复退款。
 	ok := []string{OrderStatusCompleted, OrderStatusRefundRequested, OrderStatusRefundFailed}
@@ -467,6 +473,9 @@ func (s *PaymentService) QueryAndFinalizeRefund(ctx context.Context, oid int64) 
 	o, err := s.entClient.PaymentOrder.Get(ctx, oid)
 	if err != nil {
 		return nil, infraerrors.NotFound("NOT_FOUND", "order not found")
+	}
+	if o.OrderType == payment.OrderTypeSubscriptionTopup {
+		return nil, infraerrors.BadRequest("TOPUP_REFUND_CONTACT_ADMIN", "退款请联系管理员。")
 	}
 	if o.Status != OrderStatusRefundPending {
 		return nil, infraerrors.BadRequest("INVALID_STATUS", "only refund pending orders can be finalized")

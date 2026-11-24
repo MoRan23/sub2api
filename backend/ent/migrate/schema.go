@@ -1223,6 +1223,10 @@ var (
 		{Name: "pay_url", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
 		{Name: "qr_code", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
 		{Name: "qr_code_img", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "topup_sku_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "topup_quantity", Type: field.TypeInt, Default: 0},
+		{Name: "topup_snapshot", Type: field.TypeJSON, Nullable: true, SchemaType: map[string]string{"postgres": "jsonb"}},
+		{Name: "topup_delivery_status", Type: field.TypeString, Size: 20, Default: ""},
 		{Name: "order_type", Type: field.TypeString, Size: 20, Default: "balance"},
 		{Name: "plan_id", Type: field.TypeInt64, Nullable: true},
 		{Name: "subscription_group_id", Type: field.TypeInt64, Nullable: true},
@@ -1258,7 +1262,7 @@ var (
 		ForeignKeys: []*schema.ForeignKey{
 			{
 				Symbol:     "payment_orders_users_payment_orders",
-				Columns:    []*schema.Column{PaymentOrdersColumns[42]},
+				Columns:    []*schema.Column{PaymentOrdersColumns[46]},
 				RefColumns: []*schema.Column{UsersColumns[0]},
 				OnDelete:   schema.NoAction,
 			},
@@ -1275,37 +1279,37 @@ var (
 			{
 				Name:    "paymentorder_user_id",
 				Unique:  false,
-				Columns: []*schema.Column{PaymentOrdersColumns[42]},
+				Columns: []*schema.Column{PaymentOrdersColumns[46]},
 			},
 			{
 				Name:    "paymentorder_status",
 				Unique:  false,
-				Columns: []*schema.Column{PaymentOrdersColumns[24]},
+				Columns: []*schema.Column{PaymentOrdersColumns[28]},
 			},
 			{
 				Name:    "paymentorder_expires_at",
 				Unique:  false,
-				Columns: []*schema.Column{PaymentOrdersColumns[32]},
+				Columns: []*schema.Column{PaymentOrdersColumns[36]},
 			},
 			{
 				Name:    "paymentorder_created_at",
 				Unique:  false,
-				Columns: []*schema.Column{PaymentOrdersColumns[40]},
+				Columns: []*schema.Column{PaymentOrdersColumns[44]},
 			},
 			{
 				Name:    "paymentorder_paid_at",
 				Unique:  false,
-				Columns: []*schema.Column{PaymentOrdersColumns[33]},
+				Columns: []*schema.Column{PaymentOrdersColumns[37]},
 			},
 			{
 				Name:    "paymentorder_payment_type_paid_at",
 				Unique:  false,
-				Columns: []*schema.Column{PaymentOrdersColumns[12], PaymentOrdersColumns[33]},
+				Columns: []*schema.Column{PaymentOrdersColumns[12], PaymentOrdersColumns[37]},
 			},
 			{
 				Name:    "paymentorder_order_type",
 				Unique:  false,
-				Columns: []*schema.Column{PaymentOrdersColumns[17]},
+				Columns: []*schema.Column{PaymentOrdersColumns[21]},
 			},
 		},
 	}
@@ -1686,6 +1690,117 @@ var (
 		Name:       "tls_fingerprint_profiles",
 		Columns:    TLSFingerprintProfilesColumns,
 		PrimaryKey: []*schema.Column{TLSFingerprintProfilesColumns[0]},
+	}
+	// TopupCardsColumns holds the columns for the "topup_cards" table.
+	TopupCardsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "sku_id", Type: field.TypeInt64},
+		{Name: "code_hash", Type: field.TypeString, Unique: true, Size: 64},
+		{Name: "ciphertext", Type: field.TypeString, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "masked_code", Type: field.TypeString, Size: 32},
+		{Name: "status", Type: field.TypeString, Size: 20, Default: "available"},
+		{Name: "order_id", Type: field.TypeInt64, Nullable: true},
+		{Name: "issued_at", Type: field.TypeTime, Nullable: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// TopupCardsTable holds the schema information for the "topup_cards" table.
+	TopupCardsTable = &schema.Table{
+		Name:       "topup_cards",
+		Columns:    TopupCardsColumns,
+		PrimaryKey: []*schema.Column{TopupCardsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "topupcard_sku_id_status_id",
+				Unique:  false,
+				Columns: []*schema.Column{TopupCardsColumns[1], TopupCardsColumns[5], TopupCardsColumns[0]},
+			},
+			{
+				Name:    "topupcard_order_id_status",
+				Unique:  false,
+				Columns: []*schema.Column{TopupCardsColumns[6], TopupCardsColumns[5]},
+			},
+		},
+	}
+	// TopupMailsColumns holds the columns for the "topup_mails" table.
+	TopupMailsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "order_id", Type: field.TypeInt64, Unique: true},
+		{Name: "recipient", Type: field.TypeString, Size: 255},
+		{Name: "locale", Type: field.TypeString, Size: 20, Default: "zh"},
+		{Name: "status", Type: field.TypeString, Size: 20, Default: "queued"},
+		{Name: "attempts", Type: field.TypeInt, Default: 0},
+		{Name: "available_at", Type: field.TypeTime},
+		{Name: "lease_until", Type: field.TypeTime, Nullable: true},
+		{Name: "claim_token", Type: field.TypeString, Size: 64, Default: ""},
+		{Name: "message_id", Type: field.TypeString, Size: 255},
+		{Name: "last_error", Type: field.TypeString, Size: 255, Default: ""},
+		{Name: "sent_at", Type: field.TypeTime, Nullable: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// TopupMailsTable holds the schema information for the "topup_mails" table.
+	TopupMailsTable = &schema.Table{
+		Name:       "topup_mails",
+		Columns:    TopupMailsColumns,
+		PrimaryKey: []*schema.Column{TopupMailsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "topupmail_status_available_at",
+				Unique:  false,
+				Columns: []*schema.Column{TopupMailsColumns[4], TopupMailsColumns[6]},
+			},
+		},
+	}
+	// TopupProductsColumns holds the columns for the "topup_products" table.
+	TopupProductsColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "name", Type: field.TypeString, Size: 100},
+		{Name: "description", Type: field.TypeString, Default: "", SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "instructions", Type: field.TypeString, Default: "", SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "enabled", Type: field.TypeBool, Default: false},
+		{Name: "sort_order", Type: field.TypeInt, Default: 0},
+		{Name: "archived_at", Type: field.TypeTime, Nullable: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// TopupProductsTable holds the schema information for the "topup_products" table.
+	TopupProductsTable = &schema.Table{
+		Name:       "topup_products",
+		Columns:    TopupProductsColumns,
+		PrimaryKey: []*schema.Column{TopupProductsColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "topupproduct_enabled_sort_order",
+				Unique:  false,
+				Columns: []*schema.Column{TopupProductsColumns[4], TopupProductsColumns[5]},
+			},
+		},
+	}
+	// TopupSkusColumns holds the columns for the "topup_skus" table.
+	TopupSkusColumns = []*schema.Column{
+		{Name: "id", Type: field.TypeInt64, Increment: true},
+		{Name: "product_id", Type: field.TypeInt64},
+		{Name: "name", Type: field.TypeString, Size: 100},
+		{Name: "price", Type: field.TypeFloat64, SchemaType: map[string]string{"postgres": "decimal(20,2)"}},
+		{Name: "enabled", Type: field.TypeBool, Default: false},
+		{Name: "sort_order", Type: field.TypeInt, Default: 0},
+		{Name: "archived_at", Type: field.TypeTime, Nullable: true},
+		{Name: "created_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+		{Name: "updated_at", Type: field.TypeTime, SchemaType: map[string]string{"postgres": "timestamptz"}},
+	}
+	// TopupSkusTable holds the schema information for the "topup_skus" table.
+	TopupSkusTable = &schema.Table{
+		Name:       "topup_skus",
+		Columns:    TopupSkusColumns,
+		PrimaryKey: []*schema.Column{TopupSkusColumns[0]},
+		Indexes: []*schema.Index{
+			{
+				Name:    "topupsku_product_id_sort_order",
+				Unique:  false,
+				Columns: []*schema.Column{TopupSkusColumns[1], TopupSkusColumns[5]},
+			},
+		},
 	}
 	// UsageCleanupTasksColumns holds the columns for the "usage_cleanup_tasks" table.
 	UsageCleanupTasksColumns = []*schema.Column{
@@ -2273,6 +2388,10 @@ var (
 		SettingsTable,
 		SubscriptionPlansTable,
 		TLSFingerprintProfilesTable,
+		TopupCardsTable,
+		TopupMailsTable,
+		TopupProductsTable,
+		TopupSkusTable,
 		UsageCleanupTasksTable,
 		UsageLogsTable,
 		UsersTable,
@@ -2410,6 +2529,18 @@ func init() {
 	}
 	TLSFingerprintProfilesTable.Annotation = &entsql.Annotation{
 		Table: "tls_fingerprint_profiles",
+	}
+	TopupCardsTable.Annotation = &entsql.Annotation{
+		Table: "topup_cards",
+	}
+	TopupMailsTable.Annotation = &entsql.Annotation{
+		Table: "topup_mails",
+	}
+	TopupProductsTable.Annotation = &entsql.Annotation{
+		Table: "topup_products",
+	}
+	TopupSkusTable.Annotation = &entsql.Annotation{
+		Table: "topup_skus",
 	}
 	UsageCleanupTasksTable.Annotation = &entsql.Annotation{
 		Table: "usage_cleanup_tasks",

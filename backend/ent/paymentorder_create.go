@@ -197,6 +197,54 @@ func (_c *PaymentOrderCreate) SetNillableQrCodeImg(v *string) *PaymentOrderCreat
 	return _c
 }
 
+// SetTopupSkuID sets the "topup_sku_id" field.
+func (_c *PaymentOrderCreate) SetTopupSkuID(v int64) *PaymentOrderCreate {
+	_c.mutation.SetTopupSkuID(v)
+	return _c
+}
+
+// SetNillableTopupSkuID sets the "topup_sku_id" field if the given value is not nil.
+func (_c *PaymentOrderCreate) SetNillableTopupSkuID(v *int64) *PaymentOrderCreate {
+	if v != nil {
+		_c.SetTopupSkuID(*v)
+	}
+	return _c
+}
+
+// SetTopupQuantity sets the "topup_quantity" field.
+func (_c *PaymentOrderCreate) SetTopupQuantity(v int) *PaymentOrderCreate {
+	_c.mutation.SetTopupQuantity(v)
+	return _c
+}
+
+// SetNillableTopupQuantity sets the "topup_quantity" field if the given value is not nil.
+func (_c *PaymentOrderCreate) SetNillableTopupQuantity(v *int) *PaymentOrderCreate {
+	if v != nil {
+		_c.SetTopupQuantity(*v)
+	}
+	return _c
+}
+
+// SetTopupSnapshot sets the "topup_snapshot" field.
+func (_c *PaymentOrderCreate) SetTopupSnapshot(v map[string]interface{}) *PaymentOrderCreate {
+	_c.mutation.SetTopupSnapshot(v)
+	return _c
+}
+
+// SetTopupDeliveryStatus sets the "topup_delivery_status" field.
+func (_c *PaymentOrderCreate) SetTopupDeliveryStatus(v string) *PaymentOrderCreate {
+	_c.mutation.SetTopupDeliveryStatus(v)
+	return _c
+}
+
+// SetNillableTopupDeliveryStatus sets the "topup_delivery_status" field if the given value is not nil.
+func (_c *PaymentOrderCreate) SetNillableTopupDeliveryStatus(v *string) *PaymentOrderCreate {
+	if v != nil {
+		_c.SetTopupDeliveryStatus(*v)
+	}
+	return _c
+}
+
 // SetOrderType sets the "order_type" field.
 func (_c *PaymentOrderCreate) SetOrderType(v string) *PaymentOrderCreate {
 	_c.mutation.SetOrderType(v)
@@ -575,6 +623,14 @@ func (_c *PaymentOrderCreate) defaults() {
 		v := paymentorder.DefaultOutTradeNo
 		_c.mutation.SetOutTradeNo(v)
 	}
+	if _, ok := _c.mutation.TopupQuantity(); !ok {
+		v := paymentorder.DefaultTopupQuantity
+		_c.mutation.SetTopupQuantity(v)
+	}
+	if _, ok := _c.mutation.TopupDeliveryStatus(); !ok {
+		v := paymentorder.DefaultTopupDeliveryStatus
+		_c.mutation.SetTopupDeliveryStatus(v)
+	}
 	if _, ok := _c.mutation.OrderType(); !ok {
 		v := paymentorder.DefaultOrderType
 		_c.mutation.SetOrderType(v)
@@ -670,6 +726,17 @@ func (_c *PaymentOrderCreate) check() error {
 	if v, ok := _c.mutation.PaymentTradeNo(); ok {
 		if err := paymentorder.PaymentTradeNoValidator(v); err != nil {
 			return &ValidationError{Name: "payment_trade_no", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.payment_trade_no": %w`, err)}
+		}
+	}
+	if _, ok := _c.mutation.TopupQuantity(); !ok {
+		return &ValidationError{Name: "topup_quantity", err: errors.New(`ent: missing required field "PaymentOrder.topup_quantity"`)}
+	}
+	if _, ok := _c.mutation.TopupDeliveryStatus(); !ok {
+		return &ValidationError{Name: "topup_delivery_status", err: errors.New(`ent: missing required field "PaymentOrder.topup_delivery_status"`)}
+	}
+	if v, ok := _c.mutation.TopupDeliveryStatus(); ok {
+		if err := paymentorder.TopupDeliveryStatusValidator(v); err != nil {
+			return &ValidationError{Name: "topup_delivery_status", err: fmt.Errorf(`ent: validator failed for field "PaymentOrder.topup_delivery_status": %w`, err)}
 		}
 	}
 	if _, ok := _c.mutation.OrderType(); !ok {
@@ -827,6 +894,22 @@ func (_c *PaymentOrderCreate) createSpec() (*PaymentOrder, *sqlgraph.CreateSpec)
 	if value, ok := _c.mutation.QrCodeImg(); ok {
 		_spec.SetField(paymentorder.FieldQrCodeImg, field.TypeString, value)
 		_node.QrCodeImg = &value
+	}
+	if value, ok := _c.mutation.TopupSkuID(); ok {
+		_spec.SetField(paymentorder.FieldTopupSkuID, field.TypeInt64, value)
+		_node.TopupSkuID = &value
+	}
+	if value, ok := _c.mutation.TopupQuantity(); ok {
+		_spec.SetField(paymentorder.FieldTopupQuantity, field.TypeInt, value)
+		_node.TopupQuantity = value
+	}
+	if value, ok := _c.mutation.TopupSnapshot(); ok {
+		_spec.SetField(paymentorder.FieldTopupSnapshot, field.TypeJSON, value)
+		_node.TopupSnapshot = value
+	}
+	if value, ok := _c.mutation.TopupDeliveryStatus(); ok {
+		_spec.SetField(paymentorder.FieldTopupDeliveryStatus, field.TypeString, value)
+		_node.TopupDeliveryStatus = value
 	}
 	if value, ok := _c.mutation.OrderType(); ok {
 		_spec.SetField(paymentorder.FieldOrderType, field.TypeString, value)
@@ -1258,6 +1341,78 @@ func (u *PaymentOrderUpsert) UpdateQrCodeImg() *PaymentOrderUpsert {
 // ClearQrCodeImg clears the value of the "qr_code_img" field.
 func (u *PaymentOrderUpsert) ClearQrCodeImg() *PaymentOrderUpsert {
 	u.SetNull(paymentorder.FieldQrCodeImg)
+	return u
+}
+
+// SetTopupSkuID sets the "topup_sku_id" field.
+func (u *PaymentOrderUpsert) SetTopupSkuID(v int64) *PaymentOrderUpsert {
+	u.Set(paymentorder.FieldTopupSkuID, v)
+	return u
+}
+
+// UpdateTopupSkuID sets the "topup_sku_id" field to the value that was provided on create.
+func (u *PaymentOrderUpsert) UpdateTopupSkuID() *PaymentOrderUpsert {
+	u.SetExcluded(paymentorder.FieldTopupSkuID)
+	return u
+}
+
+// AddTopupSkuID adds v to the "topup_sku_id" field.
+func (u *PaymentOrderUpsert) AddTopupSkuID(v int64) *PaymentOrderUpsert {
+	u.Add(paymentorder.FieldTopupSkuID, v)
+	return u
+}
+
+// ClearTopupSkuID clears the value of the "topup_sku_id" field.
+func (u *PaymentOrderUpsert) ClearTopupSkuID() *PaymentOrderUpsert {
+	u.SetNull(paymentorder.FieldTopupSkuID)
+	return u
+}
+
+// SetTopupQuantity sets the "topup_quantity" field.
+func (u *PaymentOrderUpsert) SetTopupQuantity(v int) *PaymentOrderUpsert {
+	u.Set(paymentorder.FieldTopupQuantity, v)
+	return u
+}
+
+// UpdateTopupQuantity sets the "topup_quantity" field to the value that was provided on create.
+func (u *PaymentOrderUpsert) UpdateTopupQuantity() *PaymentOrderUpsert {
+	u.SetExcluded(paymentorder.FieldTopupQuantity)
+	return u
+}
+
+// AddTopupQuantity adds v to the "topup_quantity" field.
+func (u *PaymentOrderUpsert) AddTopupQuantity(v int) *PaymentOrderUpsert {
+	u.Add(paymentorder.FieldTopupQuantity, v)
+	return u
+}
+
+// SetTopupSnapshot sets the "topup_snapshot" field.
+func (u *PaymentOrderUpsert) SetTopupSnapshot(v map[string]interface{}) *PaymentOrderUpsert {
+	u.Set(paymentorder.FieldTopupSnapshot, v)
+	return u
+}
+
+// UpdateTopupSnapshot sets the "topup_snapshot" field to the value that was provided on create.
+func (u *PaymentOrderUpsert) UpdateTopupSnapshot() *PaymentOrderUpsert {
+	u.SetExcluded(paymentorder.FieldTopupSnapshot)
+	return u
+}
+
+// ClearTopupSnapshot clears the value of the "topup_snapshot" field.
+func (u *PaymentOrderUpsert) ClearTopupSnapshot() *PaymentOrderUpsert {
+	u.SetNull(paymentorder.FieldTopupSnapshot)
+	return u
+}
+
+// SetTopupDeliveryStatus sets the "topup_delivery_status" field.
+func (u *PaymentOrderUpsert) SetTopupDeliveryStatus(v string) *PaymentOrderUpsert {
+	u.Set(paymentorder.FieldTopupDeliveryStatus, v)
+	return u
+}
+
+// UpdateTopupDeliveryStatus sets the "topup_delivery_status" field to the value that was provided on create.
+func (u *PaymentOrderUpsert) UpdateTopupDeliveryStatus() *PaymentOrderUpsert {
+	u.SetExcluded(paymentorder.FieldTopupDeliveryStatus)
 	return u
 }
 
@@ -2019,6 +2174,90 @@ func (u *PaymentOrderUpsertOne) UpdateQrCodeImg() *PaymentOrderUpsertOne {
 func (u *PaymentOrderUpsertOne) ClearQrCodeImg() *PaymentOrderUpsertOne {
 	return u.Update(func(s *PaymentOrderUpsert) {
 		s.ClearQrCodeImg()
+	})
+}
+
+// SetTopupSkuID sets the "topup_sku_id" field.
+func (u *PaymentOrderUpsertOne) SetTopupSkuID(v int64) *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.SetTopupSkuID(v)
+	})
+}
+
+// AddTopupSkuID adds v to the "topup_sku_id" field.
+func (u *PaymentOrderUpsertOne) AddTopupSkuID(v int64) *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.AddTopupSkuID(v)
+	})
+}
+
+// UpdateTopupSkuID sets the "topup_sku_id" field to the value that was provided on create.
+func (u *PaymentOrderUpsertOne) UpdateTopupSkuID() *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.UpdateTopupSkuID()
+	})
+}
+
+// ClearTopupSkuID clears the value of the "topup_sku_id" field.
+func (u *PaymentOrderUpsertOne) ClearTopupSkuID() *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.ClearTopupSkuID()
+	})
+}
+
+// SetTopupQuantity sets the "topup_quantity" field.
+func (u *PaymentOrderUpsertOne) SetTopupQuantity(v int) *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.SetTopupQuantity(v)
+	})
+}
+
+// AddTopupQuantity adds v to the "topup_quantity" field.
+func (u *PaymentOrderUpsertOne) AddTopupQuantity(v int) *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.AddTopupQuantity(v)
+	})
+}
+
+// UpdateTopupQuantity sets the "topup_quantity" field to the value that was provided on create.
+func (u *PaymentOrderUpsertOne) UpdateTopupQuantity() *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.UpdateTopupQuantity()
+	})
+}
+
+// SetTopupSnapshot sets the "topup_snapshot" field.
+func (u *PaymentOrderUpsertOne) SetTopupSnapshot(v map[string]interface{}) *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.SetTopupSnapshot(v)
+	})
+}
+
+// UpdateTopupSnapshot sets the "topup_snapshot" field to the value that was provided on create.
+func (u *PaymentOrderUpsertOne) UpdateTopupSnapshot() *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.UpdateTopupSnapshot()
+	})
+}
+
+// ClearTopupSnapshot clears the value of the "topup_snapshot" field.
+func (u *PaymentOrderUpsertOne) ClearTopupSnapshot() *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.ClearTopupSnapshot()
+	})
+}
+
+// SetTopupDeliveryStatus sets the "topup_delivery_status" field.
+func (u *PaymentOrderUpsertOne) SetTopupDeliveryStatus(v string) *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.SetTopupDeliveryStatus(v)
+	})
+}
+
+// UpdateTopupDeliveryStatus sets the "topup_delivery_status" field to the value that was provided on create.
+func (u *PaymentOrderUpsertOne) UpdateTopupDeliveryStatus() *PaymentOrderUpsertOne {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.UpdateTopupDeliveryStatus()
 	})
 }
 
@@ -3014,6 +3253,90 @@ func (u *PaymentOrderUpsertBulk) UpdateQrCodeImg() *PaymentOrderUpsertBulk {
 func (u *PaymentOrderUpsertBulk) ClearQrCodeImg() *PaymentOrderUpsertBulk {
 	return u.Update(func(s *PaymentOrderUpsert) {
 		s.ClearQrCodeImg()
+	})
+}
+
+// SetTopupSkuID sets the "topup_sku_id" field.
+func (u *PaymentOrderUpsertBulk) SetTopupSkuID(v int64) *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.SetTopupSkuID(v)
+	})
+}
+
+// AddTopupSkuID adds v to the "topup_sku_id" field.
+func (u *PaymentOrderUpsertBulk) AddTopupSkuID(v int64) *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.AddTopupSkuID(v)
+	})
+}
+
+// UpdateTopupSkuID sets the "topup_sku_id" field to the value that was provided on create.
+func (u *PaymentOrderUpsertBulk) UpdateTopupSkuID() *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.UpdateTopupSkuID()
+	})
+}
+
+// ClearTopupSkuID clears the value of the "topup_sku_id" field.
+func (u *PaymentOrderUpsertBulk) ClearTopupSkuID() *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.ClearTopupSkuID()
+	})
+}
+
+// SetTopupQuantity sets the "topup_quantity" field.
+func (u *PaymentOrderUpsertBulk) SetTopupQuantity(v int) *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.SetTopupQuantity(v)
+	})
+}
+
+// AddTopupQuantity adds v to the "topup_quantity" field.
+func (u *PaymentOrderUpsertBulk) AddTopupQuantity(v int) *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.AddTopupQuantity(v)
+	})
+}
+
+// UpdateTopupQuantity sets the "topup_quantity" field to the value that was provided on create.
+func (u *PaymentOrderUpsertBulk) UpdateTopupQuantity() *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.UpdateTopupQuantity()
+	})
+}
+
+// SetTopupSnapshot sets the "topup_snapshot" field.
+func (u *PaymentOrderUpsertBulk) SetTopupSnapshot(v map[string]interface{}) *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.SetTopupSnapshot(v)
+	})
+}
+
+// UpdateTopupSnapshot sets the "topup_snapshot" field to the value that was provided on create.
+func (u *PaymentOrderUpsertBulk) UpdateTopupSnapshot() *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.UpdateTopupSnapshot()
+	})
+}
+
+// ClearTopupSnapshot clears the value of the "topup_snapshot" field.
+func (u *PaymentOrderUpsertBulk) ClearTopupSnapshot() *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.ClearTopupSnapshot()
+	})
+}
+
+// SetTopupDeliveryStatus sets the "topup_delivery_status" field.
+func (u *PaymentOrderUpsertBulk) SetTopupDeliveryStatus(v string) *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.SetTopupDeliveryStatus(v)
+	})
+}
+
+// UpdateTopupDeliveryStatus sets the "topup_delivery_status" field to the value that was provided on create.
+func (u *PaymentOrderUpsertBulk) UpdateTopupDeliveryStatus() *PaymentOrderUpsertBulk {
+	return u.Update(func(s *PaymentOrderUpsert) {
+		s.UpdateTopupDeliveryStatus()
 	})
 }
 

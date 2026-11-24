@@ -40,6 +40,10 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/setting"
 	"github.com/Wei-Shaw/sub2api/ent/subscriptionplan"
 	"github.com/Wei-Shaw/sub2api/ent/tlsfingerprintprofile"
+	"github.com/Wei-Shaw/sub2api/ent/topupcard"
+	"github.com/Wei-Shaw/sub2api/ent/topupmail"
+	"github.com/Wei-Shaw/sub2api/ent/topupproduct"
+	"github.com/Wei-Shaw/sub2api/ent/topupsku"
 	"github.com/Wei-Shaw/sub2api/ent/usagecleanuptask"
 	"github.com/Wei-Shaw/sub2api/ent/usagelog"
 	"github.com/Wei-Shaw/sub2api/ent/user"
@@ -1532,52 +1536,62 @@ func init() {
 	paymentorderDescPaymentTradeNo := paymentorderFields[13].Descriptor()
 	// paymentorder.PaymentTradeNoValidator is a validator for the "payment_trade_no" field. It is called by the builders before save.
 	paymentorder.PaymentTradeNoValidator = paymentorderDescPaymentTradeNo.Validators[0].(func(string) error)
+	// paymentorderDescTopupQuantity is the schema descriptor for topup_quantity field.
+	paymentorderDescTopupQuantity := paymentorderFields[18].Descriptor()
+	// paymentorder.DefaultTopupQuantity holds the default value on creation for the topup_quantity field.
+	paymentorder.DefaultTopupQuantity = paymentorderDescTopupQuantity.Default.(int)
+	// paymentorderDescTopupDeliveryStatus is the schema descriptor for topup_delivery_status field.
+	paymentorderDescTopupDeliveryStatus := paymentorderFields[20].Descriptor()
+	// paymentorder.DefaultTopupDeliveryStatus holds the default value on creation for the topup_delivery_status field.
+	paymentorder.DefaultTopupDeliveryStatus = paymentorderDescTopupDeliveryStatus.Default.(string)
+	// paymentorder.TopupDeliveryStatusValidator is a validator for the "topup_delivery_status" field. It is called by the builders before save.
+	paymentorder.TopupDeliveryStatusValidator = paymentorderDescTopupDeliveryStatus.Validators[0].(func(string) error)
 	// paymentorderDescOrderType is the schema descriptor for order_type field.
-	paymentorderDescOrderType := paymentorderFields[17].Descriptor()
+	paymentorderDescOrderType := paymentorderFields[21].Descriptor()
 	// paymentorder.DefaultOrderType holds the default value on creation for the order_type field.
 	paymentorder.DefaultOrderType = paymentorderDescOrderType.Default.(string)
 	// paymentorder.OrderTypeValidator is a validator for the "order_type" field. It is called by the builders before save.
 	paymentorder.OrderTypeValidator = paymentorderDescOrderType.Validators[0].(func(string) error)
 	// paymentorderDescProviderInstanceID is the schema descriptor for provider_instance_id field.
-	paymentorderDescProviderInstanceID := paymentorderFields[21].Descriptor()
+	paymentorderDescProviderInstanceID := paymentorderFields[25].Descriptor()
 	// paymentorder.ProviderInstanceIDValidator is a validator for the "provider_instance_id" field. It is called by the builders before save.
 	paymentorder.ProviderInstanceIDValidator = paymentorderDescProviderInstanceID.Validators[0].(func(string) error)
 	// paymentorderDescProviderKey is the schema descriptor for provider_key field.
-	paymentorderDescProviderKey := paymentorderFields[22].Descriptor()
+	paymentorderDescProviderKey := paymentorderFields[26].Descriptor()
 	// paymentorder.ProviderKeyValidator is a validator for the "provider_key" field. It is called by the builders before save.
 	paymentorder.ProviderKeyValidator = paymentorderDescProviderKey.Validators[0].(func(string) error)
 	// paymentorderDescStatus is the schema descriptor for status field.
-	paymentorderDescStatus := paymentorderFields[24].Descriptor()
+	paymentorderDescStatus := paymentorderFields[28].Descriptor()
 	// paymentorder.DefaultStatus holds the default value on creation for the status field.
 	paymentorder.DefaultStatus = paymentorderDescStatus.Default.(string)
 	// paymentorder.StatusValidator is a validator for the "status" field. It is called by the builders before save.
 	paymentorder.StatusValidator = paymentorderDescStatus.Validators[0].(func(string) error)
 	// paymentorderDescRefundAmount is the schema descriptor for refund_amount field.
-	paymentorderDescRefundAmount := paymentorderFields[25].Descriptor()
+	paymentorderDescRefundAmount := paymentorderFields[29].Descriptor()
 	// paymentorder.DefaultRefundAmount holds the default value on creation for the refund_amount field.
 	paymentorder.DefaultRefundAmount = paymentorderDescRefundAmount.Default.(float64)
 	// paymentorderDescForceRefund is the schema descriptor for force_refund field.
-	paymentorderDescForceRefund := paymentorderFields[28].Descriptor()
+	paymentorderDescForceRefund := paymentorderFields[32].Descriptor()
 	// paymentorder.DefaultForceRefund holds the default value on creation for the force_refund field.
 	paymentorder.DefaultForceRefund = paymentorderDescForceRefund.Default.(bool)
 	// paymentorderDescRefundRequestedBy is the schema descriptor for refund_requested_by field.
-	paymentorderDescRefundRequestedBy := paymentorderFields[31].Descriptor()
+	paymentorderDescRefundRequestedBy := paymentorderFields[35].Descriptor()
 	// paymentorder.RefundRequestedByValidator is a validator for the "refund_requested_by" field. It is called by the builders before save.
 	paymentorder.RefundRequestedByValidator = paymentorderDescRefundRequestedBy.Validators[0].(func(string) error)
 	// paymentorderDescClientIP is the schema descriptor for client_ip field.
-	paymentorderDescClientIP := paymentorderFields[37].Descriptor()
+	paymentorderDescClientIP := paymentorderFields[41].Descriptor()
 	// paymentorder.ClientIPValidator is a validator for the "client_ip" field. It is called by the builders before save.
 	paymentorder.ClientIPValidator = paymentorderDescClientIP.Validators[0].(func(string) error)
 	// paymentorderDescSrcHost is the schema descriptor for src_host field.
-	paymentorderDescSrcHost := paymentorderFields[38].Descriptor()
+	paymentorderDescSrcHost := paymentorderFields[42].Descriptor()
 	// paymentorder.SrcHostValidator is a validator for the "src_host" field. It is called by the builders before save.
 	paymentorder.SrcHostValidator = paymentorderDescSrcHost.Validators[0].(func(string) error)
 	// paymentorderDescCreatedAt is the schema descriptor for created_at field.
-	paymentorderDescCreatedAt := paymentorderFields[40].Descriptor()
+	paymentorderDescCreatedAt := paymentorderFields[44].Descriptor()
 	// paymentorder.DefaultCreatedAt holds the default value on creation for the created_at field.
 	paymentorder.DefaultCreatedAt = paymentorderDescCreatedAt.Default.(func() time.Time)
 	// paymentorderDescUpdatedAt is the schema descriptor for updated_at field.
-	paymentorderDescUpdatedAt := paymentorderFields[41].Descriptor()
+	paymentorderDescUpdatedAt := paymentorderFields[45].Descriptor()
 	// paymentorder.DefaultUpdatedAt holds the default value on creation for the updated_at field.
 	paymentorder.DefaultUpdatedAt = paymentorderDescUpdatedAt.Default.(func() time.Time)
 	// paymentorder.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
@@ -2132,6 +2146,168 @@ func init() {
 	tlsfingerprintprofileDescEnableGrease := tlsfingerprintprofileFields[2].Descriptor()
 	// tlsfingerprintprofile.DefaultEnableGrease holds the default value on creation for the enable_grease field.
 	tlsfingerprintprofile.DefaultEnableGrease = tlsfingerprintprofileDescEnableGrease.Default.(bool)
+	topupcardFields := schema.TopupCard{}.Fields()
+	_ = topupcardFields
+	// topupcardDescCodeHash is the schema descriptor for code_hash field.
+	topupcardDescCodeHash := topupcardFields[1].Descriptor()
+	// topupcard.CodeHashValidator is a validator for the "code_hash" field. It is called by the builders before save.
+	topupcard.CodeHashValidator = topupcardDescCodeHash.Validators[0].(func(string) error)
+	// topupcardDescMaskedCode is the schema descriptor for masked_code field.
+	topupcardDescMaskedCode := topupcardFields[3].Descriptor()
+	// topupcard.MaskedCodeValidator is a validator for the "masked_code" field. It is called by the builders before save.
+	topupcard.MaskedCodeValidator = topupcardDescMaskedCode.Validators[0].(func(string) error)
+	// topupcardDescStatus is the schema descriptor for status field.
+	topupcardDescStatus := topupcardFields[4].Descriptor()
+	// topupcard.DefaultStatus holds the default value on creation for the status field.
+	topupcard.DefaultStatus = topupcardDescStatus.Default.(string)
+	// topupcard.StatusValidator is a validator for the "status" field. It is called by the builders before save.
+	topupcard.StatusValidator = topupcardDescStatus.Validators[0].(func(string) error)
+	// topupcardDescCreatedAt is the schema descriptor for created_at field.
+	topupcardDescCreatedAt := topupcardFields[7].Descriptor()
+	// topupcard.DefaultCreatedAt holds the default value on creation for the created_at field.
+	topupcard.DefaultCreatedAt = topupcardDescCreatedAt.Default.(func() time.Time)
+	// topupcardDescUpdatedAt is the schema descriptor for updated_at field.
+	topupcardDescUpdatedAt := topupcardFields[8].Descriptor()
+	// topupcard.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	topupcard.DefaultUpdatedAt = topupcardDescUpdatedAt.Default.(func() time.Time)
+	// topupcard.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	topupcard.UpdateDefaultUpdatedAt = topupcardDescUpdatedAt.UpdateDefault.(func() time.Time)
+	topupmailFields := schema.TopupMail{}.Fields()
+	_ = topupmailFields
+	// topupmailDescRecipient is the schema descriptor for recipient field.
+	topupmailDescRecipient := topupmailFields[1].Descriptor()
+	// topupmail.RecipientValidator is a validator for the "recipient" field. It is called by the builders before save.
+	topupmail.RecipientValidator = topupmailDescRecipient.Validators[0].(func(string) error)
+	// topupmailDescLocale is the schema descriptor for locale field.
+	topupmailDescLocale := topupmailFields[2].Descriptor()
+	// topupmail.DefaultLocale holds the default value on creation for the locale field.
+	topupmail.DefaultLocale = topupmailDescLocale.Default.(string)
+	// topupmail.LocaleValidator is a validator for the "locale" field. It is called by the builders before save.
+	topupmail.LocaleValidator = topupmailDescLocale.Validators[0].(func(string) error)
+	// topupmailDescStatus is the schema descriptor for status field.
+	topupmailDescStatus := topupmailFields[3].Descriptor()
+	// topupmail.DefaultStatus holds the default value on creation for the status field.
+	topupmail.DefaultStatus = topupmailDescStatus.Default.(string)
+	// topupmail.StatusValidator is a validator for the "status" field. It is called by the builders before save.
+	topupmail.StatusValidator = topupmailDescStatus.Validators[0].(func(string) error)
+	// topupmailDescAttempts is the schema descriptor for attempts field.
+	topupmailDescAttempts := topupmailFields[4].Descriptor()
+	// topupmail.DefaultAttempts holds the default value on creation for the attempts field.
+	topupmail.DefaultAttempts = topupmailDescAttempts.Default.(int)
+	// topupmailDescAvailableAt is the schema descriptor for available_at field.
+	topupmailDescAvailableAt := topupmailFields[5].Descriptor()
+	// topupmail.DefaultAvailableAt holds the default value on creation for the available_at field.
+	topupmail.DefaultAvailableAt = topupmailDescAvailableAt.Default.(func() time.Time)
+	// topupmailDescClaimToken is the schema descriptor for claim_token field.
+	topupmailDescClaimToken := topupmailFields[7].Descriptor()
+	// topupmail.DefaultClaimToken holds the default value on creation for the claim_token field.
+	topupmail.DefaultClaimToken = topupmailDescClaimToken.Default.(string)
+	// topupmail.ClaimTokenValidator is a validator for the "claim_token" field. It is called by the builders before save.
+	topupmail.ClaimTokenValidator = topupmailDescClaimToken.Validators[0].(func(string) error)
+	// topupmailDescMessageID is the schema descriptor for message_id field.
+	topupmailDescMessageID := topupmailFields[8].Descriptor()
+	// topupmail.MessageIDValidator is a validator for the "message_id" field. It is called by the builders before save.
+	topupmail.MessageIDValidator = topupmailDescMessageID.Validators[0].(func(string) error)
+	// topupmailDescLastError is the schema descriptor for last_error field.
+	topupmailDescLastError := topupmailFields[9].Descriptor()
+	// topupmail.DefaultLastError holds the default value on creation for the last_error field.
+	topupmail.DefaultLastError = topupmailDescLastError.Default.(string)
+	// topupmail.LastErrorValidator is a validator for the "last_error" field. It is called by the builders before save.
+	topupmail.LastErrorValidator = topupmailDescLastError.Validators[0].(func(string) error)
+	// topupmailDescCreatedAt is the schema descriptor for created_at field.
+	topupmailDescCreatedAt := topupmailFields[11].Descriptor()
+	// topupmail.DefaultCreatedAt holds the default value on creation for the created_at field.
+	topupmail.DefaultCreatedAt = topupmailDescCreatedAt.Default.(func() time.Time)
+	// topupmailDescUpdatedAt is the schema descriptor for updated_at field.
+	topupmailDescUpdatedAt := topupmailFields[12].Descriptor()
+	// topupmail.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	topupmail.DefaultUpdatedAt = topupmailDescUpdatedAt.Default.(func() time.Time)
+	// topupmail.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	topupmail.UpdateDefaultUpdatedAt = topupmailDescUpdatedAt.UpdateDefault.(func() time.Time)
+	topupproductFields := schema.TopupProduct{}.Fields()
+	_ = topupproductFields
+	// topupproductDescName is the schema descriptor for name field.
+	topupproductDescName := topupproductFields[0].Descriptor()
+	// topupproduct.NameValidator is a validator for the "name" field. It is called by the builders before save.
+	topupproduct.NameValidator = func() func(string) error {
+		validators := topupproductDescName.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(name string) error {
+			for _, fn := range fns {
+				if err := fn(name); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// topupproductDescDescription is the schema descriptor for description field.
+	topupproductDescDescription := topupproductFields[1].Descriptor()
+	// topupproduct.DefaultDescription holds the default value on creation for the description field.
+	topupproduct.DefaultDescription = topupproductDescDescription.Default.(string)
+	// topupproductDescInstructions is the schema descriptor for instructions field.
+	topupproductDescInstructions := topupproductFields[2].Descriptor()
+	// topupproduct.DefaultInstructions holds the default value on creation for the instructions field.
+	topupproduct.DefaultInstructions = topupproductDescInstructions.Default.(string)
+	// topupproductDescEnabled is the schema descriptor for enabled field.
+	topupproductDescEnabled := topupproductFields[3].Descriptor()
+	// topupproduct.DefaultEnabled holds the default value on creation for the enabled field.
+	topupproduct.DefaultEnabled = topupproductDescEnabled.Default.(bool)
+	// topupproductDescSortOrder is the schema descriptor for sort_order field.
+	topupproductDescSortOrder := topupproductFields[4].Descriptor()
+	// topupproduct.DefaultSortOrder holds the default value on creation for the sort_order field.
+	topupproduct.DefaultSortOrder = topupproductDescSortOrder.Default.(int)
+	// topupproductDescCreatedAt is the schema descriptor for created_at field.
+	topupproductDescCreatedAt := topupproductFields[6].Descriptor()
+	// topupproduct.DefaultCreatedAt holds the default value on creation for the created_at field.
+	topupproduct.DefaultCreatedAt = topupproductDescCreatedAt.Default.(func() time.Time)
+	// topupproductDescUpdatedAt is the schema descriptor for updated_at field.
+	topupproductDescUpdatedAt := topupproductFields[7].Descriptor()
+	// topupproduct.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	topupproduct.DefaultUpdatedAt = topupproductDescUpdatedAt.Default.(func() time.Time)
+	// topupproduct.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	topupproduct.UpdateDefaultUpdatedAt = topupproductDescUpdatedAt.UpdateDefault.(func() time.Time)
+	topupskuFields := schema.TopupSKU{}.Fields()
+	_ = topupskuFields
+	// topupskuDescName is the schema descriptor for name field.
+	topupskuDescName := topupskuFields[1].Descriptor()
+	// topupsku.NameValidator is a validator for the "name" field. It is called by the builders before save.
+	topupsku.NameValidator = func() func(string) error {
+		validators := topupskuDescName.Validators
+		fns := [...]func(string) error{
+			validators[0].(func(string) error),
+			validators[1].(func(string) error),
+		}
+		return func(name string) error {
+			for _, fn := range fns {
+				if err := fn(name); err != nil {
+					return err
+				}
+			}
+			return nil
+		}
+	}()
+	// topupskuDescEnabled is the schema descriptor for enabled field.
+	topupskuDescEnabled := topupskuFields[3].Descriptor()
+	// topupsku.DefaultEnabled holds the default value on creation for the enabled field.
+	topupsku.DefaultEnabled = topupskuDescEnabled.Default.(bool)
+	// topupskuDescSortOrder is the schema descriptor for sort_order field.
+	topupskuDescSortOrder := topupskuFields[4].Descriptor()
+	// topupsku.DefaultSortOrder holds the default value on creation for the sort_order field.
+	topupsku.DefaultSortOrder = topupskuDescSortOrder.Default.(int)
+	// topupskuDescCreatedAt is the schema descriptor for created_at field.
+	topupskuDescCreatedAt := topupskuFields[6].Descriptor()
+	// topupsku.DefaultCreatedAt holds the default value on creation for the created_at field.
+	topupsku.DefaultCreatedAt = topupskuDescCreatedAt.Default.(func() time.Time)
+	// topupskuDescUpdatedAt is the schema descriptor for updated_at field.
+	topupskuDescUpdatedAt := topupskuFields[7].Descriptor()
+	// topupsku.DefaultUpdatedAt holds the default value on creation for the updated_at field.
+	topupsku.DefaultUpdatedAt = topupskuDescUpdatedAt.Default.(func() time.Time)
+	// topupsku.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
+	topupsku.UpdateDefaultUpdatedAt = topupskuDescUpdatedAt.UpdateDefault.(func() time.Time)
 	usagecleanuptaskMixin := schema.UsageCleanupTask{}.Mixin()
 	usagecleanuptaskMixinFields0 := usagecleanuptaskMixin[0].Fields()
 	_ = usagecleanuptaskMixinFields0

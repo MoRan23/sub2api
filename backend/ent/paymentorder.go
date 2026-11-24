@@ -53,6 +53,14 @@ type PaymentOrder struct {
 	QrCode *string `json:"qr_code,omitempty"`
 	// QrCodeImg holds the value of the "qr_code_img" field.
 	QrCodeImg *string `json:"qr_code_img,omitempty"`
+	// TopupSkuID holds the value of the "topup_sku_id" field.
+	TopupSkuID *int64 `json:"topup_sku_id,omitempty"`
+	// TopupQuantity holds the value of the "topup_quantity" field.
+	TopupQuantity int `json:"topup_quantity,omitempty"`
+	// TopupSnapshot holds the value of the "topup_snapshot" field.
+	TopupSnapshot map[string]interface{} `json:"topup_snapshot,omitempty"`
+	// TopupDeliveryStatus holds the value of the "topup_delivery_status" field.
+	TopupDeliveryStatus string `json:"topup_delivery_status,omitempty"`
 	// OrderType holds the value of the "order_type" field.
 	OrderType string `json:"order_type,omitempty"`
 	// PlanID holds the value of the "plan_id" field.
@@ -134,15 +142,15 @@ func (*PaymentOrder) scanValues(columns []string) ([]any, error) {
 	values := make([]any, len(columns))
 	for i := range columns {
 		switch columns[i] {
-		case paymentorder.FieldProviderSnapshot:
+		case paymentorder.FieldTopupSnapshot, paymentorder.FieldProviderSnapshot:
 			values[i] = new([]byte)
 		case paymentorder.FieldForceRefund:
 			values[i] = new(sql.NullBool)
 		case paymentorder.FieldAmount, paymentorder.FieldPayAmount, paymentorder.FieldFeeRate, paymentorder.FieldGiftRatio, paymentorder.FieldGiftAmount, paymentorder.FieldBonusAmount, paymentorder.FieldRefundAmount:
 			values[i] = new(sql.NullFloat64)
-		case paymentorder.FieldID, paymentorder.FieldUserID, paymentorder.FieldPlanID, paymentorder.FieldSubscriptionGroupID, paymentorder.FieldSubscriptionDays:
+		case paymentorder.FieldID, paymentorder.FieldUserID, paymentorder.FieldTopupSkuID, paymentorder.FieldTopupQuantity, paymentorder.FieldPlanID, paymentorder.FieldSubscriptionGroupID, paymentorder.FieldSubscriptionDays:
 			values[i] = new(sql.NullInt64)
-		case paymentorder.FieldUserEmail, paymentorder.FieldUserName, paymentorder.FieldUserNotes, paymentorder.FieldRechargeCode, paymentorder.FieldOutTradeNo, paymentorder.FieldPaymentType, paymentorder.FieldPaymentTradeNo, paymentorder.FieldPayURL, paymentorder.FieldQrCode, paymentorder.FieldQrCodeImg, paymentorder.FieldOrderType, paymentorder.FieldProviderInstanceID, paymentorder.FieldProviderKey, paymentorder.FieldStatus, paymentorder.FieldRefundReason, paymentorder.FieldRefundRequestReason, paymentorder.FieldRefundRequestedBy, paymentorder.FieldFailedReason, paymentorder.FieldClientIP, paymentorder.FieldSrcHost, paymentorder.FieldSrcURL:
+		case paymentorder.FieldUserEmail, paymentorder.FieldUserName, paymentorder.FieldUserNotes, paymentorder.FieldRechargeCode, paymentorder.FieldOutTradeNo, paymentorder.FieldPaymentType, paymentorder.FieldPaymentTradeNo, paymentorder.FieldPayURL, paymentorder.FieldQrCode, paymentorder.FieldQrCodeImg, paymentorder.FieldTopupDeliveryStatus, paymentorder.FieldOrderType, paymentorder.FieldProviderInstanceID, paymentorder.FieldProviderKey, paymentorder.FieldStatus, paymentorder.FieldRefundReason, paymentorder.FieldRefundRequestReason, paymentorder.FieldRefundRequestedBy, paymentorder.FieldFailedReason, paymentorder.FieldClientIP, paymentorder.FieldSrcHost, paymentorder.FieldSrcURL:
 			values[i] = new(sql.NullString)
 		case paymentorder.FieldRefundAt, paymentorder.FieldRefundRequestedAt, paymentorder.FieldExpiresAt, paymentorder.FieldPaidAt, paymentorder.FieldCompletedAt, paymentorder.FieldFailedAt, paymentorder.FieldCreatedAt, paymentorder.FieldUpdatedAt:
 			values[i] = new(sql.NullTime)
@@ -272,6 +280,33 @@ func (_m *PaymentOrder) assignValues(columns []string, values []any) error {
 			} else if value.Valid {
 				_m.QrCodeImg = new(string)
 				*_m.QrCodeImg = value.String
+			}
+		case paymentorder.FieldTopupSkuID:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field topup_sku_id", values[i])
+			} else if value.Valid {
+				_m.TopupSkuID = new(int64)
+				*_m.TopupSkuID = value.Int64
+			}
+		case paymentorder.FieldTopupQuantity:
+			if value, ok := values[i].(*sql.NullInt64); !ok {
+				return fmt.Errorf("unexpected type %T for field topup_quantity", values[i])
+			} else if value.Valid {
+				_m.TopupQuantity = int(value.Int64)
+			}
+		case paymentorder.FieldTopupSnapshot:
+			if value, ok := values[i].(*[]byte); !ok {
+				return fmt.Errorf("unexpected type %T for field topup_snapshot", values[i])
+			} else if value != nil && len(*value) > 0 {
+				if err := json.Unmarshal(*value, &_m.TopupSnapshot); err != nil {
+					return fmt.Errorf("unmarshal field topup_snapshot: %w", err)
+				}
+			}
+		case paymentorder.FieldTopupDeliveryStatus:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field topup_delivery_status", values[i])
+			} else if value.Valid {
+				_m.TopupDeliveryStatus = value.String
 			}
 		case paymentorder.FieldOrderType:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -539,6 +574,20 @@ func (_m *PaymentOrder) String() string {
 		builder.WriteString("qr_code_img=")
 		builder.WriteString(*v)
 	}
+	builder.WriteString(", ")
+	if v := _m.TopupSkuID; v != nil {
+		builder.WriteString("topup_sku_id=")
+		builder.WriteString(fmt.Sprintf("%v", *v))
+	}
+	builder.WriteString(", ")
+	builder.WriteString("topup_quantity=")
+	builder.WriteString(fmt.Sprintf("%v", _m.TopupQuantity))
+	builder.WriteString(", ")
+	builder.WriteString("topup_snapshot=")
+	builder.WriteString(fmt.Sprintf("%v", _m.TopupSnapshot))
+	builder.WriteString(", ")
+	builder.WriteString("topup_delivery_status=")
+	builder.WriteString(_m.TopupDeliveryStatus)
 	builder.WriteString(", ")
 	builder.WriteString("order_type=")
 	builder.WriteString(_m.OrderType)

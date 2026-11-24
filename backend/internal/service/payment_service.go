@@ -84,6 +84,9 @@ type CreateOrderRequest struct {
 	PaymentSource   string
 	OrderType       string
 	PlanID          int64
+	SKUID           int64
+	Quantity        int
+	topupQuote      *TopupQuote
 	Locale          string
 }
 
@@ -204,6 +207,7 @@ type PaymentService struct {
 	resumeService            *PaymentResumeService
 	affiliateService         *AffiliateService
 	notificationEmailService *NotificationEmailService
+	subscriptionTopupService *SubscriptionTopupService
 }
 
 func NewPaymentService(entClient *dbent.Client, registry *payment.Registry, loadBalancer payment.LoadBalancer, redeemService *RedeemService, subscriptionSvc *SubscriptionService, configService *PaymentConfigService, userRepo UserRepository, groupRepo GroupRepository, affiliateService *AffiliateService) *PaymentService {
@@ -214,6 +218,14 @@ func NewPaymentService(entClient *dbent.Client, registry *payment.Registry, load
 
 func (s *PaymentService) SetNotificationEmailService(notificationEmailService *NotificationEmailService) {
 	s.notificationEmailService = notificationEmailService
+}
+
+func (s *PaymentService) SetSubscriptionTopupService(topup *SubscriptionTopupService) {
+	s.subscriptionTopupService = topup
+}
+
+func (s *PaymentService) SubscriptionTopupService() *SubscriptionTopupService {
+	return s.subscriptionTopupService
 }
 
 // --- Provider Registry ---

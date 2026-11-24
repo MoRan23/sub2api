@@ -108,6 +108,18 @@ type SubscriptionPlan func(*sql.Selector)
 // TLSFingerprintProfile is the predicate function for tlsfingerprintprofile builders.
 type TLSFingerprintProfile func(*sql.Selector)
 
+// TopupCard is the predicate function for topupcard builders.
+type TopupCard func(*sql.Selector)
+
+// TopupMail is the predicate function for topupmail builders.
+type TopupMail func(*sql.Selector)
+
+// TopupProduct is the predicate function for topupproduct builders.
+type TopupProduct func(*sql.Selector)
+
+// TopupSKU is the predicate function for topupsku builders.
+type TopupSKU func(*sql.Selector)
+
 // UsageCleanupTask is the predicate function for usagecleanuptask builders.
 type UsageCleanupTask func(*sql.Selector)
 
