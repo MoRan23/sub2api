@@ -1,0 +1,60 @@
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/handler
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkOpenAIResponsesRetryPreparation/64KiB/1attempts/before-2         	     430	    786133 ns/op	  83.60 MB/s	  865905 B/op	     243 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/64KiB/1attempts/before-2         	     448	    778739 ns/op	  84.40 MB/s	  865557 B/op	     243 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/64KiB/1attempts/before-2         	     452	    796508 ns/op	  82.52 MB/s	  865165 B/op	     243 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/64KiB/1attempts/after-2          	     466	    755928 ns/op	  86.94 MB/s	  864825 B/op	     241 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/64KiB/1attempts/after-2          	     464	    770061 ns/op	  85.35 MB/s	  863555 B/op	     241 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/64KiB/1attempts/after-2          	     466	    756955 ns/op	  86.83 MB/s	  865002 B/op	     241 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/64KiB/5attempts/before-2         	     134	   2661325 ns/op	  24.70 MB/s	 3679071 B/op	     847 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/64KiB/5attempts/before-2         	     121	   3004714 ns/op	  21.87 MB/s	 3676054 B/op	     845 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/64KiB/5attempts/before-2         	     100	   3187210 ns/op	  20.62 MB/s	 3680988 B/op	     846 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/64KiB/5attempts/after-2          	     426	    828147 ns/op	  79.36 MB/s	  865478 B/op	     241 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/64KiB/5attempts/after-2          	     430	    790504 ns/op	  83.14 MB/s	  865047 B/op	     241 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/64KiB/5attempts/after-2          	     426	    815057 ns/op	  80.64 MB/s	  865969 B/op	     241 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/64KiB/15attempts/before-2        	      46	   7432843 ns/op	   8.84 MB/s	10713434 B/op	    2352 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/64KiB/15attempts/before-2        	      45	   8818495 ns/op	   7.45 MB/s	10709942 B/op	    2354 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/64KiB/15attempts/before-2        	      42	   7900120 ns/op	   8.32 MB/s	10709592 B/op	    2354 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/64KiB/15attempts/after-2         	     469	    821949 ns/op	  79.96 MB/s	  864453 B/op	     241 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/64KiB/15attempts/after-2         	     444	    814182 ns/op	  80.72 MB/s	  865628 B/op	     241 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/64KiB/15attempts/after-2         	     428	    782361 ns/op	  84.01 MB/s	  865552 B/op	     241 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/1024KiB/1attempts/before-2       	      30	  11125860 ns/op	  94.26 MB/s	13191050 B/op	     270 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/1024KiB/1attempts/before-2       	      33	  11272616 ns/op	  93.04 MB/s	13302830 B/op	     270 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/1024KiB/1attempts/before-2       	      27	  11154748 ns/op	  94.02 MB/s	13328282 B/op	     272 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/1024KiB/1attempts/after-2        	      32	  11243703 ns/op	  93.28 MB/s	13257033 B/op	     269 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/1024KiB/1attempts/after-2        	      32	  10789598 ns/op	  97.20 MB/s	13157909 B/op	     269 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/1024KiB/1attempts/after-2        	      30	  11501587 ns/op	  91.18 MB/s	13155653 B/op	     268 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/1024KiB/5attempts/before-2       	       8	  38073087 ns/op	  27.55 MB/s	56917366 B/op	     962 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/1024KiB/5attempts/before-2       	       8	  39220934 ns/op	  26.74 MB/s	57313806 B/op	     964 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/1024KiB/5attempts/before-2       	       8	  41320645 ns/op	  25.38 MB/s	56653787 B/op	     964 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/1024KiB/5attempts/after-2        	      31	  10555443 ns/op	  99.36 MB/s	13275984 B/op	     269 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/1024KiB/5attempts/after-2        	      31	  11196853 ns/op	  93.67 MB/s	13276332 B/op	     270 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/1024KiB/5attempts/after-2        	      30	  11473533 ns/op	  91.41 MB/s	13296899 B/op	     270 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/1024KiB/15attempts/before-2      	       3	 102384187 ns/op	  10.24 MB/s	166137536 B/op	    2657 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/1024KiB/15attempts/before-2      	       3	 106492342 ns/op	   9.85 MB/s	166838824 B/op	    2650 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/1024KiB/15attempts/before-2      	       3	 109183821 ns/op	   9.61 MB/s	165443173 B/op	    2685 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/1024KiB/15attempts/after-2       	      31	  10833251 ns/op	  96.81 MB/s	13071056 B/op	     265 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/1024KiB/15attempts/after-2       	      31	  10938640 ns/op	  95.88 MB/s	13139299 B/op	     266 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/1024KiB/15attempts/after-2       	      27	  11317513 ns/op	  92.67 MB/s	13131653 B/op	     266 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/8192KiB/1attempts/before-2       	       4	  75038961 ns/op	 111.79 MB/s	100747298 B/op	     297 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/8192KiB/1attempts/before-2       	       5	  69283358 ns/op	 121.08 MB/s	99066422 B/op	     290 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/8192KiB/1attempts/before-2       	       5	  74780451 ns/op	 112.18 MB/s	95707371 B/op	     285 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/8192KiB/1attempts/after-2        	       5	  67530656 ns/op	 124.22 MB/s	97385684 B/op	     282 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/8192KiB/1attempts/after-2        	       5	  65771550 ns/op	 127.54 MB/s	99066414 B/op	     289 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/8192KiB/1attempts/after-2        	       5	  70670593 ns/op	 118.70 MB/s	99066408 B/op	     289 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/8192KiB/5attempts/before-2       	       2	 270002622 ns/op	  31.07 MB/s	457499104 B/op	    1087 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/8192KiB/5attempts/before-2       	       2	 280507110 ns/op	  29.91 MB/s	457498844 B/op	    1084 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/8192KiB/5attempts/before-2       	       2	 276387426 ns/op	  30.35 MB/s	453297268 B/op	    1070 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/8192KiB/5attempts/after-2        	       5	  66710563 ns/op	 125.75 MB/s	99066342 B/op	     288 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/8192KiB/5attempts/after-2        	       5	  64073033 ns/op	 130.93 MB/s	99066337 B/op	     288 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/8192KiB/5attempts/after-2        	       5	  71991825 ns/op	 116.52 MB/s	97385688 B/op	     282 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/8192KiB/15attempts/before-2      	       1	 748947773 ns/op	  11.20 MB/s	1334681616 B/op	    3031 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/8192KiB/15attempts/before-2      	       1	 787807148 ns/op	  10.65 MB/s	1326283968 B/op	    3025 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/8192KiB/15attempts/before-2      	       1	 787390011 ns/op	  10.65 MB/s	1334681864 B/op	    3036 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/8192KiB/15attempts/after-2       	       5	  76092372 ns/op	 110.24 MB/s	97386809 B/op	     286 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/8192KiB/15attempts/after-2       	       5	  72967429 ns/op	 114.97 MB/s	99066492 B/op	     289 allocs/op
+BenchmarkOpenAIResponsesRetryPreparation/8192KiB/15attempts/after-2       	       4	  84627260 ns/op	  99.13 MB/s	98646130 B/op	     286 allocs/op
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/handler	20.629s

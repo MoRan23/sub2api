@@ -1,0 +1,29 @@
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+                               │ /mnt/c/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/docs/validation/merge-v0.2.25/final-baseline-service.txt │ /mnt/c/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/docs/validation/merge-v0.2.25/final-merged-service.txt │
+                               │                                                           sec/op                                                            │                                               sec/op                                                 vs base              │
+OpenAIWSForwarderHotPath-2                                                                                                                      93.90µ ± ∞ ¹                                                                                         101.73µ ± ∞ ¹       ~ (p=0.548 n=5)
+OpenAIWSErrorEventFieldReuse-2                                                                                                                  752.8n ± ∞ ¹                                                                                          756.3n ± ∞ ¹       ~ (p=0.841 n=5)
+OpenAIWSPoolAcquire-2                                                                                                                           1.442µ ± ∞ ¹                                                                                          1.432µ ± ∞ ¹       ~ (p=0.690 n=5)
+geomean                                                                                                                                         4.671µ                                                                                                4.794µ        +2.62%
+¹ need >= 6 samples for confidence interval at level 0.95
+
+                               │ /mnt/c/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/docs/validation/merge-v0.2.25/final-baseline-service.txt │ /mnt/c/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/docs/validation/merge-v0.2.25/final-merged-service.txt │
+                               │                                                            B/op                                                             │                                               B/op                                                 vs base                │
+OpenAIWSForwarderHotPath-2                                                                                                                     32.40Ki ± ∞ ¹                                                                                       32.41Ki ± ∞ ¹       ~ (p=1.000 n=5)
+OpenAIWSErrorEventFieldReuse-2                                                                                                                   488.0 ± ∞ ¹                                                                                         488.0 ± ∞ ¹       ~ (p=1.000 n=5) ²
+OpenAIWSPoolAcquire-2                                                                                                                            584.0 ± ∞ ¹                                                                                         584.0 ± ∞ ¹       ~ (p=1.000 n=5) ²
+geomean                                                                                                                                        2.065Ki                                                                                             2.065Ki        +0.00%
+¹ need >= 6 samples for confidence interval at level 0.95
+² all samples are equal
+
+                               │ /mnt/c/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/docs/validation/merge-v0.2.25/final-baseline-service.txt │ /mnt/c/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/docs/validation/merge-v0.2.25/final-merged-service.txt │
+                               │                                                          allocs/op                                                          │                                             allocs/op                                              vs base                │
+OpenAIWSForwarderHotPath-2                                                                                                                       847.0 ± ∞ ¹                                                                                         847.0 ± ∞ ¹       ~ (p=1.000 n=5) ²
+OpenAIWSErrorEventFieldReuse-2                                                                                                                   13.00 ± ∞ ¹                                                                                         13.00 ± ∞ ¹       ~ (p=1.000 n=5) ²
+OpenAIWSPoolAcquire-2                                                                                                                            10.00 ± ∞ ¹                                                                                         10.00 ± ∞ ¹       ~ (p=1.000 n=5) ²
+geomean                                                                                                                                          47.93                                                                                               47.93        +0.00%
+¹ need >= 6 samples for confidence interval at level 0.95
+² all samples are equal

@@ -1,0 +1,30 @@
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/handler
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkOpenAIResponsesRetryPreparation/8192KiB/1attempts/after-2         	      12	  88102047 ns/op	  95.22 MB/s	100745466 B/op	     291 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/handler
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkOpenAIResponsesRetryPreparation/8192KiB/1attempts/after-2         	      13	  80506147 ns/op	 104.20 MB/s	100747796 B/op	     299 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/handler
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkOpenAIResponsesRetryPreparation/8192KiB/1attempts/after-2         	      13	  85223032 ns/op	  98.43 MB/s	100100873 B/op	     295 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/handler
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkOpenAIResponsesRetryPreparation/8192KiB/1attempts/after-2         	      18	  66792750 ns/op	 125.59 MB/s	95614839 B/op	     288 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/handler
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkOpenAIResponsesRetryPreparation/8192KiB/1attempts/after-2         	      15	  75461845 ns/op	 111.17 MB/s	97386862 B/op	     287 allocs/op
+PASS

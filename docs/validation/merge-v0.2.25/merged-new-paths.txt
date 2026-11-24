@@ -1,0 +1,37 @@
+2026/11/24 09:07:30 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkHeaderOverrideRequestIdentity/disabled-2         	 3020614	       100.4 ns/op	     128 B/op	       4 allocs/op
+BenchmarkHeaderOverrideRequestIdentity/disabled-2         	 4194190	        88.45 ns/op	     128 B/op	       4 allocs/op
+BenchmarkHeaderOverrideRequestIdentity/disabled-2         	 3953719	        90.90 ns/op	     128 B/op	       4 allocs/op
+BenchmarkHeaderOverrideRequestIdentity/static-2           	 1000000	       376.1 ns/op	     160 B/op	       6 allocs/op
+BenchmarkHeaderOverrideRequestIdentity/static-2           	 1000000	       346.2 ns/op	     160 B/op	       6 allocs/op
+BenchmarkHeaderOverrideRequestIdentity/static-2           	 1000000	       338.2 ns/op	     160 B/op	       6 allocs/op
+BenchmarkHeaderOverrideRequestIdentity/templates-2        	  223309	      1666 ns/op	     952 B/op	      22 allocs/op
+BenchmarkHeaderOverrideRequestIdentity/templates-2        	  195266	      1755 ns/op	     952 B/op	      22 allocs/op
+BenchmarkHeaderOverrideRequestIdentity/templates-2        	  200260	      1793 ns/op	     952 B/op	      22 allocs/op
+BenchmarkHeaderOverrideWSCompatibility/no_template-2      	  436586	       749.3 ns/op	     320 B/op	       8 allocs/op
+BenchmarkHeaderOverrideWSCompatibility/no_template-2      	  558526	       693.7 ns/op	     320 B/op	       8 allocs/op
+BenchmarkHeaderOverrideWSCompatibility/no_template-2      	  531022	       711.9 ns/op	     320 B/op	       8 allocs/op
+BenchmarkHeaderOverrideWSCompatibility/template-2         	  530371	       744.2 ns/op	     320 B/op	       8 allocs/op
+BenchmarkHeaderOverrideWSCompatibility/template-2         	  479492	       730.8 ns/op	     320 B/op	       8 allocs/op
+BenchmarkHeaderOverrideWSCompatibility/template-2         	  508587	       805.0 ns/op	     320 B/op	       8 allocs/op
+BenchmarkHeaderOverrideWSCompatibility/template_4KiB_literal-2         	  556419	       744.2 ns/op	     320 B/op	       8 allocs/op
+BenchmarkHeaderOverrideWSCompatibility/template_4KiB_literal-2         	  494534	       740.1 ns/op	     320 B/op	       8 allocs/op
+BenchmarkHeaderOverrideWSCompatibility/template_4KiB_literal-2         	  539398	       730.7 ns/op	     320 B/op	       8 allocs/op
+BenchmarkOpenAIPassthroughErrorSanitizer/4KiB/no_match-2               	    2683	    146925 ns/op	  27.88 MB/s	   32864 B/op	      81 allocs/op
+BenchmarkOpenAIPassthroughErrorSanitizer/4KiB/no_match-2               	    2517	    170183 ns/op	  24.07 MB/s	   32853 B/op	      81 allocs/op
+BenchmarkOpenAIPassthroughErrorSanitizer/4KiB/no_match-2               	    2271	    166179 ns/op	  24.65 MB/s	   32858 B/op	      81 allocs/op
+BenchmarkOpenAIPassthroughErrorSanitizer/4KiB/redactions-2             	    2464	    149995 ns/op	  27.31 MB/s	   49318 B/op	      88 allocs/op
+BenchmarkOpenAIPassthroughErrorSanitizer/4KiB/redactions-2             	    2038	    155690 ns/op	  26.31 MB/s	   49257 B/op	      88 allocs/op
+BenchmarkOpenAIPassthroughErrorSanitizer/4KiB/redactions-2             	    2390	    149844 ns/op	  27.34 MB/s	   49320 B/op	      88 allocs/op
+BenchmarkOpenAIPassthroughErrorSanitizer/512KiB/no_match-2             	      12	  27311596 ns/op	  19.20 MB/s	 3164472 B/op	      86 allocs/op
+BenchmarkOpenAIPassthroughErrorSanitizer/512KiB/no_match-2             	      10	  30153669 ns/op	  17.39 MB/s	 3157911 B/op	      83 allocs/op
+BenchmarkOpenAIPassthroughErrorSanitizer/512KiB/no_match-2             	      12	  26354244 ns/op	  19.89 MB/s	 3164468 B/op	      85 allocs/op
+BenchmarkOpenAIPassthroughErrorSanitizer/512KiB/redactions-2           	      13	  27544723 ns/op	  19.03 MB/s	 5267256 B/op	      98 allocs/op
+BenchmarkOpenAIPassthroughErrorSanitizer/512KiB/redactions-2           	      13	  24529305 ns/op	  21.37 MB/s	 5269590 B/op	      96 allocs/op
+BenchmarkOpenAIPassthroughErrorSanitizer/512KiB/redactions-2           	      15	  23308019 ns/op	  22.49 MB/s	 5268452 B/op	     100 allocs/op
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/service	10.965s

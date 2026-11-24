@@ -1,0 +1,32 @@
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+                               │ ../docs/validation/merge-v0.2.25/baseline-service.txt │ ../docs/validation/merge-v0.2.25/merged-service.txt │
+                               │                        sec/op                         │           sec/op            vs base                 │
+OpenAIWSForwarderHotPath-2                                                86.80µ ± ∞ ¹                 88.01µ ± ∞ ¹        ~ (p=0.700 n=3) ²
+OpenAIWSErrorEventFieldReuse-2                                            664.6n ± ∞ ¹                 835.7n ± ∞ ¹        ~ (p=0.100 n=3) ²
+OpenAIWSPoolAcquire-2                                                     1.426µ ± ∞ ¹                 1.691µ ± ∞ ¹        ~ (p=0.100 n=3) ²
+geomean                                                                   4.349µ                       4.992µ        +14.77%
+¹ need >= 6 samples for confidence interval at level 0.95
+² need >= 4 samples to detect a difference at alpha level 0.05
+
+                               │ ../docs/validation/merge-v0.2.25/baseline-service.txt │ ../docs/validation/merge-v0.2.25/merged-service.txt │
+                               │                         B/op                          │            B/op              vs base                │
+OpenAIWSForwarderHotPath-2                                               32.42Ki ± ∞ ¹                 32.41Ki ± ∞ ¹       ~ (p=1.000 n=3) ²
+OpenAIWSErrorEventFieldReuse-2                                             488.0 ± ∞ ¹                   488.0 ± ∞ ¹       ~ (p=1.000 n=3) ³
+OpenAIWSPoolAcquire-2                                                      584.0 ± ∞ ¹                   592.0 ± ∞ ¹       ~ (p=0.100 n=3) ²
+geomean                                                                  2.065Ki                       2.075Ki        +0.45%
+¹ need >= 6 samples for confidence interval at level 0.95
+² need >= 4 samples to detect a difference at alpha level 0.05
+³ all samples are equal
+
+                               │ ../docs/validation/merge-v0.2.25/baseline-service.txt │ ../docs/validation/merge-v0.2.25/merged-service.txt │
+                               │                       allocs/op                       │          allocs/op           vs base                │
+OpenAIWSForwarderHotPath-2                                                 847.0 ± ∞ ¹                   847.0 ± ∞ ¹       ~ (p=1.000 n=3) ²
+OpenAIWSErrorEventFieldReuse-2                                             13.00 ± ∞ ¹                   13.00 ± ∞ ¹       ~ (p=1.000 n=3) ²
+OpenAIWSPoolAcquire-2                                                      10.00 ± ∞ ¹                   11.00 ± ∞ ¹       ~ (p=0.100 n=3) ³
+geomean                                                                    47.93                         49.48        +3.23%
+¹ need >= 6 samples for confidence interval at level 0.95
+² all samples are equal
+³ need >= 4 samples to detect a difference at alpha level 0.05

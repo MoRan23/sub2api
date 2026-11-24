@@ -1,0 +1,18 @@
+2026/11/24 09:29:47 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkOpenAIPassthroughErrorSanitizer/4KiB/no_match-2         	    3212	    107832 ns/op	  37.99 MB/s	    7715 B/op	      45 allocs/op
+BenchmarkOpenAIPassthroughErrorSanitizer/4KiB/no_match-2         	    2997	    106819 ns/op	  38.35 MB/s	    7741 B/op	      45 allocs/op
+BenchmarkOpenAIPassthroughErrorSanitizer/4KiB/no_match-2         	    3739	    122021 ns/op	  33.57 MB/s	    7714 B/op	      45 allocs/op
+BenchmarkOpenAIPassthroughErrorSanitizer/4KiB/redactions-2       	    2247	    182738 ns/op	  22.41 MB/s	   40651 B/op	      58 allocs/op
+BenchmarkOpenAIPassthroughErrorSanitizer/4KiB/redactions-2       	    2410	    191349 ns/op	  21.41 MB/s	   40631 B/op	      58 allocs/op
+BenchmarkOpenAIPassthroughErrorSanitizer/4KiB/redactions-2       	    2342	    156985 ns/op	  26.09 MB/s	   40617 B/op	      58 allocs/op
+BenchmarkOpenAIPassthroughErrorSanitizer/512KiB/no_match-2       	      26	  13662785 ns/op	  38.37 MB/s	    9380 B/op	      45 allocs/op
+BenchmarkOpenAIPassthroughErrorSanitizer/512KiB/no_match-2       	      24	  14352397 ns/op	  36.53 MB/s	    7976 B/op	      45 allocs/op
+BenchmarkOpenAIPassthroughErrorSanitizer/512KiB/no_match-2       	      24	  16547461 ns/op	  31.68 MB/s	    7976 B/op	      45 allocs/op
+BenchmarkOpenAIPassthroughErrorSanitizer/512KiB/redactions-2     	      14	  25791318 ns/op	  20.33 MB/s	 4210374 B/op	      61 allocs/op
+BenchmarkOpenAIPassthroughErrorSanitizer/512KiB/redactions-2     	      12	  27919567 ns/op	  18.78 MB/s	 4214763 B/op	      61 allocs/op
+BenchmarkOpenAIPassthroughErrorSanitizer/512KiB/redactions-2     	      14	  22846638 ns/op	  22.95 MB/s	 4210363 B/op	      61 allocs/op
+PASS

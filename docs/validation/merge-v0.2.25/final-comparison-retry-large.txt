@@ -1,0 +1,23 @@
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/handler
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+                                                          │ /mnt/c/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/docs/validation/merge-v0.2.25/final-baseline-retry-large.txt │ /mnt/c/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/docs/validation/merge-v0.2.25/final-merged-retry-large.txt │
+                                                          │                                                             sec/op                                                              │                                                    sec/op                                                     vs base         │
+OpenAIResponsesRetryPreparation/8192KiB/1attempts/after-2                                                                                                                      80.51m ± ∞ ¹                                                                                                   83.84m ± ∞ ¹  ~ (p=0.548 n=5)
+¹ need >= 6 samples for confidence interval at level 0.95
+
+                                                          │ /mnt/c/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/docs/validation/merge-v0.2.25/final-baseline-retry-large.txt │ /mnt/c/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/docs/validation/merge-v0.2.25/final-merged-retry-large.txt │
+                                                          │                                                               B/s                                                               │                                                     B/s                                                       vs base         │
+OpenAIResponsesRetryPreparation/8192KiB/1attempts/after-2                                                                                                                     99.37Mi ± ∞ ¹                                                                                                  95.42Mi ± ∞ ¹  ~ (p=0.548 n=5)
+¹ need >= 6 samples for confidence interval at level 0.95
+
+                                                          │ /mnt/c/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/docs/validation/merge-v0.2.25/final-baseline-retry-large.txt │ /mnt/c/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/docs/validation/merge-v0.2.25/final-merged-retry-large.txt │
+                                                          │                                                              B/op                                                               │                                                     B/op                                                      vs base         │
+OpenAIResponsesRetryPreparation/8192KiB/1attempts/after-2                                                                                                                     95.46Mi ± ∞ ¹                                                                                                  93.79Mi ± ∞ ¹  ~ (p=1.000 n=5)
+¹ need >= 6 samples for confidence interval at level 0.95
+
+                                                          │ /mnt/c/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/docs/validation/merge-v0.2.25/final-baseline-retry-large.txt │ /mnt/c/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/docs/validation/merge-v0.2.25/final-merged-retry-large.txt │
+                                                          │                                                            allocs/op                                                            │                                                  allocs/op                                                    vs base         │
+OpenAIResponsesRetryPreparation/8192KiB/1attempts/after-2                                                                                                                       291.0 ± ∞ ¹                                                                                                    291.0 ± ∞ ¹  ~ (p=0.952 n=5)
+¹ need >= 6 samples for confidence interval at level 0.95

@@ -1,0 +1,5 @@
+go version go1.27.4 linux/amd64
+GOEXPERIMENT=greenteagc,jsonv2
+GOTOOLCHAIN=local
+GOMAXPROCS=2
+Build parallelism: -p 1

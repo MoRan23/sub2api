@@ -1,0 +1,16 @@
+2026/11/24 08:50:44 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkOpenAIWSForwarderHotPath-2       	    4318	     84472 ns/op	   33179 B/op	     847 allocs/op
+BenchmarkOpenAIWSForwarderHotPath-2       	    4314	     88504 ns/op	   33197 B/op	     847 allocs/op
+BenchmarkOpenAIWSForwarderHotPath-2       	    3632	     86803 ns/op	   33194 B/op	     847 allocs/op
+BenchmarkOpenAIWSErrorEventFieldReuse-2   	  493232	       680.1 ns/op	     488 B/op	      13 allocs/op
+BenchmarkOpenAIWSErrorEventFieldReuse-2   	  464461	       664.6 ns/op	     488 B/op	      13 allocs/op
+BenchmarkOpenAIWSErrorEventFieldReuse-2   	  483888	       638.3 ns/op	     488 B/op	      13 allocs/op
+BenchmarkOpenAIWSPoolAcquire-2            	  210982	      1442 ns/op	     584 B/op	      10 allocs/op
+BenchmarkOpenAIWSPoolAcquire-2            	  257444	      1358 ns/op	     584 B/op	      10 allocs/op
+BenchmarkOpenAIWSPoolAcquire-2            	  260642	      1426 ns/op	     584 B/op	      10 allocs/op
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/service	4.156s
