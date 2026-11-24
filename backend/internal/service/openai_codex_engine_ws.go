@@ -36,7 +36,7 @@ func (s *OpenAIGatewayService) proxyCodexEngineWebSocket(ctx context.Context, c 
 		return err
 	}
 	hooks = validatedHooks
-	ctx, cancel := context.WithCancel(ctx)
+	connectionCtx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	if hooks != nil && hooks.ClientLifecycleContext != nil {
 		stop := context.AfterFunc(hooks.ClientLifecycleContext, cancel)
@@ -51,7 +51,7 @@ func (s *OpenAIGatewayService) proxyCodexEngineWebSocket(ctx context.Context, c 
 	frames := make(chan observedEngineFrame, 1)
 	readerDone := make(chan struct{})
 	write := func(payload []byte) error {
-		writeCtx, release := context.WithTimeout(ctx, s.openAIWSWriteTimeout())
+		writeCtx, release := context.WithTimeout(connectionCtx, s.openAIWSWriteTimeout())
 		defer release()
 		if err := conn.Write(writeCtx, coderws.MessageText, payload); err != nil {
 			cancel()
@@ -64,7 +64,7 @@ func (s *OpenAIGatewayService) proxyCodexEngineWebSocket(ctx context.Context, c 
 	go func() {
 		defer close(readerDone)
 		for {
-			kind, payload, err := conn.Read(ctx)
+			kind, payload, err := conn.Read(connectionCtx)
 			if err != nil {
 				cancel()
 				return
@@ -89,7 +89,7 @@ func (s *OpenAIGatewayService) proxyCodexEngineWebSocket(ctx context.Context, c 
 			frame := observedEngineFrame{openAIWSClientReadResult: openAIWSClientReadResult{messageType: kind, payload: payload}, body: bodyObservation.Begin(int64(len(payload)))}
 			select {
 			case frames <- frame:
-			case <-ctx.Done():
+			case <-connectionCtx.Done():
 				frame.body.Release()
 				return
 			default:
@@ -121,9 +121,10 @@ func (s *OpenAIGatewayService) proxyCodexEngineWebSocket(ctx context.Context, c 
 	}
 	payload := first
 	for turn := 1; ; turn++ {
-		if err := ctx.Err(); err != nil {
+		if err := connectionCtx.Err(); err != nil {
 			return err
 		}
+		turnCtx := connectionCtx
 		startedAt := time.Now()
 		if turn == 1 && hooks != nil && !hooks.InitialTurnStartedAt.IsZero() {
 			startedAt = hooks.InitialTurnStartedAt
@@ -149,7 +150,7 @@ func (s *OpenAIGatewayService) proxyCodexEngineWebSocket(ctx context.Context, c 
 					return err
 				}
 			}
-			ctx, body, err = s.prepareOpenAIWSEffort(ctx, c, body, account, hooks)
+			turnCtx, body, err = s.prepareOpenAIWSEffort(turnCtx, c, body, account, hooks)
 			if err != nil {
 				return NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, err.Error(), err)
 			}
@@ -181,14 +182,14 @@ func (s *OpenAIGatewayService) proxyCodexEngineWebSocket(ctx context.Context, c 
 			c.Writer = writer
 			defer func() { c.Writer = originalWriter }()
 			c.Set("codex_engine_response_written", false)
-			result, err := s.forwardCodexEngine(ctx, c, account, body, "/v1/responses", "")
+			result, err := s.forwardCodexEngine(turnCtx, c, account, body, "/v1/responses", "")
 			if result != nil {
 				result.OpenAIWSMode = true
 				result.Model = currentModel
-				result.ReasoningEffort = effectiveOpenAIEffortForBody(ctx, body, currentModel)
-				result.RequestedReasoningEffort = RequestedReasoningEffortFromContext(ctx)
+				result.ReasoningEffort = effectiveOpenAIEffortForBody(turnCtx, body, currentModel)
+				result.RequestedReasoningEffort = RequestedReasoningEffortFromContext(turnCtx)
 				if err == nil {
-					_ = s.RecordOpenAIResponseEffort(ctx, c, body, result.ResponseID, account)
+					_ = s.RecordOpenAIResponseEffort(turnCtx, c, body, result.ResponseID, account)
 				}
 			}
 			// Audit callbacks must read this physical turn's response headers,
@@ -200,8 +201,8 @@ func (s *OpenAIGatewayService) proxyCodexEngineWebSocket(ctx context.Context, c 
 		}()
 		bodyObservation.CompleteCurrent()
 		if forwardErr != nil {
-			if ctx.Err() != nil {
-				return ctx.Err()
+			if connectionCtx.Err() != nil {
+				return connectionCtx.Err()
 			}
 			if writer.sent == 0 {
 				_ = write(buildOpenAIWSHTTPBridgeErrorEvent(http.StatusBadGateway, "Engine request could not be completed"))
@@ -223,11 +224,11 @@ func (s *OpenAIGatewayService) proxyCodexEngineWebSocket(ctx context.Context, c 
 			}
 			payload = next.payload
 			bodyObservation.Activate(next.body)
-		case <-ctx.Done():
+		case <-connectionCtx.Done():
 			if timer != nil {
 				timer.Stop()
 			}
-			return ctx.Err()
+			return connectionCtx.Err()
 		case <-idle:
 			return NewOpenAIWSClientCloseError(coderws.StatusNormalClosure, "websocket idle timeout", nil)
 		}
