@@ -41,7 +41,9 @@ RUN --mount=type=cache,id=sub2api-pnpm-store,target=/root/.local/share/pnpm/stor
 # Copy only that subtree to keep the build dependency minimal.
 COPY frontend/ ./
 COPY docs/legal/ /app/docs/legal/
-RUN pnpm run build
+# Type checking needs more than Node's default heap on smaller build hosts.
+ARG FRONTEND_NODE_OPTIONS="--max-old-space-size=4096"
+RUN NODE_OPTIONS="${FRONTEND_NODE_OPTIONS}" pnpm run build
 
 # -----------------------------------------------------------------------------
 # Stage 2: Backend Builder

@@ -49,6 +49,28 @@ volumes:
   redis_data:
 ```
 
+## Building from source / 源码构建
+
+Both Dockerfiles give the frontend build a 4 GiB Node.js old-space limit by
+default. This applies only to the build command, not the running service.
+`pnpm run build` checks types before bundling; Vite does not repeat that check.
+
+两份 Dockerfile 的前端构建默认使用 4 GiB Node.js 老生代堆上限，仅用于构建命令。
+类型检查在打包前执行一次，开发模式仍保留实时检查。出现
+`JavaScript heap out of memory` 时，拉取新版后重新执行原构建命令即可。
+
+Override the build heap when necessary / 如需调整构建堆上限：
+
+```bash
+docker build --build-arg FRONTEND_NODE_OPTIONS="--max-old-space-size=4096" -t sub2api:latest .
+```
+
+The limit is in MiB and covers the Node.js old-space heap, not the whole process.
+The build host or container also needs room for native allocations and other
+running services.
+
+该值以 MiB 为单位，仅限制 Node.js 老生代堆；构建主机或容器还需留出原生内存及其他服务的空间。
+
 ## Startup and Database Recovery
 
 Sub2API runs database migrations while starting. PostgreSQL may still be

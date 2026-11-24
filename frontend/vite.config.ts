@@ -87,7 +87,9 @@ export default defineConfig(({ mode }) => {
     plugins: [
       vue(),
       checker({
-        vueTsc: true
+        vueTsc: true,
+        // pnpm build runs vue-tsc before bundling; keep the checker for dev only.
+        enableBuild: false
       }),
       injectPublicSettings(backendUrl)
     ],
