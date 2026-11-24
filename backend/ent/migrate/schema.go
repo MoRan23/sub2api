@@ -1696,7 +1696,8 @@ var (
 		{Name: "id", Type: field.TypeInt64, Increment: true},
 		{Name: "sku_id", Type: field.TypeInt64},
 		{Name: "code_hash", Type: field.TypeString, Unique: true, Size: 64},
-		{Name: "ciphertext", Type: field.TypeString, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "code", Type: field.TypeString, Nullable: true, SchemaType: map[string]string{"postgres": "text"}},
+		{Name: "ciphertext", Type: field.TypeString, Default: "", SchemaType: map[string]string{"postgres": "text"}},
 		{Name: "masked_code", Type: field.TypeString, Size: 32},
 		{Name: "status", Type: field.TypeString, Size: 20, Default: "available"},
 		{Name: "order_id", Type: field.TypeInt64, Nullable: true},
@@ -1713,12 +1714,12 @@ var (
 			{
 				Name:    "topupcard_sku_id_status_id",
 				Unique:  false,
-				Columns: []*schema.Column{TopupCardsColumns[1], TopupCardsColumns[5], TopupCardsColumns[0]},
+				Columns: []*schema.Column{TopupCardsColumns[1], TopupCardsColumns[6], TopupCardsColumns[0]},
 			},
 			{
 				Name:    "topupcard_order_id_status",
 				Unique:  false,
-				Columns: []*schema.Column{TopupCardsColumns[6], TopupCardsColumns[5]},
+				Columns: []*schema.Column{TopupCardsColumns[7], TopupCardsColumns[6]},
 			},
 		},
 	}

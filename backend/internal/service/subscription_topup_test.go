@@ -1,7 +1,6 @@
 package service
 
 import (
-	"context"
 	"math"
 	"strings"
 	"testing"
@@ -25,7 +24,7 @@ func TestTopupCardImportValidation(t *testing.T) {
 	}
 }
 
-func TestTopupPriceAndPersistentKey(t *testing.T) {
+func TestTopupPriceValidation(t *testing.T) {
 	for _, price := range []float64{0, -1, math.NaN(), math.Inf(1), 1.001, 1e12 + 1} {
 		require.Error(t, validateTopupPrice(&price, true))
 	}
@@ -34,9 +33,4 @@ func TestTopupPriceAndPersistentKey(t *testing.T) {
 	}
 	require.NoError(t, validateTopupPrice(nil, false))
 	require.Error(t, validateTopupPrice(nil, true))
-	svc := NewSubscriptionTopupService(nil, nil, nil)
-	_, err := svc.GetQuote(context.Background(), 1, 1)
-	require.ErrorContains(t, err, "persistent encryption key")
-	_, err = svc.ImportCards(context.Background(), 1, []string{"code"})
-	require.Error(t, err)
 }

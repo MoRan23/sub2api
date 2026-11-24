@@ -40,8 +40,8 @@ type TopupDeliveryDTO struct {
 	EmailStatus    string   `json:"email_status"`
 }
 type topupImportCard struct {
-	code, hash, ciphertext, masked string
-	line                           int
+	code, hash, masked string
+	line               int
 }
 
 func prepareTopupCodes(codes []string) ([]topupImportCard, error) {
@@ -85,24 +85,10 @@ func maskTopupCode(code string) string {
 }
 
 func (s *SubscriptionTopupService) ImportCards(ctx context.Context, skuID int64, codes []string) (int, error) {
-	if err := s.requireKey(); err != nil {
-		return 0, err
-	}
-
 	prepared, err := prepareTopupCodes(codes)
 	if err != nil {
 		return 0, err
 	}
-	// Encrypt before entering the inventory transaction.
-
-	for i := range prepared {
-		prepared[i].ciphertext, err = s.encryptor.Encrypt(prepared[i].code)
-		prepared[i].code = ""
-		if err != nil {
-			return 0, fmt.Errorf("encrypt CDK: %w", err)
-		}
-	}
-
 	tx, err := s.client.Tx(ctx)
 	if err != nil {
 		return 0, err
@@ -137,7 +123,7 @@ func (s *SubscriptionTopupService) ImportCards(ctx context.Context, skuID int64,
 	builders := make([]*dbent.TopupCardCreate, len(prepared))
 
 	for i, c := range prepared {
-		builders[i] = tx.TopupCard.Create().SetSkuID(skuID).SetCodeHash(c.hash).SetCiphertext(c.ciphertext).SetMaskedCode(c.masked)
+		builders[i] = tx.TopupCard.Create().SetSkuID(skuID).SetCodeHash(c.hash).SetCode(c.code).SetMaskedCode(c.masked)
 	}
 	if _, err = tx.TopupCard.CreateBulk(builders...).Save(ctx); err != nil {
 		if dbent.IsConstraintError(err) {
@@ -207,12 +193,6 @@ func (s *SubscriptionTopupService) ListCards(ctx context.Context, skuID int64, s
 }
 
 func (s *SubscriptionTopupService) SetCardEnabled(ctx context.Context, id int64, enabled bool) error {
-	if enabled {
-		if err := s.requireKey(); err != nil {
-			return err
-		}
-	}
-
 	status := "disabled"
 	if enabled {
 		status = "available"
@@ -229,18 +209,23 @@ func (s *SubscriptionTopupService) SetCardEnabled(ctx context.Context, id int64,
 }
 
 func (s *SubscriptionTopupService) RevealCard(ctx context.Context, id int64) (string, error) {
-	if err := s.requireKey(); err != nil {
-		return "", err
-	}
-
-	c, err := s.client.TopupCard.Query().Where(topupcard.ID(id)).Select(topupcard.FieldCiphertext).Only(ctx)
+	c, err := s.client.TopupCard.Query().Where(topupcard.ID(id)).Select(topupcard.FieldCode, topupcard.FieldCiphertext).Only(ctx)
 	if err != nil {
 		return "", topupNotFound(err)
 	}
+	return s.topupCardCode(c)
+}
 
-	code, err := s.encryptor.Decrypt(c.Ciphertext)
+func (s *SubscriptionTopupService) topupCardCode(card *dbent.TopupCard) (string, error) {
+	if card.Code != nil {
+		return *card.Code, nil
+	}
+	if !s.legacyKeyConfigured || s.legacyEncryptor == nil {
+		return "", infraerrors.BadRequest("TOPUP_LEGACY_ENCRYPTION_KEY_REQUIRED", "the original encryption key is required to read a legacy encrypted card")
+	}
+	code, err := s.legacyEncryptor.Decrypt(card.Ciphertext)
 	if err != nil {
-		return "", fmt.Errorf("decrypt CDK: %w", err)
+		return "", fmt.Errorf("decrypt legacy CDK: %w", err)
 	}
 	return code, nil
 }
@@ -276,11 +261,7 @@ func (s *SubscriptionTopupService) GetOrderCards(ctx context.Context, orderID, u
 	if order.Status != OrderStatusCompleted {
 		return result, nil
 	}
-	if err := s.requireKey(); err != nil {
-		return nil, err
-	}
-
-	cards, err := s.client.TopupCard.Query().Where(topupcard.OrderID(order.ID), topupcard.Status("issued")).Select(topupcard.FieldCiphertext).Order(dbent.Asc(topupcard.FieldID)).All(ctx)
+	cards, err := s.client.TopupCard.Query().Where(topupcard.OrderID(order.ID), topupcard.Status("issued")).Select(topupcard.FieldCode, topupcard.FieldCiphertext).Order(dbent.Asc(topupcard.FieldID)).All(ctx)
 	if err != nil {
 		return nil, err
 	}
@@ -289,9 +270,9 @@ func (s *SubscriptionTopupService) GetOrderCards(ctx context.Context, orderID, u
 	}
 
 	for _, card := range cards {
-		code, err := s.encryptor.Decrypt(card.Ciphertext)
+		code, err := s.topupCardCode(card)
 		if err != nil {
-			return nil, fmt.Errorf("decrypt delivered CDK: %w", err)
+			return nil, err
 		}
 		result.Cards = append(result.Cards, code)
 	}

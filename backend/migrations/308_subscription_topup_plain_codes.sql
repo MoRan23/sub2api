@@ -1,0 +1,2 @@
+ALTER TABLE topup_cards ADD COLUMN IF NOT EXISTS code TEXT;
+ALTER TABLE topup_cards ALTER COLUMN ciphertext SET DEFAULT '';

@@ -64,6 +64,11 @@ func CodeHash(v string) predicate.TopupCard {
 	return predicate.TopupCard(sql.FieldEQ(FieldCodeHash, v))
 }
 
+// Code applies equality check predicate on the "code" field. It's identical to CodeEQ.
+func Code(v string) predicate.TopupCard {
+	return predicate.TopupCard(sql.FieldEQ(FieldCode, v))
+}
+
 // Ciphertext applies equality check predicate on the "ciphertext" field. It's identical to CiphertextEQ.
 func Ciphertext(v string) predicate.TopupCard {
 	return predicate.TopupCard(sql.FieldEQ(FieldCiphertext, v))
@@ -202,6 +207,81 @@ func CodeHashEqualFold(v string) predicate.TopupCard {
 // CodeHashContainsFold applies the ContainsFold predicate on the "code_hash" field.
 func CodeHashContainsFold(v string) predicate.TopupCard {
 	return predicate.TopupCard(sql.FieldContainsFold(FieldCodeHash, v))
+}
+
+// CodeEQ applies the EQ predicate on the "code" field.
+func CodeEQ(v string) predicate.TopupCard {
+	return predicate.TopupCard(sql.FieldEQ(FieldCode, v))
+}
+
+// CodeNEQ applies the NEQ predicate on the "code" field.
+func CodeNEQ(v string) predicate.TopupCard {
+	return predicate.TopupCard(sql.FieldNEQ(FieldCode, v))
+}
+
+// CodeIn applies the In predicate on the "code" field.
+func CodeIn(vs ...string) predicate.TopupCard {
+	return predicate.TopupCard(sql.FieldIn(FieldCode, vs...))
+}
+
+// CodeNotIn applies the NotIn predicate on the "code" field.
+func CodeNotIn(vs ...string) predicate.TopupCard {
+	return predicate.TopupCard(sql.FieldNotIn(FieldCode, vs...))
+}
+
+// CodeGT applies the GT predicate on the "code" field.
+func CodeGT(v string) predicate.TopupCard {
+	return predicate.TopupCard(sql.FieldGT(FieldCode, v))
+}
+
+// CodeGTE applies the GTE predicate on the "code" field.
+func CodeGTE(v string) predicate.TopupCard {
+	return predicate.TopupCard(sql.FieldGTE(FieldCode, v))
+}
+
+// CodeLT applies the LT predicate on the "code" field.
+func CodeLT(v string) predicate.TopupCard {
+	return predicate.TopupCard(sql.FieldLT(FieldCode, v))
+}
+
+// CodeLTE applies the LTE predicate on the "code" field.
+func CodeLTE(v string) predicate.TopupCard {
+	return predicate.TopupCard(sql.FieldLTE(FieldCode, v))
+}
+
+// CodeContains applies the Contains predicate on the "code" field.
+func CodeContains(v string) predicate.TopupCard {
+	return predicate.TopupCard(sql.FieldContains(FieldCode, v))
+}
+
+// CodeHasPrefix applies the HasPrefix predicate on the "code" field.
+func CodeHasPrefix(v string) predicate.TopupCard {
+	return predicate.TopupCard(sql.FieldHasPrefix(FieldCode, v))
+}
+
+// CodeHasSuffix applies the HasSuffix predicate on the "code" field.
+func CodeHasSuffix(v string) predicate.TopupCard {
+	return predicate.TopupCard(sql.FieldHasSuffix(FieldCode, v))
+}
+
+// CodeIsNil applies the IsNil predicate on the "code" field.
+func CodeIsNil() predicate.TopupCard {
+	return predicate.TopupCard(sql.FieldIsNull(FieldCode))
+}
+
+// CodeNotNil applies the NotNil predicate on the "code" field.
+func CodeNotNil() predicate.TopupCard {
+	return predicate.TopupCard(sql.FieldNotNull(FieldCode))
+}
+
+// CodeEqualFold applies the EqualFold predicate on the "code" field.
+func CodeEqualFold(v string) predicate.TopupCard {
+	return predicate.TopupCard(sql.FieldEqualFold(FieldCode, v))
+}
+
+// CodeContainsFold applies the ContainsFold predicate on the "code" field.
+func CodeContainsFold(v string) predicate.TopupCard {
+	return predicate.TopupCard(sql.FieldContainsFold(FieldCode, v))
 }
 
 // CiphertextEQ applies the EQ predicate on the "ciphertext" field.

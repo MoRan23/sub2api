@@ -4,6 +4,8 @@ package repository
 
 import (
 	"context"
+	"database/sql"
+	"encoding/base64"
 	"fmt"
 	"os"
 	"strings"
@@ -16,6 +18,7 @@ import (
 	"github.com/Wei-Shaw/sub2api/ent/topupcard"
 	"github.com/Wei-Shaw/sub2api/ent/topupmail"
 	"github.com/Wei-Shaw/sub2api/internal/config"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/google/uuid"
 	"github.com/stretchr/testify/require"
@@ -36,17 +39,7 @@ func newTopupIntegrationFixture(t *testing.T) *topupIntegrationFixture {
 
 	client := testEntClient(t)
 
-	cfg := &config.Config{}
-
-	cfg.Totp.EncryptionKeyConfigured = true
-
-	cfg.Totp.EncryptionKey = strings.Repeat("ab", 32)
-
-	encryptor, err := NewAESEncryptor(cfg)
-
-	require.NoError(t, err)
-
-	svc := service.NewSubscriptionTopupService(client, encryptor, cfg)
+	svc := service.NewSubscriptionTopupService(client, nil, &config.Config{})
 
 	user, err := client.User.Create().SetEmail(uuid.NewString() + "@example.test").SetPasswordHash("test").Save(ctx)
 
@@ -155,8 +148,15 @@ func TestSubscriptionTopupAtomicDeliveryAndDedup(t *testing.T) {
 
 	sku := f.sku(t, code, "second-"+uuid.NewString())
 	stored := f.client.TopupCard.Query().Where(topupcard.SkuID(sku)).Order(dbent.Asc(topupcard.FieldID)).FirstX(ctx)
-	require.NotEqual(t, code, stored.Ciphertext)
+	require.NotNil(t, stored.Code)
+	require.Equal(t, code, *stored.Code)
+	require.Empty(t, stored.Ciphertext)
 	require.NotContains(t, stored.String(), code)
+	require.NoError(t, f.service.SetCardEnabled(ctx, stored.ID, false))
+	require.NoError(t, f.service.SetCardEnabled(ctx, stored.ID, true))
+	revealed, err := f.service.RevealCard(ctx, stored.ID)
+	require.NoError(t, err)
+	require.Equal(t, code, revealed)
 
 	products, err := f.service.ListProducts(ctx, false)
 
@@ -195,6 +195,9 @@ func TestSubscriptionTopupAtomicDeliveryAndDedup(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, []string{code}, delivery.Cards)
+	mailDelivery, err := f.service.GetOrderCards(ctx, order.ID, 0)
+	require.NoError(t, err)
+	require.Equal(t, delivery.Cards, mailDelivery.Cards)
 
 	_, err = f.service.GetOrderCards(ctx, order.ID, f.user.ID+100000)
 
@@ -294,6 +297,70 @@ func TestSubscriptionTopupConcurrentReservationAndLatePayment(t *testing.T) {
 
 }
 
+func TestSubscriptionTopupPlainBase64CodeAndLegacyCiphertext(t *testing.T) {
+	ctx := context.Background()
+	f := newTopupIntegrationFixture(t)
+	legacyCode := "legacy-" + uuid.NewString()
+	plainCode := base64.StdEncoding.EncodeToString([]byte("plain-" + uuid.NewString() + strings.Repeat("X", 48)))
+	skuID := f.sku(t, legacyCode, plainCode)
+	cards := f.client.TopupCard.Query().Where(topupcard.SkuID(skuID)).Order(dbent.Asc(topupcard.FieldID)).AllX(ctx)
+	require.Len(t, cards, 2)
+	require.Equal(t, plainCode, *cards[1].Code)
+	require.Empty(t, cards[1].Ciphertext)
+	plain, err := f.service.RevealCard(ctx, cards[1].ID)
+	require.NoError(t, err)
+	require.Equal(t, plainCode, plain, "base64-shaped plaintext must not be treated as ciphertext")
+
+	cfg := &config.Config{}
+	cfg.Totp.EncryptionKeyConfigured = true
+	cfg.Totp.EncryptionKey = strings.Repeat("ab", 32)
+	encryptor, err := NewAESEncryptor(cfg)
+	require.NoError(t, err)
+	ciphertext, err := encryptor.Encrypt(legacyCode)
+	require.NoError(t, err)
+	legacy := f.client.TopupCard.UpdateOneID(cards[0].ID).ClearCode().SetCiphertext(ciphertext).SaveX(ctx)
+	legacyService := service.NewSubscriptionTopupService(f.client, encryptor, cfg)
+	revealed, err := legacyService.RevealCard(ctx, legacy.ID)
+	require.NoError(t, err)
+	require.Equal(t, legacyCode, revealed)
+	plain, err = legacyService.RevealCard(ctx, cards[1].ID)
+	require.NoError(t, err)
+	require.Equal(t, plainCode, plain)
+	revealed, err = f.service.RevealCard(ctx, legacy.ID)
+	require.Error(t, err)
+	require.Equal(t, "TOPUP_LEGACY_ENCRYPTION_KEY_REQUIRED", infraerrors.Reason(err))
+	require.Empty(t, revealed)
+	require.NotContains(t, err.Error(), ciphertext)
+	unchanged := f.client.TopupCard.GetX(ctx, legacy.ID)
+	require.Nil(t, unchanged.Code)
+	require.Equal(t, legacy.Ciphertext, unchanged.Ciphertext)
+	require.Equal(t, legacy.CodeHash, unchanged.CodeHash)
+	require.Equal(t, legacy.UpdatedAt, unchanged.UpdatedAt, "reading a legacy card must not rewrite it")
+
+	order, err := f.reserve(ctx, skuID, 2)
+	require.NoError(t, err)
+	require.NoError(t, f.service.ConfirmPayment(ctx, order.ID, "mixed-format", 24.68))
+	delivery, err := legacyService.GetOrderCards(ctx, order.ID, f.user.ID)
+	require.NoError(t, err)
+	require.Equal(t, []string{legacyCode, plainCode}, delivery.Cards)
+	mailDelivery, err := legacyService.GetOrderCards(ctx, order.ID, 0)
+	require.NoError(t, err)
+	require.Equal(t, delivery.Cards, mailDelivery.Cards)
+	for _, userID := range []int64{f.user.ID, 0} {
+		unreadable, err := f.service.GetOrderCards(ctx, order.ID, userID)
+		require.Error(t, err)
+		require.Equal(t, "TOPUP_LEGACY_ENCRYPTION_KEY_REQUIRED", infraerrors.Reason(err))
+		require.Nil(t, unreadable)
+		require.NotContains(t, err.Error(), ciphertext)
+	}
+	issued := f.client.TopupCard.GetX(ctx, legacy.ID)
+	require.Nil(t, issued.Code)
+	require.Equal(t, ciphertext, issued.Ciphertext)
+	require.Equal(t, "issued", issued.Status)
+	require.Equal(t, order.ID, *issued.OrderID)
+	require.Equal(t, service.OrderStatusCompleted, f.client.PaymentOrder.GetX(ctx, order.ID).Status)
+}
+
 func TestSubscriptionTopupReconcileOtherSKUAndRollback(t *testing.T) {
 
 	ctx := context.Background()
@@ -345,15 +412,59 @@ func TestSubscriptionTopupReconcileOtherSKUAndRollback(t *testing.T) {
 }
 
 func TestSubscriptionTopupMigrationRepeat(t *testing.T) {
-
-	sql, err := os.ReadFile("../../migrations/307_subscription_topup.sql")
-
+	ctx := context.Background()
+	initialSQL, err := os.ReadFile("../../migrations/307_subscription_topup.sql")
 	require.NoError(t, err)
-
+	plainSQL, err := os.ReadFile("../../migrations/308_subscription_topup_plain_codes.sql")
+	require.NoError(t, err)
+	tx, err := integrationDB.BeginTx(ctx, nil)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	schema := "topup_migration_" + strings.ReplaceAll(uuid.NewString(), "-", "")
+	_, err = tx.ExecContext(ctx, "CREATE SCHEMA "+schema)
+	require.NoError(t, err)
+	_, err = tx.ExecContext(ctx, "SET LOCAL search_path TO "+schema)
+	require.NoError(t, err)
+	_, err = tx.ExecContext(ctx, `CREATE TABLE payment_orders(id BIGINT PRIMARY KEY,status TEXT,paid_at TIMESTAMPTZ)`)
+	require.NoError(t, err)
+	_, err = tx.ExecContext(ctx, string(initialSQL))
+	require.NoError(t, err)
+	_, err = tx.ExecContext(ctx, `
+		INSERT INTO topup_products(id,name,enabled) VALUES(1,'Legacy product',true);
+		INSERT INTO topup_skus(id,product_id,name,price,enabled) VALUES(1,1,'Monthly',12.34,true);
+		INSERT INTO payment_orders(id,status,paid_at,topup_sku_id,topup_quantity,topup_delivery_status) VALUES(1,'COMPLETED','2026-11-01T00:00:00Z',1,1,'delivered');
+		INSERT INTO topup_cards(id,sku_id,code_hash,ciphertext,masked_code,status,order_id,issued_at,created_at,updated_at)
+		VALUES(1,1,'legacy-hash','legacy-encrypted-payload','le********ad','issued',1,'2026-11-01T00:00:00Z','2026-10-31T00:00:00Z','2026-11-01T00:00:00Z')`)
+	require.NoError(t, err)
+	_, err = tx.ExecContext(ctx, string(plainSQL))
+	require.NoError(t, err)
+	_, err = tx.ExecContext(ctx, `INSERT INTO topup_cards(id,sku_id,code_hash,code,masked_code) VALUES(2,1,'plain-hash','ordinary-plaintext-card','or********rd')`)
+	require.NoError(t, err, "new cards must not require a ciphertext value")
 	for range 2 {
-
-		_, err = integrationDB.Exec(string(sql))
+		_, err = tx.ExecContext(ctx, string(initialSQL))
+		require.NoError(t, err)
+		_, err = tx.ExecContext(ctx, string(plainSQL))
 		require.NoError(t, err)
 	}
-
+	var oldCode sql.NullString
+	var ciphertext, hash, status string
+	var orderID int64
+	var createdAt, updatedAt, issuedAt time.Time
+	require.NoError(t, tx.QueryRowContext(ctx, `SELECT code,ciphertext,code_hash,status,order_id,created_at,updated_at,issued_at FROM topup_cards WHERE id=1`).Scan(&oldCode, &ciphertext, &hash, &status, &orderID, &createdAt, &updatedAt, &issuedAt))
+	require.False(t, oldCode.Valid)
+	require.Equal(t, "legacy-encrypted-payload", ciphertext)
+	require.Equal(t, "legacy-hash", hash)
+	require.Equal(t, "issued", status)
+	require.Equal(t, int64(1), orderID)
+	require.Equal(t, time.Date(2026, 10, 31, 0, 0, 0, 0, time.UTC), createdAt.UTC())
+	require.Equal(t, time.Date(2026, 11, 1, 0, 0, 0, 0, time.UTC), updatedAt.UTC())
+	require.Equal(t, updatedAt, issuedAt)
+	var newCode string
+	require.NoError(t, tx.QueryRowContext(ctx, `SELECT code,ciphertext FROM topup_cards WHERE id=2`).Scan(&newCode, &ciphertext))
+	require.Equal(t, "ordinary-plaintext-card", newCode)
+	require.Empty(t, ciphertext)
+	var deliveryStatus string
+	require.NoError(t, tx.QueryRowContext(ctx, `SELECT status,topup_delivery_status FROM payment_orders WHERE id=1`).Scan(&status, &deliveryStatus))
+	require.Equal(t, "COMPLETED", status)
+	require.Equal(t, "delivered", deliveryStatus)
 }

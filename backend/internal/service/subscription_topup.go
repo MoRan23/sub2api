@@ -21,13 +21,13 @@ import (
 const TopupOrderType = "subscription_topup"
 
 type SubscriptionTopupService struct {
-	client        *dbent.Client
-	encryptor     SecretEncryptor
-	keyConfigured bool
+	client              *dbent.Client
+	legacyEncryptor     SecretEncryptor
+	legacyKeyConfigured bool
 }
 
 func NewSubscriptionTopupService(client *dbent.Client, encryptor SecretEncryptor, cfg *config.Config) *SubscriptionTopupService {
-	return &SubscriptionTopupService{client: client, encryptor: encryptor, keyConfigured: cfg != nil && cfg.Totp.EncryptionKeyConfigured}
+	return &SubscriptionTopupService{client: client, legacyEncryptor: encryptor, legacyKeyConfigured: cfg != nil && cfg.Totp.EncryptionKeyConfigured}
 }
 
 type TopupProductInput struct {
@@ -84,13 +84,6 @@ type TopupQuote struct {
 	Locale       string
 }
 
-func (s *SubscriptionTopupService) requireKey() error {
-	if !s.keyConfigured {
-		return infraerrors.BadRequest("TOPUP_ENCRYPTION_KEY_REQUIRED", "configure a persistent encryption key before importing or selling cards")
-	}
-	return nil
-}
-
 func validateTopupName(name *string, required bool) error {
 	if name == nil && !required {
 		return nil
@@ -133,9 +126,6 @@ func (s *SubscriptionTopupService) validateProductInput(in TopupProductInput, cr
 	if err := validateTopupText(in.Instructions); err != nil {
 		return err
 	}
-	if in.Enabled != nil && *in.Enabled {
-		return s.requireKey()
-	}
 	return nil
 }
 
@@ -145,9 +135,6 @@ func (s *SubscriptionTopupService) validateSKUInput(in TopupSKUInput, create boo
 	}
 	if err := validateTopupPrice(in.Price, create); err != nil {
 		return err
-	}
-	if in.Enabled != nil && *in.Enabled {
-		return s.requireKey()
 	}
 	return nil
 }
@@ -208,7 +195,7 @@ func (s *SubscriptionTopupService) ListProducts(ctx context.Context, admin bool)
 }
 
 func (s *SubscriptionTopupService) stockCounts(ctx context.Context, productIDs []int64) (map[int64]int, error) {
-	// Query only IDs and counts; ciphertext never enters catalogue responses.
+	// Query only IDs and counts; card contents never enter catalogue responses.
 
 	rows, err := s.client.QueryContext(ctx, `SELECT s.id,GREATEST(0,
  (SELECT COUNT(*) FROM topup_cards c WHERE c.sku_id=s.id AND c.status='available')-

@@ -1,6 +1,6 @@
 # 订阅代充验证记录 / Subscription top-up validation
 
-日期：2026-11-24。基线：`c4ad315b26ee2e4b91d929848c05ac620e2db321`。
+日期：2026-11-24。首次实现基线：`c4ad315b26ee2e4b91d929848c05ac620e2db321`。以下保留首次实现的验证记录；后续明文存储调整见文末。
 
 ## 验证范围
 
@@ -53,3 +53,24 @@ git diff --check
 ## English summary
 
 Validated product/SKU configuration, CNY checkout, encrypted inventory, owner-only code retrieval, separate admin permissions, reservation concurrency, late payments, whole-order FIFO restocking, atomic delivery/outbox persistence, refund exclusion, payment resume compatibility, and the user/admin interfaces. PostgreSQL instances were isolated and SMTP tests used localhost. Wire/Ent generation, focused tests, backend compilation, frontend type checking, production build and targeted lint passed as recorded above. No live payment, inventory import, production email or deployment was performed.
+
+## 明文存储调整 / Plaintext storage update
+
+基线：`cd5bc80f1`。新卡密按已有兑换码方式保存明文；去掉导入、启售、报价、预留、启用和读取新卡密的持久密钥要求。迁移 `308_subscription_topup_plain_codes.sql` 增加 nullable `code` 列，保留旧密文及其原密钥读取路径，未修改已发布的 307。新卡读取不加解密、不额外查询或写回数据库；库存遮罩、敏感字段序列化隐藏、权限和日志脱敏保留。
+
+本次使用相同 Go 环境验证：
+
+```sh
+go test -p 1 -tags=unit ./internal/service ./internal/handler ./internal/handler/admin -run 'TestTopup|TestSubscriptionTopup' -count=1 -timeout=4m
+CI=1 go test -race -p 1 -tags=integration ./internal/repository -run '^TestSubscriptionTopup' -count=1 -timeout=8m
+CGO_ENABLED=0 go build -p 1 -o /tmp/sub2api-topup-plain-check ./cmd/server
+git diff --check
+```
+
+- 服务层和用户接口定向单元测试通过；管理员接口包编译通过，此筛选无匹配测试。
+- 隔离 PostgreSQL 集成及 race 通过（7.522 秒）：无密钥导入／启售／支付／发卡／用户及邮件读取、库存并发、重复回调和事务回滚均通过。
+- Base64 形式的普通卡密按原文返回；旧密文正确读取，缺原密钥时返回错误且保留原行。
+- 实际执行 307 → 插入旧记录 → 308 → 插入明文记录，并重复运行两条迁移，旧密文、订单状态及时间保持不变；新卡无需提供 ciphertext。
+- Ent 重新生成、后端编译及 diff 检查通过，依赖文件未变。前端未修改，本次未重复执行前端检查；远端 CI 未核验。
+
+New cards are stored in plaintext and no longer require an encryption key. Legacy encrypted cards remain readable with their original key. Focused unit tests, isolated PostgreSQL race/integration tests, migration replay and backend compilation passed. Normal plaintext reads add no decryption or extra database work. No production changes or deployment were performed.

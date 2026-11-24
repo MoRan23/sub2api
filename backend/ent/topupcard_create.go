@@ -34,9 +34,31 @@ func (_c *TopupCardCreate) SetCodeHash(v string) *TopupCardCreate {
 	return _c
 }
 
+// SetCode sets the "code" field.
+func (_c *TopupCardCreate) SetCode(v string) *TopupCardCreate {
+	_c.mutation.SetCode(v)
+	return _c
+}
+
+// SetNillableCode sets the "code" field if the given value is not nil.
+func (_c *TopupCardCreate) SetNillableCode(v *string) *TopupCardCreate {
+	if v != nil {
+		_c.SetCode(*v)
+	}
+	return _c
+}
+
 // SetCiphertext sets the "ciphertext" field.
 func (_c *TopupCardCreate) SetCiphertext(v string) *TopupCardCreate {
 	_c.mutation.SetCiphertext(v)
+	return _c
+}
+
+// SetNillableCiphertext sets the "ciphertext" field if the given value is not nil.
+func (_c *TopupCardCreate) SetNillableCiphertext(v *string) *TopupCardCreate {
+	if v != nil {
+		_c.SetCiphertext(*v)
+	}
 	return _c
 }
 
@@ -151,6 +173,10 @@ func (_c *TopupCardCreate) ExecX(ctx context.Context) {
 
 // defaults sets the default values of the builder before save.
 func (_c *TopupCardCreate) defaults() {
+	if _, ok := _c.mutation.Ciphertext(); !ok {
+		v := topupcard.DefaultCiphertext
+		_c.mutation.SetCiphertext(v)
+	}
 	if _, ok := _c.mutation.Status(); !ok {
 		v := topupcard.DefaultStatus
 		_c.mutation.SetStatus(v)
@@ -237,6 +263,10 @@ func (_c *TopupCardCreate) createSpec() (*TopupCard, *sqlgraph.CreateSpec) {
 	if value, ok := _c.mutation.CodeHash(); ok {
 		_spec.SetField(topupcard.FieldCodeHash, field.TypeString, value)
 		_node.CodeHash = value
+	}
+	if value, ok := _c.mutation.Code(); ok {
+		_spec.SetField(topupcard.FieldCode, field.TypeString, value)
+		_node.Code = &value
 	}
 	if value, ok := _c.mutation.Ciphertext(); ok {
 		_spec.SetField(topupcard.FieldCiphertext, field.TypeString, value)
@@ -333,6 +363,24 @@ func (u *TopupCardUpsert) UpdateSkuID() *TopupCardUpsert {
 // AddSkuID adds v to the "sku_id" field.
 func (u *TopupCardUpsert) AddSkuID(v int64) *TopupCardUpsert {
 	u.Add(topupcard.FieldSkuID, v)
+	return u
+}
+
+// SetCode sets the "code" field.
+func (u *TopupCardUpsert) SetCode(v string) *TopupCardUpsert {
+	u.Set(topupcard.FieldCode, v)
+	return u
+}
+
+// UpdateCode sets the "code" field to the value that was provided on create.
+func (u *TopupCardUpsert) UpdateCode() *TopupCardUpsert {
+	u.SetExcluded(topupcard.FieldCode)
+	return u
+}
+
+// ClearCode clears the value of the "code" field.
+func (u *TopupCardUpsert) ClearCode() *TopupCardUpsert {
+	u.SetNull(topupcard.FieldCode)
 	return u
 }
 
@@ -492,6 +540,27 @@ func (u *TopupCardUpsertOne) AddSkuID(v int64) *TopupCardUpsertOne {
 func (u *TopupCardUpsertOne) UpdateSkuID() *TopupCardUpsertOne {
 	return u.Update(func(s *TopupCardUpsert) {
 		s.UpdateSkuID()
+	})
+}
+
+// SetCode sets the "code" field.
+func (u *TopupCardUpsertOne) SetCode(v string) *TopupCardUpsertOne {
+	return u.Update(func(s *TopupCardUpsert) {
+		s.SetCode(v)
+	})
+}
+
+// UpdateCode sets the "code" field to the value that was provided on create.
+func (u *TopupCardUpsertOne) UpdateCode() *TopupCardUpsertOne {
+	return u.Update(func(s *TopupCardUpsert) {
+		s.UpdateCode()
+	})
+}
+
+// ClearCode clears the value of the "code" field.
+func (u *TopupCardUpsertOne) ClearCode() *TopupCardUpsertOne {
+	return u.Update(func(s *TopupCardUpsert) {
+		s.ClearCode()
 	})
 }
 
@@ -832,6 +901,27 @@ func (u *TopupCardUpsertBulk) AddSkuID(v int64) *TopupCardUpsertBulk {
 func (u *TopupCardUpsertBulk) UpdateSkuID() *TopupCardUpsertBulk {
 	return u.Update(func(s *TopupCardUpsert) {
 		s.UpdateSkuID()
+	})
+}
+
+// SetCode sets the "code" field.
+func (u *TopupCardUpsertBulk) SetCode(v string) *TopupCardUpsertBulk {
+	return u.Update(func(s *TopupCardUpsert) {
+		s.SetCode(v)
+	})
+}
+
+// UpdateCode sets the "code" field to the value that was provided on create.
+func (u *TopupCardUpsertBulk) UpdateCode() *TopupCardUpsertBulk {
+	return u.Update(func(s *TopupCardUpsert) {
+		s.UpdateCode()
+	})
+}
+
+// ClearCode clears the value of the "code" field.
+func (u *TopupCardUpsertBulk) ClearCode() *TopupCardUpsertBulk {
+	return u.Update(func(s *TopupCardUpsert) {
+		s.ClearCode()
 	})
 }
 

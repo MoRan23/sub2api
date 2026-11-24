@@ -49,6 +49,26 @@ func (_u *TopupCardUpdate) AddSkuID(v int64) *TopupCardUpdate {
 	return _u
 }
 
+// SetCode sets the "code" field.
+func (_u *TopupCardUpdate) SetCode(v string) *TopupCardUpdate {
+	_u.mutation.SetCode(v)
+	return _u
+}
+
+// SetNillableCode sets the "code" field if the given value is not nil.
+func (_u *TopupCardUpdate) SetNillableCode(v *string) *TopupCardUpdate {
+	if v != nil {
+		_u.SetCode(*v)
+	}
+	return _u
+}
+
+// ClearCode clears the value of the "code" field.
+func (_u *TopupCardUpdate) ClearCode() *TopupCardUpdate {
+	_u.mutation.ClearCode()
+	return _u
+}
+
 // SetCiphertext sets the "ciphertext" field.
 func (_u *TopupCardUpdate) SetCiphertext(v string) *TopupCardUpdate {
 	_u.mutation.SetCiphertext(v)
@@ -218,6 +238,12 @@ func (_u *TopupCardUpdate) sqlSave(ctx context.Context) (_node int, err error) {
 	if value, ok := _u.mutation.AddedSkuID(); ok {
 		_spec.AddField(topupcard.FieldSkuID, field.TypeInt64, value)
 	}
+	if value, ok := _u.mutation.Code(); ok {
+		_spec.SetField(topupcard.FieldCode, field.TypeString, value)
+	}
+	if _u.mutation.CodeCleared() {
+		_spec.ClearField(topupcard.FieldCode, field.TypeString)
+	}
 	if value, ok := _u.mutation.Ciphertext(); ok {
 		_spec.SetField(topupcard.FieldCiphertext, field.TypeString, value)
 	}
@@ -283,6 +309,26 @@ func (_u *TopupCardUpdateOne) SetNillableSkuID(v *int64) *TopupCardUpdateOne {
 // AddSkuID adds value to the "sku_id" field.
 func (_u *TopupCardUpdateOne) AddSkuID(v int64) *TopupCardUpdateOne {
 	_u.mutation.AddSkuID(v)
+	return _u
+}
+
+// SetCode sets the "code" field.
+func (_u *TopupCardUpdateOne) SetCode(v string) *TopupCardUpdateOne {
+	_u.mutation.SetCode(v)
+	return _u
+}
+
+// SetNillableCode sets the "code" field if the given value is not nil.
+func (_u *TopupCardUpdateOne) SetNillableCode(v *string) *TopupCardUpdateOne {
+	if v != nil {
+		_u.SetCode(*v)
+	}
+	return _u
+}
+
+// ClearCode clears the value of the "code" field.
+func (_u *TopupCardUpdateOne) ClearCode() *TopupCardUpdateOne {
+	_u.mutation.ClearCode()
 	return _u
 }
 
@@ -484,6 +530,12 @@ func (_u *TopupCardUpdateOne) sqlSave(ctx context.Context) (_node *TopupCard, er
 	}
 	if value, ok := _u.mutation.AddedSkuID(); ok {
 		_spec.AddField(topupcard.FieldSkuID, field.TypeInt64, value)
+	}
+	if value, ok := _u.mutation.Code(); ok {
+		_spec.SetField(topupcard.FieldCode, field.TypeString, value)
+	}
+	if _u.mutation.CodeCleared() {
+		_spec.ClearField(topupcard.FieldCode, field.TypeString)
 	}
 	if value, ok := _u.mutation.Ciphertext(); ok {
 		_spec.SetField(topupcard.FieldCiphertext, field.TypeString, value)

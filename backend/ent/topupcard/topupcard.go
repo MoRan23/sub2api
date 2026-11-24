@@ -17,6 +17,8 @@ const (
 	FieldSkuID = "sku_id"
 	// FieldCodeHash holds the string denoting the code_hash field in the database.
 	FieldCodeHash = "code_hash"
+	// FieldCode holds the string denoting the code field in the database.
+	FieldCode = "code"
 	// FieldCiphertext holds the string denoting the ciphertext field in the database.
 	FieldCiphertext = "ciphertext"
 	// FieldMaskedCode holds the string denoting the masked_code field in the database.
@@ -40,6 +42,7 @@ var Columns = []string{
 	FieldID,
 	FieldSkuID,
 	FieldCodeHash,
+	FieldCode,
 	FieldCiphertext,
 	FieldMaskedCode,
 	FieldStatus,
@@ -62,6 +65,8 @@ func ValidColumn(column string) bool {
 var (
 	// CodeHashValidator is a validator for the "code_hash" field. It is called by the builders before save.
 	CodeHashValidator func(string) error
+	// DefaultCiphertext holds the default value on creation for the "ciphertext" field.
+	DefaultCiphertext string
 	// MaskedCodeValidator is a validator for the "masked_code" field. It is called by the builders before save.
 	MaskedCodeValidator func(string) error
 	// DefaultStatus holds the default value on creation for the "status" field.
@@ -92,6 +97,11 @@ func BySkuID(opts ...sql.OrderTermOption) OrderOption {
 // ByCodeHash orders the results by the code_hash field.
 func ByCodeHash(opts ...sql.OrderTermOption) OrderOption {
 	return sql.OrderByField(FieldCodeHash, opts...).ToFunc()
+}
+
+// ByCode orders the results by the code field.
+func ByCode(opts ...sql.OrderTermOption) OrderOption {
+	return sql.OrderByField(FieldCode, opts...).ToFunc()
 }
 
 // ByCiphertext orders the results by the ciphertext field.

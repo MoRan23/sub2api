@@ -47522,6 +47522,7 @@ type TopupCardMutation struct {
 	sku_id        *int64
 	addsku_id     *int64
 	code_hash     *string
+	code          *string
 	ciphertext    *string
 	masked_code   *string
 	status        *string
@@ -47724,6 +47725,55 @@ func (m *TopupCardMutation) OldCodeHash(ctx context.Context) (v string, err erro
 // ResetCodeHash resets all changes to the "code_hash" field.
 func (m *TopupCardMutation) ResetCodeHash() {
 	m.code_hash = nil
+}
+
+// SetCode sets the "code" field.
+func (m *TopupCardMutation) SetCode(s string) {
+	m.code = &s
+}
+
+// Code returns the value of the "code" field in the mutation.
+func (m *TopupCardMutation) Code() (r string, exists bool) {
+	v := m.code
+	if v == nil {
+		return
+	}
+	return *v, true
+}
+
+// OldCode returns the old "code" field's value of the TopupCard entity.
+// If the TopupCard object wasn't provided to the builder, the object is fetched from the database.
+// An error is returned if the mutation operation is not UpdateOne, or the database query fails.
+func (m *TopupCardMutation) OldCode(ctx context.Context) (v *string, err error) {
+	if !m.op.Is(OpUpdateOne) {
+		return v, errors.New("OldCode is only allowed on UpdateOne operations")
+	}
+	if m.id == nil || m.oldValue == nil {
+		return v, errors.New("OldCode requires an ID field in the mutation")
+	}
+	oldValue, err := m.oldValue(ctx)
+	if err != nil {
+		return v, fmt.Errorf("querying old value for OldCode: %w", err)
+	}
+	return oldValue.Code, nil
+}
+
+// ClearCode clears the value of the "code" field.
+func (m *TopupCardMutation) ClearCode() {
+	m.code = nil
+	m.clearedFields[topupcard.FieldCode] = struct{}{}
+}
+
+// CodeCleared returns if the "code" field was cleared in this mutation.
+func (m *TopupCardMutation) CodeCleared() bool {
+	_, ok := m.clearedFields[topupcard.FieldCode]
+	return ok
+}
+
+// ResetCode resets all changes to the "code" field.
+func (m *TopupCardMutation) ResetCode() {
+	m.code = nil
+	delete(m.clearedFields, topupcard.FieldCode)
 }
 
 // SetCiphertext sets the "ciphertext" field.
@@ -48059,12 +48109,15 @@ func (m *TopupCardMutation) Type() string {
 // order to get all numeric fields that were incremented/decremented, call
 // AddedFields().
 func (m *TopupCardMutation) Fields() []string {
-	fields := make([]string, 0, 9)
+	fields := make([]string, 0, 10)
 	if m.sku_id != nil {
 		fields = append(fields, topupcard.FieldSkuID)
 	}
 	if m.code_hash != nil {
 		fields = append(fields, topupcard.FieldCodeHash)
+	}
+	if m.code != nil {
+		fields = append(fields, topupcard.FieldCode)
 	}
 	if m.ciphertext != nil {
 		fields = append(fields, topupcard.FieldCiphertext)
@@ -48099,6 +48152,8 @@ func (m *TopupCardMutation) Field(name string) (ent.Value, bool) {
 		return m.SkuID()
 	case topupcard.FieldCodeHash:
 		return m.CodeHash()
+	case topupcard.FieldCode:
+		return m.Code()
 	case topupcard.FieldCiphertext:
 		return m.Ciphertext()
 	case topupcard.FieldMaskedCode:
@@ -48126,6 +48181,8 @@ func (m *TopupCardMutation) OldField(ctx context.Context, name string) (ent.Valu
 		return m.OldSkuID(ctx)
 	case topupcard.FieldCodeHash:
 		return m.OldCodeHash(ctx)
+	case topupcard.FieldCode:
+		return m.OldCode(ctx)
 	case topupcard.FieldCiphertext:
 		return m.OldCiphertext(ctx)
 	case topupcard.FieldMaskedCode:
@@ -48162,6 +48219,13 @@ func (m *TopupCardMutation) SetField(name string, value ent.Value) error {
 			return fmt.Errorf("unexpected type %T for field %s", value, name)
 		}
 		m.SetCodeHash(v)
+		return nil
+	case topupcard.FieldCode:
+		v, ok := value.(string)
+		if !ok {
+			return fmt.Errorf("unexpected type %T for field %s", value, name)
+		}
+		m.SetCode(v)
 		return nil
 	case topupcard.FieldCiphertext:
 		v, ok := value.(string)
@@ -48269,6 +48333,9 @@ func (m *TopupCardMutation) AddField(name string, value ent.Value) error {
 // mutation.
 func (m *TopupCardMutation) ClearedFields() []string {
 	var fields []string
+	if m.FieldCleared(topupcard.FieldCode) {
+		fields = append(fields, topupcard.FieldCode)
+	}
 	if m.FieldCleared(topupcard.FieldOrderID) {
 		fields = append(fields, topupcard.FieldOrderID)
 	}
@@ -48289,6 +48356,9 @@ func (m *TopupCardMutation) FieldCleared(name string) bool {
 // error if the field is not defined in the schema.
 func (m *TopupCardMutation) ClearField(name string) error {
 	switch name {
+	case topupcard.FieldCode:
+		m.ClearCode()
+		return nil
 	case topupcard.FieldOrderID:
 		m.ClearOrderID()
 		return nil
@@ -48308,6 +48378,9 @@ func (m *TopupCardMutation) ResetField(name string) error {
 		return nil
 	case topupcard.FieldCodeHash:
 		m.ResetCodeHash()
+		return nil
+	case topupcard.FieldCode:
+		m.ResetCode()
 		return nil
 	case topupcard.FieldCiphertext:
 		m.ResetCiphertext()

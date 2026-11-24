@@ -21,6 +21,8 @@ type TopupCard struct {
 	SkuID int64 `json:"sku_id,omitempty"`
 	// CodeHash holds the value of the "code_hash" field.
 	CodeHash string `json:"code_hash,omitempty"`
+	// Code holds the value of the "code" field.
+	Code *string `json:"-"`
 	// Ciphertext holds the value of the "ciphertext" field.
 	Ciphertext string `json:"-"`
 	// MaskedCode holds the value of the "masked_code" field.
@@ -45,7 +47,7 @@ func (*TopupCard) scanValues(columns []string) ([]any, error) {
 		switch columns[i] {
 		case topupcard.FieldID, topupcard.FieldSkuID, topupcard.FieldOrderID:
 			values[i] = new(sql.NullInt64)
-		case topupcard.FieldCodeHash, topupcard.FieldCiphertext, topupcard.FieldMaskedCode, topupcard.FieldStatus:
+		case topupcard.FieldCodeHash, topupcard.FieldCode, topupcard.FieldCiphertext, topupcard.FieldMaskedCode, topupcard.FieldStatus:
 			values[i] = new(sql.NullString)
 		case topupcard.FieldIssuedAt, topupcard.FieldCreatedAt, topupcard.FieldUpdatedAt:
 			values[i] = new(sql.NullTime)
@@ -81,6 +83,13 @@ func (_m *TopupCard) assignValues(columns []string, values []any) error {
 				return fmt.Errorf("unexpected type %T for field code_hash", values[i])
 			} else if value.Valid {
 				_m.CodeHash = value.String
+			}
+		case topupcard.FieldCode:
+			if value, ok := values[i].(*sql.NullString); !ok {
+				return fmt.Errorf("unexpected type %T for field code", values[i])
+			} else if value.Valid {
+				_m.Code = new(string)
+				*_m.Code = value.String
 			}
 		case topupcard.FieldCiphertext:
 			if value, ok := values[i].(*sql.NullString); !ok {
@@ -167,6 +176,8 @@ func (_m *TopupCard) String() string {
 	builder.WriteString(", ")
 	builder.WriteString("code_hash=")
 	builder.WriteString(_m.CodeHash)
+	builder.WriteString(", ")
+	builder.WriteString("code=<sensitive>")
 	builder.WriteString(", ")
 	builder.WriteString("ciphertext=<sensitive>")
 	builder.WriteString(", ")

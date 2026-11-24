@@ -19,7 +19,8 @@ func (TopupCard) Fields() []ent.Field {
 	return []ent.Field{
 		field.Int64("sku_id"),
 		field.String("code_hash").MaxLen(64).Unique().Immutable(),
-		field.String("ciphertext").Sensitive().SchemaType(map[string]string{dialect.Postgres: "text"}),
+		field.String("code").Optional().Nillable().Sensitive().SchemaType(map[string]string{dialect.Postgres: "text"}),
+		field.String("ciphertext").Default("").Sensitive().SchemaType(map[string]string{dialect.Postgres: "text"}),
 		field.String("masked_code").MaxLen(32),
 		field.String("status").MaxLen(20).Default("available"),
 		field.Int64("order_id").Optional().Nillable(),

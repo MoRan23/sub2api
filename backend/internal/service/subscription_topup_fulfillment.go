@@ -33,9 +33,6 @@ func TopupOrderSnapshot(order *dbent.PaymentOrder) *TopupSnapshot {
 }
 
 func (s *SubscriptionTopupService) GetQuote(ctx context.Context, skuID int64, quantity int) (*TopupQuote, error) {
-	if err := s.requireKey(); err != nil {
-		return nil, err
-	}
 	if quantity < 1 || quantity > 100 {
 		return nil, infraerrors.BadRequest("INVALID_TOPUP_QUANTITY", "quantity must be between 1 and 100")
 	}
@@ -60,10 +57,6 @@ func (s *SubscriptionTopupService) GetQuote(ctx context.Context, skuID int64, qu
 // Inventory writers serialize per SKU, then lock existing order rows, then cards.
 // New order rows created by the caller are private until its transaction commits.
 func (s *SubscriptionTopupService) ReserveInTx(ctx context.Context, tx *dbent.Tx, order *dbent.PaymentOrder, quote *TopupQuote) (*dbent.PaymentOrder, error) {
-	if err := s.requireKey(); err != nil {
-		return nil, err
-	}
-
 	sku, err := tx.TopupSKU.Query().Where(topupsku.ID(quote.SKUID)).ForUpdate().Only(ctx)
 	if err != nil {
 		return nil, topupNotFound(err)

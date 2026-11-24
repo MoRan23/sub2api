@@ -29,8 +29,17 @@ import (
 func TestSubscriptionTopupPaymentServiceGatewayLifecycle(t *testing.T) {
 	ctx := context.Background()
 	f := newTopupIntegrationFixture(t)
-	skuID := f.sku(t, "card-a-"+uuid.NewString(), "card-b-"+uuid.NewString())
-	_, err := f.client.User.UpdateOneID(f.user.ID).SetBalance(123).SetGiftBalance(45).Save(ctx)
+	codes := []string{"card-a-" + uuid.NewString(), "card-b-" + uuid.NewString()}
+	skuID := f.sku(t, codes...)
+	storedCards, err := f.client.TopupCard.Query().Where(topupcard.SkuID(skuID)).All(ctx)
+	require.NoError(t, err)
+	require.Len(t, storedCards, 2)
+	for _, card := range storedCards {
+		require.NotNil(t, card.Code)
+		require.Contains(t, codes, *card.Code)
+		require.Empty(t, card.Ciphertext)
+	}
+	_, err = f.client.User.UpdateOneID(f.user.ID).SetBalance(123).SetGiftBalance(45).Save(ctx)
 	require.NoError(t, err)
 
 	settings := NewSettingRepository(f.client)
@@ -156,6 +165,12 @@ func TestSubscriptionTopupPaymentServiceGatewayLifecycle(t *testing.T) {
 	mail, err := f.client.TopupMail.Query().Where(topupmail.OrderID(created.OrderID)).Only(ctx)
 	require.NoError(t, err)
 	require.Equal(t, "zh", mail.Locale)
+	delivery, err := f.service.GetOrderCards(ctx, created.OrderID, f.user.ID)
+	require.NoError(t, err)
+	require.Equal(t, codes, delivery.Cards)
+	mailDelivery, err := f.service.GetOrderCards(ctx, created.OrderID, 0)
+	require.NoError(t, err)
+	require.Equal(t, codes, mailDelivery.Cards)
 	user, err := f.client.User.Get(ctx, f.user.ID)
 	require.NoError(t, err)
 	require.Equal(t, 123.0, user.Balance)

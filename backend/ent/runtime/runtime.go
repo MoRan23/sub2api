@@ -2152,22 +2152,26 @@ func init() {
 	topupcardDescCodeHash := topupcardFields[1].Descriptor()
 	// topupcard.CodeHashValidator is a validator for the "code_hash" field. It is called by the builders before save.
 	topupcard.CodeHashValidator = topupcardDescCodeHash.Validators[0].(func(string) error)
+	// topupcardDescCiphertext is the schema descriptor for ciphertext field.
+	topupcardDescCiphertext := topupcardFields[3].Descriptor()
+	// topupcard.DefaultCiphertext holds the default value on creation for the ciphertext field.
+	topupcard.DefaultCiphertext = topupcardDescCiphertext.Default.(string)
 	// topupcardDescMaskedCode is the schema descriptor for masked_code field.
-	topupcardDescMaskedCode := topupcardFields[3].Descriptor()
+	topupcardDescMaskedCode := topupcardFields[4].Descriptor()
 	// topupcard.MaskedCodeValidator is a validator for the "masked_code" field. It is called by the builders before save.
 	topupcard.MaskedCodeValidator = topupcardDescMaskedCode.Validators[0].(func(string) error)
 	// topupcardDescStatus is the schema descriptor for status field.
-	topupcardDescStatus := topupcardFields[4].Descriptor()
+	topupcardDescStatus := topupcardFields[5].Descriptor()
 	// topupcard.DefaultStatus holds the default value on creation for the status field.
 	topupcard.DefaultStatus = topupcardDescStatus.Default.(string)
 	// topupcard.StatusValidator is a validator for the "status" field. It is called by the builders before save.
 	topupcard.StatusValidator = topupcardDescStatus.Validators[0].(func(string) error)
 	// topupcardDescCreatedAt is the schema descriptor for created_at field.
-	topupcardDescCreatedAt := topupcardFields[7].Descriptor()
+	topupcardDescCreatedAt := topupcardFields[8].Descriptor()
 	// topupcard.DefaultCreatedAt holds the default value on creation for the created_at field.
 	topupcard.DefaultCreatedAt = topupcardDescCreatedAt.Default.(func() time.Time)
 	// topupcardDescUpdatedAt is the schema descriptor for updated_at field.
-	topupcardDescUpdatedAt := topupcardFields[8].Descriptor()
+	topupcardDescUpdatedAt := topupcardFields[9].Descriptor()
 	// topupcard.DefaultUpdatedAt holds the default value on creation for the updated_at field.
 	topupcard.DefaultUpdatedAt = topupcardDescUpdatedAt.Default.(func() time.Time)
 	// topupcard.UpdateDefaultUpdatedAt holds the default value on update for the updated_at field.
