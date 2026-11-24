@@ -18,6 +18,7 @@ func TestAdminFullAccessRouteBoundary(t *testing.T) {
 	}{
 		{"/api/v1/admin/future-operation", true},
 		{"/api/v1/admin/accounts/:id", true},
+		{"/api/v1/admin/accounts/upstream-billing-probe/group-preview", true},
 		{"/api/v1/admin/settings/admin-api-keys", false},
 		{"/api/v1/admin/settings/admin-api-keys/:id/rotate", false},
 		{"/api/v1/admin/settings/admin-api-key/regenerate", false},
@@ -28,5 +29,14 @@ func TestAdminFullAccessRouteBoundary(t *testing.T) {
 		if got := RouteAllowed(policy, "POST", tc.path); got != tc.allowed {
 			t.Errorf("%s: got %v want %v", tc.path, got, tc.allowed)
 		}
+	}
+}
+
+func TestRestrictedAdminKeyCannotPreviewUpstreamGroup(t *testing.T) {
+	policy := Policy{
+		Rules: []Rule{{Permissions: []string{"accounts.read", "accounts.update", "accounts.network", "accounts.credentials"}, AllGroups: true}},
+	}
+	if RouteAllowed(policy, "POST", "/api/v1/admin/accounts/upstream-billing-probe/group-preview") {
+		t.Fatal("group preview must not inherit account permissions")
 	}
 }

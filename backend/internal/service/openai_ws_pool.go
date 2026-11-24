@@ -48,6 +48,7 @@ type openAIWSDialError struct {
 	StatusCode      int
 	ResponseHeaders http.Header
 	ResponseBody    []byte
+	ReportedHeaders *headerOverrideReport
 	Err             error
 }
 
@@ -75,8 +76,9 @@ type openAIWSAcquireRequest struct {
 	// IdentityDigest scopes pooled connection compatibility to the server-owned
 	// UUIDv7 session/thread pair used by the handshake. Empty preserves the
 	// legacy account+beta-features pooling behavior.
-	IdentityDigest string
-	Routing        *openAIGuardianRoutingRequest
+	IdentityDigest  string
+	ReportedHeaders *headerOverrideReport
+	Routing         *openAIGuardianRoutingRequest
 	// HeadersFactory is evaluated inside dialConn. It exists so credentials
 	// whose authorization is per-dial (Agent Identity) are never cached in
 	// lastAcquire or delayed prewarm state.
@@ -100,15 +102,16 @@ type openAIWSAcquireRequest struct {
 }
 
 type openAIWSHandshakeCompatibilityKey struct {
-	betaFeatures   string
-	timingMetrics  string
-	guardian       string
-	parentPinID    string
-	routingScope   [32]byte
-	originator     string
-	identityDigest string
-	residency      string
-	transportScope openAIWSTransportScope
+	betaFeatures     string
+	timingMetrics    string
+	guardian         string
+	parentPinID      string
+	routingScope     [32]byte
+	originator       string
+	identityDigest   string
+	reportedIdentity [32]byte
+	residency        string
+	transportScope   openAIWSTransportScope
 }
 
 type openAIWSConnLease struct {
@@ -335,6 +338,7 @@ type openAIWSConn struct {
 	handshakeObserverInstalled bool
 	responseEvidenceClaimed    atomic.Bool
 	handshakeCompatibility     openAIWSHandshakeCompatibilityKey
+	reportedHeaders            *headerOverrideReport
 	routingAffinity            string
 	turnStateMu                sync.Mutex
 	turnStateIdentity          string
@@ -869,7 +873,7 @@ func (c *openAIWSConn) matchesHandshakeCompatibility(compatibility openAIWSHands
 	// pre-V2 mirror fields instead of dialing it through the pool.
 	return c.handshakeCompatibility == (openAIWSHandshakeCompatibilityKey{}) &&
 		c.betaFeatures == compatibility.betaFeatures &&
-		c.identityDigest == compatibility.identityDigest && compatibility.residency == "" && compatibility.timingMetrics == "" && compatibility.guardian == "" && compatibility.parentPinID == "" && compatibility.originator == "" && compatibility.routingScope == ([32]byte{})
+		c.identityDigest == compatibility.identityDigest && compatibility.residency == "" && compatibility.timingMetrics == "" && compatibility.guardian == "" && compatibility.parentPinID == "" && compatibility.originator == "" && compatibility.routingScope == ([32]byte{}) && compatibility.reportedIdentity == ([32]byte{})
 }
 
 // A timing request is advisory and fixed at handshake. A continuation pinned to
@@ -1229,11 +1233,25 @@ type openAIWSAcquireQueueWait struct {
 }
 
 func (p *openAIWSConnPool) Acquire(ctx context.Context, req openAIWSAcquireRequest) (*openAIWSConnLease, error) {
+	req.ReportedHeaders = req.ReportedHeaders.matching(req.Headers)
 	if p != nil {
 		p.metrics.acquireTotal.Add(1)
 	}
 	queueWait := &openAIWSAcquireQueueWait{}
 	lease, err := p.acquire(ctx, cloneOpenAIWSAcquireRequest(req), 0, queueWait)
+	if req.Account != nil {
+		var report *headerOverrideReport
+		if lease != nil && lease.conn != nil {
+			report = lease.conn.reportedHeaders
+		}
+		if err != nil {
+			var dialErr *openAIWSDialError
+			if errors.As(err, &dialErr) {
+				report = dialErr.ReportedHeaders
+			}
+		}
+		headerOverrideScopeFromContext(ctx).record(req.Account.ID, report)
+	}
 	if lease != nil && queueWait.rewoken {
 		// 广播重选经 tryAcquire 拿令牌，不像排队分支那样在取得令牌后检查取消，
 		// 这里补上复查：上下文已取消就归还令牌并按取消返回。
@@ -2305,6 +2323,7 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 			return nil, err
 		}
 	}
+	reported := req.ReportedHeaders.matching(headers)
 	ctx = withOpenAIWSTransportAccount(ctx, req.Account.ID)
 	ctx = withOpenAIGuardianRouting(ctx, req.Routing)
 	var connectObserver *CodexTelemetryConnectObserver
@@ -2325,6 +2344,7 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 		connectObserver.FinishWithHeaders(false, observedHeaders)
 		return nil, &openAIWSDialError{
 			StatusCode:      status,
+			ReportedHeaders: reported,
 			ResponseHeaders: cloneHeader(handshakeHeaders),
 			ResponseBody:    responseBody,
 			Err:             err,
@@ -2334,12 +2354,14 @@ func (p *openAIWSConnPool) dialConn(ctx context.Context, req openAIWSAcquireRequ
 		connectObserver.FinishWithHeaders(false, headers)
 		return nil, &openAIWSDialError{
 			StatusCode:      status,
+			ReportedHeaders: reported,
 			ResponseHeaders: cloneHeader(handshakeHeaders),
 			Err:             errors.New("openai ws dialer returned nil connection"),
 		}
 	}
 	id := p.nextConnID(req.Account.ID)
 	pooledConn := newOpenAIWSConn(id, req.Account.ID, conn, handshakeHeaders)
+	pooledConn.reportedHeaders = reported
 	pooledConn.observationHeaders = openAIWSPhysicalObservationHeaders(conn, headers)
 	connectObserver.FinishWithHeaders(true, pooledConn.observationHeaders)
 	pooledConn.handshakeObserverInstalled = req.HandshakeObserver != nil

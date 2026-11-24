@@ -45,6 +45,9 @@ func (s *OpenAIGatewayService) doOpenAIUpstream(request *http.Request, proxyURL 
 	if account != nil && account.Platform == PlatformOpenAI {
 		request = ApplyOpenAIRequestPolicy(request, s.settingService)
 	}
+	if account != nil {
+		finalizeHeaderOverrideReportedHeaders(request.Context(), account.ID, request.Header)
+	}
 	var telemetryAttempt *CodexTelemetryAttempt
 	var telemetryStart sync.Once
 	if !isOpenAICandyTest(request.Context()) {

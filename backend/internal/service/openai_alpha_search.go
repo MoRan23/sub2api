@@ -319,7 +319,7 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchResponsesWebSearchRequest(c
 		req.Header.Set("Session_ID", isolated)
 		req.Header.Set("Conversation_ID", isolated)
 	}
-	account.ApplyHeaderOverrides(req.Header)
+	account.ApplyHeaderOverrides(req.Context(), req.Header)
 	if body, err = json.Marshal(responsesPayload); err != nil {
 		return nil, fmt.Errorf("encode alpha search responses body: %w", err)
 	}
@@ -487,7 +487,7 @@ func (s *OpenAIGatewayService) buildOpenAIAlphaSearchRequest(ctx context.Context
 		}
 	}
 
-	account.ApplyHeaderOverrides(req.Header)
+	account.ApplyHeaderOverrides(req.Context(), req.Header)
 	if directIdentityPlanned {
 		projectedBody, applyErr := ApplyOpenAIOAuthIdentityPlan(req.Header, body, directIdentityPlan)
 		if applyErr != nil {

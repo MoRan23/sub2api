@@ -322,7 +322,7 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 	}
 	// 账号级请求头覆写（仅 openai api_key 账号启用时生效；OAuth 路径 no-op）。
 	// 覆盖所有 WS 模式（ctx_pool/dedicated/passthrough）的握手头。
-	account.ApplyHeaderOverrides(headers)
+	account.ApplyHeaderOverrides(withHeaderOverrideConnectionScope(ctx), headers)
 	copyOpenAIWSTraceContext(headers, c)
 	projectOpenAIGuardianHeader(c, account, headers)
 	// Session-level beta features participate in WS pool compatibility, so
@@ -373,6 +373,12 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 	s.applyOpenAIWSResidencyHeaders(ctx, account, headers)
 	if sessionResolution.OutboundIdentityEnabled {
 		setFingerprintObservationOutboundIdentity(c, sessionResolution.OutboundIdentity)
+	}
+	if account != nil {
+		// Keep immutable candidates so a later frame can restore a template
+		// previously superseded by the residency policy.
+		sessionResolution.ReportedHeaders = headerOverrideScopeFromContext(ctx).report(account.ID)
+		finalizeHeaderOverrideReportedHeaders(ctx, account.ID, headers)
 	}
 	return headers, sessionResolution, nil
 }

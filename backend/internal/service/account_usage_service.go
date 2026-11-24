@@ -989,7 +989,7 @@ func (s *AccountUsageService) probeOpenAICodexSnapshot(ctx context.Context, acco
 		}
 	}
 	setOpenAIChatGPTAccountHeaders(req.Header, account)
-	account.ApplyHeaderOverrides(req.Header)
+	account.ApplyHeaderOverrides(withoutHeaderOverrideRequestScope(req.Context()), req.Header)
 	payloadBytes, err := json.Marshal(payload)
 	if err != nil {
 		return nil, fmt.Errorf("marshal openai probe payload: %w", err)

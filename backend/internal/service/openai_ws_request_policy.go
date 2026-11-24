@@ -33,8 +33,10 @@ func (s *OpenAIGatewayService) refreshOpenAIWSHeadersForDial(frozenCtx, dialCtx 
 // spawned from it. It must not close over a session variable advanced by later
 // frames while a previous dial or account retry is still running.
 func (s *OpenAIGatewayService) openAIWSHeadersFactory(ctx context.Context, account *Account) func(context.Context, http.Header) (http.Header, error) {
+	policy, _ := openai.RequestPolicyFromContext(ctx)
+	frozenCtx := openai.WithRequestPolicy(context.Background(), policy)
 	return func(dialCtx context.Context, headers http.Header) (http.Header, error) {
-		return s.refreshOpenAIWSHeadersForDial(ctx, dialCtx, account, headers)
+		return s.refreshOpenAIWSHeadersForDial(frozenCtx, dialCtx, account, headers)
 	}
 }
 

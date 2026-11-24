@@ -16,6 +16,8 @@ const {
   getAllProxies,
   getAllGroups,
   refreshCredentials,
+  previewUpstreamGroup,
+  updateAccount,
   showError,
   showWarning
 } = vi.hoisted(() => ({
@@ -28,6 +30,8 @@ const {
   getAllProxies: vi.fn(),
   getAllGroups: vi.fn(),
   refreshCredentials: vi.fn(),
+  previewUpstreamGroup: vi.fn(),
+  updateAccount: vi.fn(),
   showError: vi.fn(),
   showWarning: vi.fn()
 }))
@@ -45,7 +49,9 @@ vi.mock('@/api/admin', () => ({
       batchClearError: vi.fn(),
       batchRefresh: vi.fn(),
       toggleSchedulable: vi.fn(),
-      refreshCredentials
+      refreshCredentials,
+      previewUpstreamGroup,
+      update: updateAccount
     },
     proxies: { getAll: getAllProxies },
     groups: { getAll: getAllGroups }
@@ -70,6 +76,7 @@ const DataTableStub = defineComponent({
   template: `
     <div>
       <template v-if="!loading"><div v-for="row in data" :key="row.id" :data-account-name="row.name">
+        <slot name="cell-name" :row="row" :value="row.name" />
         <slot name="cell-groups" :row="row" />
         <slot name="cell-usage" :row="row" />
         <slot name="cell-actions" :row="row" />
@@ -183,6 +190,25 @@ describe('admin AccountsView lite account list', () => {
   afterEach(() => {
     vi.useRealTimers()
     vi.restoreAllMocks()
+  })
+
+  it('syncs the selected row without clearing notes missing from the upstream', async () => {
+    const account = { ...listRow, type: 'apikey', notes: 'local notes' }
+    listAccounts.mockResolvedValue({ items: [account], total: 1, page: 1, page_size: 20, pages: 1 })
+    previewUpstreamGroup.mockResolvedValueOnce({}).mockResolvedValueOnce({ name: 'New group' })
+    updateAccount.mockReset().mockResolvedValue({ ...account, name: 'New group' })
+    const wrapper = mountView()
+    await flushPromises()
+    const sync = wrapper.get('button[aria-label="admin.accounts.upstreamBilling.saveGroup"]')
+    await sync.trigger('click')
+    await flushPromises()
+    expect(updateAccount).not.toHaveBeenCalled()
+    await sync.trigger('click')
+    await flushPromises()
+    expect(previewUpstreamGroup).toHaveBeenLastCalledWith({ account_id: account.id })
+    expect(updateAccount).toHaveBeenCalledWith(account.id, { name: 'New group' })
+    expect(wrapper.find('[data-account-name="New group"]').exists()).toBe(true)
+    wrapper.unmount()
   })
 
   it.each([

@@ -69,6 +69,7 @@ type openAIWSSessionHeaderResolution struct {
 	SessionSource         string
 	ConversationSource    string
 	ResidencyBeforePolicy http.Header
+	ReportedHeaders       *headerOverrideReport
 
 	// UUIDv7 outbound identity is connection-scoped.  Callers retain this
 	// resolved snapshot for payload metadata, reconnects and pool compatibility

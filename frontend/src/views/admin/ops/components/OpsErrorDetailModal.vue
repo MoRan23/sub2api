@@ -137,6 +137,48 @@
           <OpenAIHeaderDiagnosticsDetails :diagnostics="entry.diagnostics" />
         </div>
       </section>
+      <!-- 身份上报请求头：账号请求头覆写变量实际发给上游的值 -->
+      <div
+        v-if="reportedHeaderGroups.length"
+        class="rounded-xl bg-gray-50 p-6 dark:bg-dark-900"
+        data-testid="error-detail-reported-headers"
+      >
+        <h3 class="text-sm font-black uppercase tracking-wider text-gray-900 dark:text-white">{{ t('admin.ops.errorDetail.reportedHeaders.title') }}</h3>
+        <p class="mt-1 text-xs text-gray-500 dark:text-gray-400">{{ t('admin.ops.errorDetail.reportedHeaders.hint') }}</p>
+        <div class="mt-4 space-y-3">
+          <div
+            v-for="group in reportedHeaderGroups"
+            :key="group.key"
+            class="overflow-hidden rounded-xl border border-gray-200 bg-white dark:border-dark-700 dark:bg-dark-800"
+          >
+            <div
+              v-if="group.accountName || group.accountId != null"
+              class="flex items-center gap-2 border-b border-gray-100 px-4 py-2 text-xs dark:border-dark-700"
+            >
+              <span class="text-gray-400">{{ t('admin.ops.errorDetail.account') }}</span>
+              <span class="font-medium text-gray-900 dark:text-white">{{ group.accountName || '—' }}</span>
+              <span v-if="group.accountId != null" class="font-mono text-gray-400">#{{ group.accountId }}</span>
+            </div>
+            <div class="divide-y divide-gray-100 dark:divide-dark-700">
+              <div
+                v-for="header in group.headers"
+                :key="header.name"
+                class="flex items-center gap-3 px-4 py-2"
+              >
+                <span class="w-2/5 min-w-0 flex-shrink-0 break-all font-mono text-xs text-gray-500 dark:text-gray-400 sm:w-1/3">{{ header.name }}</span>
+                <span class="min-w-0 flex-1 break-all font-mono text-sm font-medium text-gray-900 dark:text-white">{{ header.value }}</span>
+                <button
+                  type="button"
+                  class="flex-shrink-0 rounded-md px-2 py-1 text-[10px] font-bold text-primary-700 transition-colors hover:bg-primary-50 dark:text-primary-200 dark:hover:bg-dark-700"
+                  @click="copyReportedHeader(header.name, header.value)"
+                >
+                  {{ t('admin.ops.errorDetail.reportedHeaders.copy') }}
+                </button>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
 
       <div class="rounded-xl bg-gray-50 p-6 dark:bg-dark-900">
         <h3 class="text-sm font-black uppercase tracking-wider text-gray-900 dark:text-white">{{ t('admin.ops.errorDetail.diagnosticPayloads') }}</h3>
@@ -242,7 +284,8 @@ import { opsAPI, type OpsErrorDetail } from '@/api/admin/ops'
 import type { OpenAIHeaderDiagnostics } from '@/api/admin/accounts'
 import OpenAIHeaderDiagnosticsDetails from '@/components/admin/account/OpenAIHeaderDiagnosticsDetails.vue'
 import { formatDateTime } from '@/utils/format'
-import { resolveUpstreamPayload } from '../utils/errorDetailResponse'
+import { useClipboard } from '@/composables/useClipboard'
+import { extractReportedHeaderGroups, parseUpstreamErrorEvents, resolveUpstreamPayload } from '../utils/errorDetailResponse'
 
 interface Props {
   show: boolean
@@ -269,26 +312,22 @@ const showUpstreamList = computed(() => props.errorType === 'request')
 
 const requestId = computed(() => detail.value?.request_id || detail.value?.client_request_id || '')
 
+const upstreamErrorEvents = computed(() => parseUpstreamErrorEvents(detail.value?.upstream_errors))
+
 const headerDiagnosticEvents = computed(() => {
-  try {
-    const events: unknown = JSON.parse(detail.value?.upstream_errors || '[]')
-    if (!Array.isArray(events)) return []
-    return events.flatMap((event: unknown, index) => {
-      if (!event || typeof event !== 'object') return []
-      const record = event as Record<string, unknown>
-      const header = record.header_diagnostics
-      if (!header || typeof header !== 'object' || Array.isArray(header)) return []
-      const diagnostics: OpenAIHeaderDiagnostics = {}
-      for (const key of ['imagegen_request_id', 'authorization_error', 'identity_error_code'] as const) {
-        const value = (header as Record<string, unknown>)[key]
-        if (typeof value === 'string' && value.trim()) diagnostics[key] = value
-      }
-      if (!Object.keys(diagnostics).length) return []
-      return [{ index, diagnostics, requestID: typeof record.upstream_request_id === 'string' ? record.upstream_request_id : '' }]
-    })
-  } catch {
-    return []
-  }
+  return upstreamErrorEvents.value.flatMap((event, index) => {
+    if (!event || typeof event !== 'object') return []
+    const record = event as Record<string, unknown>
+    const header = record.header_diagnostics
+    if (!header || typeof header !== 'object' || Array.isArray(header)) return []
+    const diagnostics: OpenAIHeaderDiagnostics = {}
+    for (const key of ['imagegen_request_id', 'authorization_error', 'identity_error_code'] as const) {
+      const value = (header as Record<string, unknown>)[key]
+      if (typeof value === 'string' && value.trim()) diagnostics[key] = value
+    }
+    if (!Object.keys(diagnostics).length) return []
+    return [{ index, diagnostics, requestID: typeof record.upstream_request_id === 'string' ? record.upstream_request_id : '' }]
+  })
 })
 
 type DiagnosticPayloadKey = 'client' | 'upstream_message' | 'upstream_detail' | 'upstream_events'
@@ -316,6 +355,14 @@ const diagnosticPayloadSections = computed(() => {
     return section.value && all.findIndex(candidate => candidate.value === section.value) === index
   })
 })
+
+const { copyToClipboard } = useClipboard()
+
+const reportedHeaderGroups = computed(() => extractReportedHeaderGroups(upstreamErrorEvents.value))
+
+function copyReportedHeader(name: string, value: string) {
+  void copyToClipboard(`${name}: ${value}`, t('admin.ops.errorDetail.reportedHeaders.copied'))
+}
 
 function meaningfulPayload(candidate: unknown): string {
   const value = String(candidate || '').trim()

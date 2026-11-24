@@ -11,6 +11,8 @@ import (
 	"fmt"
 	"io"
 	"net/http"
+	"net/url"
+	"regexp"
 	"sort"
 	"strconv"
 	"strings"
@@ -428,7 +430,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 			if shouldFailoverOpenAIPassthroughResponse(account, resp.StatusCode, probeBody) {
 				return nil, s.handleFailoverErrorResponsePassthrough(ctx, resp, c, account, body, probeBody)
 			}
-			return nil, s.handleErrorResponsePassthrough(ctx, resp, c, account, body, probeBody)
+			return nil, s.handleErrorResponsePassthrough(ctx, resp, c, account, body, probeBody, upstreamReq)
 		}
 
 		if mapping, ok := openAIResponsesClientToolMapping(c); ok && isEventStreamResponse(resp.Header) {
@@ -462,7 +464,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 					if shouldFailoverOpenAIPassthroughResponse(account, compactResp.StatusCode, compactBody) {
 						return nil, s.handleFailoverErrorResponsePassthrough(ctx, compactResp, c, account, body, compactBody)
 					}
-					return nil, s.handleErrorResponsePassthrough(ctx, compactResp, c, account, body, compactBody)
+					return nil, s.handleErrorResponsePassthrough(ctx, compactResp, c, account, body, compactBody, upstreamReq)
 				}
 				_ = resp.Body.Close()
 				return nil, handleErr
@@ -491,7 +493,7 @@ func (s *OpenAIGatewayService) forwardOpenAIPassthrough(
 					if shouldFailoverOpenAIPassthroughResponse(account, compactResp.StatusCode, compactBody) {
 						return nil, s.handleFailoverErrorResponsePassthrough(ctx, compactResp, c, account, body, compactBody)
 					}
-					return nil, s.handleErrorResponsePassthrough(ctx, compactResp, c, account, body, compactBody)
+					return nil, s.handleErrorResponsePassthrough(ctx, compactResp, c, account, body, compactBody, upstreamReq)
 				}
 				_ = resp.Body.Close()
 				return nil, handleErr
@@ -853,7 +855,7 @@ func (s *OpenAIGatewayService) buildUpstreamRequestOpenAIPassthroughWithIdentity
 	applyOpenCodeUpstreamUserAgent(account, targetURL, req.Header)
 
 	// 账号级请求头覆写（仅 openai api_key 账号启用时生效；OAuth 路径 no-op）
-	account.ApplyHeaderOverrides(req.Header)
+	account.ApplyHeaderOverrides(req.Context(), req.Header)
 	applyOpenCodeSessionHeader(c, account, targetURL, req.Header, body)
 	// x-codex-beta-features：按真实 Codex 的会话级行为补注（在账号级覆写之后，
 	// 保证不被覆盖丢失）。
@@ -1182,6 +1184,9 @@ func shouldFailoverOpenAIPassthroughResponse(account *Account, statusCode int, r
 	if isOpenAIContextWindowError("", responseBody) {
 		return false
 	}
+	if isOpenAIInvalidEncryptedContentError(statusCode, "", responseBody) {
+		return false
+	}
 	if isOpenAIHTTPUpstreamAccessStateError(statusCode, "", responseBody) {
 		return true
 	}
@@ -1283,6 +1288,221 @@ func writeOpenAIPassthroughErrorEnvelope(c *gin.Context, downstreamStatus int, u
 	c.Data(downstreamStatus, "application/json; charset=utf-8", body)
 }
 
+// isOpenAIInvalidEncryptedContentError 判断上游 400 错误是否为 Responses
+// reasoning/compaction 密文校验失败（invalid_encrypted_content）。
+// 该错误属于确定性请求失败，客户端需据此识别密文失效或验签失败。
+func isOpenAIInvalidEncryptedContentError(statusCode int, upstreamMsg string, body []byte) bool {
+	if statusCode != http.StatusBadRequest {
+		return false
+	}
+	code := strings.ToLower(strings.TrimSpace(extractUpstreamErrorCode(body)))
+	if code == "invalid_encrypted_content" {
+		return true
+	}
+	if code == "thinking_signature_invalid" {
+		if upstreamMsg == "" {
+			upstreamMsg = extractUpstreamErrorMessage(body)
+		}
+		lowerMsg := strings.ToLower(strings.TrimSpace(upstreamMsg))
+		return strings.Contains(lowerMsg, "encrypted content") &&
+			(strings.Contains(lowerMsg, "could not be verified") || strings.Contains(lowerMsg, "could not be decrypted"))
+	}
+	return false
+}
+
+// Prepared only for a final error. Reuse the small physical-attempt identity
+// across all client fields without retaining the request or credential map.
+type openAIPassthroughErrorSanitizer struct {
+	secrets     [4]string
+	hosts       [2]*regexp.Regexp
+	invalidHost bool
+}
+
+func newOpenAIPassthroughErrorSanitizer(account *Account, upstreamRequest *http.Request) openAIPassthroughErrorSanitizer {
+	var sanitizer openAIPassthroughErrorSanitizer
+	var hosts [2]string
+	if account != nil {
+		for i, key := range [...]string{"api_key", "access_token", "refresh_token"} {
+			sanitizer.secrets[i] = strings.TrimSpace(account.GetCredential(key))
+		}
+		if baseURL, err := url.Parse(strings.TrimSpace(account.GetCredential("base_url"))); err == nil {
+			hosts[0] = baseURL.Hostname()
+		}
+	}
+	if upstreamRequest != nil {
+		// Use the finalized physical credential rather than assuming the
+		// business account's credential map contains the exact sent token.
+		authorization := strings.TrimSpace(upstreamRequest.Header.Get("Authorization"))
+		scheme, token, found := strings.Cut(authorization, " ")
+		if found && strings.EqualFold(scheme, "Bearer") {
+			authorization = strings.TrimSpace(token)
+		}
+		sanitizer.secrets[3] = authorization
+		if upstreamRequest.URL != nil {
+			hosts[1] = upstreamRequest.URL.Hostname()
+		}
+	}
+	for i, secret := range sanitizer.secrets {
+		for _, previous := range sanitizer.secrets[:i] {
+			if secret == previous {
+				sanitizer.secrets[i] = ""
+				break
+			}
+		}
+	}
+	for i, host := range hosts {
+		if host == "" || (i > 0 && strings.EqualFold(host, hosts[0])) {
+			continue
+		}
+		pattern, err := regexp.Compile("(?i)" + regexp.QuoteMeta(host))
+		if err != nil {
+			sanitizer.invalidHost = true
+			continue
+		}
+		sanitizer.hosts[i] = pattern
+	}
+	return sanitizer
+}
+
+func (sanitizer *openAIPassthroughErrorSanitizer) sanitize(text string) string {
+	sanitized := strings.TrimSpace(text)
+	if strings.ContainsAny(sanitized, "?&") && sensitiveQueryParamRegex.MatchString(sanitized) {
+		sanitized = sanitizeUpstreamErrorMessage(sanitized)
+	}
+	if sanitized == "" || sanitizer == nil {
+		return sanitized
+	}
+	if sanitizer.invalidHost {
+		return ""
+	}
+	for _, secret := range sanitizer.secrets {
+		if len(secret) >= 6 {
+			sanitized = strings.ReplaceAll(sanitized, secret, "[redacted]")
+		}
+	}
+	for _, host := range sanitizer.hosts {
+		if host != nil && host.MatchString(sanitized) {
+			sanitized = host.ReplaceAllLiteralString(sanitized, "[upstream]")
+		}
+	}
+	return sanitized
+}
+
+// replaceCaseInsensitive 把 input 中所有大小写不敏感匹配 target 的片段替换为
+// replacement。
+//
+// 必须直接在原始字节上匹配：strings.ToLower 会改变字节长度（"Ⱥ" 2→3 字节、
+// Kelvin 符号 "K" 3→1 字节、非法 UTF-8 单字节→3 字节 U+FFFD），用小写串的下标
+// 去切原串会越界 panic 或漏掉 target。正则的 (?i) 在原串上逐 rune 折叠匹配，
+// 不存在下标错位。
+//
+// target 无法编译为模式（如含非法 UTF-8）时返回空串：调用方会回退到通用文案，
+// 宁可丢弃整段文本，也不把未脱敏的内容写给客户端。
+func replaceCaseInsensitive(input, target, replacement string) string {
+	if input == "" || target == "" {
+		return input
+	}
+	pattern, err := regexp.Compile("(?i)" + regexp.QuoteMeta(target))
+	if err != nil {
+		return ""
+	}
+	return pattern.ReplaceAllLiteralString(input, replacement)
+}
+
+// openAIPassthroughClientErrorFieldMaxBytes 限制透出的 error.type/code/param
+// 单字段长度。三者都是短标识符，超长只可能是上游在夹带其它内容。
+const openAIPassthroughClientErrorFieldMaxBytes = 256
+
+// openAIPassthroughClientErrorField 提取允许写给客户端的标量错误字段。
+// gjson 对对象/数组的 String() 返回整段原始 JSON，直接透出等于把上游任意
+// 扩展字段塞进 type/code/param，因此只接受字符串与数字（部分上游的 code 为
+// 数字），并在脱敏后做长度上限校验，超限即丢弃。
+func openAIPassthroughClientErrorField(sanitizer *openAIPassthroughErrorSanitizer, value gjson.Result) string {
+	if value.Type != gjson.String && value.Type != gjson.Number {
+		return ""
+	}
+	field := sanitizer.sanitize(value.String())
+	if len(field) > openAIPassthroughClientErrorFieldMaxBytes {
+		return ""
+	}
+	return field
+}
+
+// openAIPassthroughClientErrorCode 返回允许写给客户端的 error.code。
+// error.code 缺失、为 null 或为空白字符串时，沿用 extractUpstreamErrorCode 对
+// "message 内嵌 JSON"形态的兼容提取（与错误分类看到的 code 保持一致）；
+// error.code 是对象、数组或布尔值时不回退，直接视为无 code。
+func openAIPassthroughClientErrorCode(sanitizer *openAIPassthroughErrorSanitizer, body []byte) string {
+	code := gjson.GetBytes(body, "error.code")
+	blank := !code.Exists() || code.Type == gjson.Null ||
+		(code.Type == gjson.String && strings.TrimSpace(code.Str) == "")
+	if !blank {
+		return openAIPassthroughClientErrorField(sanitizer, code)
+	}
+	inner := sanitizer.sanitize(extractUpstreamErrorCode(body))
+	if len(inner) > openAIPassthroughClientErrorFieldMaxBytes || strings.HasPrefix(inner, "{") || strings.HasPrefix(inner, "[") {
+		return ""
+	}
+	return inner
+}
+
+// writeOpenAIPassthroughStructuredErrorEnvelope 在净化后的 OpenAI 错误信封内
+// 仅保留标准的 type/code/param/message 四个字段（不透传任意扩展字段与敏感响应头），
+// 同时兼容 compact SSE 桥接与响应头净化策略。
+func writeOpenAIPassthroughStructuredErrorEnvelope(
+	c *gin.Context,
+	downstreamStatus int,
+	upstreamHeaders http.Header,
+	body []byte,
+	sanitizer *openAIPassthroughErrorSanitizer,
+	fallbackType string,
+	upstreamMsg string,
+	fallbackMessage string,
+) {
+	if c == nil {
+		return
+	}
+	errType := openAIPassthroughClientErrorField(sanitizer, gjson.GetBytes(body, "error.type"))
+	if errType == "" {
+		errType = fallbackType
+	}
+	if errType == "" {
+		errType = "upstream_error"
+	}
+	errorPayload := gin.H{"type": errType}
+	code := openAIPassthroughClientErrorCode(sanitizer, body)
+	if code != "" {
+		errorPayload["code"] = code
+	}
+	if param := openAIPassthroughClientErrorField(sanitizer, gjson.GetBytes(body, "error.param")); param != "" {
+		errorPayload["param"] = param
+	}
+	message := sanitizer.sanitize(upstreamMsg)
+	if message == "" {
+		message = fallbackMessage
+	}
+	if message == "" {
+		message = "Upstream request failed"
+	}
+	errorPayload["message"] = message
+
+	// compact 心跳已把响应头提交为 200 时，错误只能以 response.failed 终止事件
+	// 回传。通用桥接会把 code 固定为 upstream_error，这里直接带上结构化 code，
+	// 否则本函数要保留的 error.code 恰好在 compact 流上丢失。
+	if (downstreamStatus < 200 || downstreamStatus >= 300) &&
+		openAICompactClientWantsStream(c) && StopOpenAICompactSSEKeepaliveCommitted(c) {
+		writeOpenAICompactSSEFailureWithCode(c, downstreamStatus, code, message)
+		return
+	}
+
+	payload, _ := json.Marshal(gin.H{"error": errorPayload})
+	if writeOpenAICompactSSEBridge(c, downstreamStatus, payload) {
+		return
+	}
+	writeOpenAIPassthroughErrorHeaders(c.Writer.Header(), upstreamHeaders)
+	c.Data(downstreamStatus, "application/json; charset=utf-8", payload)
+}
+
 func (s *OpenAIGatewayService) handleFailoverErrorResponsePassthrough(
 	ctx context.Context,
 	resp *http.Response,
@@ -1340,6 +1560,7 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 	account *Account,
 	requestBody []byte,
 	responseBody []byte,
+	upstreamRequest *http.Request,
 ) error {
 	MarkResponseCommitted(c)
 	body := s.redactAgentIdentitySensitiveBody(ctx, account, responseBody)
@@ -1359,6 +1580,7 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 
 	upstreamMsg := strings.TrimSpace(extractUpstreamErrorMessage(body))
 	upstreamMsg = sanitizeUpstreamErrorMessage(upstreamMsg)
+	invalidEncryptedContent := isOpenAIInvalidEncryptedContentError(resp.StatusCode, upstreamMsg, body)
 	upstreamDetail := ""
 	if s.cfg != nil && s.cfg.Gateway.LogUpstreamErrorBody {
 		maxBytes := s.cfg.Gateway.LogUpstreamErrorBodyMaxBytes
@@ -1370,8 +1592,8 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 	setOpsUpstreamError(c, resp.StatusCode, upstreamMsg, upstreamDetail)
 	logOpenAIInstructionsRequiredDebug(ctx, c, account, resp.StatusCode, upstreamMsg, requestBody, body)
 	// 错误体虽不会原样透传，运行态账号状态仍需更新，避免粘性路由继续复用
-	// 刚被限流的账号。cyber 例外：不冷却账号。
-	if !cyberHit {
+	// 刚被限流的账号。cyber 与确定性密文拒绝均不冷却账号。
+	if !cyberHit && !invalidEncryptedContent {
 		reqModel, _, _ := extractOpenAIRequestMetaFromBody(requestBody)
 		canonicalModel := canonicalOpenAIAccountSchedulingModel(account, reqModel)
 		_ = s.handleOpenAIAccountUpstreamError(ctx, account, resp.StatusCode, resp.Header, body, canonicalModel)
@@ -1390,15 +1612,58 @@ func (s *OpenAIGatewayService) handleErrorResponsePassthrough(
 		Detail:               upstreamDetail,
 		UpstreamResponseBody: upstreamDetail,
 	})
-	// context-window 超限是确定性请求失败（shouldFailoverOpenAIPassthroughResponse
-	// 已保证不切号），其文案对客户端可操作（如触发自动压缩）；在净化信封内保留
-	// 脱敏后的上游消息，而不是抹成通用文案。
-	if isOpenAIContextWindowError(upstreamMsg, body) && upstreamMsg != "" {
-		writeOpenAIPassthroughErrorEnvelope(c, resp.StatusCode, resp.Header, upstreamMsg)
-	} else {
-		writeSanitizedOpenAIPassthroughError(c, resp.StatusCode, resp.Header)
+	// 优先遵循管理员配置的错误透传规则，使 openai_passthrough=true 账号与非透传路径
+	// 及 SSE response.failed 路径保持一致；命中 passthrough_body=true 时保留结构化
+	// error.type/code/param 及脱敏消息，同时维持响应头净化与 compact SSE 桥接安全边界。
+	rulePlatform := PlatformOpenAI
+	if account != nil && strings.TrimSpace(account.Platform) != "" {
+		rulePlatform = account.Platform
+	}
+	if status, errType, errMsg, rule, matched := applyErrorPassthroughRuleWithRule(
+		c,
+		rulePlatform,
+		resp.StatusCode,
+		body,
+		resp.StatusCode,
+		"upstream_error",
+		"Upstream request failed",
+	); matched {
+		if rule != nil && !rule.PassthroughBody && rule.CustomMessage != nil {
+			writeOpenAIPassthroughErrorEnvelope(c, status, resp.Header, errMsg)
+			return fmt.Errorf("upstream error: %d (passthrough rule matched)", resp.StatusCode)
+		}
+		sanitizer := newOpenAIPassthroughErrorSanitizer(account, upstreamRequest)
+		if rule != nil && rule.PassthroughBody {
+			writeOpenAIPassthroughStructuredErrorEnvelope(
+				c, status, resp.Header, body, &sanitizer, errType, errMsg, "Upstream request failed",
+			)
+			return fmt.Errorf("upstream error: %d (passthrough rule matched)", resp.StatusCode)
+		}
+		// Without a custom message the rule uses upstream text, which must be redacted.
+		errMsg = sanitizer.sanitize(errMsg)
+		if errMsg == "" {
+			errMsg = "Upstream request failed"
+		}
+		writeOpenAIPassthroughErrorEnvelope(c, status, resp.Header, errMsg)
+		return fmt.Errorf("upstream error: %d (passthrough rule matched)", resp.StatusCode)
 	}
 
+	// invalid_encrypted_content 与 context-window 超限均为确定性请求失败
+	// （shouldFailoverOpenAIPassthroughResponse 已保证不切号），客户端需要其
+	// error.code/param/message 做明确处理（如丢弃失效加密思考块或触发自动压缩）；
+	// 在净化信封内仅保留标准字段并脱敏，不暴露上游额外字段与敏感头。
+	if !invalidEncryptedContent && (upstreamMsg == "" || !isOpenAIContextWindowError(upstreamMsg, body)) {
+		writeSanitizedOpenAIPassthroughError(c, resp.StatusCode, resp.Header)
+		return fmt.Errorf("upstream error: %d (client response sanitized)", resp.StatusCode)
+	}
+	fallbackType, fallbackMessage := "upstream_error", "Upstream request failed"
+	if invalidEncryptedContent {
+		fallbackType, fallbackMessage = openAIUpstreamClientErrorFallbackType, openAIUpstreamClientErrorFallbackMessage
+	}
+	sanitizer := newOpenAIPassthroughErrorSanitizer(account, upstreamRequest)
+	writeOpenAIPassthroughStructuredErrorEnvelope(
+		c, resp.StatusCode, resp.Header, body, &sanitizer, fallbackType, upstreamMsg, fallbackMessage,
+	)
 	return fmt.Errorf("upstream error: %d (client response sanitized)", resp.StatusCode)
 }
 

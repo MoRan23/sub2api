@@ -89,3 +89,52 @@ export function resolvePrimaryResponseBody(
 
   return errorBody
 }
+
+export interface ReportedHeaderGroup {
+  /** 稳定 key：账号 + 请求头内容 */
+  key: string
+  accountId: number | null
+  accountName: string
+  headers: Array<{ name: string; value: string }>
+}
+
+export function parseUpstreamErrorEvents(upstreamErrors: string | null | undefined): unknown[] {
+  const text = String(upstreamErrors || '').trim()
+  if (!text) return []
+  try {
+    const events: unknown = JSON.parse(text)
+    return Array.isArray(events) ? events : []
+  } catch {
+    return []
+  }
+}
+
+/**
+ * 从错误记录的上游事件里提取"身份上报请求头"（账号请求头覆写变量实际发出的值）。
+ * 同一账号、内容相同的多次尝试合并为一组；没有上报时返回空数组。
+ */
+export function extractReportedHeaderGroups(
+  upstreamErrors: string | null | undefined | unknown[]
+): ReportedHeaderGroup[] {
+  const events = Array.isArray(upstreamErrors) ? upstreamErrors : parseUpstreamErrorEvents(upstreamErrors)
+
+  const groups: ReportedHeaderGroup[] = []
+  const seen = new Set<string>()
+  for (const event of events) {
+    if (!event || typeof event !== 'object' || Array.isArray(event)) continue
+    const raw = event as Record<string, unknown>
+    const reported = raw.reported_headers
+    if (!reported || typeof reported !== 'object' || Array.isArray(reported)) continue
+    const headers = Object.entries(reported)
+      .filter((entry): entry is [string, string] => !!entry[0] && typeof entry[1] === 'string' && entry[1] !== '')
+      .map(([name, value]) => ({ name, value }))
+      .sort((a, b) => a.name.localeCompare(b.name))
+    if (!headers.length) continue
+    const accountId = typeof raw.account_id === 'number' && raw.account_id > 0 ? raw.account_id : null
+    const key = JSON.stringify([accountId, headers])
+    if (seen.has(key)) continue
+    seen.add(key)
+    groups.push({ key, accountId, accountName: String(raw.account_name || '').trim(), headers })
+  }
+  return groups
+}

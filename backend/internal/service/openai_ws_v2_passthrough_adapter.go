@@ -1008,6 +1008,7 @@ func (s *OpenAIGatewayService) proxyResponsesWebSocketV2Passthrough(
 		if err != nil {
 			return fmt.Errorf("refresh ws authentication headers: %w", err)
 		}
+		finalizeHeaderOverrideReportedHeaders(ctx, account.ID, headers)
 		dialCtx, cancelDial := context.WithTimeout(ctx, s.openAIWSDialTimeout())
 		var connectObserver *CodexTelemetryConnectObserver
 		if start := s.prepareCodexTelemetryConnect(ctx, account, headers, wsURL, gjson.GetBytes(firstClientMessage, "model").String()); start != nil {

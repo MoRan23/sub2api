@@ -983,6 +983,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		Account:           account,
 		WSURL:             wsURL,
 		Headers:           wsHeaders,
+		ReportedHeaders:   wsSessionResolution.ReportedHeaders,
 		HandshakeObserver: freezeFingerprintObservationWSHandshake(c, account),
 		ConnectObserver:   s.prepareCodexTelemetryConnect(ctx, account, wsHeaders, wsURL, strings.TrimSpace(gjson.GetBytes(firstPayload.payloadRaw, "model").String())),
 		IdentityDigest:    pinnedSocketDigest,
@@ -2476,7 +2477,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 		} else {
 			// Legacy mode retains its historical per-prompt header update.
 			if nextPayload.promptCacheKey != "" {
-				updatedHeaders, _, updHdrErr := s.buildOpenAIWSHeadersWithBody(
+				updatedHeaders, updatedResolution, updHdrErr := s.buildOpenAIWSHeadersWithBody(
 					ctx,
 					c,
 					account,
@@ -2495,6 +2496,7 @@ func (s *OpenAIGatewayService) ProxyResponsesWebSocketFromClient(
 					logOpenAIWSModeInfo("ingress_ws_update_headers_failed account_id=%d err=%v", account.ID, updHdrErr)
 				} else {
 					baseAcquireReq.Headers = updatedHeaders
+					baseAcquireReq.ReportedHeaders = updatedResolution.ReportedHeaders
 				}
 			}
 		}

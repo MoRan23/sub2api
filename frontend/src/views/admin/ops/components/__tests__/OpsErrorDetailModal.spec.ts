@@ -3,6 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import OpsErrorDetailModal from '../OpsErrorDetailModal.vue'
 
 const mocks = vi.hoisted(() => ({
+  copyToClipboard: vi.fn(),
   getRequestErrorDetail: vi.fn(),
   listRequestErrorUpstreamErrors: vi.fn()
 }))
@@ -17,6 +18,10 @@ vi.mock('@/api/admin/ops', () => ({
 
 vi.mock('@/stores', () => ({
   useAppStore: () => ({ showError: vi.fn() })
+}))
+
+vi.mock('@/composables/useClipboard', () => ({
+  useClipboard: () => ({ copyToClipboard: mocks.copyToClipboard })
 }))
 
 vi.mock('vue-i18n', async (importOriginal) => {
@@ -38,7 +43,7 @@ describe('OpsErrorDetailModal', () => {
     mocks.getRequestErrorDetail.mockResolvedValue({
       id: 1, created_at: '2026-10-30T00:00:00Z', status_code: 502,
       upstream_errors: JSON.stringify([
-        { upstream_request_id: 'attempt-1', header_diagnostics: { imagegen_request_id: 'image-1', identity_error_code: 'invalid_identity' } },
+        { upstream_request_id: 'attempt-1', header_diagnostics: { imagegen_request_id: 'image-1', identity_error_code: 'invalid_identity' }, reported_headers: { 'x-gateway-user-id': '7' } },
         { upstream_request_id: 'attempt-2', header_diagnostics: { authorization_error: '<b>access denied</b>' } },
         { header_diagnostics: { identity_error_code: { unexpected: true } } },
       ]),
@@ -56,6 +61,7 @@ describe('OpsErrorDetailModal', () => {
     expect(diagnostics.text()).toContain('invalid_identity')
     expect(diagnostics.text()).toContain('<b>access denied</b>')
     expect(diagnostics.find('b').exists()).toBe(false)
+    expect(wrapper.get('[data-testid="error-detail-reported-headers"]').text()).toContain('x-gateway-user-id')
   })
 
   it.each([undefined, '[]', 'invalid json', '{}', '[null,{"header_diagnostics":null}]'])('handles old or malformed diagnostic records (%s)', async (upstream_errors) => {
@@ -109,5 +115,41 @@ describe('OpsErrorDetailModal', () => {
     expect(wrapper.text()).toContain('429')
     expect(wrapper.findAll('pre')).toHaveLength(2)
     expect(wrapper.text()).not.toContain('admin.ops.errorDetail.payloads.upstream_detail')
+    expect(wrapper.find('[data-testid="error-detail-reported-headers"]').exists()).toBe(false)
+  })
+
+  it('shows the identity headers that were reported upstream and copies them', async () => {
+    mocks.getRequestErrorDetail.mockResolvedValue({
+      id: 2,
+      created_at: '2026-11-24T00:00:00Z',
+      phase: 'upstream',
+      error_owner: 'provider',
+      status_code: 502,
+      platform: 'openai',
+      request_id: 'rid-2',
+      upstream_errors: JSON.stringify([
+        {
+          account_id: 5,
+          account_name: 'relay-a',
+          upstream_status_code: 400,
+          reported_headers: { 'x-gateway-user-id': '7' }
+        }
+      ])
+    })
+
+    const wrapper = shallowMount(OpsErrorDetailModal, {
+      props: { show: true, errorId: 2, errorType: 'request' },
+      global: { stubs: { BaseDialog: { template: '<div><slot /></div>' }, Icon: true } }
+    })
+    await flushPromises()
+
+    const section = wrapper.get('[data-testid="error-detail-reported-headers"]')
+    expect(section.text()).toContain('relay-a')
+    expect(section.text()).toContain('x-gateway-user-id')
+    await section.get('button').trigger('click')
+    expect(mocks.copyToClipboard).toHaveBeenCalledWith(
+      'x-gateway-user-id: 7',
+      'admin.ops.errorDetail.reportedHeaders.copied'
+    )
   })
 })
