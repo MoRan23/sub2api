@@ -206,7 +206,7 @@ export default {
     logout: '退出登录',
     github: 'GitHub',
     mySubscriptions: '我的订阅',
-    buySubscription: '充值/订阅',
+    buySubscription: '充值／订阅代充',
     recharge: '充值',
     subscribe: '订阅',
     docs: '文档',

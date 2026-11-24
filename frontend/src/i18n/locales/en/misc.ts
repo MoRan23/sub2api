@@ -60,16 +60,16 @@ export default {
     dockerRecreate: 'Recreate the container'
   },
 
-  // Recharge / Subscription Page
+  // Recharge / Subscription Top-up Page
   purchase: {
-    title: 'Recharge / Subscription',
+    title: 'Recharge / Subscription Top-up',
     description: 'Recharge balance or purchase subscription via the embedded page',
     rechargeDescription: 'Recharge balance via the embedded page',
     subscriptionDescription: 'Purchase subscription via the embedded page',
     openInNewTab: 'Open in new tab',
     notEnabledTitle: 'Feature not enabled',
     notEnabledDesc: 'The administrator has not enabled the recharge/subscription entry. Please contact admin.',
-    notConfiguredTitle: 'Recharge / Subscription URL not configured',
+    notConfiguredTitle: 'Recharge / Subscription Top-up URL not configured',
     notConfiguredDesc:
       'The administrator enabled the entry but has not configured a recharge/subscription URL. Please contact admin.'
   },
@@ -79,6 +79,8 @@ export default {
     title: 'Custom Page',
     openInNewTab: 'Open in new tab',
     purchaseGuideTitle: 'Redeem after payment',
+    usdtGuide: 'To pay with USDT, use the on-site recharge page.',
+    goToRecharge: 'Go to recharge',
     purchaseGuideDescription: 'This page only sells codes. After payment, copy the redemption code, open the Redeem page, and paste it there before your balance is credited.',
     goToRedeem: 'Go to Redeem',
     notFoundTitle: 'Page not found',
@@ -310,7 +312,7 @@ export default {
 
   // Payment System
   payment: {
-    title: 'Recharge / Subscription',
+    title: 'Recharge / Subscription Top-up',
     amountLabel: 'Amount',
     paymentAmount: 'Payment Amount',
     creditedBalance: 'Credited Balance',
@@ -410,7 +412,7 @@ export default {
     activeSubscription: 'Active Subscription',
     noActiveSubscription: 'No active subscription',
     tabTopUp: 'Top Up',
-    tabSubscribe: 'Subscribe',
+    tabSubscribe: 'Subscription Top-up',
     noPlans: 'No subscription plans available',
     notAvailable: 'Top-up is currently unavailable',
     billingUnavailable: 'Neither top-up nor subscriptions are currently available. Please contact the administrator.',

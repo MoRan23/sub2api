@@ -11,6 +11,7 @@ const verifyOrder = vi.hoisted(() => vi.fn())
 const verifyOrderPublic = vi.hoisted(() => vi.fn())
 const resolveOrderPublicByResumeToken = vi.hoisted(() => vi.fn())
 const refreshUser = vi.hoisted(() => vi.fn())
+const authState = vi.hoisted(() => ({ isAuthenticated: false, user: { id: 9 } }))
 
 vi.mock('vue-router', async () => {
   const actual = await vi.importActual<typeof import('vue-router')>('vue-router')
@@ -40,6 +41,8 @@ vi.mock('@/stores/payment', () => ({
 vi.mock('@/stores/auth', () => ({
   useAuthStore: () => ({
     refreshUser,
+    get isAuthenticated() { return authState.isAuthenticated },
+    get user() { return authState.user },
   }),
 }))
 
@@ -93,6 +96,7 @@ const recoverySnapshotFactory = (resumeToken: string) => ({
 describe('PaymentResultView', () => {
   beforeEach(() => {
     routeState.query = {}
+    authState.isAuthenticated = false
     routerPush.mockReset()
     pollOrderStatus.mockReset()
     verifyOrder.mockReset()
@@ -105,6 +109,40 @@ describe('PaymentResultView', () => {
 
   afterEach(() => {
     vi.useRealTimers()
+  })
+
+  it('only displays delivered codes for the authenticated order owner', async () => {
+    routeState.query = { order_id: '42' }
+    pollOrderStatus.mockResolvedValue({ ...orderFactory('COMPLETED'), order_type: 'subscription_topup' })
+    const anonymous = mount(PaymentResultView, { global: { stubs: { OrderStatusBadge: true, SubscriptionTopupDelivery: true } } })
+    await flushPromises()
+    expect(anonymous.find('subscription-topup-delivery-stub').exists()).toBe(false)
+    anonymous.unmount()
+    authState.isAuthenticated = true
+    const owner = mount(PaymentResultView, { global: { stubs: { OrderStatusBadge: true, SubscriptionTopupDelivery: true } } })
+    await flushPromises()
+    expect(owner.getComponent({ name: 'SubscriptionTopupDelivery' }).props('orderId')).toBe(42)
+    expect(owner.text()).not.toContain('payment.orders.creditedAmount')
+    owner.unmount()
+  })
+
+  it('loads owner details after a public resume result with an ID and keeps private polling', async () => {
+    vi.useFakeTimers()
+    authState.isAuthenticated = true
+    routeState.query = { order_id: '42', resume_token: 'topup-token' }
+    resolveOrderPublicByResumeToken.mockResolvedValue({ data: { id: 42, status: 'PENDING', order_type: 'subscription_topup' } })
+    pollOrderStatus.mockResolvedValueOnce({ ...orderFactory('PENDING'), order_type: 'subscription_topup' })
+      .mockResolvedValue({ ...orderFactory('COMPLETED'), order_type: 'subscription_topup' })
+    const wrapper = mount(PaymentResultView, { global: { stubs: { OrderStatusBadge: true, SubscriptionTopupDelivery: true } } })
+    await flushPromises()
+    expect(pollOrderStatus).toHaveBeenCalledWith(42)
+    expect(wrapper.getComponent({ name: 'SubscriptionTopupDelivery' }).props('orderId')).toBe(42)
+    await vi.advanceTimersByTimeAsync(2000)
+    await flushPromises()
+    expect(resolveOrderPublicByResumeToken).toHaveBeenCalledTimes(1)
+    expect(wrapper.text()).toContain('payment.result.success')
+    expect(wrapper.getComponent({ name: 'SubscriptionTopupDelivery' }).props('orderId')).toBe(42)
+    wrapper.unmount()
   })
 
   it('renders a pending state instead of a failure state when the restored order is still pending', async () => {

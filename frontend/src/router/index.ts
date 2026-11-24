@@ -768,6 +768,19 @@ const routes: RouteRecordRaw[] = [
     }
   },
 
+  {
+    path: '/admin/orders/subscription-topups',
+    name: 'AdminSubscriptionTopups',
+    component: () => import('@/views/admin/orders/AdminSubscriptionTopupsView.vue'),
+    meta: {
+      requiresAuth: true,
+      requiresAdmin: true,
+      title: 'Subscription Top-ups',
+      titleKey: 'subscriptionTopup.title',
+      requiresPayment: true,
+    },
+  },
+
   // ==================== 404 Not Found ====================
   {
     path: '/:pathMatch(.*)*',

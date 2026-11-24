@@ -1,12 +1,14 @@
 import type { LocationQuery, LocationQueryRaw } from 'vue-router'
-import type { SubscriptionPlan } from '@/types/payment'
+import type { OrderType, SubscriptionPlan } from '@/types/payment'
 import { normalizeVisibleMethod } from '@/components/payment/paymentFlow'
 
 export interface ParsedWechatResumeRoute {
   orderAmount: number
-  orderType: 'balance' | 'subscription'
+  orderType: OrderType
   paymentType: string
   planId?: number
+  skuId?: number
+  quantity?: number
   openid?: string
   wechatResumeToken?: string
 }
@@ -40,9 +42,14 @@ export function parseWechatResumeRoute(
   const paymentType = normalizeVisibleMethod(readQueryString(query, 'payment_type')) || 'wxpay'
   const planId = Number.parseInt(readQueryString(query, 'plan_id'), 10)
   const hasPlanId = Number.isFinite(planId) && planId > 0
-  const orderType = readQueryString(query, 'order_type') === 'subscription' || hasPlanId
+  const orderType = readQueryString(query, 'order_type') === 'subscription_topup' ? 'subscription_topup'
+    : readQueryString(query, 'order_type') === 'subscription' || hasPlanId
     ? 'subscription'
     : 'balance'
+  const skuId = Number(readQueryString(query, 'sku_id'))
+  const quantity = Number(readQueryString(query, 'quantity'))
+  const topupFields = orderType === 'subscription_topup' && Number.isInteger(skuId) && skuId > 0
+    && Number.isInteger(quantity) && quantity >= 1 && quantity <= 100 ? { skuId, quantity } : {}
 
   if (wechatResumeToken) {
     return {
@@ -51,6 +58,7 @@ export function parseWechatResumeRoute(
       orderType,
       orderAmount: 0,
       planId: hasPlanId ? planId : undefined,
+      ...topupFields,
     }
   }
 
@@ -58,13 +66,14 @@ export function parseWechatResumeRoute(
   if (!openid) {
     return null
   }
+  if (orderType === 'subscription_topup' && !topupFields.skuId) return null
 
   const rawAmount = Number.parseFloat(readQueryString(query, 'amount'))
   const orderAmount = Number.isFinite(rawAmount) && rawAmount > 0
     ? rawAmount
     : (orderType === 'subscription'
       ? (plans.find(plan => plan.id === planId)?.price ?? 0)
-      : fallbackBalanceAmount)
+      : orderType === 'balance' ? fallbackBalanceAmount : 0)
 
   return {
     openid,
@@ -72,6 +81,7 @@ export function parseWechatResumeRoute(
     orderType,
     orderAmount,
     planId: hasPlanId ? planId : undefined,
+    ...topupFields,
   }
 }
 
@@ -86,5 +96,7 @@ export function stripWechatResumeQuery(query: LocationQuery): LocationQueryRaw {
   delete nextQuery.amount
   delete nextQuery.order_type
   delete nextQuery.plan_id
+  delete nextQuery.sku_id
+  delete nextQuery.quantity
   return nextQuery
 }

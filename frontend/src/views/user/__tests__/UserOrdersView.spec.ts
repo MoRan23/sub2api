@@ -112,4 +112,20 @@ describe('UserOrdersView refund wallet details', () => {
     expect(wrapper.get('[data-test="refund-gift-credit"]').text()).toContain('$0.00000001')
     expect(wrapper.get('[data-test="refund-total-credit"]').text()).toContain('$0.01000001')
   })
+
+  it('offers code delivery details but no self-service refund for top-up orders', async () => {
+    getMyOrders.mockResolvedValue({ data: { items: [{ id: 42, order_type: 'subscription_topup', status: 'COMPLETED', provider_instance_id: 'provider-1' }], total: 1 } })
+    const wrapper = mount(UserOrdersView, { global: { stubs: {
+      AppLayout: { template: '<div><slot /></div>' }, OrderTable: OrderTableStub,
+      BaseDialog: { props: ['show'], template: '<div v-if="show"><slot /></div>' },
+      SubscriptionTopupDelivery: true, Pagination: true, Select: true, Icon: true,
+    } } })
+    await flushPromises()
+    expect(wrapper.text()).not.toContain('payment.orders.requestRefund')
+    const view = wrapper.findAll('button').find(button => button.text() === 'subscriptionTopup.viewCards')
+    expect(view).toBeDefined()
+    await view!.trigger('click')
+    expect(wrapper.getComponent({ name: 'SubscriptionTopupDelivery' }).props('orderId')).toBe(42)
+    wrapper.unmount()
+  })
 })

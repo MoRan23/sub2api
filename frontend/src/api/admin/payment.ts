@@ -104,8 +104,8 @@ export const adminPaymentAPI = {
   },
 
   /** Get a specific order by ID */
-  getOrder(id: number) {
-    return apiClient.get<PaymentOrder>(`/admin/payment/orders/${id}`)
+  getOrder(id: number, signal?: AbortSignal) {
+    return apiClient.get<PaymentOrder>(`/admin/payment/orders/${id}`, { signal })
   },
 
   /** Cancel an order (admin) */

@@ -14,6 +14,7 @@ import type {
   PaymentOrder
 } from '@/types/payment'
 import type { BasePaginationResponse } from '@/types'
+import type { SubscriptionTopupProduct, SubscriptionTopupOrderCards } from '@/types/subscriptionTopup'
 
 export interface PublicOrderVerifyResult {
   id?: number
@@ -35,6 +36,13 @@ export interface PublicOrderVerifyResult {
 }
 
 export const paymentAPI = {
+  getTopupProducts(signal?: AbortSignal) {
+    return apiClient.get<SubscriptionTopupProduct[]>('/payment/topup-products', { signal })
+  },
+
+  getOrderCards(id: number, signal?: AbortSignal) {
+    return apiClient.get<SubscriptionTopupOrderCards>(`/payment/orders/${id}/cards`, { signal })
+  },
   /** Get payment configuration (enabled types, limits, etc.) */
   getConfig() {
     return apiClient.get<PaymentConfig>('/payment/config')

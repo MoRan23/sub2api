@@ -2,6 +2,11 @@ import { describe, expect, it } from 'vitest'
 import { parseWechatResumeRoute, stripWechatResumeQuery } from '../paymentWechatResume'
 
 describe('parseWechatResumeRoute', () => {
+  it('preserves SKU and quantity in top-up OAuth callbacks without legacy plan conversion', () => {
+    expect(parseWechatResumeRoute({ openid: 'openid', order_type: 'subscription_topup', sku_id: '12', quantity: '3', amount: '37.02' }, [], 88))
+      .toEqual({ openid: 'openid', orderType: 'subscription_topup', paymentType: 'wxpay', planId: undefined, skuId: 12, quantity: 3, orderAmount: 37.02 })
+    expect(parseWechatResumeRoute({ openid: 'openid', order_type: 'subscription_topup', sku_id: '12', quantity: '1.5', amount: '37.02' }, [], 88)).toBeNull()
+  })
   it('prefers the opaque resume token over legacy openid query params', () => {
     expect(parseWechatResumeRoute({
       wechat_resume: '1',
@@ -49,6 +54,8 @@ describe('stripWechatResumeQuery', () => {
       order_type: 'subscription',
       plan_id: '7',
       state: 'state-123',
+      sku_id: '12',
+      quantity: '3',
       scope: 'snsapi_base',
     })).toEqual({
       foo: 'bar',

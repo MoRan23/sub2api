@@ -1,4 +1,5 @@
 import adminAccessKeys from './adminAccessKeys'
+import subscriptionTopup from './subscriptionTopup'
 import mcp from './mcp'
 import landing from './landing'
 import common from './common'
@@ -12,6 +13,7 @@ import { attributionZh } from '../modelAttribution'
 import { diagnosticDaybreakZh } from '../diagnosticDaybreak'
 
 export default {
+  subscriptionTopup,
   attribution: attributionZh,
   diagnosticDaybreak: diagnosticDaybreakZh,
   candyTests: candyTestsZh,

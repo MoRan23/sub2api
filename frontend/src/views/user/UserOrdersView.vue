@@ -18,6 +18,7 @@
       <OrderTable :orders="orders" :loading="loading">
         <template #actions="{ row }">
           <div class="flex items-center gap-2">
+            <button v-if="row.order_type === 'subscription_topup'" class="btn btn-secondary btn-sm" @click="cardOrderId = row.id">{{ t('subscriptionTopup.viewCards') }}</button>
             <button v-if="row.status === 'PENDING'" @click="handleCancel(row.id)" class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-yellow-600 hover:bg-yellow-50 dark:text-yellow-400 dark:hover:bg-yellow-900/20">
               <Icon name="x" size="sm" />
               <span>{{ t('payment.orders.cancel') }}</span>
@@ -42,6 +43,9 @@
     </div>
 
     <!-- Cancel Confirm Dialog -->
+    <BaseDialog :show="cardOrderId !== null" :title="t('subscriptionTopup.title')" @close="cardOrderId = null">
+      <SubscriptionTopupDelivery v-if="cardOrderId !== null" :key="cardOrderId" :order-id="cardOrderId" />
+    </BaseDialog>
     <BaseDialog :show="!!cancelTargetId" :title="t('payment.orders.cancel')" width="narrow" @close="cancelTargetId = null">
       <p class="text-sm text-gray-600 dark:text-gray-300">{{ t('payment.confirmCancel') }}</p>
       <template #footer>
@@ -113,6 +117,7 @@ import BaseDialog from '@/components/common/BaseDialog.vue'
 import Select from '@/components/common/Select.vue'
 import Icon from '@/components/icons/Icon.vue'
 import OrderTable from '@/components/payment/OrderTable.vue'
+import SubscriptionTopupDelivery from '@/components/payment/SubscriptionTopupDelivery.vue'
 
 const { t } = useI18n()
 const router = useRouter()
@@ -121,6 +126,7 @@ const appStore = useAppStore()
 const loading = ref(false)
 const actionLoading = ref(false)
 const orders = ref<PaymentOrder[]>([])
+const cardOrderId = ref<number | null>(null)
 const refundEligibleProviders = ref<Set<string>>(new Set())
 const currentFilter = ref('')
 const cancelTargetId = ref<number | null>(null)
@@ -192,6 +198,7 @@ async function confirmRefund() {
 }
 
 function canRequestRefund(order: PaymentOrder): boolean {
+  if (order.order_type === 'subscription_topup') return false
   if (order.status !== 'COMPLETED') return false
   if (!order.provider_instance_id) return false
   return refundEligibleProviders.value.has(order.provider_instance_id)

@@ -118,10 +118,12 @@
                 <p class="mt-1 text-sm leading-5 text-gray-600 dark:text-dark-300">
                   {{ t('customPage.purchaseGuideDescription') }}
                 </p>
+                <p class="mt-1 text-sm leading-5 text-gray-600 dark:text-dark-300">{{ t('customPage.usdtGuide') }}</p>
               </div>
             </div>
 
             <div class="custom-purchase-actions">
+              <button type="button" class="btn btn-secondary btn-sm" data-testid="purchase-recharge-button" @click="router.push('/purchase?tab=recharge')">{{ t('customPage.goToRecharge') }}</button>
               <button
                 type="button"
                 class="btn btn-primary btn-sm"

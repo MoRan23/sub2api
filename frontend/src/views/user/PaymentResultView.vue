@@ -67,7 +67,7 @@
               <span class="font-medium text-gray-600 dark:text-gray-300">{{ t('payment.orders.totalCredit') }}</span>
               <span class="font-bold text-gray-900 dark:text-white">${{ formatWalletAmount(paymentOrderTotalCredit(order)) }}</span>
             </div>
-            <div v-else-if="hasAmountFields(order) && order.order_type !== 'balance' && order.amount !== order.pay_amount" class="flex justify-between">
+            <div v-else-if="hasAmountFields(order) && order.order_type === 'subscription' && order.amount !== order.pay_amount" class="flex justify-between">
               <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.creditedAmount') }}</span>
               <span class="font-medium text-gray-900 dark:text-white">{{ formatGatewayAmount(order.amount) }}</span>
             </div>
@@ -98,6 +98,9 @@
             </div>
           </div>
         </div>
+        <div v-if="isOwnedOrder(order) && order.order_type === 'subscription_topup'" class="rounded-xl bg-white p-5 shadow-sm dark:bg-dark-800">
+          <SubscriptionTopupDelivery :key="`${order.id}-${order.status}`" :order-id="order.id" />
+        </div>
         <!-- Actions -->
         <div class="flex gap-3">
           <button class="btn btn-secondary flex-1" @click="router.push('/purchase')">{{ t('payment.result.backToRecharge') }}</button>
@@ -113,6 +116,7 @@ import { ref, computed, onBeforeUnmount, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useRoute, useRouter } from 'vue-router'
 import OrderStatusBadge from '@/components/payment/OrderStatusBadge.vue'
+import SubscriptionTopupDelivery from '@/components/payment/SubscriptionTopupDelivery.vue'
 import {
   PAYMENT_RECOVERY_STORAGE_KEY,
   clearPaymentRecoverySnapshot,
@@ -232,6 +236,10 @@ function refreshUserBalanceForSuccessfulOrder(nextOrder: ResolvedOrder | null): 
 
 function hasOrderId(nextOrder: ResolvedOrder | null): nextOrder is PaymentOrder {
   return !!nextOrder && 'id' in nextOrder && typeof nextOrder.id === 'number'
+}
+
+function isOwnedOrder(nextOrder: ResolvedOrder | null): nextOrder is PaymentOrder {
+  return authStore.isAuthenticated && hasOrderId(nextOrder) && nextOrder.user_id === authStore.user?.id
 }
 
 function hasAmountFields(nextOrder: ResolvedOrder | null): nextOrder is PaymentOrder {
@@ -410,6 +418,14 @@ onMounted(async () => {
   const hasLegacyFallbackContext = readRouteQueryString('trade_status').trim() !== ''
   const shouldUsePublicOutTradeNo = outTradeNo !== '' && (hasLegacyFallbackContext || routeOrderId > 0 || orderId > 0)
 
+  if (authStore.isAuthenticated && (orderId || routeOrderId) && !isOwnedOrder(order.value)) {
+    try {
+      setResolvedOrder(await paymentStore.pollOrderStatus(orderId || routeOrderId))
+    } catch (_err: unknown) {
+      // Keep the public payment status when this signed-in user does not own the order.
+    }
+  }
+
   if (!order.value && orderId && (!resumeToken || routeOrderId > 0)) {
     try {
       setResolvedOrder(await paymentStore.pollOrderStatus(orderId))
@@ -438,6 +454,13 @@ onMounted(async () => {
   }
 
   const refreshOrder = async (): Promise<ResolvedOrder | null> => {
+    if (isOwnedOrder(order.value)) {
+      try {
+        return await paymentStore.pollOrderStatus(order.value.id)
+      } catch (_err: unknown) {
+        return null
+      }
+    }
     if (resumeToken) {
       const resolvedOrder = await resolveOrderFromResumeToken(resumeToken)
       if (resolvedOrder) {

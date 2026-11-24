@@ -61,15 +61,15 @@ export default {
 
   // Recharge / Subscription Page
   purchase: {
-    title: '充值/订阅',
-    description: '通过内嵌页面完成充值/订阅',
+    title: '充值／订阅代充',
+    description: '通过内嵌页面完成充值／订阅代充',
     rechargeDescription: '通过内嵌页面完成充值',
     subscriptionDescription: '通过内嵌页面完成订阅',
     openInNewTab: '新窗口打开',
     notEnabledTitle: '该功能未开启',
-    notEnabledDesc: '管理员暂未开启充值/订阅入口，请联系管理员。',
-    notConfiguredTitle: '充值/订阅链接未配置',
-    notConfiguredDesc: '管理员已开启入口，但尚未配置充值/订阅链接，请联系管理员。'
+    notEnabledDesc: '管理员暂未开启充值／订阅代充入口，请联系管理员。',
+    notConfiguredTitle: '充值／订阅代充链接未配置',
+    notConfiguredDesc: '管理员已开启入口，但尚未配置充值／订阅代充链接，请联系管理员。'
   },
 
   // Custom Page (iframe embed)
@@ -77,6 +77,8 @@ export default {
     title: '自定义页面',
     openInNewTab: '新窗口打开',
     purchaseGuideTitle: '付款后去兑换',
+    usdtGuide: '如需使用 USDT 支付，请使用站内充值页。',
+    goToRecharge: '前往站内充值',
     purchaseGuideDescription: '这里只负责买码。支付完成后复制兑换码，打开「兑换」页粘贴，余额才会到账。',
     goToRedeem: '去兑换页',
     notFoundTitle: '页面不存在',
@@ -334,7 +336,7 @@ export default {
 
   // Payment System
   payment: {
-    title: '充值/订阅',
+    title: '充值／订阅代充',
     amountLabel: '充值金额',
     paymentAmount: '支付金额',
     creditedBalance: '到账余额',
@@ -434,7 +436,7 @@ export default {
     activeSubscription: '当前订阅',
     noActiveSubscription: '暂无有效订阅',
     tabTopUp: '充值',
-    tabSubscribe: '订阅',
+    tabSubscribe: '订阅代充',
     noPlans: '暂无可用订阅套餐',
     notAvailable: '充值功能暂未开放',
     billingUnavailable: '充值与订阅均暂未开放，请联系管理员。',

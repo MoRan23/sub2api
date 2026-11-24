@@ -21,7 +21,7 @@ export type OrderStatus =
 
 export type PaymentType = 'alipay' | 'wxpay' | 'alipay_direct' | 'wxpay_direct' | 'stripe' | 'easypay' | 'airwallex'
 
-export type OrderType = 'balance' | 'subscription'
+export type OrderType = 'balance' | 'subscription' | 'subscription_topup'
 
 // ==================== Configuration ====================
 
@@ -107,6 +107,11 @@ export interface PaymentOrder {
   refund_requested_by?: number
   refund_request_reason?: string
   plan_id?: number
+  topup_sku_id?: number
+  topup_quantity?: number
+  topup_snapshot?: { product_name: string; sku_name: string; unit_price: number; instructions: string }
+  topup_delivery_status?: string
+  topup_email_status?: string
   provider_instance_id?: string
 }
 
@@ -175,6 +180,8 @@ export interface CreateOrderRequest {
   payment_type: string
   order_type: string
   plan_id?: number
+  sku_id?: number
+  quantity?: number
   return_url?: string
   payment_source?: string
   openid?: string

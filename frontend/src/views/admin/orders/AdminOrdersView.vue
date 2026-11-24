@@ -30,11 +30,12 @@
               <Icon name="x" size="sm" />
               {{ t('payment.orders.cancel') }}
             </button>
-            <button v-if="row.status === 'FAILED'" @click="handleRetryOrder(row)" class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20">
+            <button v-if="row.status === 'FAILED' || (row.order_type === 'subscription_topup' && row.status === 'PAID')" @click="handleRetryOrder(row)" class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-blue-600 hover:bg-blue-50 dark:text-blue-400 dark:hover:bg-blue-900/20">
               <Icon name="refresh" size="sm" />
-              {{ t('payment.admin.retry') }}
+              {{ t(row.order_type === 'subscription_topup' ? 'subscriptionTopup.admin.retryDelivery' : 'payment.admin.retry') }}
             </button>
-            <template v-if="row.status === 'REFUND_REQUESTED'">
+            <span v-if="row.order_type === 'subscription_topup'" class="text-xs text-gray-500">{{ t('subscriptionTopup.refundNotice') }}</span>
+            <template v-else-if="row.status === 'REFUND_REQUESTED'">
               <span v-if="row.refund_amount" class="rounded-full bg-purple-100 px-1.5 py-0.5 text-xs font-medium text-purple-700 dark:bg-purple-900/30 dark:text-purple-300">{{ creditedAmountSymbol }}{{ row.refund_amount.toFixed(2) }}</span>
               <button @click="openRefundDialog(row)" class="inline-flex items-center gap-1 rounded-md px-2 py-1 text-xs font-medium text-purple-600 hover:bg-purple-50 dark:text-purple-400 dark:hover:bg-purple-900/20">
                 <Icon name="check" size="sm" />
@@ -60,7 +61,7 @@
     </div>
 
     <!-- Order Detail Dialog -->
-    <BaseDialog :show="showDetailDialog" :title="t('payment.admin.orderDetail')" width="wide" @close="showDetailDialog = false">
+    <BaseDialog :show="showDetailDialog" :title="t('payment.admin.orderDetail')" width="wide" @close="closeOrderDetail">
       <div v-if="selectedOrder" class="space-y-4">
         <div class="grid grid-cols-2 gap-4">
           <div><p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.orderId') }}</p><p class="font-mono text-sm font-medium text-gray-900 dark:text-white">#{{ selectedOrder.id }}</p></div>
@@ -69,7 +70,7 @@
           <div v-if="selectedOrder.order_type === 'balance'"><p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.ordinaryCredit') }}</p><p class="text-sm font-medium text-gray-900 dark:text-white">{{ creditedAmountSymbol }}{{ formatWalletAmount(selectedOrder.amount) }}</p></div>
           <div v-if="selectedOrder.order_type === 'balance'"><p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.giftCredit') }}</p><p class="text-sm font-medium text-emerald-600 dark:text-emerald-400">{{ creditedAmountSymbol }}{{ formatWalletAmount(paymentOrderGiftAmount(selectedOrder)) }}</p></div>
           <div v-if="selectedOrder.order_type === 'balance'"><p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.totalCredit') }}</p><p class="text-sm font-semibold text-gray-900 dark:text-white">{{ creditedAmountSymbol }}{{ formatWalletAmount(paymentOrderTotalCredit(selectedOrder)) }}</p></div>
-          <div v-else><p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.amount') }}</p><p class="text-sm font-medium text-gray-900 dark:text-white">{{ creditedAmountSymbol }}{{ formatWalletAmount(selectedOrder.amount) }}</p></div>
+          <div v-else><p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.amount') }}</p><p class="text-sm font-medium text-gray-900 dark:text-white">{{ selectedOrder.order_type === 'subscription_topup' ? '¥' : creditedAmountSymbol }}{{ formatWalletAmount(selectedOrder.amount) }}</p></div>
           <div><p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.payAmount') }}</p><p class="text-sm font-medium text-gray-900 dark:text-white">{{ paymentAmountSymbol(selectedOrder) }}{{ selectedOrder.pay_amount.toFixed(2) }}</p></div>
           <div><p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.orders.paymentMethod') }}</p><p class="text-sm text-gray-700 dark:text-gray-300">{{ t('payment.methods.' + selectedOrder.payment_type, selectedOrder.payment_type) }}</p></div>
           <div><p class="text-xs text-gray-500 dark:text-gray-400">{{ t('payment.admin.feeRate') }}</p><p class="text-sm text-gray-700 dark:text-gray-300">{{ selectedOrder.fee_rate }}%</p></div>
@@ -97,6 +98,15 @@
             </div>
           </div>
         </div>
+        <section v-if="selectedOrder.order_type === 'subscription_topup'" class="space-y-3 rounded-lg border border-gray-200 p-4 dark:border-dark-600" data-testid="topup-order-detail">
+          <p class="font-medium">{{ selectedOrder.topup_snapshot?.product_name }} · {{ selectedOrder.topup_snapshot?.sku_name }}</p>
+          <p class="text-sm">{{ t('subscriptionTopup.quantity') }}: {{ selectedOrder.topup_quantity }}</p>
+          <p class="text-sm">{{ t('subscriptionTopup.deliveryStatus') }}: {{ topupDeliveryLabel(selectedOrder.topup_delivery_status) }}</p>
+          <p class="text-sm">{{ t('subscriptionTopup.emailStatus') }}: {{ topupEmailLabel(selectedOrder.topup_email_status) }}</p>
+          <p class="whitespace-pre-wrap text-sm text-gray-500">{{ selectedOrder.topup_snapshot?.instructions }}</p>
+          <p class="text-sm text-gray-500">{{ t('subscriptionTopup.refundNotice') }}</p>
+          <button v-if="selectedOrder.topup_delivery_status === 'delivered'" class="btn btn-secondary btn-sm" :disabled="resendingCards || confirmedDetailOrderID !== selectedOrder.id" @click="resendCards(selectedOrder.id)">{{ t('subscriptionTopup.admin.resendEmail') }}</button>
+        </section>
         <!-- Audit Logs -->
         <div v-if="orderAuditLogs.length > 0" class="border-t border-gray-200 pt-4 dark:border-dark-600">
           <p class="mb-2 text-xs font-medium text-gray-500 dark:text-gray-400">{{ t('payment.admin.auditLogs') }}</p>
@@ -130,10 +140,11 @@
 </template>
 
 <script setup lang="ts">
-import { ref, reactive, computed, onMounted } from 'vue'
+import { ref, reactive, computed, onMounted, onBeforeUnmount } from 'vue'
 import { useI18n } from 'vue-i18n'
 import { useAppStore } from '@/stores/app'
 import { adminPaymentAPI, type RefundResult } from '@/api/admin/payment'
+import { adminSubscriptionTopupsAPI } from '@/api/admin/subscriptionTopups'
 import { getById as getAdminUserByID } from '@/api/admin/users'
 import { extractI18nErrorMessage } from '@/utils/apiError'
 import {
@@ -179,6 +190,9 @@ const refundWallet = ref<{ ordinary: number; gift: number } | null>(null)
 const refundWalletLoading = ref(false)
 const refundQueryingIds = ref(new Set<number>())
 const orderAuditLogs = ref<AuditLog[]>([])
+const resendingCards = ref(false)
+const confirmedDetailOrderID = ref<number | null>(null)
+let detailRequest: AbortController | undefined
 const creditedAmountSymbol = currencySymbol('USD')
 let refundWalletRequestID = 0
 
@@ -236,18 +250,35 @@ const orderTypeFilterOptions = computed(() => [
   { value: '', label: t('payment.admin.allOrderTypes') },
   { value: 'balance', label: t('payment.admin.balanceOrder') },
   { value: 'subscription', label: t('payment.admin.subscriptionOrder') },
+  { value: 'subscription_topup', label: t('subscriptionTopup.title') },
 ])
 
 async function showOrderDetail(order: PaymentOrder) {
+  detailRequest?.abort()
+  const request = new AbortController()
+  detailRequest = request
+  confirmedDetailOrderID.value = null
   selectedOrder.value = order
   orderAuditLogs.value = []
   showDetailDialog.value = true
   try {
-    const res = await adminPaymentAPI.getOrder(order.id)
+    const res = await adminPaymentAPI.getOrder(order.id, request.signal)
+    if (request.signal.aborted) return
     const data = res.data as unknown as Record<string, unknown>
-    if (data.order) selectedOrder.value = data.order as PaymentOrder
+    const detail = data.order as PaymentOrder | undefined
+    if (!detail || detail.id !== order.id) return
+    selectedOrder.value = detail
+    confirmedDetailOrderID.value = detail.id
     orderAuditLogs.value = ((data.auditLogs || data.audit_logs || []) as unknown) as AuditLog[]
   } catch (_err: unknown) { /* keep cached order data */ }
+}
+
+function closeOrderDetail() {
+  detailRequest?.abort()
+  confirmedDetailOrderID.value = null
+  showDetailDialog.value = false
+  selectedOrder.value = null
+  orderAuditLogs.value = []
 }
 
 async function handleCancelOrder(order: PaymentOrder) {
@@ -261,6 +292,7 @@ async function handleRetryOrder(order: PaymentOrder) {
 }
 
 function openRefundDialog(order: PaymentOrder) {
+  if (order.order_type === 'subscription_topup') return
   selectedOrder.value = order
   refundRequireForce.value = false
   refundWarning.value = ''
@@ -315,6 +347,7 @@ function showRefundSuccess(result: RefundResult) {
 
 async function handleRefund(data: { amount: number; reason: string; deduct_balance: boolean; force: boolean }) {
   if (!selectedOrder.value) return
+  if (selectedOrder.value.order_type === 'subscription_topup') return
   refundSubmitting.value = true
   try {
     const res = await adminPaymentAPI.refundOrder(selectedOrder.value.id, { amount: data.amount, reason: data.reason, deduct_balance: data.deduct_balance, force: data.force })
@@ -344,6 +377,7 @@ async function handleRefund(data: { amount: number; reason: string; deduct_balan
 }
 
 async function handleQueryRefund(order: PaymentOrder) {
+  if (order.order_type === 'subscription_topup') return
   refundQueryingIds.value = new Set(refundQueryingIds.value).add(order.id)
   try {
     const res = await adminPaymentAPI.queryRefund(order.id)
@@ -366,5 +400,31 @@ async function handleQueryRefund(order: PaymentOrder) {
 
 function formatDateTime(dateStr: string): string { return formatOrderDateTime(dateStr) }
 
+function topupDeliveryLabel(status?: string): string {
+  if (status === 'reserved' || status === 'waiting_stock' || status === 'delivered' || status === 'released') return t(`subscriptionTopup.${status}`)
+  return t('subscriptionTopup.admin.notRecorded')
+}
+
+function topupEmailLabel(status?: string): string {
+  if (status === 'sent') return t('subscriptionTopup.mailSent')
+  if (status === 'failed') return t('subscriptionTopup.mailFailed')
+  if (status === 'queued' || status === 'sending') return t('subscriptionTopup.mailPending')
+  if (status === 'not_queued') return t('subscriptionTopup.notSent')
+  return t('subscriptionTopup.admin.notRecorded')
+}
+
+async function resendCards(orderID: number) {
+  if (resendingCards.value || !showDetailDialog.value || confirmedDetailOrderID.value !== orderID || selectedOrder.value?.id !== orderID) return
+  resendingCards.value = true
+  try {
+    await adminSubscriptionTopupsAPI.resendCards(orderID)
+    appStore.showSuccess(t('subscriptionTopup.admin.resendQueued'))
+    if (showDetailDialog.value && confirmedDetailOrderID.value === orderID && selectedOrder.value?.id === orderID) await showOrderDetail(selectedOrder.value)
+  } catch (err: unknown) {
+    appStore.showError(extractI18nErrorMessage(err, t, 'payment.errors', t('common.error')))
+  } finally { resendingCards.value = false }
+}
+
 onMounted(() => loadOrders())
+onBeforeUnmount(() => detailRequest?.abort())
 </script>

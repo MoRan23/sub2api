@@ -3,8 +3,11 @@
     <template #cell-id="{ value }">
       <span class="font-mono text-sm">#{{ value }}</span>
     </template>
-    <template #cell-out_trade_no="{ value }">
+    <template #cell-out_trade_no="{ value, row }">
       <span class="text-sm text-gray-900 dark:text-white">{{ value }}</span>
+      <p v-if="row.order_type === 'subscription_topup'" class="mt-1 text-xs text-gray-500 dark:text-gray-400">
+        {{ t('subscriptionTopup.title') }} · {{ row.topup_snapshot?.product_name }} {{ row.topup_snapshot?.sku_name }} × {{ row.topup_quantity }}
+      </p>
     </template>
     <template v-if="showUser" #cell-user_email="{ value, row }">
       <div class="text-sm">
@@ -27,7 +30,7 @@
             {{ t('payment.orders.totalCredit') }}: {{ creditedAmountSymbol }}{{ formatWalletAmount(paymentOrderTotalCredit(row)) }}
           </div>
         </div>
-        <div v-else-if="row.amount !== row.pay_amount" class="text-xs text-gray-500">
+        <div v-else-if="row.order_type === 'subscription' && row.amount !== row.pay_amount" class="text-xs text-gray-500">
           {{ t('payment.orders.creditedAmount') }}: {{ creditedAmountSymbol }}{{ formatWalletAmount(row.amount) }}
         </div>
       </div>

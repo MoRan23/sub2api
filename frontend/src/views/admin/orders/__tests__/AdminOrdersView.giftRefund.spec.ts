@@ -11,6 +11,7 @@ const {
   getAdminUserByID,
   showSuccess,
   showError,
+  resendCards,
 } = vi.hoisted(() => ({
   getOrders: vi.fn(),
   getOrder: vi.fn(),
@@ -21,6 +22,7 @@ const {
   getAdminUserByID: vi.fn(),
   showSuccess: vi.fn(),
   showError: vi.fn(),
+  resendCards: vi.fn(),
 }))
 
 vi.mock('@/api/admin/payment', () => ({
@@ -46,6 +48,8 @@ vi.mock('@/api/admin/users', () => ({
   getById: getAdminUserByID,
   default: { getById: getAdminUserByID },
 }))
+
+vi.mock('@/api/admin/subscriptionTopups', () => ({ adminSubscriptionTopupsAPI: { resendCards } }))
 
 vi.mock('@/stores/app', () => ({
   useAppStore: () => ({ showSuccess, showError }),
@@ -180,5 +184,109 @@ describe('AdminOrdersView gift refunds', () => {
     expect(message).toContain('$50.00')
     expect(message).toContain('$10.00')
     expect(message).toContain('$60.00')
+  })
+
+  it('shows topup delivery and email status without a refund action, and resends explicitly', async () => {
+    const topupOrder = {
+      ...balanceOrder,
+      order_type: 'subscription_topup', currency: 'CNY', topup_quantity: 2,
+      topup_snapshot: { product_name: 'Chat subscription', sku_name: 'Monthly', instructions: 'Redeem on provider site', unit_price: 50 },
+      topup_delivery_status: 'delivered', topup_email_status: 'failed',
+    }
+    getOrders.mockResolvedValue({ data: { items: [topupOrder], total: 1 } })
+    getOrder.mockResolvedValue({ data: { order: topupOrder, audit_logs: [] } })
+    resendCards.mockResolvedValue({ data: {} })
+    const wrapper = mount(AdminOrdersView, {
+      global: { stubs: {
+        AppLayout: { template: '<div><slot /></div>' }, OrderTable: OrderTableStub,
+        AdminRefundDialog: AdminRefundDialogStub,
+        BaseDialog: { props: ['show'], template: '<div v-if="show"><slot /></div>' },
+        Icon: true, OrderStatusBadge: true, Pagination: true, Select: true,
+      } },
+    })
+    await flushPromises()
+    expect(wrapper.findAll('button').some(button => button.text() === 'payment.admin.refund')).toBe(false)
+    expect(wrapper.text()).toContain('subscriptionTopup.refundNotice')
+    expect(resendCards).not.toHaveBeenCalled()
+    await wrapper.findAll('button').find(button => button.text() === 'common.view')!.trigger('click')
+    await flushPromises()
+    const detail = wrapper.get('[data-testid="topup-order-detail"]')
+    expect(detail.text()).toContain('Chat subscription · Monthly')
+    expect(detail.text()).toContain('subscriptionTopup.mailFailed')
+    expect(detail.text()).toContain('subscriptionTopup.delivered')
+    await detail.get('button').trigger('click')
+    await flushPromises()
+    expect(resendCards).toHaveBeenCalledWith(12)
+    expect(refundOrder).not.toHaveBeenCalled()
+    expect(getAdminUserByID).not.toHaveBeenCalled()
+    wrapper.unmount()
+  })
+
+  it('ignores old and closed detail responses and binds resend to the confirmed selection', async () => {
+    const makeTopup = (id: number) => ({
+      ...balanceOrder, id, order_type: 'subscription_topup', topup_quantity: 1,
+      topup_snapshot: { product_name: `Product ${id}`, sku_name: 'Monthly', instructions: '', unit_price: 100 },
+      topup_delivery_status: 'delivered', topup_email_status: 'failed',
+    })
+    const first = makeTopup(12)
+    const second = makeTopup(13)
+    type DetailResponse = { data: { order: ReturnType<typeof makeTopup>; audit_logs: [] } }
+    let resolveFirst!: (response: DetailResponse) => void
+    let resolveSecond!: (response: DetailResponse) => void
+    getOrders.mockResolvedValue({ data: { items: [first, second], total: 2 } })
+    getOrder.mockReturnValueOnce(new Promise(resolve => { resolveFirst = resolve }))
+      .mockReturnValueOnce(new Promise(resolve => { resolveSecond = resolve }))
+    resendCards.mockResolvedValue({ data: {} })
+    const wrapper = mount(AdminOrdersView, { global: { stubs: {
+      AppLayout: { template: '<div><slot /></div>' }, OrderTable: OrderTableStub,
+      AdminRefundDialog: true,
+      BaseDialog: { props: ['show'], emits: ['close'], template: '<div v-if="show"><button data-test="close-detail" @click="$emit(\'close\')">Close</button><slot /></div>' },
+      Icon: true, OrderStatusBadge: true, Pagination: true, Select: true,
+    } } })
+    await flushPromises()
+    const viewButtons = wrapper.findAll('button').filter(button => button.text() === 'common.view')
+    await viewButtons[0]!.trigger('click')
+    expect(wrapper.get('[data-testid="topup-order-detail"] button').attributes('disabled')).toBeDefined()
+    await viewButtons[1]!.trigger('click')
+    expect((getOrder.mock.calls[0]?.[1] as AbortSignal).aborted).toBe(true)
+    resolveSecond({ data: { order: second, audit_logs: [] } })
+    await flushPromises()
+    resolveFirst({ data: { order: first, audit_logs: [] } })
+    await flushPromises()
+    expect(wrapper.get('[data-testid="topup-order-detail"]').text()).toContain('Product 13')
+    getOrder.mockResolvedValueOnce({ data: { order: second, audit_logs: [] } })
+    await wrapper.get('[data-testid="topup-order-detail"] button').trigger('click')
+    await flushPromises()
+    expect(resendCards).toHaveBeenCalledWith(13)
+
+    let resolveClosed!: (response: DetailResponse) => void
+    getOrder.mockReturnValueOnce(new Promise(resolve => { resolveClosed = resolve }))
+    await viewButtons[0]!.trigger('click')
+    await wrapper.get('[data-test="close-detail"]').trigger('click')
+    expect((getOrder.mock.calls.at(-1)?.[1] as AbortSignal).aborted).toBe(true)
+    resolveClosed({ data: { order: first, audit_logs: [] } })
+    await flushPromises()
+    expect(wrapper.find('[data-testid="topup-order-detail"]').exists()).toBe(false)
+    expect(resendCards).toHaveBeenCalledTimes(1)
+    wrapper.unmount()
+  })
+
+  it('shows released reservations as closed and does not offer email resend', async () => {
+    const closedOrder = { ...balanceOrder, order_type: 'subscription_topup', status: 'CANCELLED', topup_delivery_status: 'released', topup_email_status: 'not_queued' }
+    getOrders.mockResolvedValue({ data: { items: [closedOrder], total: 1 } })
+    getOrder.mockResolvedValue({ data: { order: closedOrder, audit_logs: [] } })
+    const wrapper = mount(AdminOrdersView, { global: { stubs: {
+      AppLayout: { template: '<div><slot /></div>' }, OrderTable: OrderTableStub,
+      AdminRefundDialog: true, BaseDialog: { props: ['show'], template: '<div v-if="show"><slot /></div>' },
+      Icon: true, OrderStatusBadge: true, Pagination: true, Select: true,
+    } } })
+    await flushPromises()
+    await wrapper.findAll('button').find(button => button.text() === 'common.view')!.trigger('click')
+    await flushPromises()
+    const detail = wrapper.get('[data-testid="topup-order-detail"]')
+    expect(detail.text()).toContain('subscriptionTopup.released')
+    expect(detail.text()).toContain('subscriptionTopup.notSent')
+    expect(detail.find('button').exists()).toBe(false)
+    wrapper.unmount()
   })
 })

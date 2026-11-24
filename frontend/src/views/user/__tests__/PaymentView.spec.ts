@@ -2,9 +2,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, shallowMount } from '@vue/test-utils'
 import PaymentView from '../PaymentView.vue'
 import { PAYMENT_RECOVERY_STORAGE_KEY } from '@/components/payment/paymentFlow'
-import { formatPaymentAmount } from '@/components/payment/currency'
 import AmountInput from '@/components/payment/AmountInput.vue'
-import SubscriptionPlanCard from '@/components/payment/SubscriptionPlanCard.vue'
+import SubscriptionTopupStorefront from '@/components/payment/SubscriptionTopupStorefront.vue'
 import en from '@/i18n/locales/en'
 import zh from '@/i18n/locales/zh'
 import type { CheckoutInfoResponse, MethodLimit, SubscriptionPlan } from '@/types/payment'
@@ -17,6 +16,7 @@ const routeState = vi.hoisted(() => ({
 const routerReplace = vi.hoisted(() => vi.fn())
 const routerPush = vi.hoisted(() => vi.fn())
 const routerResolve = vi.hoisted(() => vi.fn(() => ({ href: '/payment/stripe?mock=1' })))
+const routeUpdate = vi.hoisted(() => ({ query: (_value: Record<string, unknown>) => {} }))
 const createOrder = vi.hoisted(() => vi.fn())
 const refreshUser = vi.hoisted(() => vi.fn())
 const fetchActiveSubscriptions = vi.hoisted(() => vi.fn().mockResolvedValue(undefined))
@@ -34,9 +34,12 @@ const appStoreState = vi.hoisted(() => ({
 
 vi.mock('vue-router', async () => {
   const actual = await vi.importActual<typeof import('vue-router')>('vue-router')
+  const { reactive } = await import('vue')
+  const route = reactive(routeState)
+  routeUpdate.query = value => { route.query = value }
   return {
     ...actual,
-    useRoute: () => routeState,
+    useRoute: () => route,
     useRouter: () => ({
       replace: routerReplace,
       push: routerPush,
@@ -259,46 +262,6 @@ async function mountSubscriptionConfirm(options: Parameters<typeof checkoutInfoW
   return wrapper
 }
 
-async function mountSubscriptionPlanList(planCount: number) {
-  vi.useRealTimers()
-  routeState.path = '/purchase'
-  routeState.query = { tab: 'subscription' }
-  routerReplace.mockReset().mockResolvedValue(undefined)
-  routerPush.mockReset().mockResolvedValue(undefined)
-  routerResolve.mockClear()
-  createOrder.mockReset()
-  refreshUser.mockReset()
-  fetchActiveSubscriptions.mockReset().mockResolvedValue(undefined)
-  showError.mockReset()
-  showInfo.mockReset()
-  showWarning.mockReset()
-  const basePlan = checkoutInfoWithPlansFixture().data.plans[0]
-  const plans = Array.from({ length: planCount }, (_, index) => ({
-    ...basePlan,
-    id: index + 1,
-    name: `Plan ${index + 1}`,
-  }))
-  getCheckoutInfo.mockReset().mockResolvedValue(checkoutInfoFixture({ plans }))
-  bridgeInvoke.mockReset()
-  window.localStorage.clear()
-  ;(window as Window & { WeixinJSBridge?: { invoke: typeof bridgeInvoke } }).WeixinJSBridge = undefined
-
-  const wrapper = shallowMount(PaymentView, {
-    global: {
-      stubs: {
-        AppLayout: {
-          template: '<div><slot /></div>',
-        },
-        Teleport: true,
-        Transition: false,
-      },
-    },
-  })
-  await flushPromises()
-  await flushPromises()
-  return wrapper
-}
-
 describe('PaymentView help text', () => {
   beforeEach(() => {
     vi.useRealTimers()
@@ -359,21 +322,6 @@ describe('PaymentView help text', () => {
     const wrapper = await mountHelp('', 'https://example.com/help.png')
     expect(wrapper.find('.markdown-body').exists()).toBe(false)
     expect(wrapper.get('img').attributes('src')).toBe('https://example.com/help.png')
-  })
-})
-
-describe('PaymentView subscription plan grid', () => {
-  it.each([3, 4, 6])('keeps %i plans on the existing mobile/tablet/desktop grid', async (planCount) => {
-    const wrapper = await mountSubscriptionPlanList(planCount)
-    const cards = wrapper.findAllComponents(SubscriptionPlanCard)
-
-    expect(cards).toHaveLength(planCount)
-    expect([...(cards[0].element.parentElement?.classList ?? [])]).toEqual(expect.arrayContaining([
-      'grid',
-      'grid-cols-1',
-      'sm:grid-cols-2',
-      'lg:grid-cols-3',
-    ]))
   })
 })
 
@@ -464,96 +412,6 @@ describe('PaymentView recharge rate preview', () => {
     })
     expect(en.payment.rechargeRatePreview).toBe('Current rate: 1 {currency} = {usd} USD')
     expect(zh.payment.rechargeRatePreview).toBe('当前倍率：1 {currency} = {usd} USD')
-  })
-})
-
-describe('PaymentView subscription confirmation amounts', () => {
-  it('shows converted CNY pay amount using the subscription rate, not the balance multiplier', async () => {
-    const wrapper = await mountSubscriptionConfirm({
-      checkout: {
-        balance_recharge_multiplier: 0.14,
-        subscription_usd_to_cny_rate: 7.15,
-      },
-      method: {
-        currency: 'CNY',
-      },
-      plan: {
-        price: 9.99,
-        original_price: 12.99,
-      },
-    })
-
-    const text = wrapper.text()
-    const convertedPrice = formatPaymentAmount(71.43, 'CNY')
-    const convertedOriginalPrice = formatPaymentAmount(92.88, 'CNY')
-
-    expect(text).toContain(convertedPrice)
-    expect(text).toContain(convertedOriginalPrice)
-    expect(text).not.toContain(formatPaymentAmount(9.99, 'CNY'))
-    // 换算必须使用订阅汇率（×7.15），而不是余额倍率（÷0.14 = 71.36）
-    expect(text).not.toContain(formatPaymentAmount(71.36, 'CNY'))
-    expect(wrapper.findAll('button').some(button => button.text().includes(convertedPrice))).toBe(true)
-  })
-
-  it('keeps plan price when the subscription rate is not configured or payment currency is not CNY', async () => {
-    // opt-in 回归锁：即使余额倍率已配置，未配置订阅汇率时 CNY 订阅仍按 price 直付
-    const cnyWrapper = await mountSubscriptionConfirm({
-      checkout: {
-        balance_recharge_multiplier: 0.14,
-        subscription_usd_to_cny_rate: 0,
-      },
-      method: {
-        currency: 'CNY',
-      },
-      plan: {
-        price: 7.99,
-      },
-    })
-
-    expect(cnyWrapper.text()).toContain(formatPaymentAmount(7.99, 'CNY'))
-    expect(cnyWrapper.text()).not.toContain(formatPaymentAmount(57.07, 'CNY'))
-    expect(cnyWrapper.text()).not.toContain(formatPaymentAmount(57.13, 'CNY'))
-
-    const usdWrapper = await mountSubscriptionConfirm({
-      checkout: {
-        subscription_usd_to_cny_rate: 7.15,
-      },
-      method: {
-        currency: 'USD',
-      },
-      plan: {
-        price: 7.99,
-        original_price: 9.99,
-      },
-    })
-
-    expect(usdWrapper.text()).toContain(formatPaymentAmount(7.99, 'USD'))
-    expect(usdWrapper.text()).toContain(formatPaymentAmount(9.99, 'USD'))
-  })
-
-  it('adds fee rate after CNY rate conversion to match backend pay_amount', async () => {
-    const wrapper = await mountSubscriptionConfirm({
-      checkout: {
-        subscription_usd_to_cny_rate: 7.15,
-        recharge_fee_rate: 2.5,
-      },
-      method: {
-        currency: 'CNY',
-      },
-      plan: {
-        price: 9.99,
-      },
-    })
-
-    const text = wrapper.text()
-    const convertedPrice = formatPaymentAmount(71.43, 'CNY')
-    const fee = formatPaymentAmount(1.79, 'CNY')
-    const total = formatPaymentAmount(73.22, 'CNY')
-
-    expect(text).toContain(convertedPrice)
-    expect(text).toContain(fee)
-    expect(text).toContain(total)
-    expect(wrapper.findAll('button').some(button => button.text().includes(total))).toBe(true)
   })
 })
 
@@ -876,70 +734,35 @@ describe('PaymentView WeChat JSAPI flow', () => {
   })
 })
 
-describe('PaymentView subscription feature flag', () => {
-  afterEach(() => {
-    appStoreState.setPublicSettings(undefined)
-  })
+describe('PaymentView subscription top-up', () => {
+  afterEach(() => appStoreState.setPublicSettings(undefined))
 
-  function tabLabels(wrapper: Awaited<ReturnType<typeof mountSubscriptionPlanList>>) {
-    return wrapper
-      .findAll('button')
-      .map((button) => button.text())
-      .filter((text) => text === 'payment.tabTopUp' || text === 'payment.tabSubscribe')
-  }
-
-  it('keeps the top-up / subscribe switcher when subscription_enabled is absent (opt-out default)', async () => {
-    const wrapper = await mountSubscriptionPlanList(2)
-
-    expect(tabLabels(wrapper)).toEqual(['payment.tabTopUp', 'payment.tabSubscribe'])
-    expect(wrapper.findAllComponents(SubscriptionPlanCard)).toHaveLength(2)
-  })
-
-  it('drops the subscribe tab, hides the switcher and ignores ?tab=subscription when subscriptions are disabled', async () => {
+  it('keeps the top-up storefront available independently of legacy subscription rights', async () => {
     appStoreState.setPublicSettings({ subscription_enabled: false })
-    const wrapper = await mountSubscriptionPlanList(2)
-
-    expect(tabLabels(wrapper)).toEqual([])
-    expect(wrapper.findAllComponents(SubscriptionPlanCard)).toHaveLength(0)
-    expect(wrapper.text()).toContain('payment.rechargeAccount')
-  })
-
-  it('shows an unavailable notice instead of a doomed top-up form when balance recharge is disabled too', async () => {
-    appStoreState.setPublicSettings({ subscription_enabled: false })
-    const wrapper = await mountSubscriptionConfirm({ checkout: { balance_disabled: true } })
-
-    expect(tabLabels(wrapper)).toEqual([])
-    expect(wrapper.findAllComponents(SubscriptionPlanCard)).toHaveLength(0)
-    expect(wrapper.text()).not.toContain('payment.confirmSubscription')
-    expect(wrapper.text()).not.toContain('payment.rechargeAccount')
-    expect(wrapper.text()).toContain('payment.billingUnavailable')
+    const wrapper = await mountSubscriptionConfirm()
+    expect(wrapper.text()).toContain('subscriptionTopup.title')
+    expect(wrapper.findComponent(SubscriptionTopupStorefront).exists()).toBe(true)
+    expect(wrapper.find('subscription-plan-card-stub').exists()).toBe(false)
     wrapper.unmount()
   })
 
-  it('falls back from the subscribe tab to top-up when the flag flips off after mount', async () => {
-    const wrapper = await mountSubscriptionPlanList(2)
-    expect(wrapper.findAllComponents(SubscriptionPlanCard)).toHaveLength(2)
-
-    appStoreState.setPublicSettings({ subscription_enabled: false })
+  it('creates a top-up SKU order without subscription currency conversion', async () => {
+    const wrapper = await mountSubscriptionConfirm({ checkout: { subscription_usd_to_cny_rate: 7.15 } })
+    createOrder.mockResolvedValue({ ...jsapiOrderFixture('topup-resume'), result_type: 'qr_ready', jsapi: undefined, qr_code: 'weixin://pay/topup' })
+    wrapper.getComponent(SubscriptionTopupStorefront).vm.$emit('purchase', { skuId: 12, quantity: 3, amount: 39.9, paymentType: 'wxpay' })
     await flushPromises()
-
-    expect(tabLabels(wrapper)).toEqual([])
-    expect(wrapper.findAllComponents(SubscriptionPlanCard)).toHaveLength(0)
-    expect(wrapper.text()).toContain('payment.rechargeAccount')
+    expect(createOrder).toHaveBeenCalledWith(expect.objectContaining({ order_type: 'subscription_topup', sku_id: 12, quantity: 3, amount: 39.9 }))
+    expect(createOrder.mock.calls[0][0]).not.toHaveProperty('plan_id')
     wrapper.unmount()
   })
 
-  it('enters the subscribe tab when a subscription-only site turns subscriptions back on', async () => {
-    appStoreState.setPublicSettings({ subscription_enabled: false })
-    const wrapper = await mountSubscriptionConfirm({ checkout: { balance_disabled: true } })
-    expect(wrapper.text()).toContain('payment.billingUnavailable')
-
-    appStoreState.setPublicSettings({ subscription_enabled: true })
+  it('switches back to recharge when the query changes on the mounted purchase page', async () => {
+    const wrapper = await mountSubscriptionConfirm()
+    expect(wrapper.findComponent(SubscriptionTopupStorefront).exists()).toBe(true)
+    routeUpdate.query({ tab: 'recharge' })
     await flushPromises()
-
-    expect(wrapper.text()).not.toContain('payment.billingUnavailable')
-    expect(wrapper.text()).not.toContain('payment.rechargeAccount')
-    expect(wrapper.findAllComponents(SubscriptionPlanCard).length).toBeGreaterThan(0)
+    expect(wrapper.findComponent(SubscriptionTopupStorefront).exists()).toBe(false)
+    expect(wrapper.getComponent(AmountInput).exists()).toBe(true)
     wrapper.unmount()
   })
 })

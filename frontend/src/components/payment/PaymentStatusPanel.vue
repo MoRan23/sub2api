@@ -34,7 +34,7 @@
                   <span class="font-medium text-gray-900 dark:text-white">{{ creditedAmountSymbol }}{{ formatWalletAmount(paymentOrderTotalCredit(paidOrder)) }}</span>
                 </div>
               </template>
-              <div v-else class="flex justify-between">
+              <div v-else-if="paidOrder.order_type === 'subscription'" class="flex justify-between">
                 <span class="text-gray-500 dark:text-gray-400">{{ t('payment.orders.amount') }}</span>
                 <span class="font-medium text-gray-900 dark:text-white">{{ creditedAmountSymbol }}{{ paidOrder.amount.toFixed(2) }}</span>
               </div>
