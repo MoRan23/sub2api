@@ -2,11 +2,11 @@
 
 ## 中文
 
-“充值／订阅代充”页面的代充商品由管理员在“订单管理 → 订阅代充”配置。原有站内订阅、已分配权益和历史订单继续保留；新代充订单交付的是卡密，不会增加站内余额或分组订阅额度。
+“充值／订阅代充”页面销售外部服务的代充卡密，由管理员在“订单管理 → 订阅代充（卡密）”配置商品、规格和卡密池。商品无需绑定 Sub2API 分组或设置站内订阅有效期。原套餐继续在“站内订阅套餐”中管理，已分配权益和历史订单保留；代充订单只交付外部服务卡密。
 
 ### 配置与购买
 
-1. 创建商品，填写名称、说明和使用方法；添加规格，为各规格设置人民币价格、排序及启用状态。新商品和规格默认停用。
+1. 创建商品，填写名称、说明和使用方法；添加规格，为各规格设置人民币价格及启用状态。新商品和规格默认停用，无需填写原价或排序。
 2. 给每个规格独立导入卡密，每行一条，每次最多 1,000 行，单条最多 512 字节。忽略空行、去掉首尾空白，保留大小写和内部空格；重复卡密会使整个批次失败，包括已售卡密的重复导入。
 3. 确认库存后启用商品和规格。用户每单购买一个规格，数量 1–100，使用兼容 CNY 的现有在线支付方式。代充不使用余额购买、充值赠送、邀请返利或原站内订阅的美元换算。
 4. 用户付款成功后，在“我的订单”或登录后的支付结果页查看、复制卡密；同一批卡密会通过邮件发送。CDK 外部购买页新增 USDT 指引，跳转到站内充值标签。
@@ -35,11 +35,11 @@
 
 ## English
 
-The **Recharge / Subscription top-ups** storefront sells CDKs configured under **Order management → Subscription top-ups**. Existing site subscriptions, assigned entitlements and historical orders remain available. A new top-up order delivers codes; it does not credit the site's wallet or group subscription quota.
+The **Recharge / Subscription top-ups** storefront sells codes for external services. Configure products, specifications and card pools under **Order management → Subscription top-ups (codes)**, without linking a Sub2API group or specifying a site subscription duration. Existing plans remain under **Site subscription plans**; assigned entitlements and historical orders are preserved. Top-up orders deliver external-service codes.
 
 ### Setup and purchase
 
-1. Create a product with a description and instructions, then add specifications with CNY prices, sorting and enablement. New products and specifications start disabled.
+1. Create a product with a description and instructions, then add specifications with CNY prices and enablement. New products and specifications start disabled. Neither original prices nor sorting inputs are required.
 2. Import a separate card pool for each specification: one code per line, up to 1,000 lines per import and 512 bytes per code. Blank lines and outer whitespace are removed; case and internal spaces remain unchanged. A duplicate, including a previously sold code, rejects the whole batch.
 3. Enable the product and specification after checking stock. Each order purchases one specification with a quantity of 1–100 through an existing CNY-compatible online payment method. Wallet purchases, recharge gifts, referral rebates and the previous subscription USD conversion do not apply.
 4. After payment, the authenticated owner can view and copy codes in My Orders or the payment result page. The same delivered codes are sent by email. The external CDK page also links USDT users to the internal recharge tab.

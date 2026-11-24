@@ -48,7 +48,6 @@
         <label class="block text-sm">{{ t('subscriptionTopup.admin.productName') }}<input v-model="productForm.name" class="input mt-1" required maxlength="100" /></label>
         <label class="block text-sm">{{ t('subscriptionTopup.admin.description') }}<textarea v-model="productForm.description" class="input mt-1" rows="3" maxlength="4000" /></label>
         <label class="block text-sm">{{ t('subscriptionTopup.instructions') }}<textarea v-model="productForm.instructions" class="input mt-1" rows="5" maxlength="10000" /></label>
-        <label class="block text-sm">{{ t('subscriptionTopup.admin.sortOrder') }}<input v-model.number="productForm.sort_order" type="number" step="1" class="input mt-1" required /></label>
         <label class="flex items-center gap-2 text-sm"><input v-model="productForm.enabled" type="checkbox" />{{ t('subscriptionTopup.admin.enabled') }}</label>
         <div class="flex justify-end gap-2"><button type="button" class="btn btn-secondary" @click="productDialog = false">{{ t('common.cancel') }}</button><button class="btn btn-primary" :disabled="busy">{{ t('common.save') }}</button></div>
       </form>
@@ -58,7 +57,6 @@
       <form class="space-y-4" @submit.prevent="saveSKU">
         <label class="block text-sm">{{ t('subscriptionTopup.admin.skuName') }}<input v-model="skuForm.name" class="input mt-1" required maxlength="100" /></label>
         <label class="block text-sm">{{ t('subscriptionTopup.price') }}<input v-model.number="skuForm.price" class="input mt-1" type="number" min="0.01" max="1000000000000" step="0.01" required /></label>
-        <label class="block text-sm">{{ t('subscriptionTopup.admin.sortOrder') }}<input v-model.number="skuForm.sort_order" type="number" step="1" class="input mt-1" required /></label>
         <label class="flex items-center gap-2 text-sm"><input v-model="skuForm.enabled" type="checkbox" />{{ t('subscriptionTopup.admin.enabled') }}</label>
         <div class="flex justify-end gap-2"><button type="button" class="btn btn-secondary" @click="skuDialog = false">{{ t('common.cancel') }}</button><button class="btn btn-primary" :disabled="busy">{{ t('common.save') }}</button></div>
       </form>
@@ -127,11 +125,11 @@ const loading = ref(false)
 const busy = ref(false)
 const productDialog = ref(false)
 const productID = ref<number | null>(null)
-const productForm = reactive<TopupProductInput>({ name: '', description: '', instructions: '', enabled: false, sort_order: 0 })
+const productForm = reactive<TopupProductInput>({ name: '', description: '', instructions: '', enabled: false })
 const skuDialog = ref(false)
 const skuID = ref<number | null>(null)
 const skuProductID = ref(0)
-const skuForm = reactive<TopupSKUInput>({ name: '', price: 0, enabled: false, sort_order: 0 })
+const skuForm = reactive<TopupSKUInput>({ name: '', price: 0, enabled: false })
 const archiveTarget = ref<{ kind: 'product' | 'sku'; id: number } | null>(null)
 const pool = ref<SubscriptionTopupSKU | null>(null)
 const cards = ref<TopupCardPage>({ items: [], total: 0, page: 1, page_size: 20, counts: { available: 0, reserved: 0, issued: 0, disabled: 0 } })
@@ -167,7 +165,7 @@ async function loadProducts() {
 
 function editProduct(product?: SubscriptionTopupProduct) {
   productID.value = product?.id ?? null
-  Object.assign(productForm, { name: product?.name ?? '', description: product?.description ?? '', instructions: product?.instructions ?? '', enabled: product?.enabled ?? false, sort_order: product?.sort_order ?? 0 })
+  Object.assign(productForm, { name: product?.name ?? '', description: product?.description ?? '', instructions: product?.instructions ?? '', enabled: product?.enabled ?? false })
   productDialog.value = true
 }
 
@@ -185,7 +183,7 @@ async function saveProduct() {
 function editSKU(product: number, sku?: SubscriptionTopupSKU) {
   skuID.value = sku?.id ?? null
   skuProductID.value = product
-  Object.assign(skuForm, { name: sku?.name ?? '', price: sku?.price ?? 0, enabled: sku?.enabled ?? false, sort_order: sku?.sort_order ?? 0 })
+  Object.assign(skuForm, { name: sku?.name ?? '', price: sku?.price ?? 0, enabled: sku?.enabled ?? false })
   skuDialog.value = true
 }
 

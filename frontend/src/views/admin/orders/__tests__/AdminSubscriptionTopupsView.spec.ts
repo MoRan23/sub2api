@@ -139,13 +139,36 @@ describe('AdminSubscriptionTopupsView', () => {
     await wrapper.get('[role="dialog"] input').setValue('New product')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
-    expect(api.createProduct).toHaveBeenCalledWith({ name: 'New product', description: '', instructions: '', enabled: false, sort_order: 0 })
+    expect(api.createProduct).toHaveBeenCalledWith({ name: 'New product', description: '', instructions: '', enabled: false })
     await clickLabel(wrapper, 'subscriptionTopup.admin.createSKU')
     await wrapper.get('[role="dialog"] input').setValue('Annual')
     await wrapper.get('[role="dialog"] input[type="number"]').setValue('199.50')
     await wrapper.get('form').trigger('submit')
     await flushPromises()
-    expect(api.createSKU).toHaveBeenCalledWith(1, { name: 'Annual', price: 199.5, enabled: false, sort_order: 0 })
+    expect(api.createSKU).toHaveBeenCalledWith(1, { name: 'Annual', price: 199.5, enabled: false })
+    wrapper.unmount()
+  })
+
+  it('edits external-service products without subscription fields or resetting stored sorting', async () => {
+    api.listProducts.mockResolvedValue({ data: [{ ...product, sort_order: 42, skus: [{ ...product.skus[0], sort_order: 17 }] }] })
+    const wrapper = mountView()
+    await flushPromises()
+    await clickLabel(wrapper, 'common.edit')
+    expect(wrapper.get('[role="dialog"]').findAll('input')).toHaveLength(2)
+    expect(wrapper.get('[role="dialog"]').find('select').exists()).toBe(false)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(api.updateProduct).toHaveBeenCalledWith(1, {
+      name: product.name, description: product.description, instructions: product.instructions, enabled: true,
+    })
+
+    const editSKU = wrapper.findAll('button').filter(button => button.text() === 'common.edit')[1]
+    await editSKU.trigger('click')
+    expect(wrapper.get('[role="dialog"]').findAll('input[type="number"]')).toHaveLength(1)
+    expect(wrapper.get('[role="dialog"]').find('select').exists()).toBe(false)
+    await wrapper.get('form').trigger('submit')
+    await flushPromises()
+    expect(api.updateSKU).toHaveBeenCalledWith(2, { name: product.skus[0].name, price: 19.9, enabled: true })
     wrapper.unmount()
   })
 })

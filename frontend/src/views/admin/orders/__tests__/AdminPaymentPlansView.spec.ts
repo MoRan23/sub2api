@@ -1,4 +1,4 @@
-import { flushPromises, mount } from '@vue/test-utils'
+import { flushPromises, mount, RouterLinkStub } from '@vue/test-utils'
 import { createPinia } from 'pinia'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
@@ -93,6 +93,7 @@ describe('AdminPaymentPlansView', () => {
           GroupBadge: true,
           Icon: true,
           PlanEditDialog: true,
+          RouterLink: RouterLinkStub,
         },
       },
     })
@@ -102,5 +103,7 @@ describe('AdminPaymentPlansView', () => {
     expect(wrapper.text()).toContain('¥499.00CNY')
     expect(wrapper.text()).toContain('¥599.00')
     expect(wrapper.text()).toContain('$10.00')
+    expect(wrapper.getComponent(RouterLinkStub).props('to')).toBe('/admin/orders/subscription-topups')
+    expect(wrapper.getComponent(RouterLinkStub).text()).toBe('subscriptionTopup.admin.title')
   })
 })

@@ -54,12 +54,12 @@ export interface TopupProductInput {
   description: string
   instructions: string
   enabled: boolean
-  sort_order: number
+  sort_order?: number
 }
 
 export interface TopupSKUInput {
   name: string
   price: number
   enabled: boolean
-  sort_order: number
+  sort_order?: number
 }

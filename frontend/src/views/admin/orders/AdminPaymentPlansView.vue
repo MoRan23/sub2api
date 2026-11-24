@@ -1,6 +1,10 @@
 <template>
   <AppLayout>
     <div class="space-y-4">
+      <div class="card flex flex-wrap items-center justify-between gap-3 p-4">
+        <p class="text-sm text-gray-600 dark:text-gray-400">{{ t('subscriptionTopup.admin.entryHint') }}</p>
+        <RouterLink to="/admin/orders/subscription-topups" class="btn btn-secondary">{{ t('subscriptionTopup.admin.title') }}</RouterLink>
+      </div>
       <!-- Actions -->
       <div class="flex items-center justify-end gap-2">
         <button @click="loadPlans" :disabled="plansLoading" class="btn btn-secondary" :title="t('common.refresh')">
@@ -77,6 +81,7 @@
 <script setup lang="ts">
 import { ref, computed, onMounted } from 'vue'
 import { useI18n } from 'vue-i18n'
+import { RouterLink } from 'vue-router'
 import { useAppStore } from '@/stores/app'
 import { adminPaymentAPI } from '@/api/admin/payment'
 import type { AdminPaymentConfig } from '@/api/admin/payment'

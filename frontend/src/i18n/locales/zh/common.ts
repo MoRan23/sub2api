@@ -214,7 +214,7 @@ export default {
     orderManagement: '订单管理',
     paymentDashboard: '支付概览',
     paymentConfig: '支付配置',
-    paymentPlans: '订阅套餐',
+    paymentPlans: '站内订阅套餐',
     channelManagement: '渠道管理',
     channelPricing: '渠道定价',
     channelMonitor: '渠道监控',

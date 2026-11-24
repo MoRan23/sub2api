@@ -74,3 +74,13 @@ git diff --check
 - Ent 重新生成、后端编译及 diff 检查通过，依赖文件未变。前端未修改，本次未重复执行前端检查；远端 CI 未核验。
 
 New cards are stored in plaintext and no longer require an encryption key. Legacy encrypted cards remain readable with their original key. Focused unit tests, isolated PostgreSQL race/integration tests, migration replay and backend compilation passed. Normal plaintext reads add no decryption or extra database work. No production changes or deployment were performed.
+
+## 外部服务售卖入口 / External-service storefront navigation
+
+基线：`1922c8fcc`。管理员代充入口明确为“订阅代充（卡密）”，排在旧“站内订阅套餐”之前；旧套餐页增加直接跳转。代充商品／规格表单移除排序输入，编辑请求省略排序字段以保留已有值。分组、有效期及原价继续仅属于站内套餐，代充购买仍使用独立 SKU 和卡密交付。
+
+- `AdminSubscriptionTopupsView`、`AdminPaymentPlansView`、`PlanEditDialog` 和 `AppSidebar` 共 22 项测试通过，覆盖简化创建／编辑请求、原排序保留及正确跳转。
+- 中英文键完整性 3 项测试、Vue 类型检查、Vite 生产构建及涉及文件 ESLint 通过。保留既有构建提示，未升级依赖。
+- 本次只修改前端和说明，无后端或数据库变更，未重复执行 Go 测试，未部署或修改生产配置。
+
+Admin navigation now separates external-service code sales from site subscription plans. Simplified product/SKU forms do not overwrite stored sorting. Focused component tests, locale checks, type checking, production build and targeted lint passed.

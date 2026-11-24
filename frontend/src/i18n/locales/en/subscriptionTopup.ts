@@ -11,6 +11,8 @@ export default {
   waiting_stock: 'Paid, awaiting stock', delivered: 'Delivered', reserved: 'Reserved',
   mailPending: 'Pending', mailSent: 'Sent', mailFailed: 'Failed',
   admin: {
+    title: 'Subscription Top-ups (Codes)',
+    entryHint: 'Manage external-service products and codes in Subscription Top-ups (Codes).',
     createProduct: 'Add product', editProduct: 'Edit product', createSKU: 'Add option', editSKU: 'Edit option',
     productName: 'Product name', skuName: 'Option name', description: 'Description', sortOrder: 'Sort order',
     enabled: 'Listed', disabled: 'Unlisted', noProducts: 'No products yet. Add a product and its options.',

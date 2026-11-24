@@ -11,6 +11,8 @@ export default {
   waiting_stock: '已付款，待补货', delivered: '已发货', reserved: '已预占',
   mailPending: '待发送', mailSent: '已发送', mailFailed: '发送失败',
   admin: {
+    title: '订阅代充（卡密）',
+    entryHint: '外部服务的代充商品和卡密请在“订阅代充（卡密）”中管理。',
     createProduct: '新增商品', editProduct: '编辑商品', createSKU: '新增规格', editSKU: '编辑规格',
     productName: '商品名称', skuName: '规格名称', description: '商品说明', sortOrder: '排序',
     enabled: '上架', disabled: '下架', noProducts: '暂无商品，请先新增商品和规格。',

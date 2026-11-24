@@ -762,7 +762,7 @@ const routes: RouteRecordRaw[] = [
     meta: {
       requiresAuth: true,
       requiresAdmin: true,
-      title: 'Subscription Plans',
+      title: 'Site Subscription Plans',
       titleKey: 'nav.paymentPlans',
       requiresPayment: true
     }
@@ -775,8 +775,8 @@ const routes: RouteRecordRaw[] = [
     meta: {
       requiresAuth: true,
       requiresAdmin: true,
-      title: 'Subscription Top-ups',
-      titleKey: 'subscriptionTopup.title',
+      title: 'Subscription Top-ups (Codes)',
+      titleKey: 'subscriptionTopup.admin.title',
       requiresPayment: true,
     },
   },
