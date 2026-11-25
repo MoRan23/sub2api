@@ -1,7 +1,7 @@
 import { afterEach, beforeEach, describe, expect, it, vi } from 'vitest'
 import { flushPromises, mount } from '@vue/test-utils'
 import { createI18n } from 'vue-i18n'
-import type { CodexTelemetryEntry, CodexTelemetryObservationsResponse } from '@/api/admin/codexTelemetry'
+import type { CodexTelemetryEntry, CodexTelemetryObservationsResponse, CodexTelemetrySignalCoverage } from '@/api/admin/codexTelemetry'
 import zh from '@/i18n/locales/zh/admin/fingerprintObservation'
 import en from '@/i18n/locales/en/admin/fingerprintObservation'
 import CodexTelemetryObservations from '../components/CodexTelemetryObservations.vue'
@@ -241,7 +241,7 @@ describe('CodexTelemetryObservations', () => {
     ['zh', '客户端事件采集范围', '技能调用', '凭据存储操作', '等待客户端数据', '当前没有原始指标接入'],
     ['en', 'Client event collection coverage', 'Skill invocation', 'Credential storage operations', 'Awaiting client data', 'no raw metric ingress'],
   ] as const)('explains uncollected client-only signals without creating delivery records (%s)', async (locale, title, skill, storage, status, reason) => {
-    list.mockResolvedValue(response({ configured_enabled: false, effective_enabled: false, items: [], total: 0, coverage: [
+    const signals: CodexTelemetrySignalCoverage[] = [
       { signal: 'skill_invocation', type: 'logs', status: 'unavailable', event_names: ['codex.skill_invocation'], reason: 'client_skill_event_not_on_responses_wire' },
       { signal: 'auth_storage', type: 'metrics', status: 'awaiting_source', event_names: ['codex.auth_storage.operation'], reason: 'client_auth_storage_not_on_responses_wire' },
       { signal: 'turn_critical_path', type: 'metrics', status: 'awaiting_source', event_names: ['codex.turn.critical_path.capture'], reason: 'client_critical_path_not_on_responses_wire' },
@@ -249,7 +249,16 @@ describe('CodexTelemetryObservations', () => {
       { signal: 'websocket_continuation', type: 'metrics', status: 'awaiting_source', event_names: ['codex.websocket.continuation'], reason: 'client_websocket_continuation_not_on_responses_wire' },
       { signal: 'used_dictation', type: 'analytics', status: 'awaiting_source', event_names: ['codex_turn_event'], reason: 'client_dictation_source_not_on_responses_wire' },
       { signal: 'guardian_v2_classification', type: 'analytics', status: 'awaiting_source', event_names: ['codex_guardian_v2_classification'], reason: 'client_guardian_v2_classification_not_on_responses_wire' },
-    ] }))
+      { signal: 'exec_command_timing', type: 'metrics', status: 'awaiting_source', event_names: ['codex.exec_command.duration_total_ms', 'codex.exec_command.calls'], reason: 'client_exec_command_timing_not_on_responses_wire' },
+      { signal: 'multi_agent_spawn', type: 'metrics', status: 'awaiting_source', event_names: ['codex.multi_agent.spawn.failure', 'codex.multi_agent.spawn.phase.duration_ms'], reason: 'client_multi_agent_spawn_not_on_responses_wire' },
+      { signal: 'additional_context', type: 'metrics', status: 'awaiting_source', event_names: ['codex.additional_context', 'codex.additional_context.value_bytes'], reason: 'client_additional_context_not_on_responses_wire' },
+      { signal: 'tool_registrations', type: 'metrics', status: 'awaiting_source', event_names: ['codex.tools.registered'], reason: 'client_tool_registrations_not_on_responses_wire' },
+      { signal: 'mcp_binding_catalog', type: 'metrics', status: 'awaiting_source', event_names: ['codex.mcp.binding_catalog.raw_definition_json_bytes'], reason: 'client_mcp_binding_catalog_not_on_responses_wire' },
+      { signal: 'model_search_discovery', type: 'metrics', status: 'awaiting_source', event_names: ['codex.model_search.discovery'], reason: 'client_model_search_discovery_not_on_responses_wire' },
+      { signal: 'artifact_operation_metrics', type: 'metrics', status: 'awaiting_source', event_names: ['codex.artifact.operation.started', 'codex.artifact.operation.expected_output_count'], reason: 'client_artifact_operation_not_on_responses_wire' },
+      { signal: 'artifact_operation_analytics', type: 'analytics', status: 'awaiting_source', event_names: ['codex_artifact_operation'], reason: 'client_artifact_operation_not_on_responses_wire' },
+    ]
+    list.mockResolvedValue(response({ configured_enabled: false, effective_enabled: false, items: [], total: 0, coverage: signals }))
     const wrapper = mountPanel(locale)
     await flushPromises()
     const coverage = wrapper.get(`[aria-label="${title}"]`)
@@ -257,12 +266,14 @@ describe('CodexTelemetryObservations', () => {
     expect(coverage.text()).toContain(storage)
     expect(coverage.text()).toContain(status)
     expect(coverage.text()).toContain(reason)
-    expect(coverage.find('[title="codex.skill_invocation"]').exists()).toBe(true)
-    expect(coverage.find('[title="codex.turn.critical_path.capture"]').exists()).toBe(true)
-    expect(coverage.find('[title="codex.tools.exec_entry_updates"]').exists()).toBe(true)
-    expect(coverage.find('[title="codex.websocket.continuation"]').exists()).toBe(true)
-    expect(coverage.find('[title="codex_turn_event"]').exists()).toBe(true)
-    expect(coverage.find('[title="codex_guardian_v2_classification"]').exists()).toBe(true)
+    const labels = (locale === 'zh' ? zh : en).fingerprintObservation.telemetry
+    const reasonLabels = new Map(Object.entries(labels.reasonLabels))
+    for (const signal of signals) {
+      expect(coverage.text()).toContain(labels.coverage.signals[signal.signal])
+      expect(reasonLabels.has(signal.reason)).toBe(true)
+      expect(coverage.text()).toContain(reasonLabels.get(signal.reason))
+      expect(coverage.find(`[title="${signal.event_names.join(', ')}"]`).exists()).toBe(true)
+    }
     expect(wrapper.findAll('details')).toHaveLength(0)
     expect(wrapper.text()).not.toContain('admin.fingerprintObservation')
   })

@@ -22,9 +22,10 @@ func catalogFixture(body string) *OpenAIModelsResponse {
 }
 
 func TestOpenAIGroupCatalogOfficialDescriptorsRemainComplete(t *testing.T) {
+	const messages = `{"content_filter_guidance":"  Keep original guidance.  ","plugins":{"unknown_plugin_field":null},"tools":{"indirect_description_prefixes":{"namespaces":{"functions":"prefix"},"mcp_servers":{"search":"  search guidance  "}},"unknown_tool_field":[1,null]},"unknown_message_field":{"enabled":true}}`
 	group := &Group{ID: 1, Platform: PlatformOpenAI}
 	account := groupCatalogAccount(1, map[string]any{"gpt-5.6-sol": "gpt-5.6-sol", "alias": "gpt-5.6-sol"})
-	live := catalogFixture(`{"models":[{"slug":"gpt-5.6-sol","display_name":"Official Sol","context_window":272000,"shell_type":"shell_command","use_responses_lite":true,"supports_search_tool":true,"code_mode_only":true,"unknown":{"enabled":true},"explicit_null":null}],"catalog_version":"live"}`)
+	live := catalogFixture(`{"models":[{"slug":"gpt-5.6-sol","display_name":"Official Sol","context_window":272000,"shell_type":"shell_command","use_responses_lite":true,"supports_search_tool":true,"code_mode_only":true,"unknown":{"enabled":true},"explicit_null":null,"web_search_provider":"search_mcp","model_messages":` + messages + `}],"catalog_version":"live"}`)
 	public := catalogFixture(`{"models":[{"slug":"gpt-5.6-sol","context_window":500000}]}`)
 	response, _, err := buildOpenAIGroupModelsCatalog(group, []Account{account}, []Account{account}, nil, live, public, "", true, nil)
 	require.NoError(t, err)
@@ -36,6 +37,10 @@ func TestOpenAIGroupCatalogOfficialDescriptorsRemainComplete(t *testing.T) {
 		require.Equal(t, true, model["use_responses_lite"])
 		require.Equal(t, true, model["supports_search_tool"])
 		require.Equal(t, true, model["code_mode_only"])
+		require.Equal(t, "search_mcp", model["web_search_provider"])
+		projectedMessages, err := json.Marshal(model["model_messages"])
+		require.NoError(t, err)
+		require.JSONEq(t, messages, string(projectedMessages))
 		require.Contains(t, model, "explicit_null")
 		require.Equal(t, map[string]any{"enabled": true}, model["unknown"])
 	}

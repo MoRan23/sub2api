@@ -58,5 +58,45 @@ func codexTelemetrySignalCoverage() []CodexTelemetrySignalCoverage {
 			EventNames: []string{"codex_guardian_v2_classification"},
 			Reason:     "client_guardian_v2_classification_not_on_responses_wire",
 		},
+		{
+			Signal: "exec_command_timing", Type: "metrics", Status: "awaiting_source",
+			EventNames: []string{"codex.exec_command.duration_total_ms", "codex.exec_command.calls"},
+			Reason:     "client_exec_command_timing_not_on_responses_wire",
+		},
+		{
+			Signal: "multi_agent_spawn", Type: "metrics", Status: "awaiting_source",
+			EventNames: []string{"codex.multi_agent.spawn.failure", "codex.multi_agent.spawn.phase.duration_ms"},
+			Reason:     "client_multi_agent_spawn_not_on_responses_wire",
+		},
+		{
+			Signal: "additional_context", Type: "metrics", Status: "awaiting_source",
+			EventNames: []string{"codex.additional_context", "codex.additional_context.value_bytes"},
+			Reason:     "client_additional_context_not_on_responses_wire",
+		},
+		{
+			Signal: "tool_registrations", Type: "metrics", Status: "awaiting_source",
+			EventNames: []string{"codex.tools.registered"},
+			Reason:     "client_tool_registrations_not_on_responses_wire",
+		},
+		{
+			Signal: "mcp_binding_catalog", Type: "metrics", Status: "awaiting_source",
+			EventNames: []string{"codex.mcp.binding_catalog.raw_definition_json_bytes"},
+			Reason:     "client_mcp_binding_catalog_not_on_responses_wire",
+		},
+		{
+			Signal: "model_search_discovery", Type: "metrics", Status: "awaiting_source",
+			EventNames: []string{"codex.model_search.discovery"},
+			Reason:     "client_model_search_discovery_not_on_responses_wire",
+		},
+		{
+			Signal: "artifact_operation_metrics", Type: "metrics", Status: "awaiting_source",
+			EventNames: []string{"codex.artifact.operation.started", "codex.artifact.operation.expected_output_count"},
+			Reason:     "client_artifact_operation_not_on_responses_wire",
+		},
+		{
+			Signal: "artifact_operation_analytics", Type: "analytics", Status: "awaiting_source",
+			EventNames: []string{"codex_artifact_operation"},
+			Reason:     "client_artifact_operation_not_on_responses_wire",
+		},
 	}
 }

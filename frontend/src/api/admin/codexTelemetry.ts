@@ -5,7 +5,12 @@ export type CodexTelemetryStatus = 'queued' | 'sent' | 'failed' | 'dropped' | 'c
 export type CodexTelemetryOS = 'windows' | 'macos' | 'linux'
 export type CodexTelemetrySource = 'observed' | 'simulated' | 'mixed'
 
-const coverageSignals = ['skill_invocation', 'auth_storage', 'turn_critical_path', 'tool_declaration_updates', 'websocket_continuation', 'used_dictation', 'guardian_v2_classification'] as const
+const coverageSignals = [
+  'skill_invocation', 'auth_storage', 'turn_critical_path', 'tool_declaration_updates',
+  'websocket_continuation', 'used_dictation', 'guardian_v2_classification',
+  'exec_command_timing', 'multi_agent_spawn', 'additional_context', 'tool_registrations',
+  'mcp_binding_catalog', 'model_search_discovery', 'artifact_operation_metrics', 'artifact_operation_analytics',
+] as const
 
 export interface CodexTelemetrySignalCoverage {
   signal: typeof coverageSignals[number]

@@ -11,7 +11,7 @@ import (
 
 var codexToolCapabilityFields = []string{
 	"service_tiers",
-	"supports_search_tool", "apply_patch_tool_type", "comp_hash", "tool_mode", "use_responses_lite",
+	"supports_search_tool", "web_search_provider", "apply_patch_tool_type", "comp_hash", "tool_mode", "use_responses_lite",
 	"multi_agent_reasoning_effort", "multi_agent_version", "multi_agent_tools_in_code_mode",
 }
 

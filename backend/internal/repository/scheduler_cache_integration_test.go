@@ -4,6 +4,7 @@ package repository
 
 import (
 	"context"
+	"encoding/json"
 	"strings"
 	"testing"
 	"time"
@@ -11,6 +12,56 @@ import (
 	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
+
+func TestCodexWebSearchProviderMetadataPostgresRedisRoundTrip(t *testing.T) {
+	ctx := context.Background()
+	tx := testEntTx(t)
+	repo := newAccountRepositoryWithSQL(tx.Client(), tx, nil)
+	account := &service.Account{
+		Name: "codex-search-provider", Platform: service.PlatformOpenAI, Type: service.AccountTypeAPIKey,
+		Status: service.StatusActive, Concurrency: 3, Priority: 50, Schedulable: true,
+	}
+	metadata := service.UpstreamModelMetadataSnapshot{Models: make(map[string]service.UpstreamModelMetadata)}
+	for model, value := range map[string]string{
+		"absent": "", "null": "null", "standalone": `"standalone"`, "search": `"search_mcp"`, "future": `"future_provider"`,
+	} {
+		capabilities := make(map[string]json.RawMessage)
+		if value != "" {
+			capabilities["web_search_provider"] = json.RawMessage(value)
+		}
+		metadata.Models[model] = service.UpstreamModelMetadata{ID: model, CodexToolCapabilities: capabilities}
+	}
+	account.SetUpstreamModelMetadataSnapshot(metadata)
+	require.NoError(t, repo.Create(ctx, account))
+	restored, err := repo.GetByID(ctx, account.ID)
+	require.NoError(t, err)
+	rdb := testRedis(t)
+	cache := NewSchedulerCache(rdb)
+	require.NoError(t, cache.SetAccount(ctx, restored))
+	cached, err := NewSchedulerCache(rdb).GetAccount(ctx, account.ID)
+	require.NoError(t, err)
+	for _, persisted := range []*service.Account{restored, cached} {
+		require.NotNil(t, persisted)
+		for model, expected := range metadata.Models {
+			actual, ok := persisted.GetUpstreamModelMetadata(model)
+			require.True(t, ok, model)
+			require.Equal(t, string(expected.CodexToolCapabilities["web_search_provider"]), string(actual.CodexToolCapabilities["web_search_provider"]), model)
+		}
+	}
+
+	snapshot := &service.PublicCodexCatalogSnapshot{
+		Body: []byte(`{
+  "models": [{"slug":"catalog-target","web_search_provider":"search_mcp","unknown":null,
+    "model_messages":{"content_filter_guidance":"  Keep original guidance.  ","plugins":{"unknown":true},
+      "tools":{"indirect_description_prefixes":{"namespaces":{"functions":"prefix"},"mcp_servers":{"search":"  search guidance  "}},"unknown":[1,null]}}}]
+}`),
+		CheckedAt: time.Now().UTC().Truncate(time.Millisecond),
+	}
+	require.NoError(t, NewPublicCodexCatalogStore(rdb).Save(ctx, snapshot))
+	public, err := NewPublicCodexCatalogStore(rdb).Load(ctx)
+	require.NoError(t, err)
+	require.Equal(t, snapshot, public)
+}
 
 func TestSchedulerCacheSnapshotUsesSlimMetadataButKeepsFullAccount(t *testing.T) {
 	ctx := context.Background()

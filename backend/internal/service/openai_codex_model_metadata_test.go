@@ -272,6 +272,86 @@ func TestCodexCatalogMultiAgentCodeModeCapabilities(t *testing.T) {
 	}
 }
 
+func TestCodexCatalogWebSearchProviderProjection(t *testing.T) {
+	const field = "web_search_provider"
+	for _, tt := range []struct {
+		name   string
+		values []string
+		want   string
+	}{
+		{"absent", []string{""}, ""},
+		{"null", []string{"null"}, "null"},
+		{"standalone", []string{`"standalone"`}, `"standalone"`},
+		{"search MCP", []string{`"search_mcp"`}, `"search_mcp"`},
+		{"future provider", []string{`"future_provider"`}, `"future_provider"`},
+		{"all absent", []string{"", ""}, ""},
+		{"all null", []string{"null", "null"}, "null"},
+		{"matching peers", []string{`"search_mcp"`, `"search_mcp"`}, `"search_mcp"`},
+		{"conflicting peers", []string{`"standalone"`, `"search_mcp"`}, "null"},
+		{"missing first peer", []string{"", `"search_mcp"`}, "null"},
+		{"missing second peer", []string{`"search_mcp"`, ""}, "null"},
+		{"null and absent", []string{"null", ""}, "null"},
+		{"boolean is invalid", []string{"false"}, ""},
+		{"number is invalid", []string{"0"}, ""},
+		{"object is invalid", []string{"{}"}, ""},
+		{"array is invalid", []string{"[]"}, ""},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			accounts := make([]Account, 0, len(tt.values))
+			for _, value := range tt.values {
+				fields := map[string]json.RawMessage{"slug": json.RawMessage(`"catalog-target"`)}
+				if value != "" {
+					fields[field] = json.RawMessage(value)
+				}
+				raw, err := json.Marshal(fields)
+				require.NoError(t, err)
+				_, metadata, err := extractUpstreamModelCatalog([]byte(`{"models":[`+string(raw)+`]}`), false)
+				require.NoError(t, err)
+				account := Account{ID: int64(len(accounts) + 1), Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+				require.NoError(t, json.Unmarshal([]byte(`{"base_url":"https://relay.example/v1","model_mapping":{"public-custom":"catalog-target"}}`), &account.Credentials))
+				account.SetUpstreamModelMetadataSnapshot(UpstreamModelMetadataSnapshot{Models: metadata})
+				accounts = append(accounts, account)
+			}
+			body, err := buildCodexModelsManifestForAccounts(PlatformOpenAI, []string{"public-custom"}, accounts, nil, nil, true)
+			require.NoError(t, err)
+			var manifest struct {
+				Models []map[string]json.RawMessage `json:"models"`
+			}
+			require.NoError(t, json.Unmarshal(body, &manifest))
+			require.Len(t, manifest.Models, 1)
+			require.Equal(t, tt.want, string(manifest.Models[0][field]))
+		})
+	}
+}
+
+func TestCodexCatalogWebSearchProviderLiveMetadata(t *testing.T) {
+	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
+	require.NoError(t, json.Unmarshal([]byte(`{"base_url":"https://relay.example/v1"}`), &account.Credentials))
+	account.SetUpstreamModelMetadataSnapshot(UpstreamModelMetadataSnapshot{Models: map[string]UpstreamModelMetadata{
+		"catalog-target": {ID: "catalog-target", CodexToolCapabilities: map[string]json.RawMessage{"web_search_provider": json.RawMessage(`"standalone"`)}},
+	}})
+	for _, value := range []string{"null", `"search_mcp"`, `"future_provider"`} {
+		for _, source := range []string{
+			`{"models":[{"slug":"catalog-target","web_search_provider":` + value + `}]}`,
+			`{"data":[{"id":"catalog-target","web_search_provider":` + value + `}]}`,
+		} {
+			t.Run(source, func(t *testing.T) {
+				response := &OpenAIModelsResponse{
+					Body:                         convertOpenAIModelListToCodexManifestForAccount([]byte(source), account),
+					upstreamSourceBody:           []byte(source),
+					convertedFromOpenAIModelList: strings.HasPrefix(source, `{"data":`),
+				}
+				require.NoError(t, (&OpenAIGatewayService{}).CompleteAPIKeyCodexModelsManifestForClient(response, account))
+				var manifest struct {
+					Models []map[string]json.RawMessage `json:"models"`
+				}
+				require.NoError(t, json.Unmarshal(response.Body, &manifest))
+				require.Equal(t, value, string(manifest.Models[0]["web_search_provider"]))
+			})
+		}
+	}
+}
+
 func TestCodexCatalogPreservesAppsUsageInstructions(t *testing.T) {
 	account := &Account{Platform: PlatformOpenAI, Type: AccountTypeAPIKey}
 	require.NoError(t, json.Unmarshal([]byte(`{"base_url":"https://relay.example/v1"}`), &account.Credentials))
