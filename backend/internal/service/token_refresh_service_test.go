@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"net"
 	"reflect"
 	"testing"
 	"time"
@@ -528,6 +529,7 @@ func TestTokenRefreshService_RefreshWithRetry_Antigravity(t *testing.T) {
 		ID:       8,
 		Platform: PlatformAntigravity,
 		Type:     AccountTypeOAuth,
+		Extra:    map[string]any{"privacy_mode": AntigravityPrivacySet},
 	}
 	refresher := &tokenRefresherStub{
 		credentials: map[string]any{
@@ -802,6 +804,44 @@ func TestTokenRefreshService_RefreshWithRetry_RefreshFailed(t *testing.T) {
 	require.Equal(t, 0, repo.updateCalls)   // 刷新失败不应更新
 	require.Equal(t, 0, invalidator.calls)  // 刷新失败不应触发缓存失效
 	require.Equal(t, 0, repo.setErrorCalls) // 可重试错误耗尽不标记 error，下个周期继续重试
+	require.Equal(t, 1, repo.setTempUnschedCalls)
+}
+
+func TestTokenRefreshService_RefreshWithRetry_NetworkFailurePreservesAccountState(t *testing.T) {
+	for _, platform := range []string{PlatformGemini, PlatformAntigravity, PlatformGrok} {
+		for _, failure := range []struct {
+			name string
+			err  error
+		}{
+			{"wrapped DNS", fmt.Errorf("refresh request: %w", &net.DNSError{Name: "invalid_grant.example", Err: "no such host"})},
+			{"deadline", &refreshAttemptTimeoutError{err: context.DeadlineExceeded}},
+			{"transport marker", MarkUpstreamTransportFailure(errors.New("proxy connection failed"))},
+		} {
+			t.Run(platform+"/"+failure.name, func(t *testing.T) {
+				until := time.Now().Add(time.Hour)
+				account := &Account{ID: 12, Platform: platform, Type: AccountTypeOAuth, Status: StatusActive, Schedulable: true,
+					TempUnschedulableUntil: &until, TempUnschedulableReason: "existing rate limit"}
+				repo := &tokenRefreshAccountRepo{}
+				cache := &tempUnschedCacheStub{}
+				blocker := &tokenRefreshRuntimeBlocker{}
+				invalidator := &tokenCacheInvalidatorStub{}
+				service := &TokenRefreshService{accountRepo: repo, tempUnschedCache: cache, runtimeBlocker: blocker,
+					cacheInvalidator: invalidator, cfg: &config.TokenRefreshConfig{MaxRetries: 2}}
+				refresher := &tokenRefresherStub{err: failure.err}
+
+				err := service.refreshWithRetry(context.Background(), account, refresher, nil, time.Hour)
+
+				require.ErrorIs(t, err, failure.err)
+				require.Equal(t, 2, refresher.calls)
+				require.Zero(t, repo.setTempUnschedCalls+repo.conditionalTempCalls+repo.setErrorCalls+repo.conditionalErrorCalls)
+				require.Zero(t, repo.clearTempCalls+cache.setCalls+cache.deleteCalls+blocker.blockCalls+blocker.clearCalls+invalidator.calls)
+				require.Equal(t, until, *account.TempUnschedulableUntil)
+				require.Equal(t, "existing rate limit", account.TempUnschedulableReason)
+				require.Equal(t, StatusActive, account.Status)
+				require.True(t, account.Schedulable)
+			})
+		}
+	}
 }
 
 // TestTokenRefreshService_RefreshWithRetry_AntigravityRefreshFailed 测试 Antigravity 刷新失败不设置错误状态

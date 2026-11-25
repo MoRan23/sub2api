@@ -18,8 +18,7 @@ var geminiTransportFailoverBody = []byte(`{"error":{"code":502,"message":"Upstre
 //
 //   - 记录 Ops 错误事件（status 0，kind=request_error）；客户端断开不记录
 //     （见 isClientCanceledTransportError）；
-//   - 持久性故障（代理凭据失效、端点拒绝连接、DNS/路由不可达）临时摘除账号；
-//     瞬时故障（EOF / reset / 超时）账号保持可调度；
+//   - 网络故障保留来源标记，账号保持可调度；
 //   - 客户端已断开（context.Canceled）原样返回：不换号、不摘号；
 //   - 其余一律返回 *UpstreamFailoverError，由 handler 的 failover 循环换号。
 //
@@ -45,12 +44,9 @@ func (s *GeminiMessagesCompatService) handleUpstreamTransportError(ctx context.C
 		return err
 	}
 
-	if classifyUpstreamTransportError(err).Persistent {
-		tempUnscheduleAccountForTransportError(ctx, s.accountRepo, account, safeErr)
-	}
-
 	return &UpstreamFailoverError{
-		StatusCode:   http.StatusBadGateway,
-		ResponseBody: geminiTransportFailoverBody,
+		StatusCode:       http.StatusBadGateway,
+		ResponseBody:     geminiTransportFailoverBody,
+		TransportFailure: IsUpstreamNetworkError(err),
 	}
 }

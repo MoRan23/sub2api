@@ -712,17 +712,16 @@ func TestAnthropicCompatStreaming_DisconnectDrainEndsWhenIntervalDisabled(t *tes
 	}
 }
 
-func TestForwardAsCompatStreaming_IdleTimeoutTriggersStreamTimeoutHandling(t *testing.T) {
+func TestForwardAsCompatStreaming_IdleTimeoutDoesNotPenalizeAccount(t *testing.T) {
 	for _, endpoint := range []string{"chat_completions", "responses"} {
 		for _, tc := range []struct {
-			name        string
-			stream      string
-			marker      string
-			wantErr     bool
-			wantOutput  int
-			wantPenalty int
+			name       string
+			stream     string
+			marker     string
+			wantErr    bool
+			wantOutput int
 		}{
-			{name: "client_online", stream: anthropicStreamTruncatedBeforeMessageDelta(), marker: "\x00never-written", wantErr: true, wantOutput: 1, wantPenalty: 1},
+			{name: "client_online", stream: anthropicStreamTruncatedBeforeMessageDelta(), marker: "\x00never-written", wantErr: true, wantOutput: 1},
 			{name: "client_disconnected", stream: anthropicStreamTruncatedBeforeMessageDelta(), marker: "second", wantOutput: 1},
 			{name: "after_message_stop", stream: anthropicStreamWithMidStreamText(), marker: "\x00never-written", wantOutput: 42},
 			{name: "after_stop_reason", stream: anthropicStreamWithoutMessageStop(), marker: "\x00never-written", wantOutput: 42},
@@ -768,7 +767,7 @@ func TestForwardAsCompatStreaming_IdleTimeoutTriggersStreamTimeoutHandling(t *te
 				}
 				require.NotNil(t, result)
 				require.Equal(t, tc.wantOutput, result.Usage.OutputTokens)
-				require.Equal(t, tc.wantPenalty, repo.tempCalls)
+				require.Zero(t, repo.tempCalls, "local stream timeouts must not cool down the account")
 			})
 		}
 	}

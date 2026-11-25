@@ -28,6 +28,18 @@ func (s *OpenAIOAuthServiceSuite) SetupTest() {
 	s.received = make(chan url.Values, 1)
 }
 
+func TestOpenAIOAuthRefreshPreservesProxyNetworkCause(t *testing.T) {
+	proxy := newLocalTestServer(t, http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	proxy.Close()
+	client := &openaiOAuthService{tokenURL: "http://oauth.invalid/token"}
+
+	_, err := client.RefreshToken(context.Background(), "refresh-token", proxy.URL)
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "OPENAI_OAUTH_REQUEST_FAILED")
+	require.True(t, service.IsUpstreamNetworkError(err), "the refresh retry policy must retain the original transport error")
+}
+
 func (s *OpenAIOAuthServiceSuite) TearDownTest() {
 	if s.srv != nil {
 		s.srv.Close()

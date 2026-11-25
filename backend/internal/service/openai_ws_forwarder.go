@@ -82,6 +82,9 @@ func (e *openAIWSFallbackError) Unwrap() error {
 }
 
 func wrapOpenAIWSFallback(reason string, err error) error {
+	if IsOpenAIWSTransportFailure(err) {
+		err = MarkUpstreamTransportFailure(err)
+	}
 	return &openAIWSFallbackError{Reason: strings.TrimSpace(reason), Err: err}
 }
 
@@ -196,6 +199,9 @@ func (e *openAIWSIngressTurnError) Unwrap() error {
 func wrapOpenAIWSIngressTurnError(stage string, cause error, wroteDownstream bool) error {
 	if cause == nil {
 		return nil
+	}
+	if IsOpenAIWSTransportFailure(cause) {
+		cause = MarkUpstreamTransportFailure(cause)
 	}
 	return &openAIWSIngressTurnError{
 		stage:           strings.TrimSpace(stage),

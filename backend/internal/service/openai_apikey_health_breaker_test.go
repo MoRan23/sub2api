@@ -3,6 +3,9 @@ package service
 import (
 	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
+	"net"
 	"net/http"
 	"testing"
 	"time"
@@ -76,6 +79,14 @@ func TestClassifyOpenAIAPIKeyHealthFailureExclusions(t *testing.T) {
 		eligible bool
 	}{
 		{name: "account attributed 502", err: &UpstreamFailoverError{StatusCode: http.StatusBadGateway}, eligible: true},
+		{name: "account attributed 504", err: &UpstreamFailoverError{StatusCode: http.StatusGatewayTimeout}, eligible: true},
+		{name: "transport synthesized 502", err: &UpstreamFailoverError{StatusCode: http.StatusBadGateway, TransportFailure: true}},
+		{name: "wrapped transport synthesized 502", err: fmt.Errorf("attempt: %w", &UpstreamFailoverError{StatusCode: http.StatusBadGateway, TransportFailure: true})},
+		{name: "marked transport error", err: MarkUpstreamTransportFailure(errors.New("upstream connection closed"))},
+		{name: "typed network error", err: &net.OpError{Op: "read", Net: "tcp", Err: errors.New("connection reset")}},
+		{name: "cyber policy 429", err: &UpstreamFailoverError{StatusCode: http.StatusTooManyRequests, ResponseBody: []byte(`{"error":{"code":"cyber_policy"}}`)}},
+		{name: "cyber policy response 502", err: &UpstreamFailoverError{StatusCode: http.StatusBadGateway, ResponseBody: []byte(`{"response":{"error":{"code":"cyber_policy"}}}`)}},
+		{name: "cyber image policy 502", err: &OpenAIImagesUpstreamError{StatusCode: http.StatusBadGateway, Code: "cyber_policy"}},
 		{name: "request scoped capacity", err: &UpstreamFailoverError{StatusCode: 529, RequestScopedTransient: true}},
 		{name: "provider scoped overload", err: &UpstreamFailoverError{StatusCode: 529, Scope: GatewayFailureScopeProvider}},
 		{name: "dedicated same account retry", err: &UpstreamFailoverError{StatusCode: http.StatusTooManyRequests, RetryableOnSameAccount: true}},
@@ -87,6 +98,35 @@ func TestClassifyOpenAIAPIKeyHealthFailureExclusions(t *testing.T) {
 			_, _, eligible := classifyOpenAIAPIKeyHealthFailure(tt.err)
 			require.Equal(t, tt.eligible, eligible)
 		})
+	}
+}
+
+func TestOpenAIAPIKeyHealthExcludedFailureDoesNotTouchState(t *testing.T) {
+	encoded, err := json.Marshal(OpenAIAPIKeyHealthBreakerSettings{Enabled: true, WindowMinutes: 1, FailureThreshold: 1, CooldownMinutes: 5})
+	require.NoError(t, err)
+	for _, failure := range []error{
+		&UpstreamFailoverError{StatusCode: http.StatusBadGateway, TransportFailure: true},
+		MarkUpstreamTransportFailure(&UpstreamFailoverError{StatusCode: http.StatusBadGateway}),
+		&UpstreamFailoverError{StatusCode: http.StatusTooManyRequests, ResponseBody: []byte(`{"error":{"code":"cyber_policy"}}`)},
+		&OpenAIImagesUpstreamError{StatusCode: http.StatusBadGateway, Code: "cyber_policy"},
+	} {
+		settingRepo := &openAIAPIKeyHealthSettingRepo{value: string(encoded)}
+		cache := &openAIAPIKeyHealthCacheStub{tripped: true}
+		repo := &openAIAPIKeyHealthAccountRepo{}
+		blocker := &openAIAPIKeyHealthRuntimeBlocker{}
+		svc := NewRateLimitService(repo, nil, &config.Config{}, nil, cache)
+		svc.SetSettingService(NewSettingService(settingRepo, &config.Config{}))
+		svc.SetOpenAIAPIKeyHealthCache(cache)
+		svc.SetAccountRuntimeBlocker(blocker)
+		account := openAIHealthPoolAccount()
+
+		require.False(t, svc.ObserveOpenAIAPIKeyHealthFailure(context.Background(), account, failure))
+		require.Zero(t, settingRepo.getCalls)
+		require.Zero(t, cache.recordCalls)
+		require.Zero(t, cache.setCalls)
+		require.Zero(t, repo.setCalls)
+		require.Zero(t, blocker.calls)
+		require.Nil(t, account.TempUnschedulableUntil)
 	}
 }
 

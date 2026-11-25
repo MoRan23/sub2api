@@ -10,10 +10,6 @@ import (
 // Long enough for slow thinking models, short enough to release hung sockets.
 const defaultGrokStreamIdleTimeout = 180 * time.Second
 
-// Shorter cool after a Grok stream-idle failure so the account can re-enter soon
-// but is not immediately re-picked in a tight failover loop.
-const grokStreamIdleCooldown = 2 * time.Minute
-
 // resolveGrokStreamIdleTimeout returns the effective upstream-read idle timeout
 // for Grok streams. Prefers the global gateway setting when positive; otherwise
 // applies a Grok-only default so hung SSE bodies still fail over.
@@ -30,6 +26,7 @@ func grokStreamIdleFailoverError(account *Account, idle time.Duration) *Upstream
 	msg := fmt.Sprintf("Grok stream idle timeout after %s with no upstream data", idle.Round(time.Second))
 	return &UpstreamFailoverError{
 		StatusCode:               502,
+		TransportFailure:         true,
 		ResponseBody:             []byte(`{"error":{"code":"empty_upstream","message":"` + strings.ReplaceAll(msg, `"`, `'`) + `"}}`),
 		SafeToFailoverAfterWrite: true,
 		// An idle upstream stream is transient and should get the configured

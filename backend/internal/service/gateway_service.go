@@ -758,6 +758,7 @@ type GatewayFailureReason string
 // source-compatible and preserves their legacy retry-next-account behavior.
 type UpstreamFailoverError struct {
 	StatusCode               int
+	TransportFailure         bool          // 已确认的网络传输故障，合成 HTTP 状态不得触发账号处罚
 	ResponseBody             []byte        // 上游响应体，用于错误透传规则匹配
 	ResponseHeaders          http.Header   // 上游响应头，用于透传 cf-ray/cf-mitigated/content-type 等诊断信息
 	ForceCacheBilling        bool          // Antigravity 粘性会话切换时设为 true
@@ -796,7 +797,10 @@ func (e *UpstreamFailoverError) IsCredentialFailure() bool {
 // credential failures from being misattributed to the selected account. Legacy
 // and inference failures retain their existing scheduler-health behavior.
 func (e *UpstreamFailoverError) ShouldReportAccountScheduleFailure() bool {
-	if e == nil {
+	if e == nil || e.TransportFailure {
+		return false
+	}
+	if cyber, _, _ := detectOpenAICyberPolicy(e.ResponseBody); cyber {
 		return false
 	}
 	return !e.IsCredentialFailure() || e.Scope == GatewayFailureScopeAccount
@@ -821,7 +825,10 @@ func (s *GatewayService) TempUnscheduleRetryableError(ctx context.Context, accou
 	}
 	// 请求级瞬时故障与账号健康无关：封禁只会把与故障无关的账号一并摘掉，
 	// 而故障因素（客户端身份、模型容量）在下一个账号上完全相同。
-	if failoverErr.RequestScopedTransient {
+	if failoverErr.RequestScopedTransient || failoverErr.TransportFailure {
+		return
+	}
+	if cyber, _, _ := detectOpenAICyberPolicy(failoverErr.ResponseBody); cyber {
 		return
 	}
 	// 根据状态码选择封禁策略
@@ -1434,7 +1441,7 @@ func (s *GatewayService) DoGrokNativeResponsesJSON(ctx context.Context, account 
 	upstreamReq = PrepareGrokSafetyRequest(upstreamReq)
 	resp, err := s.httpUpstream.Do(upstreamReq, proxyURL, account.ID, account.Concurrency)
 	if err != nil {
-		return nil, &UpstreamFailoverError{StatusCode: http.StatusBadGateway, Reason: GatewayFailureReason("grok_search_transport")}
+		return nil, &UpstreamFailoverError{StatusCode: http.StatusBadGateway, Reason: GatewayFailureReason("grok_search_transport"), TransportFailure: IsUpstreamNetworkError(err)}
 	}
 	defer func() { _ = resp.Body.Close() }()
 	ObserveGrokSafetyHTTPResponse(ctx, upstreamReq, resp)
@@ -1445,8 +1452,9 @@ func (s *GatewayService) DoGrokNativeResponsesJSON(ctx context.Context, account 
 	}
 	if readErr != nil {
 		return nil, &UpstreamFailoverError{
-			StatusCode: http.StatusBadGateway,
-			Reason:     GatewayFailureReason("grok_search_read"),
+			StatusCode:       http.StatusBadGateway,
+			Reason:           GatewayFailureReason("grok_search_read"),
+			TransportFailure: resp.StatusCode >= 200 && resp.StatusCode < 300 && IsUpstreamNetworkError(readErr),
 		}
 	}
 	if resp.StatusCode >= 400 {

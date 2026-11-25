@@ -11,6 +11,7 @@ import (
 	"testing"
 
 	"github.com/Wei-Shaw/sub2api/internal/pkg/xai"
+	"github.com/Wei-Shaw/sub2api/internal/service"
 	"github.com/stretchr/testify/require"
 )
 
@@ -64,6 +65,18 @@ func TestGrokOAuthClientExchangeAndRefreshUseFormFields(t *testing.T) {
 	require.Equal(t, "refresh-access", refreshed.AccessToken)
 	require.Equal(t, "refresh-rotated", refreshed.RefreshToken)
 	require.Equal(t, int64(7200), refreshed.ExpiresIn)
+}
+
+func TestGrokOAuthRefreshPreservesProxyNetworkCause(t *testing.T) {
+	proxy := httptest.NewServer(http.HandlerFunc(func(http.ResponseWriter, *http.Request) {}))
+	proxy.Close()
+	client := &grokOAuthClient{tokenURL: "http://oauth.invalid/token"}
+
+	_, err := client.RefreshToken(context.Background(), "refresh-token", proxy.URL, "client-id")
+
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "GROK_OAUTH_REQUEST_FAILED")
+	require.True(t, service.IsUpstreamNetworkError(err), "the refresh retry policy must retain the original transport error")
 }
 
 func TestGrokOAuthClientRefreshForbiddenClassifiesOnlyExplicitEntitlement(t *testing.T) {

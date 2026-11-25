@@ -73,7 +73,7 @@ func (c *grokOAuthClient) ExchangeCode(ctx context.Context, code, codeVerifier, 
 		SetSuccessResult(&tokenResp).
 		Post(c.tokenURL)
 	if err != nil {
-		return nil, infraerrors.Newf(http.StatusBadGateway, "GROK_OAUTH_REQUEST_FAILED", "request failed: %v", err)
+		return nil, infraerrors.Newf(http.StatusBadGateway, "GROK_OAUTH_REQUEST_FAILED", "request failed: %v", err).WithCause(err)
 	}
 	if !resp.IsSuccessState() {
 		return nil, grokOAuthStatusError("GROK_OAUTH_TOKEN_EXCHANGE_FAILED", "token exchange failed", resp)
@@ -105,7 +105,7 @@ func (c *grokOAuthClient) RefreshToken(ctx context.Context, refreshToken, proxyU
 		SetSuccessResult(&tokenResp).
 		Post(c.tokenURL)
 	if err != nil {
-		return nil, infraerrors.Newf(http.StatusBadGateway, "GROK_OAUTH_REQUEST_FAILED", "request failed: %v", err)
+		return nil, infraerrors.Newf(http.StatusBadGateway, "GROK_OAUTH_REQUEST_FAILED", "request failed: %v", err).WithCause(err)
 	}
 	if !resp.IsSuccessState() {
 		return nil, grokOAuthStatusError("GROK_OAUTH_TOKEN_REFRESH_FAILED", "token refresh failed", resp)

@@ -651,6 +651,9 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 			if errText := strings.TrimSpace(scanErr.Error()); errText != "" {
 				msg += ": " + errText
 			}
+			if IsUpstreamNetworkError(scanErr) {
+				return resultWithUsage(), s.newOpenAIStreamTransportFailoverError(c, account, false, upstreamRequestID, msg), true
+			}
 			return resultWithUsage(), s.newOpenAIStreamFailoverError(c, account, false, upstreamRequestID, nil, msg), true
 		}
 		// 客户端已断开时，上游出错仅影响体验，不影响计费；返回已收集 usage
@@ -1243,29 +1246,23 @@ func (s *OpenAIGatewayService) handleStreamingResponseWithReasoning(ctx context.
 				return resultWithUsage(), fmt.Errorf("stream usage incomplete after timeout")
 			}
 			logger.LegacyPrintf("service.openai_gateway", "Stream data interval timeout: account=%d model=%s interval=%s", account.ID, originalModel, streamInterval)
-			// 处理流超时，可能标记账户为临时不可调度或错误状态
-			if s.rateLimitService != nil && !isOpenAICandyTest(ctx) {
-				s.rateLimitService.HandleStreamTimeout(ctx, account, originalModel)
-			}
 			if account != nil && account.Platform == PlatformOpenAI &&
 				!openAIStreamClientOutputStarted(c, clientOutputStarted) && !eventShouldFlush {
 				_ = resp.Body.Close()
-				failoverErr := s.newOpenAIStreamFailoverErrorWithModel(
-					c, account, false, upstreamRequestID, nil,
-					"OpenAI upstream stream idle timeout before model output", mappedModel, resp.Header,
+				failoverErr := s.newOpenAIStreamTransportFailoverError(
+					c, account, false, upstreamRequestID,
+					"OpenAI upstream stream idle timeout before model output", resp.Header,
 				)
 				// Only keepalive comments can have reached the client. Joining the
 				// first-output failover budget also bounds the replay to one account
-				// switch, so one stalled request cannot walk the whole pool and apply
-				// HandleStreamTimeout to every account it touches.
+				// switch, so one stalled request cannot walk the whole pool.
 				failoverErr.SafeToFailoverAfterWrite = true
 				return resultWithUsage(), failoverErr
 			}
-			// Grok: short cool + account failover when no client-visible bytes
+			// Grok: bounded account failover when no client-visible bytes
 			// were committed yet (pre-commit). After output started we keep the
 			// legacy stream_timeout path so partial SSE is not dual-written.
 			if account != nil && account.Platform == PlatformGrok {
-				s.tempUnscheduleGrok(ctx, account, grokStreamIdleCooldown, "grok stream idle timeout")
 				if !openAIStreamClientOutputStarted(c, clientOutputStarted) && !eventShouldFlush {
 					_ = resp.Body.Close()
 					return resultWithUsage(), grokStreamIdleFailoverError(account, streamInterval)

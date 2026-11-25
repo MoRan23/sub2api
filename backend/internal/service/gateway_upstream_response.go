@@ -1161,6 +1161,7 @@ func (s *GatewayService) handleStreamingResponse(ctx context.Context, resp *http
 						StatusCode:             http.StatusBadGateway,
 						ResponseBody:           body,
 						RetryableOnSameAccount: true,
+						TransportFailure:       IsUpstreamNetworkError(ev.err),
 					}
 				}
 				sendErrorEvent("stream_read_error", disconnectMsg)

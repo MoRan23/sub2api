@@ -8,6 +8,8 @@ import (
 	"strings"
 	"sync"
 	"time"
+
+	"github.com/Wei-Shaw/sub2api/internal/util/logredact"
 )
 
 const (
@@ -15,7 +17,7 @@ const (
 	antigravityTokenCacheSkew   = 5 * time.Minute
 	antigravityBackfillCooldown = 5 * time.Minute
 	// antigravityRequestRefreshTimeout 请求路径上 token 刷新的最大等待时间。
-	// 超过此时间直接放弃刷新、标记账号临时不可调度并触发 failover，
+	// 超过此时间直接放弃刷新并触发 failover，不因网络超时冷却账号，
 	// 让后台 TokenRefreshService 在下个周期继续重试。
 	antigravityRequestRefreshTimeout = 8 * time.Second
 )
@@ -106,7 +108,7 @@ func (p *AntigravityTokenProvider) GetAccessToken(ctx context.Context, account *
 			if errors.Is(err, ErrAccountProxyUnavailable) {
 				return "", err
 			}
-			// 标记账号临时不可调度，避免后续请求继续命中
+			// 保留上游拒绝的冷却，网络故障仅记录失败。
 			p.markTempUnschedulable(account, err)
 			if p.refreshPolicy.OnRefreshError == ProviderRefreshErrorReturn {
 				return "", err
@@ -200,6 +202,13 @@ func (p *AntigravityTokenProvider) shouldAttemptBackfill(accountID int64) bool {
 // 使用 background context 因为请求 context 可能已超时。
 func (p *AntigravityTokenProvider) markTempUnschedulable(account *Account, refreshErr error) {
 	if p.accountRepo == nil || account == nil {
+		return
+	}
+	if IsUpstreamNetworkError(refreshErr) || errors.Is(refreshErr, context.Canceled) {
+		slog.Warn("antigravity_token_provider.refresh_failed_without_account_cooldown",
+			"account_id", account.ID,
+			"error", logredact.RedactText(refreshErr.Error()),
+		)
 		return
 	}
 	now := time.Now()

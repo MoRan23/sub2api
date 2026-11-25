@@ -4,89 +4,87 @@ package service
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
+	"fmt"
+	"io"
 	"net"
+	"net/http"
+	"net/url"
 	"os"
 	"syscall"
 	"testing"
+
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
+	"github.com/stretchr/testify/require"
 )
 
-// TestClassifyUpstreamTransportError pins which transport-level upstream failures
-// are "persistent" (retrying the same proxy/account is pointless — evict + alert)
-// versus "transient" (a blip — fail over to a healthy account but do not evict).
-//
-// The motivating incident: a SOCKS5 proxy whose credentials expired returned
-// `username/password authentication failed`, yet the account kept being scheduled.
-func TestClassifyUpstreamTransportError(t *testing.T) {
-	cases := []struct {
-		name       string
-		err        error
-		persistent bool
+func TestIsUpstreamNetworkError(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+		want bool
 	}{
-		// Durable — config/credential/routing problems. Retrying same proxy won't help.
-		{"socks5 proxy credential rejected", errors.New(`Post "https://chatgpt.com/backend-api/codex/responses": socks connect tcp 85.255.176.68:12324->chatgpt.com:443: username/password authentication failed`), true},
-		{"proxy connection refused", errors.New(`proxyconnect tcp: dial tcp 1.2.3.4:1080: connect: connection refused`), true},
-		{"no route to host", errors.New(`dial tcp 1.2.3.4:443: connect: no route to host`), true},
-		{"dns resolution failure", errors.New(`dial tcp: lookup proxy.example.com: no such host`), true},
-		{"network unreachable", errors.New(`dial tcp 1.2.3.4:443: connect: network is unreachable`), true},
-
-		// Transient — a temporary blip. Fail over, but do NOT evict the account.
-		{"client timeout", errors.New(`Post "https://chatgpt.com/...": context deadline exceeded (Client.Timeout exceeded while awaiting headers)`), false},
-		{"i/o timeout", errors.New(`dial tcp 1.2.3.4:443: i/o timeout`), false},
-		{"connection reset by peer", errors.New(`read tcp 10.0.0.1:5->2.2.2.2:443: read: connection reset by peer`), false},
-		{"unexpected eof", errors.New(`unexpected EOF`), false},
-		{"broken pipe", errors.New(`write tcp 10.0.0.1:5->2.2.2.2:443: write: broken pipe`), false},
-
-		{"nil error", nil, false},
-
-		// ── Typed-error cases ──────────────────────────────────────────────
-		// ECONNREFUSED wrapped in the canonical net.OpError shape Go produces.
-		{
-			"ECONNREFUSED via net.OpError",
-			&net.OpError{
-				Op:  "dial",
-				Net: "tcp",
-				Err: &os.SyscallError{Syscall: "connect", Err: syscall.ECONNREFUSED},
-			},
-			true,
-		},
-		// Bare syscall error (errors.Is traverses the chain).
-		{"ECONNREFUSED bare", syscall.ECONNREFUSED, true},
-		{"EHOSTUNREACH bare", syscall.EHOSTUNREACH, true},
-		{"ENETUNREACH bare", syscall.ENETUNREACH, true},
-
-		// *net.DNSError with IsNotFound — permanent DNS lookup failure.
-		{
-			"DNS not found (IsNotFound=true)",
-			&net.DNSError{Err: "no such host", Name: "proxy.example.com", IsNotFound: true},
-			true,
-		},
-		// *net.DNSError with IsNotFound=false — transient DNS timeout (not persistent).
-		{
-			"DNS timeout (IsNotFound=false)",
-			&net.DNSError{Err: "i/o timeout", Name: "proxy.example.com", IsTimeout: true},
-			false,
-		},
-
-		// context.Canceled — client gone; NOT classified as persistent.
-		{"context.Canceled", context.Canceled, false},
-		// context.DeadlineExceeded — slow upstream; NOT persistent.
-		{"context.DeadlineExceeded", context.DeadlineExceeded, false},
-	}
-
-	for _, tc := range cases {
+		{"nil", nil, false},
+		{"DNS", &net.DNSError{Err: "no such host", Name: "proxy.example", IsNotFound: true}, true},
+		{"DNS timeout", &net.DNSError{Err: "i/o timeout", Name: "proxy.example", IsTimeout: true}, true},
+		{"TCP wrapped", &url.Error{Op: "Post", URL: "https://example.test", Err: &net.OpError{Op: "dial", Net: "tcp", Err: &os.SyscallError{Syscall: "connect", Err: syscall.ECONNREFUSED}}}, true},
+		{"connection reset", syscall.ECONNRESET, true},
+		{"connection aborted", syscall.ECONNABORTED, true},
+		{"broken pipe", syscall.EPIPE, true},
+		{"no route", syscall.EHOSTUNREACH, true},
+		{"network unreachable", syscall.ENETUNREACH, true},
+		{"timeout", syscall.ETIMEDOUT, true},
+		{"deadline", context.DeadlineExceeded, true},
+		{"cancel", context.Canceled, false},
+		{"wrapped cancel", fmt.Errorf("request canceled: %w", context.Canceled), false},
+		{"EOF", io.EOF, true},
+		{"unexpected EOF", fmt.Errorf("read response: %w", io.ErrUnexpectedEOF), true},
+		{"closed connection", net.ErrClosed, true},
+		{"TLS record", tls.RecordHeaderError{Msg: "bad record"}, true},
+		{"TLS certificate", &tls.CertificateVerificationError{Err: x509.UnknownAuthorityError{}}, true},
+		{"certificate hostname", x509.HostnameError{Certificate: &x509.Certificate{}, Host: "example.test"}, true},
+		{"socks proxy authentication", errors.New("socks connect tcp proxy.example:1080->example.test:443: username/password authentication failed"), true},
+		{"HTTP proxy", errors.New("proxyconnect tcp: Proxy Authentication Required"), true},
+		{"raw dial failure", errors.New("dial tcp 1.2.3.4:443: connect: connection refused"), true},
+		{"raw response header timeout", errors.New(`Post "https://example.test": context deadline exceeded (Client.Timeout exceeded while awaiting headers)`), true},
+		{"HTTP2 reset", errors.New("stream error: stream ID 3; INTERNAL_ERROR; received from peer"), true},
+		{"raw EOF", errors.New(`Post "https://example.test": EOF`), true},
+		{"invalid grant", errors.New("invalid_grant: authentication failed"), false},
+		{"HTTP 502 text", errors.New("upstream returned HTTP 502: connection refused"), false},
+		{"HTTP 503 body", errors.New("token 刷新失败 (HTTP 503): dial tcp: connection refused"), false},
+		{"HTTP EOF body", errors.New("token refresh failed: status 503, body: EOF"), false},
+		{"HTTP TLS body", errors.New("token refresh failed: status 503, body: tls: handshake failure"), false},
+		{"HTTP error with network prose", infraerrors.New(http.StatusBadGateway, "OPENAI_OAUTH_TOKEN_REFRESH_FAILED", "token refresh failed: status 503, body: dial tcp: tls: failure"), false},
+		{"HTTP wrapper with network cause", infraerrors.New(http.StatusBadGateway, "TOKEN_REFRESH_FAILED", "token refresh failed").WithCause(io.ErrUnexpectedEOF), true},
+		{"actual HTTP 502", &UpstreamFailoverError{StatusCode: http.StatusBadGateway, ResponseBody: []byte(`{"error":{"message":"dial tcp: connection refused"}}`)}, false},
+		{"synthetic 502", &UpstreamFailoverError{StatusCode: http.StatusBadGateway, TransportFailure: true}, true},
+		{"protocol truncation", errors.New("upstream stream ended before terminal event"), false},
+		{"invalid JSON", errors.New("invalid character 'x' looking for beginning of value"), false},
+	} {
 		t.Run(tc.name, func(t *testing.T) {
-			got := classifyUpstreamTransportError(tc.err).Persistent
-			if got != tc.persistent {
-				t.Fatalf("classifyUpstreamTransportError(%q).Persistent = %v, want %v", errString(tc.err), got, tc.persistent)
-			}
+			require.Equal(t, tc.want, IsUpstreamNetworkError(tc.err))
 		})
 	}
 }
 
-func errString(err error) string {
-	if err == nil {
-		return "<nil>"
-	}
-	return err.Error()
+func TestMarkUpstreamTransportFailure(t *testing.T) {
+	require.Nil(t, MarkUpstreamTransportFailure(nil))
+	cause := fmt.Errorf("upstream response read: %w", io.ErrUnexpectedEOF)
+	marked := MarkUpstreamTransportFailure(cause)
+	require.Equal(t, cause.Error(), marked.Error())
+	require.ErrorIs(t, marked, io.ErrUnexpectedEOF)
+	require.True(t, IsUpstreamTransportFailure(fmt.Errorf("forward: %w", marked)))
+	require.Same(t, marked, MarkUpstreamTransportFailure(marked))
+	require.False(t, IsUpstreamTransportFailure(cause))
+	var failover *UpstreamFailoverError
+	require.False(t, errors.As(marked, &failover), "marking must not enable failover")
+
+	failover = &UpstreamFailoverError{StatusCode: http.StatusBadGateway, TransportFailure: true}
+	require.True(t, IsUpstreamTransportFailure(failover))
+	require.Same(t, failover, MarkUpstreamTransportFailure(failover))
+	require.False(t, failover.ShouldReportAccountScheduleFailure())
+	require.True(t, failover.ShouldRetryNextAccount())
+	require.True(t, (&UpstreamFailoverError{StatusCode: http.StatusBadGateway}).ShouldReportAccountScheduleFailure())
 }

@@ -2,21 +2,18 @@ package service
 
 import (
 	"context"
+	"crypto/tls"
+	"crypto/x509"
 	"errors"
+	"io"
 	"net"
 	"net/http"
 	"strings"
 	"syscall"
-	"time"
 
-	"github.com/Wei-Shaw/sub2api/internal/pkg/logger"
+	infraerrors "github.com/Wei-Shaw/sub2api/internal/pkg/errors"
 	"github.com/gin-gonic/gin"
-	"go.uber.org/zap"
 )
-
-// openAITransportErrorTempUnschedDuration is how long an account is temporarily
-// unscheduled after a durable transport failure (matches tokenRefreshTempUnschedDuration).
-const openAITransportErrorTempUnschedDuration = 10 * time.Minute
 
 // openAITransportFailoverBody is the OpenAI-format error body attached to the
 // failover error for a transport-level failure. Kept identical to the legacy
@@ -24,71 +21,106 @@ const openAITransportErrorTempUnschedDuration = 10 * time.Minute
 // ultimately exhausted.
 var openAITransportFailoverBody = []byte(`{"error":{"type":"upstream_error","message":"Upstream request failed"}}`)
 
-// upstreamTransportErrorClass describes how to react to a transport-level upstream
-// failure — i.e. the HTTP round-trip never completed (proxy / DNS / TCP / TLS
-// error, no HTTP status code received).
-type upstreamTransportErrorClass struct {
-	// Persistent marks failures where retrying the same proxy/account is
-	// pointless: expired or rejected proxy credentials, a dead proxy endpoint,
-	// or DNS/routing failure. Such accounts should be temporarily unscheduled
-	// (and alerted on) instead of being repeatedly scheduled into hard failures.
-	Persistent bool
+type upstreamTransportFailure struct {
+	err error
 }
 
-// persistentUpstreamTransportErrorMarkers are substrings (matched case-insensitively
-// against the raw transport error) that indicate a durable proxy/network fault.
-// Matched signals are intentionally specific failure *reasons*, not the operation
-// (e.g. we match "connection refused", not "proxyconnect") so that a transient
-// failure of the same operation (a proxy timeout) is NOT misclassified as durable.
-var persistentUpstreamTransportErrorMarkers = []string{
-	"authentication failed",         // SOCKS5 RFC1929 / proxy credentials rejected (expired account)
-	"proxy authentication required", // HTTP proxy 407
-	"connection refused",            // proxy/upstream endpoint down
-	"no route to host",
-	"network is unreachable",
-	"no such host", // DNS resolution failure (bad/expired proxy hostname)
-}
+func (e *upstreamTransportFailure) Error() string { return e.err.Error() }
+func (e *upstreamTransportFailure) Unwrap() error { return e.err }
 
-// classifyUpstreamTransportError decides whether a transport-level upstream error
-// is durable (Persistent — evict the account + alert) or a transient blip
-// (fail over to a healthy account but keep this one schedulable).
-//
-// Motivating incident: a SOCKS5 proxy whose subscription lapsed returned
-// `username/password authentication failed`; the account was nonetheless
-// rescheduled on every request, hard-failing users with 502s.
-//
-// Classification strategy (mirrors sanitizeStreamError in gateway_service.go):
-//  1. Typed-error checks first (syscall constants, *net.DNSError) — portable and
-//     unambiguous.
-//  2. String-marker fallback for errors that have no typed form (e.g. the plain
-//     string returned by golang.org/x/net/proxy for SOCKS5 credential rejection).
-//     The network-layer string markers ("connection refused", "no route to host",
-//     "network is unreachable", "no such host") are kept as a cross-platform safety
-//     net even though the typed checks should cover them on modern Go+Linux.
-func classifyUpstreamTransportError(err error) upstreamTransportErrorClass {
-	if err == nil {
-		return upstreamTransportErrorClass{}
+// MarkUpstreamTransportFailure preserves a confirmed transport failure on paths
+// that cannot safely fail over, such as an already-sent plugin request.
+func MarkUpstreamTransportFailure(err error) error {
+	if err == nil || IsUpstreamTransportFailure(err) {
+		return err
 	}
+	return &upstreamTransportFailure{err: err}
+}
 
-	// — Typed checks (preferred) ——————————————————————————————————————————————
-	if errors.Is(err, syscall.ECONNREFUSED) ||
+// IsUpstreamTransportFailure reads the source marker, not the client-facing 502.
+func IsUpstreamTransportFailure(err error) bool {
+	var marked *upstreamTransportFailure
+	if errors.As(err, &marked) {
+		return true
+	}
+	var failover *UpstreamFailoverError
+	return errors.As(err, &failover) && failover.TransportFailure
+}
+
+// IsUpstreamNetworkError recognizes network causes before they are translated
+// to protocol errors. HTTP responses and incomplete protocol messages are not
+// network evidence on their own.
+func IsUpstreamNetworkError(err error) bool {
+	if err == nil {
+		return false
+	}
+	if IsUpstreamTransportFailure(err) {
+		return true
+	}
+	var failover *UpstreamFailoverError
+	if errors.As(err, &failover) {
+		return false
+	}
+	var applicationErr *infraerrors.ApplicationError
+	if errors.As(err, &applicationErr) {
+		return IsUpstreamNetworkError(applicationErr.Unwrap())
+	}
+	if errors.Is(err, context.Canceled) {
+		return false
+	}
+	if errors.Is(err, context.DeadlineExceeded) || errors.Is(err, io.EOF) ||
+		errors.Is(err, io.ErrUnexpectedEOF) || errors.Is(err, net.ErrClosed) ||
+		errors.Is(err, syscall.ECONNREFUSED) || errors.Is(err, syscall.ECONNRESET) ||
+		errors.Is(err, syscall.ECONNABORTED) || errors.Is(err, syscall.EPIPE) ||
+		errors.Is(err, syscall.ETIMEDOUT) ||
 		errors.Is(err, syscall.EHOSTUNREACH) ||
 		errors.Is(err, syscall.ENETUNREACH) {
-		return upstreamTransportErrorClass{Persistent: true}
+		return true
 	}
+	var opErr *net.OpError
 	var dnsErr *net.DNSError
-	if errors.As(err, &dnsErr) && dnsErr.IsNotFound {
-		return upstreamTransportErrorClass{Persistent: true}
+	var timeoutErr net.Error
+	var tlsRecordErr tls.RecordHeaderError
+	var tlsCertErr *tls.CertificateVerificationError
+	var certInvalidErr x509.CertificateInvalidError
+	var certHostErr x509.HostnameError
+	var certAuthorityErr x509.UnknownAuthorityError
+	if errors.As(err, &opErr) || errors.As(err, &dnsErr) ||
+		(errors.As(err, &timeoutErr) && timeoutErr.Timeout()) ||
+		errors.As(err, &tlsRecordErr) || errors.As(err, &tlsCertErr) ||
+		errors.As(err, &certInvalidErr) || errors.As(err, &certHostErr) || errors.As(err, &certAuthorityErr) {
+		return true
 	}
 
-	// — String-marker fallback ————————————————————————————————————————————————
-	msg := strings.ToLower(err.Error())
-	for _, marker := range persistentUpstreamTransportErrorMarkers {
-		if strings.Contains(msg, marker) {
-			return upstreamTransportErrorClass{Persistent: true}
+	// Proxy libraries and HTTP/2 may return untyped errors; require their
+	// transport operation or an exact transport reason rather than HTTP prose.
+	for cause := errors.Unwrap(err); cause != nil; cause = errors.Unwrap(err) {
+		err = cause
+	}
+	message := strings.ToLower(err.Error())
+	for _, method := range []string{"get \"", "post \"", "put \"", "patch \"", "delete \"", "head \"", "options \"", "connect \""} {
+		if strings.HasPrefix(message, method) {
+			_, reason, found := strings.Cut(message, "\": ")
+			if found {
+				message = reason
+			}
+			break
 		}
 	}
-	return upstreamTransportErrorClass{}
+	if message == "eof" || message == "unexpected eof" || message == "i/o timeout" ||
+		message == "connection reset by peer" || message == "connection reset" ||
+		message == "broken pipe" || message == "use of closed network connection" ||
+		message == "proxy authentication required" ||
+		message == "context deadline exceeded (client.timeout exceeded while awaiting headers)" ||
+		strings.HasPrefix(message, "stream error: stream id ") {
+		return true
+	}
+	for _, operation := range []string{"dial tcp", "read tcp", "write tcp", "proxyconnect tcp:", "socks connect tcp", "tls: "} {
+		if strings.HasPrefix(message, operation) {
+			return true
+		}
+	}
+	return false
 }
 
 // isClientCanceledTransportError reports whether a transport-level failure was
@@ -103,10 +135,7 @@ func isClientCanceledTransportError(ctx context.Context, err error) bool {
 // (Do/DoWithTLS returned a non-HTTP error: proxy/DNS/TCP/TLS). It:
 //  1. records the failure in Ops error logs (status 0, kind=request_error),
 //     except when the client disconnected (see isClientCanceledTransportError);
-//  2. for durable faults (expired/rejected proxy creds, dead proxy, DNS/routing)
-//     temporarily unschedules the account (DB + in-memory) and logs a stable
-//     warn event that alert rules can key on;
-//  3. returns an error that is *UpstreamFailoverError (so the handler fails over
+//  2. returns an error that is *UpstreamFailoverError (so the handler fails over
 //     to a healthy account) for all non-canceled errors, or a plain error for
 //     context.Canceled (client gone — no failover, no eviction).
 //
@@ -150,80 +179,15 @@ func (s *OpenAIGatewayService) handleOpenAIUpstreamTransportError(ctx context.Co
 	// 插件已把请求交给上游时，自动切换账号可能造成重复扣费或重复执行。
 	var pluginErr *PluginTransportError
 	if errors.As(err, &pluginErr) && pluginErr.RequestSent {
+		if IsUpstreamNetworkError(err) {
+			return MarkUpstreamTransportFailure(err)
+		}
 		return err
 	}
 
-	if classifyUpstreamTransportError(err).Persistent {
-		s.tempUnscheduleOpenAITransportError(ctx, account, safeErr)
-	}
-
 	return &UpstreamFailoverError{
-		StatusCode:   http.StatusBadGateway,
-		ResponseBody: openAITransportFailoverBody,
+		StatusCode:       http.StatusBadGateway,
+		ResponseBody:     openAITransportFailoverBody,
+		TransportFailure: IsUpstreamNetworkError(err),
 	}
-}
-
-// tempUnscheduleOpenAITransportError marks an account temporarily unschedulable
-// after a durable transport failure, both persistently (DB, survives restart)
-// and in-memory (immediate scheduler effect before the DB/account cache propagates).
-//
-// Log semantics:
-//   - "openai.account_temp_unscheduled_transport" — emitted ONLY after a
-//     successful DB write (both in-memory + persisted).
-//   - "openai.account_temp_unscheduled_transport_memory_only" — emitted when
-//     accountRepo is nil (in-memory only; no persistence).
-//   - "openai.account_temp_unscheduled_transport_failed" — DB write attempted
-//     but returned an error.
-func (s *OpenAIGatewayService) tempUnscheduleOpenAITransportError(ctx context.Context, account *Account, safeErr string) {
-	if isOpenAICandyTest(ctx) {
-		return
-	}
-	if s == nil || account == nil {
-		return
-	}
-	if s.cfg != nil && s.cfg.Gateway.DisableOpenAITransportErrorCooldown {
-		return
-	}
-	until := time.Now().Add(openAITransportErrorTempUnschedDuration)
-	reason := "upstream transport error (proxy/network): " + safeErr
-
-	// Immediate in-memory block so this process skips the account until the
-	// persisted cooldown is visible on the scheduling Account. Selection is
-	// fail-open: empty snapshot/DB cooldown fields drop a stale local block.
-	s.BlockAccountScheduling(account, until, "transport_error")
-
-	if s.accountRepo == nil {
-		// No DB configured — block is in-memory only; emit a distinct event so
-		// operators are not misled into thinking the block survived a restart.
-		logger.L().With(zap.String("component", "service.openai_gateway")).Warn(
-			"openai.account_temp_unscheduled_transport_memory_only",
-			zap.Int64("account_id", account.ID),
-			zap.String("account_name", account.Name),
-			zap.String("platform", account.Platform),
-			zap.Time("until", until),
-			zap.String("reason", reason),
-		)
-		return
-	}
-
-	bgCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), openAIAccountStateUpdateTimeout)
-	defer cancel()
-	if err := s.accountRepo.SetTempUnschedulable(bgCtx, account.ID, until, reason); err != nil {
-		logger.L().With(zap.String("component", "service.openai_gateway")).Warn(
-			"openai.account_temp_unscheduled_transport_failed",
-			zap.Int64("account_id", account.ID),
-			zap.Error(err),
-		)
-		return
-	}
-
-	// DB write succeeded: both in-memory and persisted.
-	logger.L().With(zap.String("component", "service.openai_gateway")).Warn(
-		"openai.account_temp_unscheduled_transport",
-		zap.Int64("account_id", account.ID),
-		zap.String("account_name", account.Name),
-		zap.String("platform", account.Platform),
-		zap.Time("until", until),
-		zap.String("reason", reason),
-	)
 }

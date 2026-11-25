@@ -83,6 +83,8 @@ func TestOpenAIForwardFirstOutputTimeoutIncludesResponseHeaderWait(t *testing.T)
 	require.Equal(t, http.StatusGatewayTimeout, failoverErr.StatusCode)
 	require.Contains(t, string(failoverErr.ResponseBody), "first_output_timeout")
 	require.True(t, failoverErr.SafeToFailoverAfterWrite)
+	require.True(t, IsUpstreamTransportFailure(failoverErr))
+	require.False(t, failoverErr.ShouldReportAccountScheduleFailure())
 	require.Less(t, time.Since(started), 1300*time.Millisecond)
 	require.Empty(t, rec.Body.String())
 	select {

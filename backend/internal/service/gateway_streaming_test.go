@@ -246,6 +246,12 @@ func TestHandleStreamingResponse_StreamReadErrorBeforeOutput_TriggersFailover(t 
 	require.True(t, errors.As(err, &failoverErr), "未输出过字节时 stream read error 必须包成 UpstreamFailoverError，期望: %v", err)
 	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
 	require.True(t, failoverErr.RetryableOnSameAccount, "GOAWAY 类错误应允许同账号重试")
+	require.True(t, failoverErr.TransportFailure)
+	require.False(t, failoverErr.ShouldReportAccountScheduleFailure())
+	repo := &transportTempUnschedRepoStub{}
+	svc.accountRepo = repo
+	svc.TempUnscheduleRetryableError(context.Background(), 1, failoverErr)
+	require.Zero(t, repo.calls, "网络读错重试耗尽不应冷却账号")
 
 	// ResponseBody 必须是 Anthropic 标准 error 格式：
 	// 1) ExtractUpstreamErrorMessage 能正确从 error.message 提取消息（被 handleFailoverExhausted / ops 日志依赖）

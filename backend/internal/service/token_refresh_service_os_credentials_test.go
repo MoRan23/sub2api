@@ -5,6 +5,8 @@ package service
 import (
 	"context"
 	"errors"
+	"fmt"
+	"net"
 	"sync"
 	"testing"
 	"time"
@@ -197,7 +199,7 @@ func TestTokenRefreshService_OpenAISharedGrantFailurePreservesRevisionGuard(t *t
 				if stale {
 					repo.slots[OpenAIOSLinux].Revision++
 				}
-				failure := errors.New("upstream timeout")
+				failure := errors.New("token refresh failed: status 503, body: upstream timeout")
 				if permanent {
 					failure = errors.New("invalid_grant")
 				}
@@ -231,6 +233,32 @@ func TestTokenRefreshService_OpenAISharedGrantFailurePreservesRevisionGuard(t *t
 				}
 			})
 		}
+	}
+}
+
+func TestTokenRefreshService_OpenAISharedGrantNetworkFailureDoesNotMutateState(t *testing.T) {
+	account, repo := newTokenRefreshOSFixture(t)
+	scoped, err := ResolveOpenAIOAuthCredentialAccount(context.Background(), repo, account, OpenAIOSLinux)
+	require.NoError(t, err)
+	blocker := &tokenRefreshRuntimeBlocker{}
+	invalidator := &tokenCacheInvalidatorStub{}
+	svc := &TokenRefreshService{accountRepo: repo, runtimeBlocker: blocker, cacheInvalidator: invalidator,
+		cfg: &config.TokenRefreshConfig{MaxRetries: 2}}
+	failure := fmt.Errorf("refresh request: %w", &net.DNSError{Name: "oauth.example", Err: "no such host"})
+	refresher := &tokenRefresherStub{err: failure}
+
+	err = svc.refreshWithRetry(context.Background(), scoped, refresher, nil, time.Hour)
+
+	require.ErrorIs(t, err, failure)
+	require.Equal(t, 2, refresher.calls)
+	require.Zero(t, repo.slotErrors+repo.slotCooldowns+repo.setErrorCalls+repo.setTempUnschedCalls)
+	require.Zero(t, blocker.blockCalls+invalidator.calls)
+	require.Equal(t, StatusActive, account.Status)
+	require.True(t, account.Schedulable)
+	require.Nil(t, account.TempUnschedulableUntil)
+	for _, slot := range repo.slots {
+		require.Nil(t, slot.RefreshRetryAfter)
+		require.Equal(t, OpenAIOAuthAuthorizationAuthorized, slot.Status)
 	}
 }
 

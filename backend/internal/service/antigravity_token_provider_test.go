@@ -4,7 +4,11 @@ package service
 
 import (
 	"context"
+	"errors"
+	"fmt"
+	"net"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 )
@@ -94,4 +98,39 @@ func TestAntigravityTokenProvider_GetAccessToken_Guards(t *testing.T) {
 		require.Contains(t, err.Error(), "not an antigravity oauth account")
 		require.Empty(t, token)
 	})
+}
+
+func TestAntigravityTokenProvider_RefreshFailureOnlyCoolsUpstreamRejections(t *testing.T) {
+	for _, tt := range []struct {
+		name     string
+		err      error
+		cooldown int
+	}{
+		{"network", fmt.Errorf("refresh request: %w", &net.DNSError{Name: "oauth.example", Err: "no such host"}), 0},
+		{"timeout", context.DeadlineExceeded, 0},
+		{"canceled", context.Canceled, 0},
+		{"marked transport", MarkUpstreamTransportFailure(errors.New("proxy connection failed")), 0},
+		{"HTTP 503", errors.New("token 刷新失败 (HTTP 503): dial tcp: connection refused"), 1},
+		{"invalid grant", errors.New("invalid_grant: revoked refresh token"), 1},
+	} {
+		t.Run(tt.name, func(t *testing.T) {
+			account := &Account{ID: 21, Platform: PlatformAntigravity, Type: AccountTypeOAuth, Status: StatusActive,
+				Credentials: map[string]any{"access_token": "old-token", "refresh_token": "refresh-token", "expires_at": time.Now().Add(-time.Minute).Unix()}}
+			repo := &tokenRefreshAccountRepo{}
+			cache := &tempUnschedCacheStub{}
+			provider := NewAntigravityTokenProvider(repo, nil, nil)
+			provider.SetTempUnschedCache(cache)
+			executor := &refreshAPIExecutorStub{needsRefresh: true, err: tt.err}
+			apiRepo := &refreshAPIAccountRepo{account: account}
+			provider.SetRefreshAPI(NewOAuthRefreshAPI(apiRepo, nil), executor)
+
+			_, err := provider.GetAccessToken(context.Background(), account)
+
+			require.ErrorIs(t, err, tt.err)
+			require.Equal(t, 1, executor.refreshCalls)
+			require.Equal(t, tt.cooldown, repo.setTempUnschedCalls)
+			require.Equal(t, tt.cooldown, cache.setCalls)
+			require.Zero(t, repo.setErrorCalls+repo.clearTempCalls+cache.deleteCalls)
+		})
+	}
 }

@@ -7,7 +7,6 @@ import (
 	"errors"
 	"net/http"
 	"net/http/httptest"
-	"strings"
 	"testing"
 	"time"
 
@@ -57,6 +56,9 @@ func TestHandleUpstreamTransportError_TransientFailsOverWithoutEviction(t *testi
 	}
 	if failoverErr.StatusCode != http.StatusBadGateway {
 		t.Fatalf("StatusCode = %d, want 502", failoverErr.StatusCode)
+	}
+	if !failoverErr.TransportFailure {
+		t.Fatal("network source must survive the synthetic 502")
 	}
 	if string(failoverErr.ResponseBody) != string(gatewayTransportFailoverBody) {
 		t.Fatalf("ResponseBody = %s, want legacy 502 body", failoverErr.ResponseBody)
@@ -127,16 +129,12 @@ func TestHandleUpstreamTransportError_AttributesEventTimeProxy(t *testing.T) {
 	}
 }
 
-// TestHandleUpstreamTransportError_PersistentEvictsAccount pins the contract
-// for durable faults (dead endpoint / DNS / proxy credentials): fail over AND
-// temporarily unschedule the account for the transport cooldown.
-func TestHandleUpstreamTransportError_PersistentEvictsAccount(t *testing.T) {
+func TestHandleUpstreamTransportError_ConnectionRefusedDoesNotCoolAccount(t *testing.T) {
 	repo := &transportTempUnschedRepoStub{}
 	s := &GatewayService{accountRepo: repo}
 	c := newTransportErrorTestGin(t)
 	account := &Account{ID: 149, Name: "acc", Platform: PlatformAnthropic}
 
-	before := time.Now()
 	err := s.handleUpstreamTransportError(context.Background(), c, account,
 		errors.New(`dial tcp 1.2.3.4:443: connect: connection refused`), OpsUpstreamErrorEvent{})
 
@@ -144,18 +142,11 @@ func TestHandleUpstreamTransportError_PersistentEvictsAccount(t *testing.T) {
 	if !errors.As(err, &failoverErr) {
 		t.Fatalf("expected *UpstreamFailoverError, got %T: %v", err, err)
 	}
-	if repo.calls != 1 {
-		t.Fatalf("SetTempUnschedulable called %d times for a persistent error, want 1", repo.calls)
+	if repo.calls != 0 {
+		t.Fatalf("SetTempUnschedulable called %d times for a network error, want 0", repo.calls)
 	}
-	if repo.lastID != account.ID {
-		t.Fatalf("unscheduled account = %d, want %d", repo.lastID, account.ID)
-	}
-	wantUntil := before.Add(gatewayTransportErrorTempUnschedDuration)
-	if repo.lastUntil.Before(wantUntil.Add(-time.Minute)) || repo.lastUntil.After(wantUntil.Add(time.Minute)) {
-		t.Fatalf("until = %v, want ~%v", repo.lastUntil, wantUntil)
-	}
-	if !strings.HasPrefix(repo.lastReason, "upstream transport error (proxy/network): ") {
-		t.Fatalf("reason = %q, want transport-error prefix", repo.lastReason)
+	if !failoverErr.TransportFailure || failoverErr.ShouldReportAccountScheduleFailure() {
+		t.Fatal("network source must exclude scheduler penalties")
 	}
 }
 

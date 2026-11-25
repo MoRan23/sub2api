@@ -3093,6 +3093,9 @@ func (s *OpenAIGatewayService) handleStreamingResponsePassthrough(
 			if errText := strings.TrimSpace(err.Error()); errText != "" {
 				msg += ": " + errText
 			}
+			if IsUpstreamNetworkError(err) {
+				return resultWithUsage(), s.newOpenAIStreamTransportFailoverError(c, account, true, upstreamRequestID, msg)
+			}
 			return resultWithUsage(),
 				s.newOpenAIStreamFailoverError(c, account, true, upstreamRequestID, nil, msg)
 		}

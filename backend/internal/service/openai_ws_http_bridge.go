@@ -737,6 +737,9 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 			if writeErr := writeClientMessage(clientError); writeErr == nil {
 				markOpenAIWSClientVisibleFailure(c, "error", clientError)
 			}
+			if IsUpstreamNetworkError(err) {
+				return nil, MarkUpstreamTransportFailure(fmt.Errorf("upstream http bridge request failed: %s", safeErr))
+			}
 			return nil, fmt.Errorf("upstream http bridge request failed: %s", safeErr)
 		}
 		if resp.StatusCode < 400 {
@@ -1333,6 +1336,9 @@ func (s *OpenAIGatewayService) proxyOpenAIWSHTTPBridgeTurn(
 		return resultWithUsage(), errors.New(bareErrorMessage)
 	}
 	if err := scanner.Err(); err != nil {
+		if IsUpstreamNetworkError(err) {
+			err = MarkUpstreamTransportFailure(err)
+		}
 		streamErr := fmt.Errorf("read upstream http bridge stream: %w", err)
 		if turn == 1 && !clientDisconnected && !wroteDownstream {
 			return nil, s.handleOpenAIUpstreamTransportError(ctx, c, account, streamErr, true)

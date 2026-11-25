@@ -77,8 +77,14 @@ func newOpenAIWSUnsupportedModelSwitchError(model string) error {
 	return service.NewOpenAIWSClientCloseError(coderws.StatusPolicyViolation, "model switch requires reconnect", cause)
 }
 
-func shouldReportOpenAIWSProxyAccountFailure(err error) bool {
-	return err != nil && !errors.Is(err, service.ErrGrokSafetyRejected) && !errors.Is(err, errOpenAIWSUnsupportedModelSwitch) && !service.IsOpenAIWSSessionPreemptedError(err) && !service.IsOpenAIWSInterruptCleanupError(err)
+func shouldReportOpenAIWSProxyAccountFailure(c *gin.Context, err error) bool {
+	return err != nil && service.GetOpsCyberPolicy(c) == nil &&
+		!errors.Is(err, service.ErrGrokSafetyRejected) &&
+		!errors.Is(err, errOpenAIWSUnsupportedModelSwitch) &&
+		!service.IsOpenAIWSCyberPolicyError(err) &&
+		!service.IsOpenAIWSTransportFailure(err) &&
+		!service.IsOpenAIWSSessionPreemptedError(err) &&
+		!service.IsOpenAIWSInterruptCleanupError(err)
 }
 
 // openAIWSIngressEndedByClient reports whether a finished ingress WebSocket turn
@@ -115,7 +121,7 @@ func shouldReportOpenAIWSProxyAccountFailure(err error) bool {
 // client-cancellation case is already covered by context.Canceled.
 // context.DeadlineExceeded is left out as well — the idle-timeout path wraps it
 // in a 1000 close error and stays benign through the first check, while any
-// other deadline is a genuine stall worth reporting.
+// other deadlines still use the proxy-failure response and cleanup path.
 func openAIWSIngressEndedByClient(err error) bool {
 	if err == nil {
 		return true
@@ -3427,7 +3433,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				if account.IsCodexEngine() {
 					// Durable per-turn receipts own settlement even after disconnect or
 					// failure; public context usage must never enter the legacy queue.
-					if result != nil && !cyberMarked {
+					if result != nil && !cyberMarked && !service.IsOpenAIWSTransportFailure(turnErr) {
 						h.gatewayService.ReportOpenAIAccountScheduleResult(account, turnUpstreamModel, openAIForwardSucceededForScheduling(result), result.FirstTokenMs)
 					}
 					return
@@ -3462,7 +3468,9 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 					if scheduleModel == "" {
 						scheduleModel = turnRequestedModel
 					}
-					h.gatewayService.ReportOpenAIAccountScheduleResult(account, scheduleModel, openAIForwardSucceededForScheduling(result), result.FirstTokenMs)
+					if !service.IsOpenAIWSTransportFailure(turnErr) {
+						h.gatewayService.ReportOpenAIAccountScheduleResult(account, scheduleModel, openAIForwardSucceededForScheduling(result), result.FirstTokenMs)
+					}
 				}
 				inboundEndpoint := GetInboundEndpoint(c)
 				upstreamEndpoint := resolveOpenAIUpstreamEndpoint(c, account, result)
@@ -3646,7 +3654,7 @@ func (h *OpenAIGatewayHandler) ResponsesWebSocket(c *gin.Context) {
 				return
 			}
 
-			if shouldReportOpenAIWSProxyAccountFailure(err) {
+			if shouldReportOpenAIWSProxyAccountFailure(c, err) {
 				h.gatewayService.ReportOpenAIAccountScheduleResult(account, openAIAccountScheduleModel(c, account, wsForwardModel, false, nil), false, nil, err)
 			}
 			closeStatus, closeReason := summarizeWSCloseErrorForLog(err)

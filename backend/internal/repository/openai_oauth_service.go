@@ -69,7 +69,7 @@ func (s *openaiOAuthService) ExchangeCode(ctx context.Context, code, codeVerifie
 		if shouldReturnOpenAINoProxyHint(ctx, proxyURL, err) {
 			return nil, newOpenAINoProxyHintError(err)
 		}
-		return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_OAUTH_REQUEST_FAILED", "request failed: %v", err)
+		return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_OAUTH_REQUEST_FAILED", "request failed: %v", err).WithCause(err)
 	}
 
 	if !resp.IsSuccessState() {
@@ -122,7 +122,7 @@ func (s *openaiOAuthService) refreshTokenWithClientID(ctx context.Context, refre
 		if shouldReturnOpenAINoProxyHint(ctx, proxyURL, err) {
 			return nil, newOpenAINoProxyHintError(err)
 		}
-		return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_OAUTH_REQUEST_FAILED", "request failed: %v", err)
+		return nil, infraerrors.Newf(http.StatusBadGateway, "OPENAI_OAUTH_REQUEST_FAILED", "request failed: %v", err).WithCause(err)
 	}
 
 	if !resp.IsSuccessState() {

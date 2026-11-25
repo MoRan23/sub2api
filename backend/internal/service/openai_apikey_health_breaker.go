@@ -23,9 +23,15 @@ func classifyOpenAIAPIKeyHealthFailure(err error) (int, []byte, bool) {
 	if err == nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 		return 0, nil, false
 	}
+	if IsUpstreamTransportFailure(err) {
+		return 0, nil, false
+	}
 
 	var failoverErr *UpstreamFailoverError
 	if errors.As(err, &failoverErr) {
+		if cyber, _, _ := detectOpenAICyberPolicy(failoverErr.ResponseBody); cyber {
+			return failoverErr.StatusCode, failoverErr.ResponseBody, false
+		}
 		// These failures already have dedicated recovery/state handling or are not
 		// attributable to the selected account.
 		if failoverErr.IsCredentialFailure() ||
@@ -43,6 +49,9 @@ func classifyOpenAIAPIKeyHealthFailure(err error) (int, []byte, bool) {
 
 	var imageErr *OpenAIImagesUpstreamError
 	if errors.As(err, &imageErr) {
+		if strings.EqualFold(strings.TrimSpace(imageErr.Code), "cyber_policy") {
+			return imageErr.StatusCode, nil, false
+		}
 		if imageErr.StatusCode == http.StatusTooManyRequests || imageErr.StatusCode >= http.StatusInternalServerError {
 			return imageErr.StatusCode, []byte(strings.TrimSpace(imageErr.Message)), true
 		}

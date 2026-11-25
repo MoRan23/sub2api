@@ -2,9 +2,13 @@ package service
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"net/http"
 	"strings"
+
+	"github.com/gin-gonic/gin"
 )
 
 const (
@@ -37,10 +41,44 @@ func (e *openAIUpstreamStreamReadError) Unwrap() error { return e.cause }
 
 func newOpenAIUpstreamStreamReadError(err error) error {
 	code, message := classifyOpenAIUpstreamStreamReadError(err)
+	if IsUpstreamNetworkError(err) {
+		err = MarkUpstreamTransportFailure(err)
+	}
 	return &openAIUpstreamStreamReadError{
 		cause:         err,
 		clientCode:    code,
 		clientMessage: message,
+	}
+}
+
+// Network read failures can be retried without changing account health or cooldowns.
+func (s *OpenAIGatewayService) newOpenAIStreamTransportFailoverError(
+	c *gin.Context,
+	account *Account,
+	passthrough bool,
+	upstreamRequestID string,
+	message string,
+	responseHeaders ...http.Header,
+) *UpstreamFailoverError {
+	if isOpenAICandyTestContext(c) || isOpenAICandyTestAccount(account) {
+		return &UpstreamFailoverError{StatusCode: http.StatusBadGateway, TransportFailure: true}
+	}
+	message = sanitizeUpstreamErrorMessage(strings.TrimSpace(message))
+	if message == "" {
+		message = "OpenAI stream disconnected before completion"
+	}
+	message = s.recordOpenAIStreamUpstreamError(c, account, passthrough, upstreamRequestID, "failover", nil, message)
+	var headers http.Header
+	if len(responseHeaders) > 0 && responseHeaders[0] != nil {
+		headers = responseHeaders[0].Clone()
+	}
+	body, _ := json.Marshal(gin.H{"error": gin.H{"type": "upstream_error", "message": message}})
+	return &UpstreamFailoverError{
+		StatusCode:             http.StatusBadGateway,
+		ResponseBody:           body,
+		ResponseHeaders:        headers,
+		TransportFailure:       true,
+		RetryableOnSameAccount: openAIStreamFailedEventRetryableOnSameAccount(account, nil, message),
 	}
 }
 

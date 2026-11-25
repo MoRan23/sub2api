@@ -933,6 +933,11 @@ func (s *OpenAIGatewayService) newOpenAICompatBufferedReadFailoverError(
 	if resp != nil {
 		responseHeaders = resp.Header
 	}
+	if IsUpstreamTransportFailure(classifiedErr) {
+		failoverErr := s.newOpenAIStreamTransportFailoverError(c, account, false, requestID, message, responseHeaders)
+		failoverErr.ResponseBody = payload
+		return failoverErr
+	}
 	failoverErr := s.newOpenAIStreamFailoverError(c, account, false, requestID, payload, message, responseHeaders)
 	// 保留稳定错误码，确保重试耗尽后客户端和错误透传规则仍能识别传输故障。
 	failoverErr.ResponseBody = payload

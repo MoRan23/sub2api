@@ -2148,8 +2148,12 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthResponseError(
 			return err
 		}
 		responseBody := []byte(fmt.Sprintf(`{"error":{"type":"upstream_error","code":%q,"message":%q}}`, code, message))
-		shouldDisable := s.handleOpenAIAccountUpstreamError(ctx, account, statusCode, headers, responseBody, requestedModel)
-		return s.newOpenAIAccountFailoverError(
+		transportFailure := IsUpstreamNetworkError(err)
+		shouldDisable := false
+		if !transportFailure {
+			shouldDisable = s.handleOpenAIAccountUpstreamError(ctx, account, statusCode, headers, responseBody, requestedModel)
+		}
+		failoverErr := s.newOpenAIAccountFailoverError(
 			account,
 			statusCode,
 			headers,
@@ -2158,6 +2162,8 @@ func (s *OpenAIGatewayService) handleOpenAIImagesOAuthResponseError(
 			shouldDisable,
 			!shouldDisable && account.IsPoolMode() && account.IsPoolModeRetryableStatus(statusCode),
 		)
+		failoverErr.TransportFailure = transportFailure
+		return failoverErr
 	}
 	var upstreamErr *OpenAIImagesUpstreamError
 	if !errors.As(err, &upstreamErr) {

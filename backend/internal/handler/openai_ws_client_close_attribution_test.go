@@ -79,7 +79,7 @@ func TestOpenAIWSIngressEndedByClient_GoingAwayWithoutCancellationStillReported(
 		coderws.StatusGoingAway, "upstream going away", errors.New("upstream closed session"))
 
 	require.False(t, openAIWSIngressEndedByClient(err))
-	require.True(t, shouldReportOpenAIWSProxyAccountFailure(err), "真实上游故障仍须归因账号")
+	require.True(t, shouldReportOpenAIWSProxyAccountFailure(nil, err), "真实上游故障仍须归因账号")
 }
 
 // 契约没有丢：真正的故障仍然惩罚账号。判定组合与调用点一致——
@@ -101,25 +101,26 @@ func TestOpenAIWSIngressEndedByClient_AbnormalClosuresStillReportAccountFailure(
 				coderws.StatusInternalError, "upstream websocket proxy failed", nil),
 		},
 		{
-			name: "bare_abnormal_closure",
-			err:  coderws.CloseError{Code: coderws.StatusAbnormalClosure, Reason: "connection reset"},
-		},
-		{
 			name: "generic_read_failure",
 			err:  errors.New("upstream websocket read failed"),
-		},
-		{
-			// 空闲超时之外的 deadline 是真实停滞：不豁免。
-			name: "deadline_without_normal_close",
-			err:  fmt.Errorf("upstream stalled: %w", context.DeadlineExceeded),
 		},
 	}
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			require.False(t, openAIWSIngressEndedByClient(tc.err))
-			require.True(t, shouldReportOpenAIWSProxyAccountFailure(tc.err))
+			require.True(t, shouldReportOpenAIWSProxyAccountFailure(nil, tc.err))
 		})
+	}
+}
+
+func TestOpenAIWSIngressNetworkFailuresKeepFailureResponseWithoutAccountPenalty(t *testing.T) {
+	for _, err := range []error{
+		coderws.CloseError{Code: coderws.StatusAbnormalClosure, Reason: "connection reset"},
+		fmt.Errorf("upstream stalled: %w", context.DeadlineExceeded),
+	} {
+		require.False(t, openAIWSIngressEndedByClient(err))
+		require.False(t, shouldReportOpenAIWSProxyAccountFailure(nil, err))
 	}
 }
 

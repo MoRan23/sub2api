@@ -20,7 +20,7 @@ import (
 // Gemini 传输层失败（Do 返回非 HTTP 错误）的契约，三条转发路径一致：
 //   - 不在同账号上重试，单次尝试后立即返回 *UpstreamFailoverError(502) 交给 handler 换号；
 //   - service 不写客户端响应；
-//   - 瞬时故障不摘号，持久性故障临时摘号；
+//   - 网络故障不摘号；
 //   - 客户端断开原样返回，不换号、不摘号；
 //   - countTokens 以本地估算兜底。
 // ---------------------------------------------------------------------------
@@ -43,6 +43,8 @@ func requireGeminiTransportFailover(t *testing.T, err error) *UpstreamFailoverEr
 	var failoverErr *UpstreamFailoverError
 	require.True(t, errors.As(err, &failoverErr), "传输层错误应换号，got %T: %v", err, err)
 	require.Equal(t, http.StatusBadGateway, failoverErr.StatusCode)
+	require.True(t, failoverErr.TransportFailure)
+	require.False(t, failoverErr.ShouldReportAccountScheduleFailure())
 	require.Equal(t, string(geminiTransportFailoverBody), string(failoverErr.ResponseBody))
 	require.True(t, failoverErr.ShouldRetryNextAccount())
 	require.False(t, failoverErr.RetryableOnSameAccount, "传输层错误不做同账号重试")
@@ -75,21 +77,18 @@ func TestGeminiForwardNative_TransientTransportErrorFailsOverWithoutRetry(t *tes
 	require.Zero(t, events[0].UpstreamStatusCode)
 }
 
-func TestGeminiForwardNative_PersistentTransportErrorEvictsAccount(t *testing.T) {
+func TestGeminiForwardNative_ConnectionRefusedDoesNotCoolAccount(t *testing.T) {
 	gin.SetMode(gin.TestMode)
 	svc, httpStub, repo := newGeminiTransportErrorService(errors.New(`dial tcp 1.2.3.4:443: connect: connection refused`))
 	c, _ := newGeminiNativeTestContext(t)
 	account := geminiPoolModeAPIKeyAccount()
 
-	before := time.Now()
 	_, err := svc.ForwardNative(context.Background(), c, account,
 		"gemini-2.5-flash", "streamGenerateContent", true, []byte(geminiTransportTestNativeBody))
 
 	requireGeminiTransportFailover(t, err)
 	require.Equal(t, 1, httpStub.calls)
-	require.Equal(t, 1, repo.calls, "持久性故障应临时摘号")
-	require.Equal(t, account.ID, repo.lastID)
-	require.WithinDuration(t, before.Add(gatewayTransportErrorTempUnschedDuration), repo.lastUntil, 5*time.Second)
+	require.Zero(t, repo.calls, "网络故障不应临时摘号")
 	require.False(t, c.Writer.Written())
 }
 

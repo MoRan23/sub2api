@@ -1156,13 +1156,16 @@ func (s *TokenRefreshService) refreshWithRetryWithRateGate(
 		return err
 	}
 
-	// 可重试错误耗尽：临时标记账号不可调度，避免请求路径反复命中已知失败的账号
+	// 记录重试耗尽；网络故障不作为账号冷却或凭证失效的依据。
 	slog.Warn("token_refresh.retry_exhausted",
 		"account_id", account.ID,
 		"platform", account.Platform,
 		"max_retries", maxRetries,
 		"error", logredact.RedactText(lastErr.Error()),
 	)
+	if IsUpstreamNetworkError(lastErr) {
+		return lastErr
+	}
 
 	// 设置临时不可调度 10 分钟（不标记 error，保持 status=active 让下个刷新周期能继续尝试）
 	until := time.Now().Add(tokenRefreshTempUnschedDuration)
@@ -1525,7 +1528,7 @@ func isSharedProviderRefreshError(err error) bool {
 // 这些错误通常表示凭证已失效或配置确实缺失，需要用户重新授权
 // 注意：missing_project_id 错误只在真正缺失（从未获取过）时返回，临时获取失败不会返回此错误
 func isNonRetryableRefreshError(err error) bool {
-	if err == nil {
+	if err == nil || IsUpstreamNetworkError(err) {
 		return false
 	}
 	msg := strings.ToLower(err.Error())

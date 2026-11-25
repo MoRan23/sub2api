@@ -1979,6 +1979,9 @@ func (s *OpenAIGatewayService) mapOpenAIWSPassthroughDialError(
 			Err:             err,
 		}
 	}
+	if IsOpenAIWSTransportFailure(wrappedErr) {
+		wrappedErr = MarkUpstreamTransportFailure(wrappedErr)
+	}
 
 	if errors.Is(err, context.Canceled) {
 		return err

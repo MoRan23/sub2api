@@ -20,6 +20,8 @@ func TestGrokStreamIdleFailoverError(t *testing.T) {
 	err := grokStreamIdleFailoverError(account, 180*time.Second)
 	require.NotNil(t, err)
 	require.Equal(t, 502, err.StatusCode)
+	require.True(t, IsUpstreamTransportFailure(err))
+	require.False(t, err.ShouldReportAccountScheduleFailure())
 	require.True(t, err.SafeToFailoverAfterWrite)
 	require.True(t, err.RetryableOnSameAccount)
 	require.True(t, err.RequestScopedTransient)

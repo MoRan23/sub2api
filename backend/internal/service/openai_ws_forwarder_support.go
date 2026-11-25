@@ -18,6 +18,21 @@ import (
 // A policy rejection is an authoritative outcome, never a transport retry.
 var errOpenAIWSCyberPolicyStop = errors.New("websocket cyber policy rejection delivered")
 
+func IsOpenAIWSCyberPolicyError(err error) bool {
+	return errors.Is(err, errOpenAIWSCyberPolicyStop)
+}
+
+// A failed HTTP handshake carries authoritative upstream status; only failures
+// without an HTTP response and subsequent network I/O are transport failures.
+func IsOpenAIWSTransportFailure(err error) bool {
+	var dialErr *openAIWSDialError
+	if errors.As(err, &dialErr) && dialErr.StatusCode > 0 {
+		return false
+	}
+	return IsUpstreamNetworkError(err) ||
+		coderws.CloseStatus(err) == coderws.StatusAbnormalClosure
+}
+
 const openAIWSCyberPolicyDrainTimeout = 2 * time.Second
 
 // A bare error can precede response.failed with authoritative usage. Only drain

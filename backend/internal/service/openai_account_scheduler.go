@@ -2680,6 +2680,9 @@ func (s *OpenAIGatewayService) ReportOpenAIAccountScheduleResult(account *Accoun
 	if len(observedErr) > 0 && isCodexEngineResponseError(observedErr[0]) {
 		return false
 	}
+	if !success && len(observedErr) > 0 && IsOpenAIWSTransportFailure(observedErr[0]) {
+		return false
+	}
 	if account == nil {
 		return false
 	}

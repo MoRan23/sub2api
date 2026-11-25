@@ -812,6 +812,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnTransportErrorFailoverSafety(t *testing.T) {
 				require.Error(t, err)
 				require.False(t, errors.As(err, &failoverErr))
 			}
+			require.True(t, IsUpstreamTransportFailure(err), "both first and later turns must preserve network provenance")
 			require.Len(t, writes, tt.wantWrites)
 			if tt.wantWrites > 0 {
 				require.Equal(t, "error", gjson.GetBytes(writes[0], "type").String())
@@ -1601,6 +1602,7 @@ func TestProxyOpenAIWSHTTPBridgeTurnRequiresTerminalEvent(t *testing.T) {
 			)
 
 			var failoverErr *UpstreamFailoverError
+			require.False(t, IsUpstreamTransportFailure(err), "missing terminal without network evidence remains an integrity failure")
 			if tt.wantFailover {
 				require.Nil(t, result)
 				require.ErrorAs(t, err, &failoverErr)

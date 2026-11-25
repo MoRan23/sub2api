@@ -771,6 +771,9 @@ readLoop:
 				return nil, wrapOpenAIWSFallback(classifyOpenAIWSReadFallbackReason(readErr), readErr)
 			}
 			setOpsUpstreamError(c, 0, sanitizeUpstreamErrorMessage(readErr.Error()), "")
+			if IsOpenAIWSTransportFailure(readErr) {
+				readErr = MarkUpstreamTransportFailure(readErr)
+			}
 			return nil, fmt.Errorf("openai ws read event: %w", readErr)
 		}
 		if normalized, changed := normalizeCompletedImageGenerationStatus(message); changed {

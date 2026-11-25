@@ -4,7 +4,9 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"math"
+	"net/http"
 	"strconv"
 	"sync"
 	"testing"
@@ -2955,6 +2957,36 @@ func TestOpenAIAccountScheduler_SkipsAccountBlockedForRequestedModel(t *testing.
 
 	require.False(t, scheduler.isAccountRequestCompatible(context.Background(), account, OpenAIAccountScheduleRequest{RequestedModel: "gpt-5.5"}))
 	require.True(t, scheduler.isAccountRequestCompatible(context.Background(), account, OpenAIAccountScheduleRequest{RequestedModel: "gpt-5.6-sol"}))
+}
+
+func TestReportOpenAIAccountScheduleResult_NetworkFailuresDoNotIncreaseSchedulerErrorRate(t *testing.T) {
+	svc := &OpenAIGatewayService{rateLimitService: newOpenAIAdvancedSchedulerRateLimitService("true")}
+	t.Cleanup(resetOpenAIAdvancedSchedulerSettingCacheForTest)
+	scheduler := svc.getOpenAIAccountScheduler(context.Background()).(*defaultOpenAIAccountScheduler)
+	account := &Account{ID: 21637, Platform: PlatformOpenAI, Type: AccountTypeOAuth}
+
+	for _, err := range []error{
+		MarkUpstreamTransportFailure(&PluginTransportError{RequestSent: true, Message: "upstream disconnected"}),
+		newOpenAIUpstreamStreamReadError(io.ErrUnexpectedEOF),
+		fmt.Errorf("stream read: %w", io.ErrUnexpectedEOF),
+		context.DeadlineExceeded,
+		&UpstreamFailoverError{StatusCode: http.StatusBadGateway, TransportFailure: true},
+	} {
+		svc.ReportOpenAIAccountScheduleResult(account, "gpt-5.6-sol", false, nil, err)
+		rate, _, _ := scheduler.stats.snapshot(account.ID)
+		require.Zero(t, rate)
+		require.Zero(t, scheduler.stats.accountCount.Load(), "network errors must not create scheduler failure samples")
+	}
+
+	svc.ReportOpenAIAccountScheduleResult(account, "gpt-5.6-sol", false, nil, &UpstreamFailoverError{StatusCode: http.StatusBadGateway})
+	rate, _, _ := scheduler.stats.snapshot(account.ID)
+	require.InDelta(t, 0.2, rate, 1e-9)
+	svc.ReportOpenAIAccountScheduleResult(account, "gpt-5.6-sol", false, nil, &openAIWSDialError{StatusCode: http.StatusBadGateway, Err: io.ErrUnexpectedEOF})
+	rate, _, _ = scheduler.stats.snapshot(account.ID)
+	require.InDelta(t, 0.36, rate, 1e-9, "real HTTP handshake errors remain account failures")
+	svc.ReportOpenAIAccountScheduleResult(account, "gpt-5.6-sol", true, nil)
+	rate, _, _ = scheduler.stats.snapshot(account.ID)
+	require.InDelta(t, 0.288, rate, 1e-9, "successful requests continue to update scheduler health")
 }
 
 func TestReportOpenAIAccountScheduleResult_SuccessClearsModelTransientState(t *testing.T) {

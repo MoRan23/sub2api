@@ -1749,9 +1749,31 @@ func TestOpenAIChannelForwardModelForScheduler(t *testing.T) {
 }
 
 func TestShouldReportOpenAIWSProxyAccountFailure(t *testing.T) {
+	t.Run("network failures do not penalize account", func(t *testing.T) {
+		for _, err := range []error{
+			fmt.Errorf("read upstream: %w", io.ErrUnexpectedEOF),
+			context.DeadlineExceeded,
+			service.MarkUpstreamTransportFailure(errors.New("sanitized network failure")),
+			&service.UpstreamFailoverError{StatusCode: http.StatusBadGateway, TransportFailure: true},
+		} {
+			require.False(t, shouldReportOpenAIWSProxyAccountFailure(nil, err))
+		}
+	})
+
+	t.Run("cyber policy marker does not penalize account", func(t *testing.T) {
+		c, _ := gin.CreateTestContext(httptest.NewRecorder())
+		service.MarkOpsCyberPolicy(c, service.CyberPolicyMark{})
+		require.False(t, shouldReportOpenAIWSProxyAccountFailure(c, errors.New("upstream failed")))
+	})
+
+	t.Run("real HTTP 502 still penalizes account", func(t *testing.T) {
+		err := &service.UpstreamFailoverError{StatusCode: http.StatusBadGateway, ResponseBody: []byte(`{"error":{"message":"unexpected EOF"}}`)}
+		require.True(t, shouldReportOpenAIWSProxyAccountFailure(nil, err))
+	})
+
 	t.Run("interrupt cleanup does not penalize account", func(t *testing.T) {
 		err := fmt.Errorf("wrapped ingress turn: %w", service.NewOpenAIWSInterruptCleanupError())
-		require.False(t, shouldReportOpenAIWSProxyAccountFailure(err))
+		require.False(t, shouldReportOpenAIWSProxyAccountFailure(nil, err))
 		var closeErr *service.OpenAIWSClientCloseError
 		require.ErrorAs(t, err, &closeErr)
 		require.Equal(t, coderws.StatusTryAgainLater, closeErr.StatusCode())
@@ -1759,7 +1781,7 @@ func TestShouldReportOpenAIWSProxyAccountFailure(t *testing.T) {
 
 	t.Run("unsupported client model switch does not penalize account", func(t *testing.T) {
 		err := fmt.Errorf("wrapped ingress turn: %w", newOpenAIWSUnsupportedModelSwitchError("gpt-unsupported"))
-		require.False(t, shouldReportOpenAIWSProxyAccountFailure(err))
+		require.False(t, shouldReportOpenAIWSProxyAccountFailure(nil, err))
 
 		var closeErr *service.OpenAIWSClientCloseError
 		require.ErrorAs(t, err, &closeErr)
@@ -1773,11 +1795,11 @@ func TestShouldReportOpenAIWSProxyAccountFailure(t *testing.T) {
 			"upstream websocket authentication failed",
 			errors.New("upstream rejected credentials"),
 		)
-		require.True(t, shouldReportOpenAIWSProxyAccountFailure(err))
+		require.True(t, shouldReportOpenAIWSProxyAccountFailure(nil, err))
 	})
 
 	t.Run("generic proxy failure still penalizes account", func(t *testing.T) {
-		require.True(t, shouldReportOpenAIWSProxyAccountFailure(errors.New("upstream websocket read failed")))
+		require.True(t, shouldReportOpenAIWSProxyAccountFailure(nil, errors.New("upstream websocket read failed")))
 	})
 }
 
