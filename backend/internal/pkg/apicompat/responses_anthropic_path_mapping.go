@@ -90,6 +90,20 @@ func responsesAnthropicPathMessages(raw json.RawMessage) ([]responsesAnthropicPa
 	var messages []responsesAnthropicPathMessage
 	for i, item := range items {
 		prefix := fmt.Sprintf("input.%d.content", i)
+		if item.standaloneLabel != "" {
+			// Mapping compares block shapes, so omit media payloads from this projection.
+			sources := responsesStandaloneOutputSources(item.outputRaw, item.Output, fmt.Sprintf("input.%d.output", i))
+			blocks := make([]responsesAnthropicPathBlock, len(sources))
+			for index, source := range sources {
+				blocks[index].block.Type = "text"
+				if index > 0 && source == "" {
+					blocks[index].block.Type = "image"
+				}
+				blocks[index].source = source
+			}
+			messages = append(messages, responsesAnthropicPathFromBlocks("user", blocks))
+			continue
+		}
 		switch {
 		case item.Role == "system" || item.Role == "developer":
 			// These fields are joined with instructions in system. There is no
@@ -106,8 +120,9 @@ func responsesAnthropicPathMessages(raw json.RawMessage) ([]responsesAnthropicPa
 			}}}))
 		case item.Type == "function_call_output":
 			responsesAnthropicPathDiscard(item.Content, prefix, paths)
+			content, _ := responsesFunctionOutputToAnthropicContent(item)
 			messages = append(messages, responsesAnthropicPathFromBlocks("user", []responsesAnthropicPathBlock{{block: AnthropicContentBlock{
-				Type: "tool_result", ToolUseID: fromResponsesCallIDToAnthropic(item.CallID), Content: responsesFunctionOutputToAnthropicContent(item),
+				Type: "tool_result", ToolUseID: fromResponsesCallIDToAnthropic(item.CallID), Content: content,
 			}}}))
 		case item.Type == "reasoning":
 			responsesAnthropicPathDiscard(item.Content, prefix, paths)

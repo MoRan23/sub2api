@@ -553,6 +553,16 @@ func buildChatMessagesFromItems(messages []ChatMessage, rawItems []json.RawMessa
 			continue
 		case "function_call_output", "custom_tool_call_output", "tool_search_output":
 			outputRaw := bytesTrimSpace(item["output"])
+			if label := responsesStandaloneOutputLabel(itemType, rawString(item["name"]), item["call_id"], item["namespace"], outputRaw); label != "" {
+				content, err := responsesStandaloneOutputToChatContent(label, outputRaw)
+				if err != nil {
+					return nil, nil, err
+				}
+				messages = append(messages, ChatMessage{Role: "user", Content: content})
+				pendingReasoning = ""
+				lastTurnReasoning = ""
+				continue
+			}
 			if itemType == "tool_search_output" && (len(outputRaw) == 0 || string(outputRaw) == "null") {
 				// Newer clients return discoveries in tools[] without a separate
 				// output field. Keep that useful result in Chat tool history.
@@ -793,6 +803,13 @@ func rewriteToolOutputMediaValue(value any, audio bool) (any, []ChatContentPart,
 				return nil, nil, false, err
 			}
 			return map[string]any{"type": "input_text", "text": toolOutputMediaMarker}, []ChatContentPart{part}, true, nil
+		}
+		if typed["type"] == "input_image" || typed["type"] == "image_url" {
+			imageURL, _ := recognizedToolOutputImageURL(typed)
+			fileID, _ := typed["file_id"].(string)
+			if err := rejectResponsesFileImage(imageURL, fileID); err != nil {
+				return nil, nil, false, err
+			}
 		}
 		if imageURL, ok := recognizedToolOutputImageURL(typed); ok {
 			return map[string]any{
@@ -1054,7 +1071,7 @@ func responsesContentToChatContent(raw json.RawMessage, role string) (json.RawMe
 
 	var rawParts []json.RawMessage
 	if err := json.Unmarshal(raw, &rawParts); err == nil {
-		return responsesContentPartsToChatContent(rawParts, role)
+		return responsesContentPartsToChatContent(rawParts, role, "")
 	}
 
 	var obj map[string]json.RawMessage
@@ -1068,19 +1085,47 @@ func responsesContentToChatContent(raw json.RawMessage, role string) (json.RawMe
 	return raw, nil
 }
 
-func responsesContentPartsToChatContent(rawParts []json.RawMessage, role string) (json.RawMessage, error) {
+func responsesStandaloneOutputToChatContent(label string, raw json.RawMessage) (json.RawMessage, error) {
+	if raw[0] == '"' {
+		var text string
+		if err := json.Unmarshal(raw, &text); err != nil {
+			return nil, err
+		}
+		parts := []ChatContentPart{{Type: "text", Text: label}}
+		if text != "" {
+			parts = append(parts, ChatContentPart{Type: "text", Text: text})
+		}
+		return json.Marshal(parts)
+	}
+	var parts []json.RawMessage
+	if err := json.Unmarshal(raw, &parts); err != nil {
+		return nil, err
+	}
+	return responsesContentPartsToChatContent(parts, "user", label)
+}
+
+func responsesContentPartsToChatContent(rawParts []json.RawMessage, role, contextLabel string) (json.RawMessage, error) {
 	var textParts []string
 	var chatParts []ChatContentPart
 	hasNonText := false
+	if contextLabel != "" {
+		chatParts = append(chatParts, ChatContentPart{Type: "text", Text: contextLabel})
+	}
 
 	for _, rawPart := range rawParts {
 		var part map[string]json.RawMessage
 		if err := json.Unmarshal(rawPart, &part); err != nil {
+			if contextLabel != "" {
+				return nil, fmt.Errorf("Chat bridge requires standalone output content parts to be objects")
+			}
 			continue
 		}
 		partType := rawString(part["type"])
 		switch partType {
 		case "input_text", "output_text", "text", "":
+			if contextLabel != "" && (len(part["text"]) == 0 || bytesTrimSpace(part["text"])[0] != '"') {
+				return nil, fmt.Errorf("Chat bridge requires standalone output text to be a string")
+			}
 			text := rawString(part["text"])
 			if text == "" {
 				continue
@@ -1092,7 +1137,13 @@ func responsesContentPartsToChatContent(rawParts []json.RawMessage, role string)
 			if imageURL == "" {
 				imageURL = rawNestedString(part["image_url"], "url")
 			}
+			if err := rejectResponsesFileImage(imageURL, rawString(part["file_id"])); err != nil {
+				return nil, err
+			}
 			if imageURL == "" {
+				if contextLabel != "" {
+					return nil, fmt.Errorf("Chat bridge requires standalone input_image.image_url")
+				}
 				continue
 			}
 			hasNonText = true
@@ -1110,10 +1161,14 @@ func responsesContentPartsToChatContent(rawParts []json.RawMessage, role string)
 			}
 			hasNonText = true
 			chatParts = append(chatParts, audio)
+		default:
+			if contextLabel != "" {
+				return nil, fmt.Errorf("Chat bridge does not support standalone output content type %q", partType)
+			}
 		}
 	}
 
-	if !hasNonText {
+	if !hasNonText && contextLabel == "" {
 		joined, _ := json.Marshal(strings.Join(textParts, "\n\n"))
 		return joined, nil
 	}
@@ -1140,6 +1195,9 @@ func chatContentFromSingleResponsesPart(partType string, part map[string]json.Ra
 		imageURL := rawString(part["image_url"])
 		if imageURL == "" {
 			imageURL = rawNestedString(part["image_url"], "url")
+		}
+		if err := rejectResponsesFileImage(imageURL, rawString(part["file_id"])); err != nil {
+			return nil, err
 		}
 		return json.Marshal([]ChatContentPart{{
 			Type:     "image_url",

@@ -136,13 +136,13 @@ func TestCodex0171WSTraceContext(t *testing.T) {
 			if tc.state != "" {
 				headers.Set("tracestate", tc.state)
 			}
-			value := parseOpenAIWSTraceContext(headers)
+			value := parseOpenAITraceContext(headers)
 			require.Equal(t, tc.parentOK, value.parent != "")
 			require.Equal(t, tc.stateOK, value.state != "")
 		})
 	}
 	t.Run("duplicate_parent_dropped", func(t *testing.T) {
-		value := parseOpenAIWSTraceContext(http.Header{"Traceparent": {parent, parent}, "Tracestate": {"a=b"}})
+		value := parseOpenAITraceContext(http.Header{"Traceparent": {parent, parent}, "Tracestate": {"a=b"}})
 		require.Empty(t, value.parent)
 		require.Empty(t, value.state)
 		require.Equal(t, fingerprintMetadataInvalid, value.observation.TraceparentStatus)
@@ -153,10 +153,10 @@ func TestCodex0171WSTraceContext(t *testing.T) {
 		c.Request.Header.Set("traceparent", parent)
 		c.Request.Header.Set("tracestate", "vendor=value")
 		headers := make(http.Header)
-		copyOpenAIWSTraceContext(headers, c)
+		copyOpenAITraceContext(headers, c)
 		c.Request.Header.Set("traceparent", "invalid-after-capture")
 		reconnect := make(http.Header)
-		copyOpenAIWSTraceContext(reconnect, c)
+		copyOpenAITraceContext(reconnect, c)
 		require.Equal(t, parent, reconnect.Get("traceparent"))
 		snapshot := cloneFingerprintObservationHeaders(headers)
 		require.Empty(t, snapshot.Get("traceparent"))

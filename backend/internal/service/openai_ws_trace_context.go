@@ -8,7 +8,8 @@ import (
 )
 
 const (
-	openAIWSTraceContextKey            = "openai_ws_trace_context"
+	openAITraceContextKey              = "openai_trace_context"
+	openAIHTTPTraceContextProjectedKey = "openai_http_trace_context_projected"
 	fingerprintTraceparentStatusHeader = "X-Sub2-Observation-Traceparent-Status"
 	fingerprintTracestateStatusHeader  = "X-Sub2-Observation-Tracestate-Status"
 )
@@ -19,28 +20,27 @@ type FingerprintTraceContext struct {
 	Source            string `json:"source"`
 }
 
-type openAIWSTraceContext struct {
+type openAITraceContext struct {
 	parent      string
 	state       string
 	observation FingerprintTraceContext
 }
 
-func captureOpenAIWSTraceContext(c *gin.Context) openAIWSTraceContext {
+func captureOpenAITraceContext(c *gin.Context) openAITraceContext {
 	if c == nil || c.Request == nil {
-		return parseOpenAIWSTraceContext(nil)
+		return parseOpenAITraceContext(nil)
 	}
-	if cached, exists := c.Get(openAIWSTraceContextKey); exists {
-		return cached.(openAIWSTraceContext)
+	if cached, exists := c.Get(openAITraceContextKey); exists {
+		return cached.(openAITraceContext)
 	}
-	value := parseOpenAIWSTraceContext(c.Request.Header)
-	c.Set(openAIWSTraceContextKey, value)
+	value := parseOpenAITraceContext(c.Request.Header)
+	c.Set(openAITraceContextKey, value)
 	return value
 }
 
-func parseOpenAIWSTraceContext(headers http.Header) openAIWSTraceContext {
-	value := openAIWSTraceContext{observation: FingerprintTraceContext{
+func parseOpenAITraceContext(headers http.Header) openAITraceContext {
+	value := openAITraceContext{observation: FingerprintTraceContext{
 		TraceparentStatus: fingerprintMetadataMissing, TracestateStatus: fingerprintMetadataMissing,
-		Source: FingerprintObservationEventWSHandshake,
 	}}
 	var parent, state string
 	parentCount, stateCount := 0, 0
@@ -74,20 +74,37 @@ func parseOpenAIWSTraceContext(headers http.Header) openAIWSTraceContext {
 	return value
 }
 
-func copyOpenAIWSTraceContext(headers http.Header, c *gin.Context) {
+func copyOpenAITraceContext(headers http.Header, c *gin.Context) {
 	// Administrative overrides cannot create tracing context on the user's behalf.
-	deleteHeaderAllForms(headers, "traceparent")
-	deleteHeaderAllForms(headers, "tracestate")
-	deleteHeaderAllForms(headers, strings.ToLower(fingerprintTraceparentStatusHeader))
-	deleteHeaderAllForms(headers, strings.ToLower(fingerprintTracestateStatusHeader))
-	deleteHeaderAllForms(headers, strings.ToLower(fingerprintMetadataHeaderBytes))
-	value := captureOpenAIWSTraceContext(c)
+	deleteOpenAIHeaderEqualFold(headers, "traceparent")
+	deleteOpenAIHeaderEqualFold(headers, "tracestate")
+	deleteOpenAIHeaderEqualFold(headers, fingerprintTraceparentStatusHeader)
+	deleteOpenAIHeaderEqualFold(headers, fingerprintTracestateStatusHeader)
+	value := captureOpenAITraceContext(c)
 	if value.parent != "" {
 		headers.Set("traceparent", value.parent)
 	}
 	if value.state != "" {
 		headers.Set("tracestate", value.state)
 	}
+}
+
+func fingerprintOpenAITraceContext(c *gin.Context, outbound http.Header, source string) *FingerprintTraceContext {
+	value := captureOpenAITraceContext(c)
+	observation := value.observation
+	observation.Source = source
+	if source == FingerprintObservationEventHTTP {
+		parent := headerValuesCaseInsensitive(outbound, "traceparent")
+		if observation.TraceparentStatus == fingerprintMetadataValid && (len(parent) != 1 || parent[0] != value.parent) {
+			observation.TraceparentStatus = fingerprintMetadataMissing
+		}
+		state := headerValuesCaseInsensitive(outbound, "tracestate")
+		if observation.TracestateStatus == fingerprintMetadataValid &&
+			(observation.TraceparentStatus != fingerprintMetadataValid || len(state) != 1 || state[0] != value.state) {
+			observation.TracestateStatus = fingerprintMetadataMissing
+		}
+	}
+	return &observation
 }
 
 func validOpenAITraceparent(value string) bool {

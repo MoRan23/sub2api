@@ -213,7 +213,7 @@ export interface FingerprintObservationEntry {
   trace_context?: {
     traceparent_status: 'missing' | 'valid' | 'invalid'
     tracestate_status: 'missing' | 'valid' | 'invalid'
-    source: 'ws_handshake'
+    source: 'http_request' | 'ws_handshake'
   }
   metadata_budget?: { header_bytes?: number; body_bytes?: number; remotes_trimmed?: boolean }
   daily_fixed_root_enabled: boolean

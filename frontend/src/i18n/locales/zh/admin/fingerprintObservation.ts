@@ -206,7 +206,7 @@ export default {
         },
       },
       outboundMetadata: {
-        transport: { traceparent: 'WS traceparent', tracestate: 'WS tracestate', header_bytes: '请求头元数据大小', body_bytes: '正文元数据大小', remotes_trimmed: 'Workspace remote 裁剪', trimmed: '已裁剪', unchanged: '未裁剪' },
+        transport: { traceparent: 'traceparent', tracestate: 'tracestate', header_bytes: '请求头元数据大小', body_bytes: '正文元数据大小', remotes_trimmed: 'Workspace remote 裁剪', trimmed: '已裁剪', unchanged: '未裁剪' },
         traceStatus: { valid: '有效', invalid: '无效（已省略）', missing: '未提供' },
         title: '请求与工具元数据',
         sourceHint: '读取最终出站请求头、正文或 WS 帧中的实际字段；缺失字段不从入站内容补齐。',

@@ -97,6 +97,9 @@ func TestOpenAIWSNativeInterruptAckOrdersAndNextTurn(t *testing.T) {
 			client, upstream, svc, done, settled, contexts := startNativeControlTest(t)
 			upstream.Send(`{"type":"response.created","response":{"id":"resp_native_1"}}`)
 			nativeControlRead(t, client, "response.created")
+			partial := `{"type":"response.output_item.done","response_id":"resp_native_1","output_index":0,"item":{"id":"msg_partial","type":"message","role":"assistant","phase":"partial_answer","end_turn":false,"content":[{"type":"output_text","text":"intermediate"}],"future_extension":{"preserved":true}}}`
+			upstream.Send(partial)
+			require.Equal(t, partial, string(nativeControlRead(t, client, "response.output_item.done")))
 			interrupt := `{"type":"response.interrupt","response_id":"resp_native_1","mode":"discard_partial_items","extension":"preserved"}`
 			nativeControlWrite(t, client, interrupt)
 			require.Equal(t, interrupt, string(requirePassthroughUpstreamWrite(t, upstream, time.Second)))

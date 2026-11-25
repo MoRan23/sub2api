@@ -323,7 +323,8 @@ func (s *OpenAIGatewayService) buildOpenAIWSHeadersWithBody(
 	// 账号级请求头覆写（仅 openai api_key 账号启用时生效；OAuth 路径 no-op）。
 	// 覆盖所有 WS 模式（ctx_pool/dedicated/passthrough）的握手头。
 	account.ApplyHeaderOverrides(withHeaderOverrideConnectionScope(ctx), headers)
-	copyOpenAIWSTraceContext(headers, c)
+	deleteHeaderAllForms(headers, strings.ToLower(fingerprintMetadataHeaderBytes))
+	copyOpenAITraceContext(headers, c)
 	projectOpenAIGuardianHeader(c, account, headers)
 	// Session-level beta features participate in WS pool compatibility, so
 	// finalize them before applying the identity plan and computing the digest.

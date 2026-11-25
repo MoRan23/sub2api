@@ -207,7 +207,7 @@ export default {
         },
       },
       outboundMetadata: {
-        transport: { traceparent: 'WS traceparent', tracestate: 'WS tracestate', header_bytes: 'Header metadata size', body_bytes: 'Body metadata size', remotes_trimmed: 'Workspace remote trimming', trimmed: 'Trimmed', unchanged: 'Unchanged' },
+        transport: { traceparent: 'traceparent', tracestate: 'tracestate', header_bytes: 'Header metadata size', body_bytes: 'Body metadata size', remotes_trimmed: 'Workspace remote trimming', trimmed: 'Trimmed', unchanged: 'Unchanged' },
         traceStatus: { valid: 'Valid', invalid: 'Invalid (omitted)', missing: 'Not provided' },
         title: 'Request and tool metadata',
         sourceHint: 'Reads actual fields from the final outbound headers, body, or WS frame. Missing fields are not filled from inbound content.',

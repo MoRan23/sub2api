@@ -14,8 +14,26 @@ import (
 )
 
 func TestResponsesBridgeContinuationIsClientErrorBeforeUpstream(t *testing.T) {
-	gin.SetMode(gin.TestMode)
 	body := []byte(`{"model":"claude-sonnet-4-5","previous_response_id":"resp_prior","reasoning":{"effort":"low"},"input":"continue"}`)
+	assertResponsesBridgeClientError(t, body, "previous_response_id", "resend the full conversation")
+}
+
+func TestCodex0172BridgeImageFileReferencesAreClientErrors(t *testing.T) {
+	for name, input := range map[string]string{
+		"message":     `[{"role":"user","content":[{"type":"input_image","file_id":"file_fixture"}]}]`,
+		"tool output": `[{"type":"function_call","name":"lookup","call_id":"call_fixture","arguments":"{}"},{"type":"function_call_output","call_id":"call_fixture","output":[{"type":"input_image","file_id":"file_fixture"}]}]`,
+		"standalone":  `[{"type":"function_call_output","namespace":"agent","name":"proposed_plan","output":[{"type":"input_image","file_id":"file_fixture"}]}]`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			body := []byte(`{"model":"claude-sonnet-4-5","input":` + input + `}`)
+			assertResponsesBridgeClientError(t, body, "file_id", "image_url")
+		})
+	}
+}
+
+func assertResponsesBridgeClientError(t *testing.T, body []byte, field, guidance string) {
+	t.Helper()
+	gin.SetMode(gin.TestMode)
 	account := &Account{ID: 1, Platform: PlatformOpenAI, Type: AccountTypeAPIKey, Credentials: map[string]any{"api_key": "fixture-key"}}
 	for name, forward := range map[string]func(*gin.Context) error{
 		"openai chat fallback": func(c *gin.Context) error {
@@ -51,12 +69,12 @@ func TestResponsesBridgeContinuationIsClientErrorBeforeUpstream(t *testing.T) {
 			c, _ := gin.CreateTestContext(recorder)
 			c.Request = httptest.NewRequest(http.MethodPost, "/v1/responses", strings.NewReader(string(body)))
 			err := forward(c)
-			require.ErrorContains(t, err, "previous_response_id")
+			require.ErrorContains(t, err, field)
 			var failover *UpstreamFailoverError
 			require.NotErrorAs(t, err, &failover)
 			require.Equal(t, http.StatusBadRequest, recorder.Code)
 			require.Contains(t, recorder.Body.String(), "invalid_request_error")
-			require.Contains(t, recorder.Body.String(), "resend the full conversation")
+			require.Contains(t, recorder.Body.String(), guidance)
 		})
 	}
 }

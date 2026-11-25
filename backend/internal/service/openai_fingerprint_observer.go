@@ -681,6 +681,9 @@ func (s *OpenAIGatewayService) recordFingerprintObservationWithBodyAndTierPolicy
 	}
 	entry := buildFingerprintObservationEntry(c, account, pin, outbound, body, trustedIdentity, hasTrustedIdentity, true, tierPolicy)
 	entry.EventKind = FingerprintObservationEventHTTP
+	if account.UsesOpenAICodexProtocol() && c != nil && c.GetBool(openAIHTTPTraceContextProjectedKey) {
+		entry.TraceContext = fingerprintOpenAITraceContext(c, outbound, FingerprintObservationEventHTTP)
+	}
 	entry.Daybreak = observeOpenAIDaybreak(body, daybreakDecision...)
 	entry.RequestIntegrity = integrity
 	entry.ConversionCheck = GetOpenAIChatConversionCheck(c)
@@ -1061,7 +1064,7 @@ func freezeFingerprintObservationWSHandshake(c *gin.Context, account *Account) f
 		pin = installationIDResolution{}
 	}
 	base := buildFingerprintObservationEntry(c, account, pin, nil, nil, identity, trusted, true)
-	traceContext := captureOpenAIWSTraceContext(c).observation
+	traceContext := fingerprintOpenAITraceContext(c, nil, FingerprintObservationEventWSHandshake)
 	daily, _ := openAIDailyRootObservationFromContext(c)
 	// Capture only scalar provenance, not the full plan's request metadata.
 	var routingPlan OpenAIOAuthIdentityPlan
@@ -1082,7 +1085,7 @@ func freezeFingerprintObservationWSHandshake(c *gin.Context, account *Account) f
 		entry.APIKeyID, entry.APIKeyName = base.APIKeyID, base.APIKeyName
 		entry.InboundEndpoint = base.InboundEndpoint
 		entry.EventKind = FingerprintObservationEventWSHandshake
-		entry.TraceContext = &traceContext
+		entry.TraceContext = traceContext
 		entry.RuntimeTimingMetrics.Source = FingerprintObservationEventWSHandshake
 		entry.GuardianRequest.Source = FingerprintObservationEventWSHandshake
 		entry.TimezoneComparisonStatus = "not_applicable"
@@ -1108,8 +1111,7 @@ func (s *OpenAIGatewayService) recordFingerprintObservationWSHandshake(c *gin.Co
 	}
 	entry := buildFingerprintObservationEntry(c, account, pin, outbound, nil, identity, trusted, true)
 	entry.EventKind = FingerprintObservationEventWSHandshake
-	traceContext := captureOpenAIWSTraceContext(c).observation
-	entry.TraceContext = &traceContext
+	entry.TraceContext = fingerprintOpenAITraceContext(c, outbound, FingerprintObservationEventWSHandshake)
 	entry.RuntimeTimingMetrics.Source = FingerprintObservationEventWSHandshake
 	entry.GuardianRequest.Source = FingerprintObservationEventWSHandshake
 	entry.TimezoneComparisonStatus = "not_applicable"

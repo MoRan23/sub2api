@@ -52,6 +52,12 @@ func (s *OpenAIGatewayService) FinalizeOpenAIOAuthResponsesRequest(
 	if req == nil {
 		return body, errors.New("finalize openai OAuth Responses request: request is nil")
 	}
+	if account.UsesOpenAICodexProtocol() {
+		copyOpenAITraceContext(req.Header, c)
+		if c != nil {
+			c.Set(openAIHTTPTraceContextProjectedKey, true)
+		}
+	}
 	projectOpenAIGuardianHeader(c, account, req.Header)
 	options.Plan.WireProfile.GuardianRequestKind = openAIGuardianKindForAccount(c, account)
 	if options.Plan.WireProfile.GuardianRequestKind != "" {

@@ -393,15 +393,18 @@ type ResponsesInputItem struct {
 	ID        string `json:"id,omitempty"`
 
 	// type=function_call_output
-	Output    string `json:"output,omitempty"`
-	outputRaw json.RawMessage
+	Output          string `json:"output,omitempty"`
+	outputRaw       json.RawMessage
+	standaloneLabel string
 }
 
 func (i *ResponsesInputItem) UnmarshalJSON(data []byte) error {
 	type alias ResponsesInputItem
 	var wire struct {
 		*alias
-		Output json.RawMessage `json:"output"`
+		CallID    json.RawMessage `json:"call_id"`
+		Namespace json.RawMessage `json:"namespace"`
+		Output    json.RawMessage `json:"output"`
 	}
 
 	*i = ResponsesInputItem{}
@@ -409,6 +412,12 @@ func (i *ResponsesInputItem) UnmarshalJSON(data []byte) error {
 	if err := json.Unmarshal(data, &wire); err != nil {
 		return err
 	}
+	if len(wire.CallID) > 0 {
+		if err := json.Unmarshal(wire.CallID, &i.CallID); err != nil {
+			return err
+		}
+	}
+	i.standaloneLabel = responsesStandaloneOutputLabel(i.Type, i.Name, wire.CallID, wire.Namespace, wire.Output)
 
 	output := bytes.TrimSpace(wire.Output)
 	if len(output) == 0 || bytes.Equal(output, []byte("null")) {

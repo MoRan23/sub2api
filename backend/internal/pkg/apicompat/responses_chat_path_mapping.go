@@ -155,6 +155,24 @@ func traceResponsesChatMessageOrigins(built []ChatMessage, origins []map[string]
 			}
 			continue
 		case "function_call_output", "custom_tool_call_output", "tool_search_output":
+			if responsesStandaloneOutputLabel(kind, rawString(item["name"]), item["call_id"], item["namespace"], item["output"]) != "" {
+				output := bytesTrimSpace(item["output"])
+				text := ""
+				if output[0] == '"' {
+					text = rawString(output)
+					output = nil
+				}
+				fields := make(map[string]string)
+				for index, source := range responsesStandaloneOutputSources(output, text, prefix+".output") {
+					if source != "" {
+						fields[source] = fmt.Sprintf("content.%d.text", index)
+					}
+				}
+				if !appendOrigin("user", fields) {
+					return nil, false
+				}
+				continue
+			}
 			callID := rawString(item["call_id"])
 			if callID == "" && invalidEmptyOutputs > 0 {
 				invalidEmptyOutputs--

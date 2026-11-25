@@ -249,12 +249,23 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 				}
 			}
 		}
+		if item.standaloneLabel != "" {
+			content, err := responsesFunctionOutputToAnthropicContent(item)
+			if err != nil {
+				return nil, nil, err
+			}
+			messages = append(messages, AnthropicMessage{Role: "user", Content: content})
+			continue
+		}
 		switch {
 		case item.Role == "system" || item.Role == "developer":
 			if err := rejectAnthropicAudio(item.Content); err != nil {
 				return nil, nil, err
 			}
-			text := extractTextFromContent(item.Content)
+			text, err := extractTextFromContent(item.Content)
+			if err != nil {
+				return nil, nil, err
+			}
 			if text != "" {
 				systemParts = append(systemParts, text)
 			}
@@ -279,7 +290,10 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 
 		case item.Type == "function_call_output":
 			// function_call_output → user message with tool_result block
-			contentJSON := responsesFunctionOutputToAnthropicContent(item)
+			contentJSON, err := responsesFunctionOutputToAnthropicContent(item)
+			if err != nil {
+				return nil, nil, err
+			}
 			block := AnthropicContentBlock{
 				Type:      "tool_result",
 				ToolUseID: fromResponsesCallIDToAnthropic(item.CallID),
@@ -383,43 +397,69 @@ func convertResponsesInputToAnthropic(instructions string, inputRaw json.RawMess
 	return system, messages, nil
 }
 
-func responsesFunctionOutputToAnthropicContent(item ResponsesInputItem) json.RawMessage {
+func responsesFunctionOutputToAnthropicContent(item ResponsesInputItem) (json.RawMessage, error) {
 	if len(item.outputRaw) == 0 {
+		if item.standaloneLabel != "" {
+			blocks := []AnthropicContentBlock{{Type: "text", Text: item.standaloneLabel}}
+			if item.Output != "" {
+				blocks = append(blocks, AnthropicContentBlock{Type: "text", Text: item.Output})
+			}
+			return json.Marshal(blocks)
+		}
 		output := item.Output
 		if output == "" {
 			output = "(empty)"
 		}
-		content, _ := json.Marshal(output)
-		return content
+		return json.Marshal(output)
 	}
 
-	var parts []ResponsesContentPart
+	var parts []struct {
+		ResponsesContentPart
+		Text *string `json:"text"`
+	}
 	if err := json.Unmarshal(item.outputRaw, &parts); err == nil {
 		blocks := make([]AnthropicContentBlock, 0, len(parts))
+		if item.standaloneLabel != "" {
+			blocks = append(blocks, AnthropicContentBlock{Type: "text", Text: item.standaloneLabel})
+		}
 		for _, part := range parts {
 			switch part.Type {
 			case "input_text", "output_text", "text":
-				if part.Text != "" {
-					blocks = append(blocks, AnthropicContentBlock{Type: "text", Text: part.Text})
+				if item.standaloneLabel != "" && part.Text == nil {
+					return nil, fmt.Errorf("Anthropic bridge requires standalone output text to be a string")
+				}
+				if part.Text != nil && *part.Text != "" {
+					blocks = append(blocks, AnthropicContentBlock{Type: "text", Text: *part.Text})
 				}
 			case "input_image":
+				if err := rejectResponsesFileImage(part.ImageURL, part.FileID); err != nil {
+					return nil, err
+				}
 				if source := dataURIToAnthropicImageSource(part.ImageURL); source != nil {
 					blocks = append(blocks, AnthropicContentBlock{Type: "image", Source: source})
+					continue
+				}
+				if item.standaloneLabel != "" {
+					return nil, fmt.Errorf("Anthropic bridge requires standalone input_image.image_url to be a Base64 data URI")
+				}
+			default:
+				if item.standaloneLabel != "" {
+					return nil, fmt.Errorf("Anthropic bridge does not support standalone output content type %q", part.Type)
 				}
 			}
 		}
 		if len(blocks) > 0 {
-			content, _ := json.Marshal(blocks)
-			return content
+			return json.Marshal(blocks)
 		}
 		if len(parts) == 0 {
-			content, _ := json.Marshal("(empty)")
-			return content
+			return json.Marshal("(empty)")
 		}
 	}
+	if item.standaloneLabel != "" {
+		return nil, fmt.Errorf("Anthropic bridge requires standalone output to contain supported content parts")
+	}
 
-	content, _ := json.Marshal(item.Output)
-	return content
+	return json.Marshal(item.Output)
 }
 
 // normalizeAnthropicToolPairing rebuilds the message sequence so it satisfies
@@ -541,25 +581,30 @@ func anthropicMessageFromBlocks(role string, blocks []AnthropicContentBlock) Ant
 
 // extractTextFromContent extracts text from a content field that may be a
 // plain string or an array of content parts.
-func extractTextFromContent(raw json.RawMessage) string {
+func extractTextFromContent(raw json.RawMessage) (string, error) {
 	if len(raw) == 0 {
-		return ""
+		return "", nil
 	}
 	var s string
 	if err := json.Unmarshal(raw, &s); err == nil {
-		return s
+		return s, nil
 	}
 	var parts []ResponsesContentPart
 	if err := json.Unmarshal(raw, &parts); err == nil {
 		var texts []string
 		for _, p := range parts {
+			if p.Type == "input_image" {
+				if err := rejectResponsesFileImage(p.ImageURL, p.FileID); err != nil {
+					return "", err
+				}
+			}
 			if (p.Type == "input_text" || p.Type == "output_text" || p.Type == "text") && p.Text != "" {
 				texts = append(texts, p.Text)
 			}
 		}
-		return strings.Join(texts, "\n\n")
+		return strings.Join(texts, "\n\n"), nil
 	}
-	return ""
+	return "", nil
 }
 
 // convertResponsesUserToAnthropicContent converts a Responses user message
@@ -613,6 +658,11 @@ func convertResponsesUserToAnthropicContent(raw json.RawMessage) (json.RawMessag
 
 	var blocks []AnthropicContentBlock
 	for _, p := range parts {
+		if p.Type == "input_image" {
+			if err := rejectResponsesFileImage(p.ImageURL, p.FileID); err != nil {
+				return nil, err
+			}
+		}
 		switch p.Type {
 		case "input_text", "text":
 			if p.Text != "" {
@@ -670,6 +720,11 @@ func convertResponsesAssistantToAnthropicContent(raw json.RawMessage) (json.RawM
 
 	var blocks []AnthropicContentBlock
 	for _, p := range parts {
+		if p.Type == "input_image" {
+			if err := rejectResponsesFileImage(p.ImageURL, p.FileID); err != nil {
+				return nil, err
+			}
+		}
 		switch p.Type {
 		case "output_text", "text":
 			if p.Text != "" {
