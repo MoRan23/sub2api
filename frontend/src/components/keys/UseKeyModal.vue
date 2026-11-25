@@ -317,6 +317,7 @@ import { buildCodexModelCatalogUrl, fetchCodexModelsManifest } from '@/api/codex
 import type { GroupPlatform } from '@/types'
 import { buildCodexApiKeyAuthConfig } from '@/utils/codexAuthConfig'
 import { parseCodexCatalogModels } from '@/utils/codexCatalogConfig'
+import { CODEX_TELEMETRY_DISABLED_CONFIG } from '@/utils/codexTelemetryConfig'
 
 interface Props {
   show: boolean
@@ -885,8 +886,7 @@ goals = true
 enabled = true
 use_history_notes_extension = true
 
-[analytics]
-enabled = false`
+${CODEX_TELEMETRY_DISABLED_CONFIG}`
   const authContent = JSON.stringify({
     personal_access_token: props.apiKey,
     OPENAI_API_KEY: props.apiKey
@@ -1127,7 +1127,9 @@ goals = true
 api_key_model_discovery = true
 standalone_web_search = true
 image_generation = true
-token_budget = false`
+token_budget = false
+
+${CODEX_TELEMETRY_DISABLED_CONFIG}`
 
   return buildOpenAICodexFileConfigs(configDir, configContent, apiKey)
 }
@@ -1368,7 +1370,9 @@ requires_openai_auth = false
 supports_websockets = false
 
 ${codexModelCatalogMode.value === 'remote' ? '[features]\napi_key_model_discovery = true\n\n# Optional:' : '# Optional:\n# [features]'}
-# goals = true`
+# goals = true
+
+${CODEX_TELEMETRY_DISABLED_CONFIG}`
 
   return [
     { path: envPath, content: envContent },
@@ -1433,7 +1437,9 @@ base_url = "${baseUrl}"
 ${codexModelCatalogMode.value === 'remote' ? `model_catalog_url = "${escapeTomlBasicString(buildCodexModelCatalogUrl(baseUrl))}"\n` : ''}env_key = "SUB2API_API_KEY"
 wire_api = "responses"
 requires_openai_auth = false
-supports_websockets = false${codexModelCatalogMode.value === 'remote' ? '\n\n[features]\napi_key_model_discovery = true' : ''}`
+supports_websockets = false${codexModelCatalogMode.value === 'remote' ? '\n\n[features]\napi_key_model_discovery = true' : ''}
+
+${CODEX_TELEMETRY_DISABLED_CONFIG}`
 
   return [
     { path: isWindows ? 'PowerShell' : 'Terminal', content: envContent },
@@ -1472,7 +1478,9 @@ goals = true
 api_key_model_discovery = true
 standalone_web_search = true
 image_generation = true
-token_budget = false`
+token_budget = false
+
+${CODEX_TELEMETRY_DISABLED_CONFIG}`
 
   return buildOpenAICodexFileConfigs(configDir, configContent, apiKey)
 }

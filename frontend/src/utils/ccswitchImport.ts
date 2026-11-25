@@ -1,5 +1,6 @@
 import type { GroupPlatform } from '@/types'
 import { buildCodexApiKeyAuthConfig } from '@/utils/codexAuthConfig'
+import { CODEX_TELEMETRY_DISABLED_CONFIG } from '@/utils/codexTelemetryConfig'
 
 export const OPENAI_CC_SWITCH_CODEX_MODEL = 'gpt-6.1-sol'
 export const GROK_CC_SWITCH_MODEL = 'grok-4.5'
@@ -124,6 +125,8 @@ name = "Sub2API"
 base_url = ${JSON.stringify(config.endpoint)}
 wire_api = "responses"
 ${buildCodexApiKeyAuthConfig(input.apiKey)}
+
+${CODEX_TELEMETRY_DISABLED_CONFIG}
 `
     const payload = JSON.stringify({ config: codexConfig })
     const bytes = new TextEncoder().encode(payload)

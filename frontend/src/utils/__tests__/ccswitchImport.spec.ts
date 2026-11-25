@@ -58,6 +58,15 @@ describe('ccswitchImport utils', () => {
     expect(payload.config).toContain('"x-openai-actor-authorization" = "local-image-extension"')
     // Global feature choices are preserved by CC Switch, not imported per provider.
     expect(payload.config).not.toContain('[features]')
+    expect(payload.config).toContain(`[analytics]
+enabled = false
+
+[otel]
+exporter = "none"
+metrics_exporter = "none"
+trace_exporter = "none"`)
+    expect(payload.config.match(/^\[analytics\]$/gm)).toHaveLength(1)
+    expect(payload.config.match(/^\[otel\]$/gm)).toHaveLength(1)
   })
 
   it('encodes embedded Codex configuration as UTF-8 and escapes TOML strings', () => {

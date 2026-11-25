@@ -1,0 +1,36 @@
+2026/11/25 10:15:08 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkCodex0169Compatibility/normalize/65536-2         	    8353	     80502 ns/op	 816.98 MB/s	    9707 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/65536-2       	    9639	     88394 ns/op	 744.04 MB/s	    8332 B/op	     156 allocs/op
+BenchmarkCodex0169Compatibility/normalize/1048576-2       	     649	    798151 ns/op	1314.05 MB/s	    9714 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/1048576-2     	     669	    847305 ns/op	1237.82 MB/s	    8329 B/op	     156 allocs/op
+BenchmarkCodex0169Compatibility/normalize/8388608-2       	     100	   6893813 ns/op	1216.87 MB/s	    9828 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/8388608-2     	     100	   6205832 ns/op	1351.77 MB/s	    8388 B/op	     156 allocs/op
+PASS
+2026/11/25 10:15:16 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkCodex0169Compatibility/normalize/65536-2         	    7380	     82749 ns/op	 794.80 MB/s	    9708 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/65536-2       	    7059	     88209 ns/op	 745.60 MB/s	    8332 B/op	     156 allocs/op
+BenchmarkCodex0169Compatibility/normalize/1048576-2       	     828	    790794 ns/op	1326.27 MB/s	    9706 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/1048576-2     	     679	    877482 ns/op	1195.25 MB/s	    8328 B/op	     156 allocs/op
+BenchmarkCodex0169Compatibility/normalize/8388608-2       	      78	   6987827 ns/op	1200.49 MB/s	    9860 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/8388608-2     	      67	   7482598 ns/op	1121.11 MB/s	    8337 B/op	     156 allocs/op
+PASS
+2026/11/25 10:15:23 Timezone initialized: UTC (UTC offset: +00:00)
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor
+BenchmarkCodex0169Compatibility/normalize/65536-2         	    7507	     92266 ns/op	 712.82 MB/s	    9708 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/65536-2       	    5752	     99966 ns/op	 657.92 MB/s	    8332 B/op	     156 allocs/op
+BenchmarkCodex0169Compatibility/normalize/1048576-2       	     734	    762812 ns/op	1374.92 MB/s	    9714 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/1048576-2     	     624	    888185 ns/op	1180.85 MB/s	    8346 B/op	     156 allocs/op
+BenchmarkCodex0169Compatibility/normalize/8388608-2       	      96	   6205470 ns/op	1351.85 MB/s	    9833 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/8388608-2     	      87	   6315646 ns/op	1328.26 MB/s	    8335 B/op	     156 allocs/op
+PASS

@@ -24,6 +24,22 @@ vi.mock('file-saver', () => ({
 }))
 
 import UseKeyModal from '../UseKeyModal.vue'
+import enDashboard from '@/i18n/locales/en/dashboard'
+import zhDashboard from '@/i18n/locales/zh/dashboard'
+
+const disabledTelemetry = `[analytics]
+enabled = false
+
+[otel]
+exporter = "none"
+metrics_exporter = "none"
+trace_exporter = "none"`
+
+function expectTelemetryDisabled(config: string | undefined) {
+  expect(config).toContain(disabledTelemetry)
+  expect(config?.match(/^\[analytics\]$/gm)).toHaveLength(1)
+  expect(config?.match(/^\[otel\]$/gm)).toHaveLength(1)
+}
 
 function readBlobAsText(blob: Blob): Promise<string> {
   return new Promise((resolve, reject) => {
@@ -38,6 +54,10 @@ describe('UseKeyModal', () => {
   afterEach(() => {
     vi.unstubAllGlobals()
     saveAsMock.mockClear()
+  })
+
+  it.each([enDashboard, zhDashboard])('disables telemetry in the translated context-management example', (messages) => {
+    expectTelemetryDisabled(messages.keys.useKeyModal.openai.contextManagementExample)
   })
 
   it('shows only Claude Code for Claude Code-only groups', async () => {
@@ -357,6 +377,7 @@ describe('UseKeyModal', () => {
     // API-key provider: Codex must not require a ChatGPT OAuth login.
     expect(configToml).toContain('requires_openai_auth = false')
     expect(configToml).toContain('supports_websockets = false')
+    expectTelemetryDisabled(configToml)
     expect(configToml).toContain('grok-4.20-multi-agent-0309 (text / web_search)')
     expect(configToml).toContain('grok-imagine-image')
     expect(configToml).toContain('grok-imagine-video')
@@ -424,7 +445,10 @@ goals = true
 api_key_model_discovery = true
 standalone_web_search = true
 image_generation = true
-token_budget = false`)
+token_budget = false
+
+${disabledTelemetry}`)
+    expectTelemetryDisabled(configToml)
     expect(codeBlocks).toContain('{\n  "OPENAI_API_KEY": "sk-test"\n}')
     expect(wrapper.text()).toContain('auth.json')
     expect(wrapper.find('[data-testid="codex-api-key-restart-notice"]').exists()).toBe(false)
@@ -463,6 +487,7 @@ token_budget = false`)
     expect(guideContents[0]).toContain('[features]\ncontext_management = true\ngoals = true')
     expect(guideContents[0]).toContain('[features.token_budget]\nenabled = true\nuse_history_notes_extension = true')
     expect(guideContents[0]).not.toContain('[features.context_management]')
+    expectTelemetryDisabled(guideContents[0])
     expect(guideContents[1]).toContain('"personal_access_token": "sk-pat-test"')
     expect(guideContents[2]).toBe('export CODEX_AUTHAPI_BASE_URL="https://testwww.smilecodex.space"')
     expect(guideContents[3]).toBe('unset CODEX_AUTHAPI_BASE_URL')
@@ -481,6 +506,7 @@ token_budget = false`)
     expect(windowsContents[0]).toContain('model_provider = "openai"')
     expect(windowsContents[0]).toContain('openai_base_url = "https://testwww.smilecodex.space/backend-api/codex"')
     expect(windowsContents[0]).toContain('model_catalog_json = "~/.codex/codex-models.json"')
+    expectTelemetryDisabled(windowsContents[0])
     expect(windowsContents[2]).toBe('setx CODEX_AUTHAPI_BASE_URL "https://testwww.smilecodex.space"')
     expect(windowsContents[3]).toBe(
       "[Environment]::SetEnvironmentVariable('CODEX_AUTHAPI_BASE_URL', $null, 'User')\n" +
@@ -576,7 +602,10 @@ goals = true
 api_key_model_discovery = true
 standalone_web_search = true
 image_generation = true
-token_budget = false`)
+token_budget = false
+
+${disabledTelemetry}`)
+    expectTelemetryDisabled(configToml)
     expect(codeBlocks).not.toContain('{\n  "OPENAI_API_KEY": "sk-test"\n}')
     expect(wrapper.text()).not.toContain('auth.json')
 
@@ -642,6 +671,7 @@ token_budget = false`)
     expect(configToml).toContain('supports_standalone_web_search = true\nstream_idle_timeout_ms = 600000')
     expect(configToml).toContain('api_key_model_discovery = true\nstandalone_web_search = true\nimage_generation = true\ntoken_budget = false')
     expect(configToml).toContain('supports_websockets = true')
+    expectTelemetryDisabled(configToml)
     const features = configToml?.split('[features]\n')[1]?.split('\n[')[0]
     expect(features).toContain('responses_websockets_v2 = true')
     expect(features).toContain('goals = true')
@@ -695,6 +725,7 @@ token_budget = false`)
     expect(configToml).toContain('supports_standalone_web_search = true\nstream_idle_timeout_ms = 600000')
     expect(configToml).toContain('api_key_model_discovery = true\nstandalone_web_search = true\nimage_generation = true\ntoken_budget = false')
     expect(configToml).toContain('supports_websockets = true')
+    expectTelemetryDisabled(configToml)
     const features = configToml?.split('[features]\n')[1]?.split('\n[')[0]
     expect(features).toContain('responses_websockets_v2 = true')
     expect(features).toContain('goals = true')
@@ -1142,6 +1173,7 @@ token_budget = false`)
       expect(config).toContain('base_url = "https://example.com/v1"')
       expect(config).toContain('wire_api = "responses"')
       expect(config).toContain('[features]\napi_key_model_discovery = true')
+      expectTelemetryDisabled(config)
 
       await wrapper.get('[data-testid="codex-model-catalog-mode"]').setValue('file')
       const fileConfig = wrapper.findAll('pre code')
@@ -1150,6 +1182,7 @@ token_budget = false`)
       expect(fileConfig).toContain('model_catalog_json = "~/.codex/codex-models.json"')
       expect(fileConfig).not.toContain('model_catalog_url')
       expect(fileConfig).not.toContain('api_key_model_discovery')
+      expectTelemetryDisabled(fileConfig)
 
       await wrapper.get('[data-testid="codex-model-catalog-mode"]').setValue('remote')
       const restoredRemoteConfig = wrapper.findAll('pre code')
@@ -1158,6 +1191,7 @@ token_budget = false`)
       expect(restoredRemoteConfig).toContain('model_catalog_url = "https://example.com/v1/models"')
       expect(restoredRemoteConfig).not.toContain('model_catalog_json')
       expect(restoredRemoteConfig).toContain('[features]\napi_key_model_discovery = true')
+      expectTelemetryDisabled(restoredRemoteConfig)
     }
   )
 
