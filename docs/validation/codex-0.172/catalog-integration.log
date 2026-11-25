@@ -1,0 +1,34 @@
+2026/11/25 08:34:20 Timezone initialized: UTC (UTC offset: +00:00)
+2026/11/25 08:34:21 github.com/testcontainers/testcontainers-go - Connected to docker: 
+  Server Version: 29.4.0
+  API Version: 1.51
+  Operating System: Ubuntu 24.04.3 LTS
+  Total Memory: 32099 MB
+  Testcontainers for Go Version: v0.40.0
+  Resolved Docker Host: unix:///var/run/docker.sock
+  Resolved Docker Socket Path: /var/run/docker.sock
+  Test SessionID: fc1acd9628d7525d46cbb33f3735ac7fea6d14d2228557a5503a9c6c14677e40
+  Test ProcessID: 1463c39b-93bb-46de-8048-2dfb1cb0e404
+2026/11/25 08:34:21 🐳 Creating container for image postgres:18.1-alpine3.23
+2026/11/25 08:34:21 🐳 Creating container for image testcontainers/ryuk:0.13.0
+2026/11/25 08:34:21 ✅ Container created: 6668fd132636
+2026/11/25 08:34:21 🐳 Starting container: 6668fd132636
+2026/11/25 08:34:21 ✅ Container started: 6668fd132636
+2026/11/25 08:34:21 ⏳ Waiting for container id 6668fd132636 image: testcontainers/ryuk:0.13.0. Waiting for: port 8080/tcp to be listening
+2026/11/25 08:34:21 Shell not found in container
+2026/11/25 08:34:21 🔔 Container is ready: 6668fd132636
+2026/11/25 08:34:21 ✅ Container created: 28780bc28018
+2026/11/25 08:34:21 🐳 Starting container: 28780bc28018
+2026/11/25 08:34:22 ✅ Container started: 28780bc28018
+2026/11/25 08:34:22 ⏳ Waiting for container id 28780bc28018 image: postgres:18.1-alpine3.23. Waiting for: all of: [log message "database system is ready to accept connections" (occurrence: 2), port 5432/tcp to be listening]
+2026/11/25 08:34:24 🔔 Container is ready: 28780bc28018
+2026/11/25 08:34:24 🐳 Creating container for image redis:8.4-alpine
+2026/11/25 08:34:24 ✅ Container created: 232dbe3623ca
+2026/11/25 08:34:24 🐳 Starting container: 232dbe3623ca
+2026/11/25 08:34:24 ✅ Container started: 232dbe3623ca
+2026/11/25 08:34:24 ⏳ Waiting for container id 232dbe3623ca image: redis:8.4-alpine. Waiting for: all of: [port 6379/tcp to be listening, log message "* Ready to accept connections"]
+2026/11/25 08:34:24 🔔 Container is ready: 232dbe3623ca
+=== RUN   TestCodexWebSearchProviderMetadataPostgresRedisRoundTrip
+--- PASS: TestCodexWebSearchProviderMetadataPostgresRedisRoundTrip (0.02s)
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/repository	6.659s

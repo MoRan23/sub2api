@@ -1,0 +1,9 @@
+=== RUN   TestAPIContracts
+=== RUN   TestAPIContracts/GET_/api/v1/admin/settings
+=== RUN   TestAPIContracts/GET_/api/v1/admin/settings_falls_back_to_config_oauth_defaults
+--- PASS: TestAPIContracts (0.00s)
+    --- PASS: TestAPIContracts/GET_/api/v1/admin/settings (0.00s)
+    --- PASS: TestAPIContracts/GET_/api/v1/admin/settings_falls_back_to_config_oauth_defaults (0.00s)
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/server	0.035s
+2026-11-25T16:44:02.690+0800	INFO	stdlog	Sub2API 0.2.25 (commit: unknown, built: unknown)	{"service": "sub2api", "env": "bootstrap", "legacy_stdlog": true}

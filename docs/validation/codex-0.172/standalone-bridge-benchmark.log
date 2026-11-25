@@ -1,0 +1,23 @@
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/pkg/apicompat
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkCodex0172StandaloneBridge/text64KiB/Chat         	     882	    589941 ns/op	 1166365 B/op	      70 allocs/op
+BenchmarkCodex0172StandaloneBridge/text64KiB/Chat         	    1095	    625821 ns/op	 1166263 B/op	      69 allocs/op
+BenchmarkCodex0172StandaloneBridge/text64KiB/Chat         	     949	    613747 ns/op	 1166263 B/op	      69 allocs/op
+BenchmarkCodex0172StandaloneBridge/text64KiB/Messages     	    1146	    564297 ns/op	  423039 B/op	      40 allocs/op
+BenchmarkCodex0172StandaloneBridge/text64KiB/Messages     	    1248	    456874 ns/op	  422947 B/op	      40 allocs/op
+BenchmarkCodex0172StandaloneBridge/text64KiB/Messages     	    1065	    470098 ns/op	  422947 B/op	      40 allocs/op
+BenchmarkCodex0172StandaloneBridge/text64KiB/MessagesWithPathMapping         	     726	    845725 ns/op	  636009 B/op	      98 allocs/op
+BenchmarkCodex0172StandaloneBridge/text64KiB/MessagesWithPathMapping         	     708	    828183 ns/op	  636009 B/op	      98 allocs/op
+BenchmarkCodex0172StandaloneBridge/text64KiB/MessagesWithPathMapping         	     658	    791153 ns/op	  636009 B/op	      98 allocs/op
+BenchmarkCodex0172StandaloneBridge/image256KiB/Chat                          	     237	   2685007 ns/op	 5413796 B/op	     125 allocs/op
+BenchmarkCodex0172StandaloneBridge/image256KiB/Chat                          	     212	   2831141 ns/op	 5413926 B/op	     125 allocs/op
+BenchmarkCodex0172StandaloneBridge/image256KiB/Chat                          	     234	   2458328 ns/op	 5413800 B/op	     125 allocs/op
+BenchmarkCodex0172StandaloneBridge/image256KiB/Messages                      	     316	   1894545 ns/op	 2157709 B/op	      66 allocs/op
+BenchmarkCodex0172StandaloneBridge/image256KiB/Messages                      	     321	   1818733 ns/op	 2156796 B/op	      65 allocs/op
+BenchmarkCodex0172StandaloneBridge/image256KiB/Messages                      	     325	   1858028 ns/op	 2156782 B/op	      65 allocs/op
+BenchmarkCodex0172StandaloneBridge/image256KiB/MessagesWithPathMapping       	     176	   3493264 ns/op	 3245065 B/op	     148 allocs/op
+BenchmarkCodex0172StandaloneBridge/image256KiB/MessagesWithPathMapping       	     108	   4721972 ns/op	 3245030 B/op	     148 allocs/op
+BenchmarkCodex0172StandaloneBridge/image256KiB/MessagesWithPathMapping       	     166	   3738590 ns/op	 3245017 B/op	     148 allocs/op
+PASS

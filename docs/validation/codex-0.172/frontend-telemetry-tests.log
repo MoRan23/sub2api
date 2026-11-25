@@ -1,0 +1,15 @@
+
+ RUN  v2.1.9 C:/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/frontend
+
+ ✓ src/api/__tests__/admin.codexTelemetry.spec.ts (6 tests) 6ms
+Browserslist: browsers data (caniuse-lite) is 11 months old. Please run:
+  npx update-browserslist-db@latest
+  Why you should do it regularly: https://github.com/browserslist/update-db#readme
+ ✓ src/views/admin/__tests__/CodexTelemetryObservations.spec.ts (18 tests) 388ms
+ ✓ src/i18n/__tests__/localeKeyCompleteness.spec.ts (3 tests) 62ms
+
+ Test Files  3 passed (3)
+      Tests  27 passed (27)
+   Start at  16:24:23
+   Duration  12.32s (transform 7.01s, setup 710ms, collect 11.61s, tests 457ms, environment 2.38s, prepare 362ms)
+

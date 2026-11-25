@@ -1,0 +1,12 @@
+
+Oops! Something went wrong! :(
+
+ESLint: 8.57.1
+
+No files matching the pattern "frontend/src/api/__tests__/admin.codexTelemetry.spec.ts" were found.
+Please check for typing mistakes in the pattern.
+
+undefined
+ ERR_PNPM_RECURSIVE_EXEC_FIRST_FAIL  Command "eslint" not found
+
+Did you mean "pnpm exec eslint"?

@@ -1,0 +1,35 @@
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkCodex0172TraceProjection/absent         	17883063	        32.97 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCodex0172TraceProjection/absent         	[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+17057571	        35.27 ns/op	       0 B/op	       0 allocs/op
+BenchmarkCodex0172TraceProjection/absent         	[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+19237486	        35.33 ns/op	       0 B/op	       0 allocs/op
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+BenchmarkCodex0172TraceProjection/valid          	 3784304	       157.0 ns/op	      32 B/op	       2 allocs/op
+BenchmarkCodex0172TraceProjection/valid          	[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+ 3438232	       189.5 ns/op	      32 B/op	       2 allocs/op
+BenchmarkCodex0172TraceProjection/valid          	[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+ 2514516	       232.4 ns/op	      32 B/op	       2 allocs/op
+PASS

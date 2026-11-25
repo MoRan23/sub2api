@@ -1,0 +1,10 @@
+
+ RUN  v2.1.9 C:/Users/Admin/.codex/worktrees/merge-upstream-v0-2-22/sub2api/frontend
+
+ ✓ src/views/admin/__tests__/CodexOutboundMetadataDetails.spec.ts (18 tests) 364ms
+
+ Test Files  1 passed (1)
+      Tests  18 passed (18)
+   Start at  16:22:38
+   Duration  5.93s (transform 744ms, setup 178ms, collect 776ms, tests 364ms, environment 2.04s, prepare 340ms)
+

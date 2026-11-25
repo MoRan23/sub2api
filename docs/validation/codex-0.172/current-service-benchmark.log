@@ -1,0 +1,33 @@
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkCodex0169Compatibility/normalize/65536         	   10000	     52083 ns/op	1262.76 MB/s	    9705 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/65536       	   10000	     54403 ns/op	1208.91 MB/s	    8328 B/op	     156 allocs/op
+BenchmarkCodex0169Compatibility/normalize/1048576       	    1230	    456812 ns/op	2295.93 MB/s	    9705 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/1048576     	    1364	    485251 ns/op	2161.37 MB/s	    8328 B/op	     156 allocs/op
+BenchmarkCodex0169Compatibility/normalize/8388608       	     172	   3482175 ns/op	2409.08 MB/s	    9739 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/8388608     	     170	   3480288 ns/op	2410.39 MB/s	    8328 B/op	     156 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkCodex0169Compatibility/normalize/65536         	   10000	     54382 ns/op	1209.38 MB/s	    9705 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/65536       	   10000	     62018 ns/op	1060.49 MB/s	    8328 B/op	     156 allocs/op
+BenchmarkCodex0169Compatibility/normalize/1048576       	    1201	    534190 ns/op	1963.36 MB/s	    9709 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/1048576     	    1018	    576772 ns/op	1818.41 MB/s	    8328 B/op	     156 allocs/op
+BenchmarkCodex0169Compatibility/normalize/8388608       	     158	   3753500 ns/op	2234.94 MB/s	    9742 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/8388608     	     160	   3741704 ns/op	2241.98 MB/s	    8328 B/op	     156 allocs/op
+PASS
+goos: linux
+goarch: amd64
+pkg: github.com/Wei-Shaw/sub2api/internal/service
+cpu: AMD Ryzen 7 9700X 8-Core Processor             
+BenchmarkCodex0169Compatibility/normalize/65536         	   10000	     57639 ns/op	1141.05 MB/s	    9705 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/65536       	   10000	     57416 ns/op	1145.49 MB/s	    8328 B/op	     156 allocs/op
+BenchmarkCodex0169Compatibility/normalize/1048576       	    1224	    594269 ns/op	1764.87 MB/s	    9704 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/1048576     	    1293	    468014 ns/op	2240.98 MB/s	    8328 B/op	     156 allocs/op
+BenchmarkCodex0169Compatibility/normalize/8388608       	     168	   3474300 ns/op	2414.54 MB/s	    9739 B/op	     165 allocs/op
+BenchmarkCodex0169Compatibility/fingerprint/8388608     	     177	   3480972 ns/op	2409.91 MB/s	    8328 B/op	     156 allocs/op
+PASS

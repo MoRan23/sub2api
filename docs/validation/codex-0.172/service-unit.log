@@ -1,0 +1,1180 @@
+2026/11/25 08:37:10 Timezone initialized: UTC (UTC offset: +00:00)
+=== RUN   TestCodexTelemetryAuxiliaryHeadersUseFinalWire
+=== RUN   TestCodexTelemetryAuxiliaryHeadersUseFinalWire/absent
+=== RUN   TestCodexTelemetryAuxiliaryHeadersUseFinalWire/actual
+=== RUN   TestCodexTelemetryAuxiliaryHeadersUseFinalWire/conflicting
+=== RUN   TestCodexTelemetryAuxiliaryHeadersUseFinalWire/invalid
+=== RUN   TestCodexTelemetryAuxiliaryHeadersUseFinalWire/oversized
+--- PASS: TestCodexTelemetryAuxiliaryHeadersUseFinalWire (0.00s)
+    --- PASS: TestCodexTelemetryAuxiliaryHeadersUseFinalWire/absent (0.00s)
+    --- PASS: TestCodexTelemetryAuxiliaryHeadersUseFinalWire/actual (0.00s)
+    --- PASS: TestCodexTelemetryAuxiliaryHeadersUseFinalWire/conflicting (0.00s)
+    --- PASS: TestCodexTelemetryAuxiliaryHeadersUseFinalWire/invalid (0.00s)
+    --- PASS: TestCodexTelemetryAuxiliaryHeadersUseFinalWire/oversized (0.00s)
+=== RUN   TestCodexTelemetryAuxiliaryHeadersStayFrozenInBatches
+--- PASS: TestCodexTelemetryAuxiliaryHeadersStayFrozenInBatches (0.00s)
+=== RUN   TestCodexTelemetryHydrationPreservesAuxiliaryHeaders
+--- PASS: TestCodexTelemetryHydrationPreservesAuxiliaryHeaders (0.00s)
+=== RUN   TestCodexTelemetry0165AnalyticsSchemaAndProvenance
+--- PASS: TestCodexTelemetry0165AnalyticsSchemaAndProvenance (0.00s)
+=== RUN   TestCodexTelemetry0166CriticalPathIsSimulationOnly
+=== RUN   TestCodexTelemetry0166CriticalPathIsSimulationOnly/observation_only
+=== RUN   TestCodexTelemetry0166CriticalPathIsSimulationOnly/simulation
+--- PASS: TestCodexTelemetry0166CriticalPathIsSimulationOnly (0.00s)
+    --- PASS: TestCodexTelemetry0166CriticalPathIsSimulationOnly/observation_only (0.00s)
+    --- PASS: TestCodexTelemetry0166CriticalPathIsSimulationOnly/simulation (0.00s)
+=== RUN   TestCodexTelemetry0166RestoredUnsealedTurnUsesCurrentSchema
+--- PASS: TestCodexTelemetry0166RestoredUnsealedTurnUsesCurrentSchema (0.00s)
+=== RUN   TestCodexTelemetry0166SealedLegacyBatchKeepsPayloadOnRecovery
+--- PASS: TestCodexTelemetry0166SealedLegacyBatchKeepsPayloadOnRecovery (0.00s)
+=== RUN   TestCodexTelemetry0169ObservedTurnTriggerOnActivityEvents
+--- PASS: TestCodexTelemetry0169ObservedTurnTriggerOnActivityEvents (0.00s)
+=== RUN   TestCodexTelemetry0169GuardianLabelsShareExistingReview
+--- PASS: TestCodexTelemetry0169GuardianLabelsShareExistingReview (0.00s)
+=== RUN   TestCodexTelemetry0169FinalGuardianMarkerAndSnapshot
+--- PASS: TestCodexTelemetry0169FinalGuardianMarkerAndSnapshot (0.00s)
+=== RUN   TestCodexTelemetry0169ControlKindsKeepTerminalAndUsage
+--- PASS: TestCodexTelemetry0169ControlKindsKeepTerminalAndUsage (0.00s)
+=== RUN   TestCodexTelemetry0171CompressionKeepsSealedPayload
+--- PASS: TestCodexTelemetry0171CompressionKeepsSealedPayload (0.01s)
+=== RUN   TestCodexTelemetry0171WorkersCompressOnlyMetrics
+--- PASS: TestCodexTelemetry0171WorkersCompressOnlyMetrics (0.00s)
+=== RUN   TestCodexTelemetry0171StopCancelsCompressedSends
+--- PASS: TestCodexTelemetry0171StopCancelsCompressedSends (0.00s)
+=== RUN   TestCodexTelemetryAuthStorageLockSchemaPreservesProvidedSamples
+--- PASS: TestCodexTelemetryAuthStorageLockSchemaPreservesProvidedSamples (0.00s)
+=== RUN   TestCodexTelemetryBodyViewMatchesLegacy
+=== RUN   TestCodexTelemetryBodyViewMatchesLegacy/""
+=== RUN   TestCodexTelemetryBodyViewMatchesLegacy/"null"
+=== RUN   TestCodexTelemetryBodyViewMatchesLegacy/"[]"
+=== RUN   TestCodexTelemetryBodyViewMatchesLegacy/"\"text\""
+=== RUN   TestCodexTelemetryBodyViewMatchesLegacy/"{}"
+=== RUN   TestCodexTelemetryBodyViewMatchesLegacy/"{\"model\":\"test\",\"model\":\"later\",\"approval_policy\":\"never\",\"reasoning\":{\"effort\":\"max\"},\"service_tier\":\"priority\"}"
+=== RUN   TestCodexTelemetryBodyViewMatchesLegacy/"{\"client_metadata\":{\"x-codex-turn-metadata\":\"{\\\"guardian_v2_enabled\\\":false,\\\"approvals_reviewer\\\":\\\"user\\\"}\"},\"guardian_v2_enabled\":true}"
+=== RUN   TestCodexTelemetryBodyViewMatchesLegacy/"{\"client_metadata\":{\"guardian_v2_enabled\":null,\"approvals_reviewer\":\"invalid\"}}"
+=== RUN   TestCodexTelemetryBodyViewMatchesLegacy/"{\"x-codex-turn-metadata\":{\"guardian_v2_enabled\":\"true\",\"approvals_reviewer\":\"user\"},\"guardian_v2_enabled\":false}"
+=== RUN   TestCodexTelemetryBodyViewMatchesLegacy/"{\"model\":\"test\",\"input\":[{\"type\":\"function_call_output\",\"call_id\":\"abc\",\"output\":\"text\"},{\"type\":\"custom_tool_call_output\",\"call_id\":\"def\",\"output\":\"text\"}]}"
+=== RUN   TestCodexTelemetryBodyViewMatchesLegacy/"{\"input\":[{\"type\":\"function_call_output\",\"call_id\":\"old\"},{\"role\":\"user\",\"content\":\"new\"},{\"type\":\"function_call_output\",\"call_id\":\"new\"}]}"
+=== RUN   TestCodexTelemetryBodyViewMatchesLegacy/"{\"input\":[{\"role\":\"user\",\"content\":\"<environment_context><shell>bash</shell></environment_context>\"}]}"
+=== RUN   TestCodexTelemetryBodyViewMatchesLegacy/"{\"messages\":[{\"role\":\"user\",\"content\":\"<environment_context><shell>fish</shell></environment_context>\"}],\"input\":[]}"
+=== RUN   TestCodexTelemetryBodyViewMatchesLegacy/"{\"model\":\"partial\",\"guardian_v2_enabled\":true,"
+=== RUN   TestCodexTelemetryBodyViewMatchesLegacy/"{\"approvals_reviewer\":\"user\",\"input\":[{\"type\":\"function_call_output\",\"call_id\":\"partial\"}]"
+=== RUN   TestCodexTelemetryBodyViewMatchesLegacy/"{\"model\":\"first\"}_{\"model\":\"second\"}"
+=== RUN   TestCodexTelemetryBodyViewMatchesLegacy/"broken_{\"model\":\"test\"}"
+=== RUN   TestCodexTelemetryBodyViewMatchesLegacy/"{\"model\":true,\"reasoning\":{\"effort\":42}}"
+=== RUN   TestCodexTelemetryBodyViewMatchesLegacy/"broken_{\"model\":\"test\",\"approval_policy\":\"never\",\"reasoning\":{\"effort\":\"high\"},\"service_tier\":\"priority\",\"input\":[{\"type\":\"function_call_output\",\"call_id\":\"partial\"}]}"
+--- PASS: TestCodexTelemetryBodyViewMatchesLegacy (0.00s)
+    --- PASS: TestCodexTelemetryBodyViewMatchesLegacy/"" (0.00s)
+    --- PASS: TestCodexTelemetryBodyViewMatchesLegacy/"null" (0.00s)
+    --- PASS: TestCodexTelemetryBodyViewMatchesLegacy/"[]" (0.00s)
+    --- PASS: TestCodexTelemetryBodyViewMatchesLegacy/"\"text\"" (0.00s)
+    --- PASS: TestCodexTelemetryBodyViewMatchesLegacy/"{}" (0.00s)
+    --- PASS: TestCodexTelemetryBodyViewMatchesLegacy/"{\"model\":\"test\",\"model\":\"later\",\"approval_policy\":\"never\",\"reasoning\":{\"effort\":\"max\"},\"service_tier\":\"priority\"}" (0.00s)
+    --- PASS: TestCodexTelemetryBodyViewMatchesLegacy/"{\"client_metadata\":{\"x-codex-turn-metadata\":\"{\\\"guardian_v2_enabled\\\":false,\\\"approvals_reviewer\\\":\\\"user\\\"}\"},\"guardian_v2_enabled\":true}" (0.00s)
+    --- PASS: TestCodexTelemetryBodyViewMatchesLegacy/"{\"client_metadata\":{\"guardian_v2_enabled\":null,\"approvals_reviewer\":\"invalid\"}}" (0.00s)
+    --- PASS: TestCodexTelemetryBodyViewMatchesLegacy/"{\"x-codex-turn-metadata\":{\"guardian_v2_enabled\":\"true\",\"approvals_reviewer\":\"user\"},\"guardian_v2_enabled\":false}" (0.00s)
+    --- PASS: TestCodexTelemetryBodyViewMatchesLegacy/"{\"model\":\"test\",\"input\":[{\"type\":\"function_call_output\",\"call_id\":\"abc\",\"output\":\"text\"},{\"type\":\"custom_tool_call_output\",\"call_id\":\"def\",\"output\":\"text\"}]}" (0.00s)
+    --- PASS: TestCodexTelemetryBodyViewMatchesLegacy/"{\"input\":[{\"type\":\"function_call_output\",\"call_id\":\"old\"},{\"role\":\"user\",\"content\":\"new\"},{\"type\":\"function_call_output\",\"call_id\":\"new\"}]}" (0.00s)
+    --- PASS: TestCodexTelemetryBodyViewMatchesLegacy/"{\"input\":[{\"role\":\"user\",\"content\":\"<environment_context><shell>bash</shell></environment_context>\"}]}" (0.00s)
+    --- PASS: TestCodexTelemetryBodyViewMatchesLegacy/"{\"messages\":[{\"role\":\"user\",\"content\":\"<environment_context><shell>fish</shell></environment_context>\"}],\"input\":[]}" (0.00s)
+    --- PASS: TestCodexTelemetryBodyViewMatchesLegacy/"{\"model\":\"partial\",\"guardian_v2_enabled\":true," (0.00s)
+    --- PASS: TestCodexTelemetryBodyViewMatchesLegacy/"{\"approvals_reviewer\":\"user\",\"input\":[{\"type\":\"function_call_output\",\"call_id\":\"partial\"}]" (0.00s)
+    --- PASS: TestCodexTelemetryBodyViewMatchesLegacy/"{\"model\":\"first\"}_{\"model\":\"second\"}" (0.00s)
+    --- PASS: TestCodexTelemetryBodyViewMatchesLegacy/"broken_{\"model\":\"test\"}" (0.00s)
+    --- PASS: TestCodexTelemetryBodyViewMatchesLegacy/"{\"model\":true,\"reasoning\":{\"effort\":42}}" (0.00s)
+    --- PASS: TestCodexTelemetryBodyViewMatchesLegacy/"broken_{\"model\":\"test\",\"approval_policy\":\"never\",\"reasoning\":{\"effort\":\"high\"},\"service_tier\":\"priority\",\"input\":[{\"type\":\"function_call_output\",\"call_id\":\"partial\"}]}" (0.00s)
+=== RUN   TestCodexTelemetryBodyViewResultsOwnTheirScalars
+--- PASS: TestCodexTelemetryBodyViewResultsOwnTheirScalars (0.00s)
+=== RUN   TestCodexTelemetryBodyViewKeepsLimits
+--- PASS: TestCodexTelemetryBodyViewKeepsLimits (0.19s)
+=== RUN   TestCodexTelemetryConnectObservedSuccessFailureAndTimeout
+--- PASS: TestCodexTelemetryConnectObservedSuccessFailureAndTimeout (0.00s)
+=== RUN   TestCodexTelemetryConnectReauthOnlyUsesSuccessfulScopedBaseline
+--- PASS: TestCodexTelemetryConnectReauthOnlyUsesSuccessfulScopedBaseline (0.00s)
+=== RUN   TestCodexTelemetryConnectConcurrentDialsLeaveReauthUnknown
+--- PASS: TestCodexTelemetryConnectConcurrentDialsLeaveReauthUnknown (0.00s)
+=== RUN   TestCodexTelemetryConnectOverlappingFailuresPreserveSuccessfulBaseline
+--- PASS: TestCodexTelemetryConnectOverlappingFailuresPreserveSuccessfulBaseline (0.00s)
+=== RUN   TestCodexTelemetryConnectFactoryFreezesScalarsAndPolicy
+--- PASS: TestCodexTelemetryConnectFactoryFreezesScalarsAndPolicy (0.00s)
+=== RUN   TestCodexTelemetryConnectConflictingIdentityIsUnknown
+--- PASS: TestCodexTelemetryConnectConflictingIdentityIsUnknown (0.00s)
+=== RUN   TestCodexTelemetryConnectHonorsThreePolicySwitches
+=== RUN   TestCodexTelemetryConnectHonorsThreePolicySwitches/false/false/false
+=== RUN   TestCodexTelemetryConnectHonorsThreePolicySwitches/false/false/true
+=== RUN   TestCodexTelemetryConnectHonorsThreePolicySwitches/false/true/false
+=== RUN   TestCodexTelemetryConnectHonorsThreePolicySwitches/false/true/true
+=== RUN   TestCodexTelemetryConnectHonorsThreePolicySwitches/true/false/false
+=== RUN   TestCodexTelemetryConnectHonorsThreePolicySwitches/true/false/true
+=== RUN   TestCodexTelemetryConnectHonorsThreePolicySwitches/true/true/false
+=== RUN   TestCodexTelemetryConnectHonorsThreePolicySwitches/true/true/true
+=== RUN   TestCodexTelemetryConnectHonorsThreePolicySwitches/environment
+--- PASS: TestCodexTelemetryConnectHonorsThreePolicySwitches (0.00s)
+    --- PASS: TestCodexTelemetryConnectHonorsThreePolicySwitches/false/false/false (0.00s)
+    --- PASS: TestCodexTelemetryConnectHonorsThreePolicySwitches/false/false/true (0.00s)
+    --- PASS: TestCodexTelemetryConnectHonorsThreePolicySwitches/false/true/false (0.00s)
+    --- PASS: TestCodexTelemetryConnectHonorsThreePolicySwitches/false/true/true (0.00s)
+    --- PASS: TestCodexTelemetryConnectHonorsThreePolicySwitches/true/false/false (0.00s)
+    --- PASS: TestCodexTelemetryConnectHonorsThreePolicySwitches/true/false/true (0.00s)
+    --- PASS: TestCodexTelemetryConnectHonorsThreePolicySwitches/true/true/false (0.00s)
+    --- PASS: TestCodexTelemetryConnectHonorsThreePolicySwitches/true/true/true (0.00s)
+    --- PASS: TestCodexTelemetryConnectHonorsThreePolicySwitches/environment (0.00s)
+=== RUN   TestCodexTelemetryConnectQueueAndTrackerAreBounded
+--- PASS: TestCodexTelemetryConnectQueueAndTrackerAreBounded (0.05s)
+=== RUN   TestCodexTelemetryConnectStaleDatabaseEpochAndRollback
+--- PASS: TestCodexTelemetryConnectStaleDatabaseEpochAndRollback (0.00s)
+=== RUN   TestCodexTelemetryConnectFinishConcurrentAndNilSafe
+--- PASS: TestCodexTelemetryConnectFinishConcurrentAndNilSafe (0.00s)
+=== RUN   TestCodexTelemetryConnectWireSnapshotDoesNotRetainBusinessObjects
+--- PASS: TestCodexTelemetryConnectWireSnapshotDoesNotRetainBusinessObjects (0.00s)
+=== RUN   TestCodexTelemetryConnectUsesFinalPhysicalHeaders
+--- PASS: TestCodexTelemetryConnectUsesFinalPhysicalHeaders (0.00s)
+=== RUN   TestCodexTelemetryConnectFinalIdentityChangeDoesNotRelabelBaseline
+--- PASS: TestCodexTelemetryConnectFinalIdentityChangeDoesNotRelabelBaseline (0.00s)
+=== RUN   TestCodexTelemetryConnectV3SnapshotAndFrozenSealedPayload
+--- PASS: TestCodexTelemetryConnectV3SnapshotAndFrozenSealedPayload (0.00s)
+=== RUN   TestCodexTelemetryCoverageReportsClientOnlySignalsWithoutCollection
+--- PASS: TestCodexTelemetryCoverageReportsClientOnlySignalsWithoutCollection (0.00s)
+=== RUN   TestCodexTelemetryClientOnlySignalsAreNeverInferredFromResponses
+--- PASS: TestCodexTelemetryClientOnlySignalsAreNeverInferredFromResponses (0.01s)
+=== RUN   TestCodexTelemetryAuthStorageMetricSchemaPreservesProvidedSamples
+--- PASS: TestCodexTelemetryAuthStorageMetricSchemaPreservesProvidedSamples (0.00s)
+=== RUN   TestCodexTelemetryShellFromMultipleEnvironments
+=== RUN   TestCodexTelemetryShellFromMultipleEnvironments/legacy
+=== RUN   TestCodexTelemetryShellFromMultipleEnvironments/single_remote
+=== RUN   TestCodexTelemetryShellFromMultipleEnvironments/primary_remote
+=== RUN   TestCodexTelemetryShellFromMultipleEnvironments/primary_first
+=== RUN   TestCodexTelemetryShellFromMultipleEnvironments/unavailable_secondary
+=== RUN   TestCodexTelemetryShellFromMultipleEnvironments/explicit_available
+=== RUN   TestCodexTelemetryShellFromMultipleEnvironments/two_primaries
+=== RUN   TestCodexTelemetryShellFromMultipleEnvironments/two_unmarked
+=== RUN   TestCodexTelemetryShellFromMultipleEnvironments/explicit_nonprimary
+=== RUN   TestCodexTelemetryShellFromMultipleEnvironments/unavailable_primary
+=== RUN   TestCodexTelemetryShellFromMultipleEnvironments/starting_primary
+=== RUN   TestCodexTelemetryShellFromMultipleEnvironments/failed_primary
+=== RUN   TestCodexTelemetryShellFromMultipleEnvironments/missing_primary_shell
+=== RUN   TestCodexTelemetryShellFromMultipleEnvironments/duplicate_id
+=== RUN   TestCodexTelemetryShellFromMultipleEnvironments/duplicate_shell
+=== RUN   TestCodexTelemetryShellFromMultipleEnvironments/duplicate_primary_attribute
+=== RUN   TestCodexTelemetryShellFromMultipleEnvironments/invalid_primary
+=== RUN   TestCodexTelemetryShellFromMultipleEnvironments/conflicting_status
+=== RUN   TestCodexTelemetryShellFromMultipleEnvironments/mixed_formats
+=== RUN   TestCodexTelemetryShellFromMultipleEnvironments/multiple_containers
+=== RUN   TestCodexTelemetryShellFromMultipleEnvironments/nested_example
+=== RUN   TestCodexTelemetryShellFromMultipleEnvironments/nested_shell_subtree
+=== RUN   TestCodexTelemetryShellFromMultipleEnvironments/arbitrary_command
+=== RUN   TestCodexTelemetryShellFromMultipleEnvironments/namespace
+=== RUN   TestCodexTelemetryShellFromMultipleEnvironments/unavailable_shell
+=== RUN   TestCodexTelemetryShellFromMultipleEnvironments/missing_id
+=== RUN   TestCodexTelemetryShellFromMultipleEnvironments/environment_limit
+--- PASS: TestCodexTelemetryShellFromMultipleEnvironments (0.00s)
+    --- PASS: TestCodexTelemetryShellFromMultipleEnvironments/legacy (0.00s)
+    --- PASS: TestCodexTelemetryShellFromMultipleEnvironments/single_remote (0.00s)
+    --- PASS: TestCodexTelemetryShellFromMultipleEnvironments/primary_remote (0.00s)
+    --- PASS: TestCodexTelemetryShellFromMultipleEnvironments/primary_first (0.00s)
+    --- PASS: TestCodexTelemetryShellFromMultipleEnvironments/unavailable_secondary (0.00s)
+    --- PASS: TestCodexTelemetryShellFromMultipleEnvironments/explicit_available (0.00s)
+    --- PASS: TestCodexTelemetryShellFromMultipleEnvironments/two_primaries (0.00s)
+    --- PASS: TestCodexTelemetryShellFromMultipleEnvironments/two_unmarked (0.00s)
+    --- PASS: TestCodexTelemetryShellFromMultipleEnvironments/explicit_nonprimary (0.00s)
+    --- PASS: TestCodexTelemetryShellFromMultipleEnvironments/unavailable_primary (0.00s)
+    --- PASS: TestCodexTelemetryShellFromMultipleEnvironments/starting_primary (0.00s)
+    --- PASS: TestCodexTelemetryShellFromMultipleEnvironments/failed_primary (0.00s)
+    --- PASS: TestCodexTelemetryShellFromMultipleEnvironments/missing_primary_shell (0.00s)
+    --- PASS: TestCodexTelemetryShellFromMultipleEnvironments/duplicate_id (0.00s)
+    --- PASS: TestCodexTelemetryShellFromMultipleEnvironments/duplicate_shell (0.00s)
+    --- PASS: TestCodexTelemetryShellFromMultipleEnvironments/duplicate_primary_attribute (0.00s)
+    --- PASS: TestCodexTelemetryShellFromMultipleEnvironments/invalid_primary (0.00s)
+    --- PASS: TestCodexTelemetryShellFromMultipleEnvironments/conflicting_status (0.00s)
+    --- PASS: TestCodexTelemetryShellFromMultipleEnvironments/mixed_formats (0.00s)
+    --- PASS: TestCodexTelemetryShellFromMultipleEnvironments/multiple_containers (0.00s)
+    --- PASS: TestCodexTelemetryShellFromMultipleEnvironments/nested_example (0.00s)
+    --- PASS: TestCodexTelemetryShellFromMultipleEnvironments/nested_shell_subtree (0.00s)
+    --- PASS: TestCodexTelemetryShellFromMultipleEnvironments/arbitrary_command (0.00s)
+    --- PASS: TestCodexTelemetryShellFromMultipleEnvironments/namespace (0.00s)
+    --- PASS: TestCodexTelemetryShellFromMultipleEnvironments/unavailable_shell (0.00s)
+    --- PASS: TestCodexTelemetryShellFromMultipleEnvironments/missing_id (0.00s)
+    --- PASS: TestCodexTelemetryShellFromMultipleEnvironments/environment_limit (0.00s)
+=== RUN   TestCodexTelemetryRemoteShellPreservesWireSystem
+=== RUN   TestCodexTelemetryRemoteShellPreservesWireSystem/windows
+=== RUN   TestCodexTelemetryRemoteShellPreservesWireSystem/macos
+=== RUN   TestCodexTelemetryRemoteShellPreservesWireSystem/linux
+--- PASS: TestCodexTelemetryRemoteShellPreservesWireSystem (0.00s)
+    --- PASS: TestCodexTelemetryRemoteShellPreservesWireSystem/windows (0.00s)
+    --- PASS: TestCodexTelemetryRemoteShellPreservesWireSystem/macos (0.00s)
+    --- PASS: TestCodexTelemetryRemoteShellPreservesWireSystem/linux (0.00s)
+=== RUN   TestCodexTelemetryMultiEnvironmentEvidenceBoundaries
+=== RUN   TestCodexTelemetryMultiEnvironmentEvidenceBoundaries/current
+=== RUN   TestCodexTelemetryMultiEnvironmentEvidenceBoundaries/quoted
+=== RUN   TestCodexTelemetryMultiEnvironmentEvidenceBoundaries/fenced
+=== RUN   TestCodexTelemetryMultiEnvironmentEvidenceBoundaries/historical
+=== RUN   TestCodexTelemetryMultiEnvironmentEvidenceBoundaries/skill
+=== RUN   TestCodexTelemetryMultiEnvironmentEvidenceBoundaries/newest_conflict_blocks_old
+=== RUN   TestCodexTelemetryMultiEnvironmentEvidenceBoundaries/text_limit
+=== RUN   TestCodexTelemetryMultiEnvironmentEvidenceBoundaries/node_limit
+=== RUN   TestCodexTelemetryMultiEnvironmentEvidenceBoundaries/depth_limit
+--- PASS: TestCodexTelemetryMultiEnvironmentEvidenceBoundaries (0.00s)
+    --- PASS: TestCodexTelemetryMultiEnvironmentEvidenceBoundaries/current (0.00s)
+    --- PASS: TestCodexTelemetryMultiEnvironmentEvidenceBoundaries/quoted (0.00s)
+    --- PASS: TestCodexTelemetryMultiEnvironmentEvidenceBoundaries/fenced (0.00s)
+    --- PASS: TestCodexTelemetryMultiEnvironmentEvidenceBoundaries/historical (0.00s)
+    --- PASS: TestCodexTelemetryMultiEnvironmentEvidenceBoundaries/skill (0.00s)
+    --- PASS: TestCodexTelemetryMultiEnvironmentEvidenceBoundaries/newest_conflict_blocks_old (0.00s)
+    --- PASS: TestCodexTelemetryMultiEnvironmentEvidenceBoundaries/text_limit (0.00s)
+    --- PASS: TestCodexTelemetryMultiEnvironmentEvidenceBoundaries/node_limit (0.00s)
+    --- PASS: TestCodexTelemetryMultiEnvironmentEvidenceBoundaries/depth_limit (0.00s)
+=== RUN   TestCodexTelemetryAnalyticsEventContract
+--- PASS: TestCodexTelemetryAnalyticsEventContract (0.00s)
+=== RUN   TestCodexTelemetryAnalyticsReviewDisabledAndMissingIdentity
+--- PASS: TestCodexTelemetryAnalyticsReviewDisabledAndMissingIdentity (0.00s)
+=== RUN   TestCodexTelemetryAnalyticsAttemptCountsDoNotLeakIntoSyntheticTitle
+--- PASS: TestCodexTelemetryAnalyticsAttemptCountsDoNotLeakIntoSyntheticTitle (0.00s)
+=== RUN   TestCodexTelemetryAnalyticsFailureIsNotAnExplicitInterrupt
+=== RUN   TestCodexTelemetryAnalyticsFailureIsNotAnExplicitInterrupt/failed
+=== RUN   TestCodexTelemetryAnalyticsFailureIsNotAnExplicitInterrupt/interrupted
+=== RUN   TestCodexTelemetryAnalyticsFailureIsNotAnExplicitInterrupt/incomplete
+=== RUN   TestCodexTelemetryAnalyticsFailureIsNotAnExplicitInterrupt/completed
+--- PASS: TestCodexTelemetryAnalyticsFailureIsNotAnExplicitInterrupt (0.00s)
+    --- PASS: TestCodexTelemetryAnalyticsFailureIsNotAnExplicitInterrupt/failed (0.00s)
+    --- PASS: TestCodexTelemetryAnalyticsFailureIsNotAnExplicitInterrupt/interrupted (0.00s)
+    --- PASS: TestCodexTelemetryAnalyticsFailureIsNotAnExplicitInterrupt/incomplete (0.00s)
+    --- PASS: TestCodexTelemetryAnalyticsFailureIsNotAnExplicitInterrupt/completed (0.00s)
+=== RUN   TestCodexTelemetryAnalyticsDesktopAndCLIIdentity
+=== RUN   TestCodexTelemetryAnalyticsDesktopAndCLIIdentity/desktop
+=== RUN   TestCodexTelemetryAnalyticsDesktopAndCLIIdentity/cli
+=== RUN   TestCodexTelemetryAnalyticsDesktopAndCLIIdentity/windows
+--- PASS: TestCodexTelemetryAnalyticsDesktopAndCLIIdentity (0.00s)
+    --- PASS: TestCodexTelemetryAnalyticsDesktopAndCLIIdentity/desktop (0.00s)
+    --- PASS: TestCodexTelemetryAnalyticsDesktopAndCLIIdentity/cli (0.00s)
+    --- PASS: TestCodexTelemetryAnalyticsDesktopAndCLIIdentity/windows (0.00s)
+=== RUN   TestCodexTelemetrySimulationPermissionAndEvidenceBoundaries
+--- PASS: TestCodexTelemetrySimulationPermissionAndEvidenceBoundaries (0.00s)
+=== RUN   TestCodexTelemetryActivityIdentityAndTimeAreStable
+--- PASS: TestCodexTelemetryActivityIdentityAndTimeAreStable (0.00s)
+=== RUN   TestCodexTelemetryGatewayFreezesSamplingAndRoute
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+--- PASS: TestCodexTelemetryGatewayFreezesSamplingAndRoute (0.00s)
+=== RUN   TestCodexTelemetryGatewayUsesWireInstallationAndOS
+=== RUN   TestCodexTelemetryGatewayUsesWireInstallationAndOS/windows
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+=== RUN   TestCodexTelemetryGatewayUsesWireInstallationAndOS/macos
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+=== RUN   TestCodexTelemetryGatewayUsesWireInstallationAndOS/linux
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+--- PASS: TestCodexTelemetryGatewayUsesWireInstallationAndOS (0.00s)
+    --- PASS: TestCodexTelemetryGatewayUsesWireInstallationAndOS/windows (0.00s)
+    --- PASS: TestCodexTelemetryGatewayUsesWireInstallationAndOS/macos (0.00s)
+    --- PASS: TestCodexTelemetryGatewayUsesWireInstallationAndOS/linux (0.00s)
+=== RUN   TestCodexTelemetryGatewaySparkOwnerAndAccountBoundary
+[GIN-debug] [WARNING] Running in "debug" mode. Switch to "release" mode in production.
+ - using env:	export GIN_MODE=release
+ - using code:	gin.SetMode(gin.ReleaseMode)
+
+--- PASS: TestCodexTelemetryGatewaySparkOwnerAndAccountBoundary (0.00s)
+=== RUN   TestCodexTelemetryShellOnlyReadsCurrentStandaloneEnvironment
+=== RUN   TestCodexTelemetryShellOnlyReadsCurrentStandaloneEnvironment/current
+=== RUN   TestCodexTelemetryShellOnlyReadsCurrentStandaloneEnvironment/quoted
+=== RUN   TestCodexTelemetryShellOnlyReadsCurrentStandaloneEnvironment/history
+=== RUN   TestCodexTelemetryShellOnlyReadsCurrentStandaloneEnvironment/newest_wins
+=== RUN   TestCodexTelemetryShellOnlyReadsCurrentStandaloneEnvironment/malformed_blocks_older
+=== RUN   TestCodexTelemetryShellOnlyReadsCurrentStandaloneEnvironment/nested_shell
+=== RUN   TestCodexTelemetryShellOnlyReadsCurrentStandaloneEnvironment/multiple_shell
+=== RUN   TestCodexTelemetryShellOnlyReadsCurrentStandaloneEnvironment/arbitrary_command
+=== RUN   TestCodexTelemetryShellOnlyReadsCurrentStandaloneEnvironment/skill_label
+--- PASS: TestCodexTelemetryShellOnlyReadsCurrentStandaloneEnvironment (0.00s)
+    --- PASS: TestCodexTelemetryShellOnlyReadsCurrentStandaloneEnvironment/current (0.00s)
+    --- PASS: TestCodexTelemetryShellOnlyReadsCurrentStandaloneEnvironment/quoted (0.00s)
+    --- PASS: TestCodexTelemetryShellOnlyReadsCurrentStandaloneEnvironment/history (0.00s)
+    --- PASS: TestCodexTelemetryShellOnlyReadsCurrentStandaloneEnvironment/newest_wins (0.00s)
+    --- PASS: TestCodexTelemetryShellOnlyReadsCurrentStandaloneEnvironment/malformed_blocks_older (0.00s)
+    --- PASS: TestCodexTelemetryShellOnlyReadsCurrentStandaloneEnvironment/nested_shell (0.00s)
+    --- PASS: TestCodexTelemetryShellOnlyReadsCurrentStandaloneEnvironment/multiple_shell (0.00s)
+    --- PASS: TestCodexTelemetryShellOnlyReadsCurrentStandaloneEnvironment/arbitrary_command (0.00s)
+    --- PASS: TestCodexTelemetryShellOnlyReadsCurrentStandaloneEnvironment/skill_label (0.00s)
+=== RUN   TestCodexTelemetryReturnedToolsExcludeHistory
+--- PASS: TestCodexTelemetryReturnedToolsExcludeHistory (0.00s)
+=== RUN   TestCodexTelemetryGatewayIdentityFailuresRemainLocal
+=== RUN   TestCodexTelemetryGatewayIdentityFailuresRemainLocal/identity_unavailable
+=== RUN   TestCodexTelemetryGatewayIdentityFailuresRemainLocal/stale_identity
+=== RUN   TestCodexTelemetryGatewayIdentityFailuresRemainLocal/proxy_unavailable
+--- PASS: TestCodexTelemetryGatewayIdentityFailuresRemainLocal (0.00s)
+    --- PASS: TestCodexTelemetryGatewayIdentityFailuresRemainLocal/identity_unavailable (0.00s)
+    --- PASS: TestCodexTelemetryGatewayIdentityFailuresRemainLocal/stale_identity (0.00s)
+    --- PASS: TestCodexTelemetryGatewayIdentityFailuresRemainLocal/proxy_unavailable (0.00s)
+=== RUN   TestCodexTelemetryGatewayExcludedRequestsDoNotRecordIdentityFailure
+--- PASS: TestCodexTelemetryGatewayExcludedRequestsDoNotRecordIdentityFailure (0.00s)
+=== RUN   TestCodexTelemetrySnapshotUsesFinalWireOnly
+--- PASS: TestCodexTelemetrySnapshotUsesFinalWireOnly (0.00s)
+=== RUN   TestCodexTelemetryGatewayExcludesInternalAndNonOAuth
+=== RUN   TestCodexTelemetryGatewayExcludesInternalAndNonOAuth/{"request_kind":"prewarm"}
+=== RUN   TestCodexTelemetryGatewayExcludesInternalAndNonOAuth/{"request_kind":"compaction"}
+=== RUN   TestCodexTelemetryGatewayExcludesInternalAndNonOAuth/{"request_kind":"memory"}
+=== RUN   TestCodexTelemetryGatewayExcludesInternalAndNonOAuth/{"generate":false}
+=== RUN   TestCodexTelemetryGatewayExcludesInternalAndNonOAuth/{"model":"gpt-image-1"}
+=== RUN   TestCodexTelemetryGatewayExcludesInternalAndNonOAuth/{"tools":[{"type":"image_generation"}]}
+=== RUN   TestCodexTelemetryGatewayExcludesInternalAndNonOAuth/{"client_metadata":{"x-codex-turn-metadata":"{\"request_kind\":\"memory\"}"}}
+--- PASS: TestCodexTelemetryGatewayExcludesInternalAndNonOAuth (0.00s)
+    --- PASS: TestCodexTelemetryGatewayExcludesInternalAndNonOAuth/{"request_kind":"prewarm"} (0.00s)
+    --- PASS: TestCodexTelemetryGatewayExcludesInternalAndNonOAuth/{"request_kind":"compaction"} (0.00s)
+    --- PASS: TestCodexTelemetryGatewayExcludesInternalAndNonOAuth/{"request_kind":"memory"} (0.00s)
+    --- PASS: TestCodexTelemetryGatewayExcludesInternalAndNonOAuth/{"generate":false} (0.00s)
+    --- PASS: TestCodexTelemetryGatewayExcludesInternalAndNonOAuth/{"model":"gpt-image-1"} (0.00s)
+    --- PASS: TestCodexTelemetryGatewayExcludesInternalAndNonOAuth/{"tools":[{"type":"image_generation"}]} (0.00s)
+    --- PASS: TestCodexTelemetryGatewayExcludesInternalAndNonOAuth/{"client_metadata":{"x-codex-turn-metadata":"{\"request_kind\":\"memory\"}"}} (0.00s)
+=== RUN   TestCodexTelemetryResultPreservesActualOutcomeAndUsage
+--- PASS: TestCodexTelemetryResultPreservesActualOutcomeAndUsage (0.00s)
+=== RUN   TestCodexTelemetryReviewFactsAreIndependent
+=== RUN   TestCodexTelemetryReviewFactsAreIndependent/auto-review-off
+=== RUN   TestCodexTelemetryReviewFactsAreIndependent/auto-review-on
+=== RUN   TestCodexTelemetryReviewFactsAreIndependent/v2-on-auto-off
+=== RUN   TestCodexTelemetryReviewFactsAreIndependent/v2-off-auto-on
+=== RUN   TestCodexTelemetryReviewFactsAreIndependent/v2-on-user-reviewer
+=== RUN   TestCodexTelemetryReviewFactsAreIndependent/explicit-reviewer-wins
+--- PASS: TestCodexTelemetryReviewFactsAreIndependent (0.00s)
+    --- PASS: TestCodexTelemetryReviewFactsAreIndependent/auto-review-off (0.00s)
+    --- PASS: TestCodexTelemetryReviewFactsAreIndependent/auto-review-on (0.00s)
+    --- PASS: TestCodexTelemetryReviewFactsAreIndependent/v2-on-auto-off (0.00s)
+    --- PASS: TestCodexTelemetryReviewFactsAreIndependent/v2-off-auto-on (0.00s)
+    --- PASS: TestCodexTelemetryReviewFactsAreIndependent/v2-on-user-reviewer (0.00s)
+    --- PASS: TestCodexTelemetryReviewFactsAreIndependent/explicit-reviewer-wins (0.00s)
+=== RUN   TestCodexTelemetryReviewSnapshotReadsFinalCarriers
+=== RUN   TestCodexTelemetryReviewSnapshotReadsFinalCarriers/missing
+=== RUN   TestCodexTelemetryReviewSnapshotReadsFinalCarriers/header
+=== RUN   TestCodexTelemetryReviewSnapshotReadsFinalCarriers/body-flat
+=== RUN   TestCodexTelemetryReviewSnapshotReadsFinalCarriers/body-metadata-priority
+=== RUN   TestCodexTelemetryReviewSnapshotReadsFinalCarriers/string-extra
+=== RUN   TestCodexTelemetryReviewSnapshotReadsFinalCarriers/malformed-is-unknown
+--- PASS: TestCodexTelemetryReviewSnapshotReadsFinalCarriers (0.00s)
+    --- PASS: TestCodexTelemetryReviewSnapshotReadsFinalCarriers/missing (0.00s)
+    --- PASS: TestCodexTelemetryReviewSnapshotReadsFinalCarriers/header (0.00s)
+    --- PASS: TestCodexTelemetryReviewSnapshotReadsFinalCarriers/body-flat (0.00s)
+    --- PASS: TestCodexTelemetryReviewSnapshotReadsFinalCarriers/body-metadata-priority (0.00s)
+    --- PASS: TestCodexTelemetryReviewSnapshotReadsFinalCarriers/string-extra (0.00s)
+    --- PASS: TestCodexTelemetryReviewSnapshotReadsFinalCarriers/malformed-is-unknown (0.00s)
+=== RUN   TestCodexTelemetryGuardianRequestsKeepOnlyActualMeasurements
+=== RUN   TestCodexTelemetryGuardianRequestsKeepOnlyActualMeasurements/review-source
+=== RUN   TestCodexTelemetryGuardianRequestsKeepOnlyActualMeasurements/classifier-source
+=== RUN   TestCodexTelemetryGuardianRequestsKeepOnlyActualMeasurements/review-subagent
+=== RUN   TestCodexTelemetryGuardianRequestsKeepOnlyActualMeasurements/classifier-subagent
+=== RUN   TestCodexTelemetryGuardianRequestsKeepOnlyActualMeasurements/review-header
+=== RUN   TestCodexTelemetryGuardianRequestsKeepOnlyActualMeasurements/classifier-header
+--- PASS: TestCodexTelemetryGuardianRequestsKeepOnlyActualMeasurements (0.00s)
+    --- PASS: TestCodexTelemetryGuardianRequestsKeepOnlyActualMeasurements/review-source (0.00s)
+    --- PASS: TestCodexTelemetryGuardianRequestsKeepOnlyActualMeasurements/classifier-source (0.00s)
+    --- PASS: TestCodexTelemetryGuardianRequestsKeepOnlyActualMeasurements/review-subagent (0.00s)
+    --- PASS: TestCodexTelemetryGuardianRequestsKeepOnlyActualMeasurements/classifier-subagent (0.00s)
+    --- PASS: TestCodexTelemetryGuardianRequestsKeepOnlyActualMeasurements/review-header (0.00s)
+    --- PASS: TestCodexTelemetryGuardianRequestsKeepOnlyActualMeasurements/classifier-header (0.00s)
+=== RUN   TestCodexTelemetryBeginCopiesIndependentReviewFlags
+--- PASS: TestCodexTelemetryBeginCopiesIndependentReviewFlags (0.00s)
+=== RUN   TestCodexTelemetryGuardianDoesNotConsumeOrdinaryStartup
+--- PASS: TestCodexTelemetryGuardianDoesNotConsumeOrdinaryStartup (0.00s)
+=== RUN   TestCodexTelemetryLifecycleHooksRespectSubagentSource
+=== RUN   TestCodexTelemetryLifecycleHooksRespectSubagentSource/root
+=== RUN   TestCodexTelemetryLifecycleHooksRespectSubagentSource/root-interrupt
+=== RUN   TestCodexTelemetryLifecycleHooksRespectSubagentSource/unknown-root
+=== RUN   TestCodexTelemetryLifecycleHooksRespectSubagentSource/feature
+=== RUN   TestCodexTelemetryLifecycleHooksRespectSubagentSource/spawn-kind
+=== RUN   TestCodexTelemetryLifecycleHooksRespectSubagentSource/spawn-header
+=== RUN   TestCodexTelemetryLifecycleHooksRespectSubagentSource/spawn-header-fallback
+=== RUN   TestCodexTelemetryLifecycleHooksRespectSubagentSource/spawn-both
+=== RUN   TestCodexTelemetryLifecycleHooksRespectSubagentSource/normalized-spawn
+=== RUN   TestCodexTelemetryLifecycleHooksRespectSubagentSource/spawn-interrupt
+=== RUN   TestCodexTelemetryLifecycleHooksRespectSubagentSource/review
+=== RUN   TestCodexTelemetryLifecycleHooksRespectSubagentSource/compact
+=== RUN   TestCodexTelemetryLifecycleHooksRespectSubagentSource/unknown-kind
+=== RUN   TestCodexTelemetryLifecycleHooksRespectSubagentSource/unknown-header
+=== RUN   TestCodexTelemetryLifecycleHooksRespectSubagentSource/missing-kind
+=== RUN   TestCodexTelemetryLifecycleHooksRespectSubagentSource/missing-kind-interrupt
+=== RUN   TestCodexTelemetryLifecycleHooksRespectSubagentSource/memory-source
+=== RUN   TestCodexTelemetryLifecycleHooksRespectSubagentSource/memory-kind
+=== RUN   TestCodexTelemetryLifecycleHooksRespectSubagentSource/memory-header
+=== RUN   TestCodexTelemetryLifecycleHooksRespectSubagentSource/conflicting-kind-header
+=== RUN   TestCodexTelemetryLifecycleHooksRespectSubagentSource/conflicting-header-kind
+=== RUN   TestCodexTelemetryLifecycleHooksRespectSubagentSource/conflicting-root-source
+=== RUN   TestCodexTelemetryLifecycleHooksRespectSubagentSource/guardian-source
+=== RUN   TestCodexTelemetryLifecycleHooksRespectSubagentSource/guardian-header
+--- PASS: TestCodexTelemetryLifecycleHooksRespectSubagentSource (0.00s)
+    --- PASS: TestCodexTelemetryLifecycleHooksRespectSubagentSource/root (0.00s)
+    --- PASS: TestCodexTelemetryLifecycleHooksRespectSubagentSource/root-interrupt (0.00s)
+    --- PASS: TestCodexTelemetryLifecycleHooksRespectSubagentSource/unknown-root (0.00s)
+    --- PASS: TestCodexTelemetryLifecycleHooksRespectSubagentSource/feature (0.00s)
+    --- PASS: TestCodexTelemetryLifecycleHooksRespectSubagentSource/spawn-kind (0.00s)
+    --- PASS: TestCodexTelemetryLifecycleHooksRespectSubagentSource/spawn-header (0.00s)
+    --- PASS: TestCodexTelemetryLifecycleHooksRespectSubagentSource/spawn-header-fallback (0.00s)
+    --- PASS: TestCodexTelemetryLifecycleHooksRespectSubagentSource/spawn-both (0.00s)
+    --- PASS: TestCodexTelemetryLifecycleHooksRespectSubagentSource/normalized-spawn (0.00s)
+    --- PASS: TestCodexTelemetryLifecycleHooksRespectSubagentSource/spawn-interrupt (0.00s)
+    --- PASS: TestCodexTelemetryLifecycleHooksRespectSubagentSource/review (0.00s)
+    --- PASS: TestCodexTelemetryLifecycleHooksRespectSubagentSource/compact (0.00s)
+    --- PASS: TestCodexTelemetryLifecycleHooksRespectSubagentSource/unknown-kind (0.00s)
+    --- PASS: TestCodexTelemetryLifecycleHooksRespectSubagentSource/unknown-header (0.00s)
+    --- PASS: TestCodexTelemetryLifecycleHooksRespectSubagentSource/missing-kind (0.00s)
+    --- PASS: TestCodexTelemetryLifecycleHooksRespectSubagentSource/missing-kind-interrupt (0.00s)
+    --- PASS: TestCodexTelemetryLifecycleHooksRespectSubagentSource/memory-source (0.00s)
+    --- PASS: TestCodexTelemetryLifecycleHooksRespectSubagentSource/memory-kind (0.00s)
+    --- PASS: TestCodexTelemetryLifecycleHooksRespectSubagentSource/memory-header (0.00s)
+    --- PASS: TestCodexTelemetryLifecycleHooksRespectSubagentSource/conflicting-kind-header (0.00s)
+    --- PASS: TestCodexTelemetryLifecycleHooksRespectSubagentSource/conflicting-header-kind (0.00s)
+    --- PASS: TestCodexTelemetryLifecycleHooksRespectSubagentSource/conflicting-root-source (0.00s)
+    --- PASS: TestCodexTelemetryLifecycleHooksRespectSubagentSource/guardian-source (0.00s)
+    --- PASS: TestCodexTelemetryLifecycleHooksRespectSubagentSource/guardian-header (0.00s)
+=== RUN   TestCodexTelemetryLifecycleHooksRequireSimulation
+=== RUN   TestCodexTelemetryLifecycleHooksRequireSimulation/disabled
+=== RUN   TestCodexTelemetryLifecycleHooksRequireSimulation/unknown-os
+--- PASS: TestCodexTelemetryLifecycleHooksRequireSimulation (0.00s)
+    --- PASS: TestCodexTelemetryLifecycleHooksRequireSimulation/disabled (0.00s)
+    --- PASS: TestCodexTelemetryLifecycleHooksRequireSimulation/unknown-os (0.00s)
+=== RUN   TestCodexTelemetryNetworkPermissionAndTitle
+=== RUN   TestCodexTelemetryNetworkPermissionAndTitle/full-access
+=== RUN   TestCodexTelemetryNetworkPermissionAndTitle/normalized-full-access
+=== RUN   TestCodexTelemetryNetworkPermissionAndTitle/sandbox-policy-fallback
+=== RUN   TestCodexTelemetryNetworkPermissionAndTitle/read-only
+=== RUN   TestCodexTelemetryNetworkPermissionAndTitle/workspace-write
+=== RUN   TestCodexTelemetryNetworkPermissionAndTitle/external-sandbox
+=== RUN   TestCodexTelemetryNetworkPermissionAndTitle/unknown
+=== RUN   TestCodexTelemetryNetworkPermissionAndTitle/unknown-mode
+=== RUN   TestCodexTelemetryNetworkPermissionAndTitle/no-backend-is-not-full-access
+=== RUN   TestCodexTelemetryNetworkPermissionAndTitle/mode-precedes-backend
+--- PASS: TestCodexTelemetryNetworkPermissionAndTitle (0.00s)
+    --- PASS: TestCodexTelemetryNetworkPermissionAndTitle/full-access (0.00s)
+    --- PASS: TestCodexTelemetryNetworkPermissionAndTitle/normalized-full-access (0.00s)
+    --- PASS: TestCodexTelemetryNetworkPermissionAndTitle/sandbox-policy-fallback (0.00s)
+    --- PASS: TestCodexTelemetryNetworkPermissionAndTitle/read-only (0.00s)
+    --- PASS: TestCodexTelemetryNetworkPermissionAndTitle/workspace-write (0.00s)
+    --- PASS: TestCodexTelemetryNetworkPermissionAndTitle/external-sandbox (0.00s)
+    --- PASS: TestCodexTelemetryNetworkPermissionAndTitle/unknown (0.00s)
+    --- PASS: TestCodexTelemetryNetworkPermissionAndTitle/unknown-mode (0.00s)
+    --- PASS: TestCodexTelemetryNetworkPermissionAndTitle/no-backend-is-not-full-access (0.00s)
+    --- PASS: TestCodexTelemetryNetworkPermissionAndTitle/mode-precedes-backend (0.00s)
+=== RUN   TestCodexTelemetryHTTPStartsAtPhysicalSendWithoutCookieFeature
+--- PASS: TestCodexTelemetryHTTPStartsAtPhysicalSendWithoutCookieFeature (0.00s)
+=== RUN   TestCodexTelemetryHTTPBodySnapshotBorrowsFinalizedBytes
+--- PASS: TestCodexTelemetryHTTPBodySnapshotBorrowsFinalizedBytes (0.00s)
+=== RUN   TestCodexTelemetryHTTPBodySnapshotCompatibilityAndErrors
+=== RUN   TestCodexTelemetryHTTPBodySnapshotCompatibilityAndErrors/compatibility
+=== RUN   TestCodexTelemetryHTTPBodySnapshotCompatibilityAndErrors/empty_compatibility
+=== RUN   TestCodexTelemetryHTTPBodySnapshotCompatibilityAndErrors/empty_snapshot
+=== RUN   TestCodexTelemetryHTTPBodySnapshotCompatibilityAndErrors/read_error
+=== RUN   TestCodexTelemetryHTTPBodySnapshotCompatibilityAndErrors/open_error
+--- PASS: TestCodexTelemetryHTTPBodySnapshotCompatibilityAndErrors (0.00s)
+    --- PASS: TestCodexTelemetryHTTPBodySnapshotCompatibilityAndErrors/compatibility (0.00s)
+    --- PASS: TestCodexTelemetryHTTPBodySnapshotCompatibilityAndErrors/empty_compatibility (0.00s)
+    --- PASS: TestCodexTelemetryHTTPBodySnapshotCompatibilityAndErrors/empty_snapshot (0.00s)
+    --- PASS: TestCodexTelemetryHTTPBodySnapshotCompatibilityAndErrors/read_error (0.00s)
+    --- PASS: TestCodexTelemetryHTTPBodySnapshotCompatibilityAndErrors/open_error (0.00s)
+=== RUN   TestCodexTelemetryHTTPBeginUsesSnapshotAndCountsEveryPhysicalAttempt
+--- PASS: TestCodexTelemetryHTTPBeginUsesSnapshotAndCountsEveryPhysicalAttempt (0.00s)
+=== RUN   TestCodexTelemetryHTTPResponseTransparentCompletion
+=== RUN   TestCodexTelemetryHTTPResponseTransparentCompletion/json
+=== RUN   TestCodexTelemetryHTTPResponseTransparentCompletion/sse
+--- PASS: TestCodexTelemetryHTTPResponseTransparentCompletion (0.00s)
+    --- PASS: TestCodexTelemetryHTTPResponseTransparentCompletion/json (0.00s)
+    --- PASS: TestCodexTelemetryHTTPResponseTransparentCompletion/sse (0.00s)
+=== RUN   TestCodexTelemetryHTTPResponseLargeOutputDoesNotLoseTrailingUsage
+--- PASS: TestCodexTelemetryHTTPResponseLargeOutputDoesNotLoseTrailingUsage (0.01s)
+=== RUN   TestCodexTelemetryHTTPResponseNonCompletionOutcomes
+=== RUN   TestCodexTelemetryHTTPResponseNonCompletionOutcomes/failure
+=== RUN   TestCodexTelemetryHTTPResponseNonCompletionOutcomes/server_cancellation
+=== RUN   TestCodexTelemetryHTTPResponseNonCompletionOutcomes/incomplete
+=== RUN   TestCodexTelemetryHTTPResponseNonCompletionOutcomes/missing_terminal
+=== RUN   TestCodexTelemetryHTTPResponseNonCompletionOutcomes/done_alone
+--- PASS: TestCodexTelemetryHTTPResponseNonCompletionOutcomes (0.00s)
+    --- PASS: TestCodexTelemetryHTTPResponseNonCompletionOutcomes/failure (0.00s)
+    --- PASS: TestCodexTelemetryHTTPResponseNonCompletionOutcomes/server_cancellation (0.00s)
+    --- PASS: TestCodexTelemetryHTTPResponseNonCompletionOutcomes/incomplete (0.00s)
+    --- PASS: TestCodexTelemetryHTTPResponseNonCompletionOutcomes/missing_terminal (0.00s)
+    --- PASS: TestCodexTelemetryHTTPResponseNonCompletionOutcomes/done_alone (0.00s)
+=== RUN   TestCodexTelemetryHTTPResponseTransportAndHTTPFailuresRemainRetryable
+--- PASS: TestCodexTelemetryHTTPResponseTransportAndHTTPFailuresRemainRetryable (0.00s)
+=== RUN   TestCodexTelemetryHTTPResponseEarlyCloseIsNotUserCancellation
+--- PASS: TestCodexTelemetryHTTPResponseEarlyCloseIsNotUserCancellation (0.00s)
+=== RUN   TestCodexTelemetryHTTPUsesProgressiveUsageAndLatchesBareErrorBeforeSuccess
+--- PASS: TestCodexTelemetryHTTPUsesProgressiveUsageAndLatchesBareErrorBeforeSuccess (0.00s)
+=== RUN   TestCodexTelemetryHTTPCompletedWaitsForGatewayAcceptance
+--- PASS: TestCodexTelemetryHTTPCompletedWaitsForGatewayAcceptance (0.00s)
+=== RUN   TestCodexTelemetryHTTPContextPreservesInferenceRequest
+--- PASS: TestCodexTelemetryHTTPContextPreservesInferenceRequest (0.00s)
+=== RUN   TestCodexTelemetryHTTPTransportCloseDoesNotPreemptBufferedTerminal
+--- PASS: TestCodexTelemetryHTTPTransportCloseDoesNotPreemptBufferedTerminal (0.00s)
+=== RUN   TestCodexTelemetryHTTPGatewayUsesActualWireWithFingerprintCollectionOff
+=== RUN   TestCodexTelemetryHTTPGatewayUsesActualWireWithFingerprintCollectionOff/responses/daily=false/stream=false
+=== RUN   TestCodexTelemetryHTTPGatewayUsesActualWireWithFingerprintCollectionOff/messages/daily=false/stream=false
+=== RUN   TestCodexTelemetryHTTPGatewayUsesActualWireWithFingerprintCollectionOff/chat/daily=false/stream=false
+2026/11/25 08:37:11 WARN openai.chat_conversion account_id=44 status=known_loss reason=oauth_output_limit_ignored field=max_tokens suppressed=0
+=== RUN   TestCodexTelemetryHTTPGatewayUsesActualWireWithFingerprintCollectionOff/responses/daily=false/stream=true
+=== RUN   TestCodexTelemetryHTTPGatewayUsesActualWireWithFingerprintCollectionOff/messages/daily=false/stream=true
+=== RUN   TestCodexTelemetryHTTPGatewayUsesActualWireWithFingerprintCollectionOff/chat/daily=false/stream=true
+=== RUN   TestCodexTelemetryHTTPGatewayUsesActualWireWithFingerprintCollectionOff/responses/daily=true/stream=false
+=== RUN   TestCodexTelemetryHTTPGatewayUsesActualWireWithFingerprintCollectionOff/messages/daily=true/stream=false
+=== RUN   TestCodexTelemetryHTTPGatewayUsesActualWireWithFingerprintCollectionOff/chat/daily=true/stream=false
+=== RUN   TestCodexTelemetryHTTPGatewayUsesActualWireWithFingerprintCollectionOff/responses/daily=true/stream=true
+=== RUN   TestCodexTelemetryHTTPGatewayUsesActualWireWithFingerprintCollectionOff/messages/daily=true/stream=true
+=== RUN   TestCodexTelemetryHTTPGatewayUsesActualWireWithFingerprintCollectionOff/chat/daily=true/stream=true
+--- PASS: TestCodexTelemetryHTTPGatewayUsesActualWireWithFingerprintCollectionOff (0.06s)
+    --- PASS: TestCodexTelemetryHTTPGatewayUsesActualWireWithFingerprintCollectionOff/responses/daily=false/stream=false (0.01s)
+    --- PASS: TestCodexTelemetryHTTPGatewayUsesActualWireWithFingerprintCollectionOff/messages/daily=false/stream=false (0.01s)
+    --- PASS: TestCodexTelemetryHTTPGatewayUsesActualWireWithFingerprintCollectionOff/chat/daily=false/stream=false (0.00s)
+    --- PASS: TestCodexTelemetryHTTPGatewayUsesActualWireWithFingerprintCollectionOff/responses/daily=false/stream=true (0.00s)
+    --- PASS: TestCodexTelemetryHTTPGatewayUsesActualWireWithFingerprintCollectionOff/messages/daily=false/stream=true (0.00s)
+    --- PASS: TestCodexTelemetryHTTPGatewayUsesActualWireWithFingerprintCollectionOff/chat/daily=false/stream=true (0.00s)
+    --- PASS: TestCodexTelemetryHTTPGatewayUsesActualWireWithFingerprintCollectionOff/responses/daily=true/stream=false (0.00s)
+    --- PASS: TestCodexTelemetryHTTPGatewayUsesActualWireWithFingerprintCollectionOff/messages/daily=true/stream=false (0.00s)
+    --- PASS: TestCodexTelemetryHTTPGatewayUsesActualWireWithFingerprintCollectionOff/chat/daily=true/stream=false (0.01s)
+    --- PASS: TestCodexTelemetryHTTPGatewayUsesActualWireWithFingerprintCollectionOff/responses/daily=true/stream=true (0.00s)
+    --- PASS: TestCodexTelemetryHTTPGatewayUsesActualWireWithFingerprintCollectionOff/messages/daily=true/stream=true (0.01s)
+    --- PASS: TestCodexTelemetryHTTPGatewayUsesActualWireWithFingerprintCollectionOff/chat/daily=true/stream=true (0.00s)
+=== RUN   TestCodexTelemetryRuntimeWakeBurstsThrottleDueScanButDispatchNewBatches
+--- PASS: TestCodexTelemetryRuntimeWakeBurstsThrottleDueScanButDispatchNewBatches (0.00s)
+=== RUN   TestCodexTelemetryDueMaintenanceStopsAfterContextCancellation
+--- PASS: TestCodexTelemetryDueMaintenanceStopsAfterContextCancellation (0.00s)
+=== RUN   TestCodexTelemetryDueMaintenanceContinuesAfterDeletedOwner
+--- PASS: TestCodexTelemetryDueMaintenanceContinuesAfterDeletedOwner (0.00s)
+=== RUN   TestCodexTelemetryRuntimeHeartbeatStopsAfterContextCancellation
+--- PASS: TestCodexTelemetryRuntimeHeartbeatStopsAfterContextCancellation (0.00s)
+=== RUN   TestCodexTelemetryRuntimeFailureLogsAreSanitizedAndThrottled
+--- PASS: TestCodexTelemetryRuntimeFailureLogsAreSanitizedAndThrottled (0.00s)
+=== RUN   TestCodexTelemetryRuntimePruneKeepsFreshRowsBelowCapacity
+--- PASS: TestCodexTelemetryRuntimePruneKeepsFreshRowsBelowCapacity (0.00s)
+=== RUN   TestCodexTelemetryRuntimeExpiredLeaseWaitsForIdleDeadline
+--- PASS: TestCodexTelemetryRuntimeExpiredLeaseWaitsForIdleDeadline (0.00s)
+=== RUN   TestCodexTelemetryRuntimePruneStillRejectsInvalidStateBelowCapacity
+=== RUN   TestCodexTelemetryRuntimePruneStillRejectsInvalidStateBelowCapacity/attempt
+=== RUN   TestCodexTelemetryRuntimePruneStillRejectsInvalidStateBelowCapacity/turn
+--- PASS: TestCodexTelemetryRuntimePruneStillRejectsInvalidStateBelowCapacity (0.00s)
+    --- PASS: TestCodexTelemetryRuntimePruneStillRejectsInvalidStateBelowCapacity/attempt (0.00s)
+    --- PASS: TestCodexTelemetryRuntimePruneStillRejectsInvalidStateBelowCapacity/turn (0.00s)
+=== RUN   TestCodexTelemetryMetricsKindLimitSpansAttemptsAndResetsAfterFlush
+=== RUN   TestCodexTelemetryMetricsKindLimitSpansAttemptsAndResetsAfterFlush/codex.sse_event
+=== RUN   TestCodexTelemetryMetricsKindLimitSpansAttemptsAndResetsAfterFlush/codex.websocket.event
+--- PASS: TestCodexTelemetryMetricsKindLimitSpansAttemptsAndResetsAfterFlush (0.03s)
+    --- PASS: TestCodexTelemetryMetricsKindLimitSpansAttemptsAndResetsAfterFlush/codex.sse_event (0.01s)
+    --- PASS: TestCodexTelemetryMetricsKindLimitSpansAttemptsAndResetsAfterFlush/codex.websocket.event (0.01s)
+=== RUN   TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions
+=== RUN   TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions/v1/codex.sse_event/waits_first=false
+=== RUN   TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions/v1/codex.sse_event/waits_first=true
+=== RUN   TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions/v1/codex.websocket.event/waits_first=false
+=== RUN   TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions/v1/codex.websocket.event/waits_first=true
+=== RUN   TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions/v2/codex.sse_event/waits_first=false
+=== RUN   TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions/v2/codex.sse_event/waits_first=true
+=== RUN   TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions/v2/codex.websocket.event/waits_first=false
+=== RUN   TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions/v2/codex.websocket.event/waits_first=true
+=== RUN   TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions/v3/codex.sse_event/waits_first=false
+=== RUN   TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions/v3/codex.sse_event/waits_first=true
+=== RUN   TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions/v3/codex.websocket.event/waits_first=false
+=== RUN   TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions/v3/codex.websocket.event/waits_first=true
+=== RUN   TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions/v4/codex.sse_event/waits_first=false
+=== RUN   TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions/v4/codex.sse_event/waits_first=true
+=== RUN   TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions/v4/codex.websocket.event/waits_first=false
+=== RUN   TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions/v4/codex.websocket.event/waits_first=true
+--- PASS: TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions (0.53s)
+    --- PASS: TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions/v1/codex.sse_event/waits_first=false (0.04s)
+    --- PASS: TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions/v1/codex.sse_event/waits_first=true (0.03s)
+    --- PASS: TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions/v1/codex.websocket.event/waits_first=false (0.03s)
+    --- PASS: TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions/v1/codex.websocket.event/waits_first=true (0.03s)
+    --- PASS: TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions/v2/codex.sse_event/waits_first=false (0.03s)
+    --- PASS: TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions/v2/codex.sse_event/waits_first=true (0.03s)
+    --- PASS: TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions/v2/codex.websocket.event/waits_first=false (0.03s)
+    --- PASS: TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions/v2/codex.websocket.event/waits_first=true (0.03s)
+    --- PASS: TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions/v3/codex.sse_event/waits_first=false (0.04s)
+    --- PASS: TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions/v3/codex.sse_event/waits_first=true (0.04s)
+    --- PASS: TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions/v3/codex.websocket.event/waits_first=false (0.03s)
+    --- PASS: TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions/v3/codex.websocket.event/waits_first=true (0.03s)
+    --- PASS: TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions/v4/codex.sse_event/waits_first=false (0.03s)
+    --- PASS: TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions/v4/codex.sse_event/waits_first=true (0.03s)
+    --- PASS: TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions/v4/codex.websocket.event/waits_first=false (0.03s)
+    --- PASS: TestCodexTelemetryMetricsKindLimitRestoresAcrossSnapshotVersions/v4/codex.websocket.event/waits_first=true (0.03s)
+=== RUN   TestCodexTelemetryMetricsLegacySnapshotMigratesOnlyByteHistograms
+--- PASS: TestCodexTelemetryMetricsLegacySnapshotMigratesOnlyByteHistograms (0.00s)
+=== RUN   TestCodexTelemetryMetricsV2ByteHistogramRoundTripAcceptsNewSamples
+=== RUN   TestCodexTelemetryMetricsV2ByteHistogramRoundTripAcceptsNewSamples/codex.app_server.codex_home.size_bytes
+=== RUN   TestCodexTelemetryMetricsV2ByteHistogramRoundTripAcceptsNewSamples/codex.sqlite.logs.write.bytes
+=== RUN   TestCodexTelemetryMetricsV2ByteHistogramRoundTripAcceptsNewSamples/codex.sqlite.logs.write.max_entry_bytes
+--- PASS: TestCodexTelemetryMetricsV2ByteHistogramRoundTripAcceptsNewSamples (0.00s)
+    --- PASS: TestCodexTelemetryMetricsV2ByteHistogramRoundTripAcceptsNewSamples/codex.app_server.codex_home.size_bytes (0.00s)
+    --- PASS: TestCodexTelemetryMetricsV2ByteHistogramRoundTripAcceptsNewSamples/codex.sqlite.logs.write.bytes (0.00s)
+    --- PASS: TestCodexTelemetryMetricsV2ByteHistogramRoundTripAcceptsNewSamples/codex.sqlite.logs.write.max_entry_bytes (0.00s)
+=== RUN   TestCodexTelemetryMetricsSnapshotMigrationRejectsInvalidShapes
+=== RUN   TestCodexTelemetryMetricsSnapshotMigrationRejectsInvalidShapes/unknown_version
+=== RUN   TestCodexTelemetryMetricsSnapshotMigrationRejectsInvalidShapes/v2_legacy_byte_buckets
+=== RUN   TestCodexTelemetryMetricsSnapshotMigrationRejectsInvalidShapes/legacy_byte_bucket_count
+=== RUN   TestCodexTelemetryMetricsSnapshotMigrationRejectsInvalidShapes/legacy_byte_kind
+=== RUN   TestCodexTelemetryMetricsSnapshotMigrationRejectsInvalidShapes/legacy_byte_unit
+=== RUN   TestCodexTelemetryMetricsSnapshotMigrationRejectsInvalidShapes/unchanged_legacy_histogram
+=== RUN   TestCodexTelemetryMetricsSnapshotMigrationRejectsInvalidShapes/v2_malformed_histogram
+--- PASS: TestCodexTelemetryMetricsSnapshotMigrationRejectsInvalidShapes (0.00s)
+    --- PASS: TestCodexTelemetryMetricsSnapshotMigrationRejectsInvalidShapes/unknown_version (0.00s)
+    --- PASS: TestCodexTelemetryMetricsSnapshotMigrationRejectsInvalidShapes/v2_legacy_byte_buckets (0.00s)
+    --- PASS: TestCodexTelemetryMetricsSnapshotMigrationRejectsInvalidShapes/legacy_byte_bucket_count (0.00s)
+    --- PASS: TestCodexTelemetryMetricsSnapshotMigrationRejectsInvalidShapes/legacy_byte_kind (0.00s)
+    --- PASS: TestCodexTelemetryMetricsSnapshotMigrationRejectsInvalidShapes/legacy_byte_unit (0.00s)
+    --- PASS: TestCodexTelemetryMetricsSnapshotMigrationRejectsInvalidShapes/unchanged_legacy_histogram (0.00s)
+    --- PASS: TestCodexTelemetryMetricsSnapshotMigrationRejectsInvalidShapes/v2_malformed_histogram (0.00s)
+=== RUN   TestCodexTelemetryRuntimeMigratesPendingMetricsAndKeepsSealedPayload
+--- PASS: TestCodexTelemetryRuntimeMigratesPendingMetricsAndKeepsSealedPayload (0.00s)
+=== RUN   TestCodexTelemetryMetricsSnapshotDropsUnknownCompatibilityReason
+--- PASS: TestCodexTelemetryMetricsSnapshotDropsUnknownCompatibilityReason (0.00s)
+=== RUN   TestCodexTelemetryMetricsLegacyEventSnapshotAddsUnknownKind
+=== RUN   TestCodexTelemetryMetricsLegacyEventSnapshotAddsUnknownKind/codex.sse_event
+=== RUN   TestCodexTelemetryMetricsLegacyEventSnapshotAddsUnknownKind/codex.sse_event.duration_ms
+=== RUN   TestCodexTelemetryMetricsLegacyEventSnapshotAddsUnknownKind/codex.websocket.event
+=== RUN   TestCodexTelemetryMetricsLegacyEventSnapshotAddsUnknownKind/codex.websocket.event.duration_ms
+--- PASS: TestCodexTelemetryMetricsLegacyEventSnapshotAddsUnknownKind (0.00s)
+    --- PASS: TestCodexTelemetryMetricsLegacyEventSnapshotAddsUnknownKind/codex.sse_event (0.00s)
+    --- PASS: TestCodexTelemetryMetricsLegacyEventSnapshotAddsUnknownKind/codex.sse_event.duration_ms (0.00s)
+    --- PASS: TestCodexTelemetryMetricsLegacyEventSnapshotAddsUnknownKind/codex.websocket.event (0.00s)
+    --- PASS: TestCodexTelemetryMetricsLegacyEventSnapshotAddsUnknownKind/codex.websocket.event.duration_ms (0.00s)
+=== RUN   TestCodexTelemetryMetricsLegacyEventMigrationMergesUnknownCollisions
+=== RUN   TestCodexTelemetryMetricsLegacyEventMigrationMergesUnknownCollisions/codex.sse_event/missing_first
+=== RUN   TestCodexTelemetryMetricsLegacyEventMigrationMergesUnknownCollisions/codex.sse_event/explicit_first
+=== RUN   TestCodexTelemetryMetricsLegacyEventMigrationMergesUnknownCollisions/codex.sse_event.duration_ms/missing_first
+=== RUN   TestCodexTelemetryMetricsLegacyEventMigrationMergesUnknownCollisions/codex.sse_event.duration_ms/explicit_first
+=== RUN   TestCodexTelemetryMetricsLegacyEventMigrationMergesUnknownCollisions/codex.websocket.event/missing_first
+=== RUN   TestCodexTelemetryMetricsLegacyEventMigrationMergesUnknownCollisions/codex.websocket.event/explicit_first
+=== RUN   TestCodexTelemetryMetricsLegacyEventMigrationMergesUnknownCollisions/codex.websocket.event.duration_ms/missing_first
+=== RUN   TestCodexTelemetryMetricsLegacyEventMigrationMergesUnknownCollisions/codex.websocket.event.duration_ms/explicit_first
+--- PASS: TestCodexTelemetryMetricsLegacyEventMigrationMergesUnknownCollisions (0.00s)
+    --- PASS: TestCodexTelemetryMetricsLegacyEventMigrationMergesUnknownCollisions/codex.sse_event/missing_first (0.00s)
+    --- PASS: TestCodexTelemetryMetricsLegacyEventMigrationMergesUnknownCollisions/codex.sse_event/explicit_first (0.00s)
+    --- PASS: TestCodexTelemetryMetricsLegacyEventMigrationMergesUnknownCollisions/codex.sse_event.duration_ms/missing_first (0.00s)
+    --- PASS: TestCodexTelemetryMetricsLegacyEventMigrationMergesUnknownCollisions/codex.sse_event.duration_ms/explicit_first (0.00s)
+    --- PASS: TestCodexTelemetryMetricsLegacyEventMigrationMergesUnknownCollisions/codex.websocket.event/missing_first (0.00s)
+    --- PASS: TestCodexTelemetryMetricsLegacyEventMigrationMergesUnknownCollisions/codex.websocket.event/explicit_first (0.00s)
+    --- PASS: TestCodexTelemetryMetricsLegacyEventMigrationMergesUnknownCollisions/codex.websocket.event.duration_ms/missing_first (0.00s)
+    --- PASS: TestCodexTelemetryMetricsLegacyEventMigrationMergesUnknownCollisions/codex.websocket.event.duration_ms/explicit_first (0.00s)
+=== RUN   TestCodexTelemetryMetricsV2EventSnapshotNormalizesPrivateKinds
+=== RUN   TestCodexTelemetryMetricsV2EventSnapshotNormalizesPrivateKinds/codex.sse_event
+=== RUN   TestCodexTelemetryMetricsV2EventSnapshotNormalizesPrivateKinds/codex.sse_event.duration_ms
+=== RUN   TestCodexTelemetryMetricsV2EventSnapshotNormalizesPrivateKinds/codex.websocket.event
+=== RUN   TestCodexTelemetryMetricsV2EventSnapshotNormalizesPrivateKinds/codex.websocket.event.duration_ms
+--- PASS: TestCodexTelemetryMetricsV2EventSnapshotNormalizesPrivateKinds (0.00s)
+    --- PASS: TestCodexTelemetryMetricsV2EventSnapshotNormalizesPrivateKinds/codex.sse_event (0.00s)
+    --- PASS: TestCodexTelemetryMetricsV2EventSnapshotNormalizesPrivateKinds/codex.sse_event.duration_ms (0.00s)
+    --- PASS: TestCodexTelemetryMetricsV2EventSnapshotNormalizesPrivateKinds/codex.websocket.event (0.00s)
+    --- PASS: TestCodexTelemetryMetricsV2EventSnapshotNormalizesPrivateKinds/codex.websocket.event.duration_ms (0.00s)
+=== RUN   TestCodexTelemetryMetricsNativeByteHistogramBounds
+=== RUN   TestCodexTelemetryMetricsNativeByteHistogramBounds/codex.app_server.codex_home.size_bytes
+=== RUN   TestCodexTelemetryMetricsNativeByteHistogramBounds/codex.sqlite.logs.write.bytes
+=== RUN   TestCodexTelemetryMetricsNativeByteHistogramBounds/codex.sqlite.logs.write.max_entry_bytes
+--- PASS: TestCodexTelemetryMetricsNativeByteHistogramBounds (0.00s)
+    --- PASS: TestCodexTelemetryMetricsNativeByteHistogramBounds/codex.app_server.codex_home.size_bytes (0.00s)
+    --- PASS: TestCodexTelemetryMetricsNativeByteHistogramBounds/codex.sqlite.logs.write.bytes (0.00s)
+    --- PASS: TestCodexTelemetryMetricsNativeByteHistogramBounds/codex.sqlite.logs.write.max_entry_bytes (0.00s)
+=== RUN   TestCodexTelemetryMetricsHomeDirectoriesRemainSimulated
+--- PASS: TestCodexTelemetryMetricsHomeDirectoriesRemainSimulated (0.00s)
+=== RUN   TestCodexTelemetryMetricsMergeCompleteEventDistributions
+--- PASS: TestCodexTelemetryMetricsMergeCompleteEventDistributions (0.00s)
+=== RUN   TestCodexTelemetryMetricsCountOnlyEventsHaveNoWaitSample
+--- PASS: TestCodexTelemetryMetricsCountOnlyEventsHaveNoWaitSample (0.00s)
+=== RUN   TestCodexTelemetryMetricsDescriptorContract
+--- PASS: TestCodexTelemetryMetricsDescriptorContract (0.00s)
+=== RUN   TestCodexTelemetryMetricsHistogramKeepsEachObservation
+--- PASS: TestCodexTelemetryMetricsHistogramKeepsEachObservation (0.00s)
+=== RUN   TestCodexTelemetryMetricsPartitionAndStableStartup
+--- PASS: TestCodexTelemetryMetricsPartitionAndStableStartup (0.00s)
+=== RUN   TestCodexTelemetryMetricsOSCapabilities
+=== RUN   TestCodexTelemetryMetricsOSCapabilities/windows
+=== RUN   TestCodexTelemetryMetricsOSCapabilities/macos
+=== RUN   TestCodexTelemetryMetricsOSCapabilities/linux
+--- PASS: TestCodexTelemetryMetricsOSCapabilities (0.00s)
+    --- PASS: TestCodexTelemetryMetricsOSCapabilities/windows (0.00s)
+    --- PASS: TestCodexTelemetryMetricsOSCapabilities/macos (0.00s)
+    --- PASS: TestCodexTelemetryMetricsOSCapabilities/linux (0.00s)
+=== RUN   TestCodexTelemetryMetricsObservedTransportHasNoInventedClientTurn
+--- PASS: TestCodexTelemetryMetricsObservedTransportHasNoInventedClientTurn (0.00s)
+=== RUN   TestCodexTelemetryMetricsSnapshotPreservesDedupAndDelta
+--- PASS: TestCodexTelemetryMetricsSnapshotPreservesDedupAndDelta (0.00s)
+=== RUN   TestCodexTelemetryMetricsModesAndRetention
+--- PASS: TestCodexTelemetryMetricsModesAndRetention (0.05s)
+=== RUN   TestCodexTelemetryNotifierReplacementAndStop
+--- PASS: TestCodexTelemetryNotifierReplacementAndStop (0.00s)
+=== RUN   TestCodexTelemetryNotifierNilSafe
+--- PASS: TestCodexTelemetryNotifierNilSafe (0.00s)
+=== RUN   TestCodexTelemetryObservationsFilterAndCopyProvenance
+--- PASS: TestCodexTelemetryObservationsFilterAndCopyProvenance (0.00s)
+=== RUN   TestCodexTelemetryObservationModesAffectEffectiveState
+--- PASS: TestCodexTelemetryObservationModesAffectEffectiveState (0.00s)
+=== RUN   TestCodexTelemetryOSAuthorizationSeparatesReauthorizedTurnsAndMetrics
+--- PASS: TestCodexTelemetryOSAuthorizationSeparatesReauthorizedTurnsAndMetrics (0.01s)
+=== RUN   TestCodexTelemetryOSAuthorizationDoesNotChangePoolOnTokenRefresh
+--- PASS: TestCodexTelemetryOSAuthorizationDoesNotChangePoolOnTokenRefresh (0.00s)
+=== RUN   TestCodexTelemetryPersistentSenderUsesCurrentCredentialsAndFrozenRoute
+--- PASS: TestCodexTelemetryPersistentSenderUsesCurrentCredentialsAndFrozenRoute (0.00s)
+=== RUN   TestCodexTelemetryPersistentSenderNeverFallsBackFromMissingProxy
+--- PASS: TestCodexTelemetryPersistentSenderNeverFallsBackFromMissingProxy (0.00s)
+=== RUN   TestCodexTelemetryPersistentSenderRejectsChangedIdentity
+=== RUN   TestCodexTelemetryPersistentSenderRejectsChangedIdentity/workspace
+=== RUN   TestCodexTelemetryPersistentSenderRejectsChangedIdentity/installation
+=== RUN   TestCodexTelemetryPersistentSenderRejectsChangedIdentity/qualification
+--- PASS: TestCodexTelemetryPersistentSenderRejectsChangedIdentity (0.00s)
+    --- PASS: TestCodexTelemetryPersistentSenderRejectsChangedIdentity/workspace (0.00s)
+    --- PASS: TestCodexTelemetryPersistentSenderRejectsChangedIdentity/installation (0.00s)
+    --- PASS: TestCodexTelemetryPersistentSenderRejectsChangedIdentity/qualification (0.00s)
+=== RUN   TestCodexTelemetryPersistentSenderAllowsUnpinnedClientInstallation
+--- PASS: TestCodexTelemetryPersistentSenderAllowsUnpinnedClientInstallation (0.00s)
+=== RUN   TestCodexTelemetryProfilePersistenceExcludesTransportSecrets
+--- PASS: TestCodexTelemetryProfilePersistenceExcludesTransportSecrets (0.00s)
+=== RUN   TestCodexTelemetryOSAuthorizationUsesFrozenSlotAndLatestRefresh
+--- PASS: TestCodexTelemetryOSAuthorizationUsesFrozenSlotAndLatestRefresh (0.00s)
+=== RUN   TestCodexTelemetryOSAuthorizationRejectsOldOrMissingScope
+=== RUN   TestCodexTelemetryOSAuthorizationRejectsOldOrMissingScope/reauthorized
+=== RUN   TestCodexTelemetryOSAuthorizationRejectsOldOrMissingScope/revoked
+=== RUN   TestCodexTelemetryOSAuthorizationRejectsOldOrMissingScope/missing_generation
+=== RUN   TestCodexTelemetryOSAuthorizationRejectsOldOrMissingScope/missing_os
+--- PASS: TestCodexTelemetryOSAuthorizationRejectsOldOrMissingScope (0.00s)
+    --- PASS: TestCodexTelemetryOSAuthorizationRejectsOldOrMissingScope/reauthorized (0.00s)
+    --- PASS: TestCodexTelemetryOSAuthorizationRejectsOldOrMissingScope/revoked (0.00s)
+    --- PASS: TestCodexTelemetryOSAuthorizationRejectsOldOrMissingScope/missing_generation (0.00s)
+    --- PASS: TestCodexTelemetryOSAuthorizationRejectsOldOrMissingScope/missing_os (0.00s)
+=== RUN   TestCodexTelemetryOSAuthorizationIgnoresPrivateAdmissionState
+=== RUN   TestCodexTelemetryOSAuthorizationIgnoresPrivateAdmissionState/unauthorized
+=== RUN   TestCodexTelemetryOSAuthorizationIgnoresPrivateAdmissionState/reauth_required
+=== RUN   TestCodexTelemetryOSAuthorizationIgnoresPrivateAdmissionState/authorized
+--- PASS: TestCodexTelemetryOSAuthorizationIgnoresPrivateAdmissionState (0.00s)
+    --- PASS: TestCodexTelemetryOSAuthorizationIgnoresPrivateAdmissionState/unauthorized (0.00s)
+    --- PASS: TestCodexTelemetryOSAuthorizationIgnoresPrivateAdmissionState/reauth_required (0.00s)
+    --- PASS: TestCodexTelemetryOSAuthorizationIgnoresPrivateAdmissionState/authorized (0.00s)
+=== RUN   TestCodexTelemetryRuntimeDueTurnBatchPreservesRemainingWork
+--- PASS: TestCodexTelemetryRuntimeDueTurnBatchPreservesRemainingWork (0.01s)
+=== RUN   TestCodexTelemetryRuntimeCapacityDoesNotEvictReferencedTurn
+--- PASS: TestCodexTelemetryRuntimeCapacityDoesNotEvictReferencedTurn (0.12s)
+=== RUN   TestCodexTelemetryActivityTransactionReadsOwnChangesWithoutSharingJSON
+--- PASS: TestCodexTelemetryActivityTransactionReadsOwnChangesWithoutSharingJSON (0.00s)
+=== RUN   TestCodexTelemetryActivityTransactionBoundaries
+--- PASS: TestCodexTelemetryActivityTransactionBoundaries (0.00s)
+=== RUN   TestCodexTelemetryRuntimeSamplingAndExplicitTurnBoundary
+--- PASS: TestCodexTelemetryRuntimeSamplingAndExplicitTurnBoundary (0.01s)
+=== RUN   TestCodexTelemetryRuntimeRetryAndDuplicateResultAreNotNewSamples
+--- PASS: TestCodexTelemetryRuntimeRetryAndDuplicateResultAreNotNewSamples (0.00s)
+=== RUN   TestCodexTelemetryRuntimePendingToolAndContinuePreventSealing
+--- PASS: TestCodexTelemetryRuntimePendingToolAndContinuePreventSealing (0.01s)
+=== RUN   TestCodexTelemetryRuntimeIdleIsIncompleteAndNeverExtendsBusinessActivity
+--- PASS: TestCodexTelemetryRuntimeIdleIsIncompleteAndNeverExtendsBusinessActivity (0.00s)
+=== RUN   TestCodexTelemetryRuntimePoolSurvivesRoutingAndIdentityPartitions
+--- PASS: TestCodexTelemetryRuntimePoolSurvivesRoutingAndIdentityPartitions (0.00s)
+=== RUN   TestCodexTelemetryRuntimePolicyFenceDiscardsPendingButKeepsMarkers
+--- PASS: TestCodexTelemetryRuntimePolicyFenceDiscardsPendingButKeepsMarkers (0.00s)
+=== RUN   TestCodexTelemetryRuntimeProfileAllowlist
+--- PASS: TestCodexTelemetryRuntimeProfileAllowlist (0.00s)
+=== RUN   TestCodexTelemetryRuntimeBusinessNeverWaitsForStorage
+--- PASS: TestCodexTelemetryRuntimeBusinessNeverWaitsForStorage (0.00s)
+=== RUN   TestCodexTelemetryRuntimeCapacityPreservesActiveAndStableMarkers
+--- PASS: TestCodexTelemetryRuntimeCapacityPreservesActiveAndStableMarkers (0.16s)
+=== RUN   TestCodexTelemetryRuntimeRetentionKeepsInitializationMarkers
+--- PASS: TestCodexTelemetryRuntimeRetentionKeepsInitializationMarkers (0.00s)
+=== RUN   TestCodexTelemetryRuntimePreservesIncompleteMeasurementStatus
+--- PASS: TestCodexTelemetryRuntimePreservesIncompleteMeasurementStatus (0.00s)
+=== RUN   TestCodexTelemetryRuntimeLiveBusinessLeasePreventsIdleCompletion
+--- PASS: TestCodexTelemetryRuntimeLiveBusinessLeasePreventsIdleCompletion (0.00s)
+=== RUN   TestCodexTelemetryRuntimeDisabledMaintenance
+=== RUN   TestCodexTelemetryRuntimeDisabledMaintenance/global_disabled
+=== RUN   TestCodexTelemetryRuntimeDisabledMaintenance/both_modes_disabled
+=== RUN   TestCodexTelemetryRuntimeDisabledMaintenance/node_override
+--- PASS: TestCodexTelemetryRuntimeDisabledMaintenance (0.00s)
+    --- PASS: TestCodexTelemetryRuntimeDisabledMaintenance/global_disabled (0.00s)
+    --- PASS: TestCodexTelemetryRuntimeDisabledMaintenance/both_modes_disabled (0.00s)
+    --- PASS: TestCodexTelemetryRuntimeDisabledMaintenance/node_override (0.00s)
+=== RUN   TestCodexTelemetrySharedGrantRefreshKeepsThreeIdentityPools
+--- PASS: TestCodexTelemetrySharedGrantRefreshKeepsThreeIdentityPools (0.00s)
+=== RUN   TestCodexTelemetrySkillsBoundsAndV3RoundTrip
+=== RUN   TestCodexTelemetrySkillsBoundsAndV3RoundTrip/codex.thread.skills.enabled_total
+=== RUN   TestCodexTelemetrySkillsBoundsAndV3RoundTrip/codex.thread.skills.kept_total
+=== RUN   TestCodexTelemetrySkillsBoundsAndV3RoundTrip/codex.thread.skills.truncated
+=== RUN   TestCodexTelemetrySkillsBoundsAndV3RoundTrip/codex.thread.skills.description_truncated_chars
+--- PASS: TestCodexTelemetrySkillsBoundsAndV3RoundTrip (0.00s)
+    --- PASS: TestCodexTelemetrySkillsBoundsAndV3RoundTrip/codex.thread.skills.enabled_total (0.00s)
+    --- PASS: TestCodexTelemetrySkillsBoundsAndV3RoundTrip/codex.thread.skills.kept_total (0.00s)
+    --- PASS: TestCodexTelemetrySkillsBoundsAndV3RoundTrip/codex.thread.skills.truncated (0.00s)
+    --- PASS: TestCodexTelemetrySkillsBoundsAndV3RoundTrip/codex.thread.skills.description_truncated_chars (0.00s)
+=== RUN   TestCodexTelemetryLegacySkillsMigrationPreservesPoolAndOtherData
+=== RUN   TestCodexTelemetryLegacySkillsMigrationPreservesPoolAndOtherData/1
+=== RUN   TestCodexTelemetryLegacySkillsMigrationPreservesPoolAndOtherData/2
+--- PASS: TestCodexTelemetryLegacySkillsMigrationPreservesPoolAndOtherData (0.00s)
+    --- PASS: TestCodexTelemetryLegacySkillsMigrationPreservesPoolAndOtherData/1 (0.00s)
+    --- PASS: TestCodexTelemetryLegacySkillsMigrationPreservesPoolAndOtherData/2 (0.00s)
+=== RUN   TestCodexTelemetrySkillsMigrationRejectsInvalidLegacyShapes
+=== RUN   TestCodexTelemetrySkillsMigrationRejectsInvalidLegacyShapes/v1/kind
+=== RUN   TestCodexTelemetrySkillsMigrationRejectsInvalidLegacyShapes/v1/unit
+=== RUN   TestCodexTelemetrySkillsMigrationRejectsInvalidLegacyShapes/v1/buckets
+=== RUN   TestCodexTelemetrySkillsMigrationRejectsInvalidLegacyShapes/v2/kind
+=== RUN   TestCodexTelemetrySkillsMigrationRejectsInvalidLegacyShapes/v2/unit
+=== RUN   TestCodexTelemetrySkillsMigrationRejectsInvalidLegacyShapes/v2/buckets
+=== RUN   TestCodexTelemetrySkillsMigrationRejectsInvalidLegacyShapes/v3/kind
+=== RUN   TestCodexTelemetrySkillsMigrationRejectsInvalidLegacyShapes/v3/unit
+=== RUN   TestCodexTelemetrySkillsMigrationRejectsInvalidLegacyShapes/v3/buckets
+--- PASS: TestCodexTelemetrySkillsMigrationRejectsInvalidLegacyShapes (0.00s)
+    --- PASS: TestCodexTelemetrySkillsMigrationRejectsInvalidLegacyShapes/v1/kind (0.00s)
+    --- PASS: TestCodexTelemetrySkillsMigrationRejectsInvalidLegacyShapes/v1/unit (0.00s)
+    --- PASS: TestCodexTelemetrySkillsMigrationRejectsInvalidLegacyShapes/v1/buckets (0.00s)
+    --- PASS: TestCodexTelemetrySkillsMigrationRejectsInvalidLegacyShapes/v2/kind (0.00s)
+    --- PASS: TestCodexTelemetrySkillsMigrationRejectsInvalidLegacyShapes/v2/unit (0.00s)
+    --- PASS: TestCodexTelemetrySkillsMigrationRejectsInvalidLegacyShapes/v2/buckets (0.00s)
+    --- PASS: TestCodexTelemetrySkillsMigrationRejectsInvalidLegacyShapes/v3/kind (0.00s)
+    --- PASS: TestCodexTelemetrySkillsMigrationRejectsInvalidLegacyShapes/v3/unit (0.00s)
+    --- PASS: TestCodexTelemetrySkillsMigrationRejectsInvalidLegacyShapes/v3/buckets (0.00s)
+=== RUN   TestCodexTelemetryStreamOutputTiming
+--- PASS: TestCodexTelemetryStreamOutputTiming (0.00s)
+=== RUN   TestCodexTelemetryStreamFailureIsStickyAndTypeWins
+=== RUN   TestCodexTelemetryStreamFailureIsStickyAndTypeWins/error
+=== RUN   TestCodexTelemetryStreamFailureIsStickyAndTypeWins/response.failed
+=== RUN   TestCodexTelemetryStreamFailureIsStickyAndTypeWins/response.incomplete
+--- PASS: TestCodexTelemetryStreamFailureIsStickyAndTypeWins (0.00s)
+    --- PASS: TestCodexTelemetryStreamFailureIsStickyAndTypeWins/error (0.00s)
+    --- PASS: TestCodexTelemetryStreamFailureIsStickyAndTypeWins/response.failed (0.00s)
+    --- PASS: TestCodexTelemetryStreamFailureIsStickyAndTypeWins/response.incomplete (0.00s)
+=== RUN   TestCodexTelemetryStreamDeduplicatesIDsWithoutRetainingPayload
+--- PASS: TestCodexTelemetryStreamDeduplicatesIDsWithoutRetainingPayload (0.00s)
+=== RUN   TestCodexTelemetryStreamBoundedTimingAndAllowedServerFields
+--- PASS: TestCodexTelemetryStreamBoundedTimingAndAllowedServerFields (0.00s)
+=== RUN   TestCodexTelemetryWSReadTimingAndControlFrames
+--- PASS: TestCodexTelemetryWSReadTimingAndControlFrames (0.00s)
+=== RUN   TestCodexTelemetryWSCancelRequiresUpstreamConfirmation
+--- PASS: TestCodexTelemetryWSCancelRequiresUpstreamConfirmation (0.00s)
+=== RUN   TestCodexTelemetryWSRepairedDocumentsRemainOnePhysicalFrame
+--- PASS: TestCodexTelemetryWSRepairedDocumentsRemainOnePhysicalFrame (0.00s)
+=== RUN   TestCodexTelemetryWSDeliveryDoesNotRewriteUpstreamTerminal
+--- PASS: TestCodexTelemetryWSDeliveryDoesNotRewriteUpstreamTerminal (0.00s)
+=== RUN   TestCodexTelemetryWSSendOutcomeIsIndependentOfResponse
+--- PASS: TestCodexTelemetryWSSendOutcomeIsIndependentOfResponse (0.00s)
+=== RUN   TestCodexTelemetryStreamMetricsSeparateSuccessAndPreserveAllWaits
+--- PASS: TestCodexTelemetryStreamMetricsSeparateSuccessAndPreserveAllWaits (0.00s)
+=== RUN   TestCodexTelemetryStreamMetricsOverflowKeepsBothOutcomes
+--- PASS: TestCodexTelemetryStreamMetricsOverflowKeepsBothOutcomes (0.00s)
+=== RUN   TestCodexTelemetryStreamUnknownKindsAndHTTPDurationAbsence
+--- PASS: TestCodexTelemetryStreamUnknownKindsAndHTTPDurationAbsence (0.00s)
+=== RUN   TestCodexTelemetryRuntimeCopiesEventMetricBuckets
+--- PASS: TestCodexTelemetryRuntimeCopiesEventMetricBuckets (0.00s)
+=== RUN   TestCodexTelemetryStreamEventKindsUseFixedProtocolVocabulary
+--- PASS: TestCodexTelemetryStreamEventKindsUseFixedProtocolVocabulary (0.00s)
+=== RUN   TestCodexTelemetryAuthenticationAndObservationIsolation
+--- PASS: TestCodexTelemetryAuthenticationAndObservationIsolation (0.01s)
+=== RUN   TestCodexTelemetryRetryCommitsOneFinalTurn
+--- PASS: TestCodexTelemetryRetryCommitsOneFinalTurn (0.01s)
+=== RUN   TestCodexTelemetryRetryPreservesPhysicalMeasurementsAndFinalModel
+--- PASS: TestCodexTelemetryRetryPreservesPhysicalMeasurementsAndFinalModel (0.02s)
+=== RUN   TestCodexTelemetryRequestEndPreservesFailureUntilNextTurn
+--- PASS: TestCodexTelemetryRequestEndPreservesFailureUntilNextTurn (0.01s)
+=== RUN   TestCodexTelemetryContextCancelDoesNotPreemptActiveTerminal
+--- PASS: TestCodexTelemetryContextCancelDoesNotPreemptActiveTerminal (0.01s)
+=== RUN   TestCodexTelemetryRetryAfterContextCancelUsesFailure
+--- PASS: TestCodexTelemetryRetryAfterContextCancelUsesFailure (0.01s)
+=== RUN   TestCodexTelemetryMissingTurnDoesNotInventOrDeduplicateIdentity
+--- PASS: TestCodexTelemetryMissingTurnDoesNotInventOrDeduplicateIdentity (0.01s)
+=== RUN   TestCodexTelemetryDisableCancelsQueuedAndInflightAndDoesNotReplay
+--- PASS: TestCodexTelemetryDisableCancelsQueuedAndInflightAndDoesNotReplay (0.00s)
+=== RUN   TestCodexTelemetryQueueAndHistoryAreBounded
+--- PASS: TestCodexTelemetryQueueAndHistoryAreBounded (0.00s)
+=== RUN   TestCodexTelemetryEnvironmentOverride
+--- PASS: TestCodexTelemetryEnvironmentOverride (0.00s)
+=== RUN   TestCodexTelemetryErrorsNeverExposeTransportCredentials
+--- PASS: TestCodexTelemetryErrorsNeverExposeTransportCredentials (0.00s)
+=== RUN   TestCodexTelemetryThreadInitializationWorktreeIsExplicitlyUnknown
+=== RUN   TestCodexTelemetryThreadInitializationWorktreeIsExplicitlyUnknown/codex-tui/0.155.0_(Ubuntu_24.04.4;_x86_64)
+=== RUN   TestCodexTelemetryThreadInitializationWorktreeIsExplicitlyUnknown/Codex_Desktop/0.155.0_(Mac_OS_26.6.2;_arm64)
+=== RUN   TestCodexTelemetryThreadInitializationWorktreeIsExplicitlyUnknown/codex-tui/0.155.0_(Windows_10.0.26200;_x86_64)
+--- PASS: TestCodexTelemetryThreadInitializationWorktreeIsExplicitlyUnknown (0.00s)
+    --- PASS: TestCodexTelemetryThreadInitializationWorktreeIsExplicitlyUnknown/codex-tui/0.155.0_(Ubuntu_24.04.4;_x86_64) (0.00s)
+    --- PASS: TestCodexTelemetryThreadInitializationWorktreeIsExplicitlyUnknown/Codex_Desktop/0.155.0_(Mac_OS_26.6.2;_arm64) (0.00s)
+    --- PASS: TestCodexTelemetryThreadInitializationWorktreeIsExplicitlyUnknown/codex-tui/0.155.0_(Windows_10.0.26200;_x86_64) (0.00s)
+=== RUN   TestCodexTelemetryWorktreeObservationMatchesAnalyticsOnly
+--- PASS: TestCodexTelemetryWorktreeObservationMatchesAnalyticsOnly (0.00s)
+=== RUN   TestCodexTelemetryThreadStartedWorktreeUnknownAggregates
+--- PASS: TestCodexTelemetryThreadStartedWorktreeUnknownAggregates (0.00s)
+=== RUN   TestCodexTelemetryWSFinalFrameIdentityIsIndependentOfObservation
+--- PASS: TestCodexTelemetryWSFinalFrameIdentityIsIndependentOfObservation (0.00s)
+=== RUN   TestCodexTelemetryWSSharedRootChildrenDoNotMerge
+--- PASS: TestCodexTelemetryWSSharedRootChildrenDoNotMerge (0.00s)
+=== RUN   TestCodexTelemetryWSRetryDoesNotCommitEarlyFailure
+--- PASS: TestCodexTelemetryWSRetryDoesNotCommitEarlyFailure (0.00s)
+=== RUN   TestCodexTelemetryWSExcludedRequestsAndNoIdentityFabrication
+--- PASS: TestCodexTelemetryWSExcludedRequestsAndNoIdentityFabrication (0.00s)
+=== RUN   TestCodexTelemetryWSDisconnectIsNotUserCancel
+--- PASS: TestCodexTelemetryWSDisconnectIsNotUserCancel (0.00s)
+=== RUN   TestCodexTelemetryWSFinalizingFrameObserverSeesPhysicalWriteResult
+--- PASS: TestCodexTelemetryWSFinalizingFrameObserverSeesPhysicalWriteResult (0.00s)
+=== RUN   TestCodexTelemetryWSGatewayTransportsUseFinalWireIdentity
+=== RUN   TestCodexTelemetryWSGatewayTransportsUseFinalWireIdentity/http_to_ws
+=== RUN   TestCodexTelemetryWSGatewayTransportsUseFinalWireIdentity/ctx_pool
+=== RUN   TestCodexTelemetryWSGatewayTransportsUseFinalWireIdentity/passthrough
+=== RUN   TestCodexTelemetryWSGatewayTransportsUseFinalWireIdentity/daily_http_to_ws
+=== RUN   TestCodexTelemetryWSGatewayTransportsUseFinalWireIdentity/daily_ctx_pool
+=== RUN   TestCodexTelemetryWSGatewayTransportsUseFinalWireIdentity/daily_passthrough
+=== RUN   TestCodexTelemetryWSGatewayTransportsUseFinalWireIdentity/daily_ctx_pool_without_stream_context
+=== RUN   TestCodexTelemetryWSGatewayTransportsUseFinalWireIdentity/daily_passthrough_without_stream_context
+=== RUN   TestCodexTelemetryWSGatewayTransportsUseFinalWireIdentity/daily_sync_http_to_ws
+--- PASS: TestCodexTelemetryWSGatewayTransportsUseFinalWireIdentity (0.03s)
+    --- PASS: TestCodexTelemetryWSGatewayTransportsUseFinalWireIdentity/http_to_ws (0.00s)
+    --- PASS: TestCodexTelemetryWSGatewayTransportsUseFinalWireIdentity/ctx_pool (0.00s)
+    --- PASS: TestCodexTelemetryWSGatewayTransportsUseFinalWireIdentity/passthrough (0.00s)
+    --- PASS: TestCodexTelemetryWSGatewayTransportsUseFinalWireIdentity/daily_http_to_ws (0.00s)
+    --- PASS: TestCodexTelemetryWSGatewayTransportsUseFinalWireIdentity/daily_ctx_pool (0.00s)
+    --- PASS: TestCodexTelemetryWSGatewayTransportsUseFinalWireIdentity/daily_passthrough (0.00s)
+    --- PASS: TestCodexTelemetryWSGatewayTransportsUseFinalWireIdentity/daily_ctx_pool_without_stream_context (0.00s)
+    --- PASS: TestCodexTelemetryWSGatewayTransportsUseFinalWireIdentity/daily_passthrough_without_stream_context (0.00s)
+    --- PASS: TestCodexTelemetryWSGatewayTransportsUseFinalWireIdentity/daily_sync_http_to_ws (0.01s)
+=== RUN   TestCodexTelemetryWSDailyRootConcurrentChildrenUseActualWire
+--- PASS: TestCodexTelemetryWSDailyRootConcurrentChildrenUseActualWire (0.01s)
+=== RUN   TestResponsesBridgeContinuationIsClientErrorBeforeUpstream
+=== RUN   TestResponsesBridgeContinuationIsClientErrorBeforeUpstream/openai_chat_fallback
+=== RUN   TestResponsesBridgeContinuationIsClientErrorBeforeUpstream/openai_native_anthropic
+=== RUN   TestResponsesBridgeContinuationIsClientErrorBeforeUpstream/anthropic_platform
+=== RUN   TestResponsesBridgeContinuationIsClientErrorBeforeUpstream/responses_shaped_chat
+=== RUN   TestResponsesBridgeContinuationIsClientErrorBeforeUpstream/antigravity
+--- PASS: TestResponsesBridgeContinuationIsClientErrorBeforeUpstream (0.00s)
+    --- PASS: TestResponsesBridgeContinuationIsClientErrorBeforeUpstream/openai_chat_fallback (0.00s)
+    --- PASS: TestResponsesBridgeContinuationIsClientErrorBeforeUpstream/openai_native_anthropic (0.00s)
+    --- PASS: TestResponsesBridgeContinuationIsClientErrorBeforeUpstream/anthropic_platform (0.00s)
+    --- PASS: TestResponsesBridgeContinuationIsClientErrorBeforeUpstream/responses_shaped_chat (0.00s)
+    --- PASS: TestResponsesBridgeContinuationIsClientErrorBeforeUpstream/antigravity (0.00s)
+=== RUN   TestCodex0172BridgeImageFileReferencesAreClientErrors
+=== RUN   TestCodex0172BridgeImageFileReferencesAreClientErrors/tool_output
+=== RUN   TestCodex0172BridgeImageFileReferencesAreClientErrors/tool_output/openai_chat_fallback
+=== RUN   TestCodex0172BridgeImageFileReferencesAreClientErrors/tool_output/openai_native_anthropic
+=== RUN   TestCodex0172BridgeImageFileReferencesAreClientErrors/tool_output/anthropic_platform
+=== RUN   TestCodex0172BridgeImageFileReferencesAreClientErrors/tool_output/responses_shaped_chat
+=== RUN   TestCodex0172BridgeImageFileReferencesAreClientErrors/tool_output/antigravity
+=== RUN   TestCodex0172BridgeImageFileReferencesAreClientErrors/standalone
+=== RUN   TestCodex0172BridgeImageFileReferencesAreClientErrors/standalone/openai_chat_fallback
+=== RUN   TestCodex0172BridgeImageFileReferencesAreClientErrors/standalone/openai_native_anthropic
+=== RUN   TestCodex0172BridgeImageFileReferencesAreClientErrors/standalone/anthropic_platform
+=== RUN   TestCodex0172BridgeImageFileReferencesAreClientErrors/standalone/responses_shaped_chat
+=== RUN   TestCodex0172BridgeImageFileReferencesAreClientErrors/standalone/antigravity
+=== RUN   TestCodex0172BridgeImageFileReferencesAreClientErrors/message
+=== RUN   TestCodex0172BridgeImageFileReferencesAreClientErrors/message/openai_native_anthropic
+=== RUN   TestCodex0172BridgeImageFileReferencesAreClientErrors/message/anthropic_platform
+=== RUN   TestCodex0172BridgeImageFileReferencesAreClientErrors/message/responses_shaped_chat
+=== RUN   TestCodex0172BridgeImageFileReferencesAreClientErrors/message/antigravity
+=== RUN   TestCodex0172BridgeImageFileReferencesAreClientErrors/message/openai_chat_fallback
+--- PASS: TestCodex0172BridgeImageFileReferencesAreClientErrors (0.00s)
+    --- PASS: TestCodex0172BridgeImageFileReferencesAreClientErrors/tool_output (0.00s)
+        --- PASS: TestCodex0172BridgeImageFileReferencesAreClientErrors/tool_output/openai_chat_fallback (0.00s)
+        --- PASS: TestCodex0172BridgeImageFileReferencesAreClientErrors/tool_output/openai_native_anthropic (0.00s)
+        --- PASS: TestCodex0172BridgeImageFileReferencesAreClientErrors/tool_output/anthropic_platform (0.00s)
+        --- PASS: TestCodex0172BridgeImageFileReferencesAreClientErrors/tool_output/responses_shaped_chat (0.00s)
+        --- PASS: TestCodex0172BridgeImageFileReferencesAreClientErrors/tool_output/antigravity (0.00s)
+    --- PASS: TestCodex0172BridgeImageFileReferencesAreClientErrors/standalone (0.00s)
+        --- PASS: TestCodex0172BridgeImageFileReferencesAreClientErrors/standalone/openai_chat_fallback (0.00s)
+        --- PASS: TestCodex0172BridgeImageFileReferencesAreClientErrors/standalone/openai_native_anthropic (0.00s)
+        --- PASS: TestCodex0172BridgeImageFileReferencesAreClientErrors/standalone/anthropic_platform (0.00s)
+        --- PASS: TestCodex0172BridgeImageFileReferencesAreClientErrors/standalone/responses_shaped_chat (0.00s)
+        --- PASS: TestCodex0172BridgeImageFileReferencesAreClientErrors/standalone/antigravity (0.00s)
+    --- PASS: TestCodex0172BridgeImageFileReferencesAreClientErrors/message (0.00s)
+        --- PASS: TestCodex0172BridgeImageFileReferencesAreClientErrors/message/openai_native_anthropic (0.00s)
+        --- PASS: TestCodex0172BridgeImageFileReferencesAreClientErrors/message/anthropic_platform (0.00s)
+        --- PASS: TestCodex0172BridgeImageFileReferencesAreClientErrors/message/responses_shaped_chat (0.00s)
+        --- PASS: TestCodex0172BridgeImageFileReferencesAreClientErrors/message/antigravity (0.00s)
+        --- PASS: TestCodex0172BridgeImageFileReferencesAreClientErrors/message/openai_chat_fallback (0.00s)
+=== RUN   TestCodex0171MetadataBudget
+=== PAUSE TestCodex0171MetadataBudget
+=== RUN   TestCodex0171WSTraceContext
+=== PAUSE TestCodex0171WSTraceContext
+=== RUN   TestCodex0171WSHeadersContainOnlyValidatedTrace
+--- PASS: TestCodex0171WSHeadersContainOnlyValidatedTrace (0.00s)
+=== RUN   TestCodex0171MetadataBudgetObservation
+=== PAUSE TestCodex0171MetadataBudgetObservation
+=== RUN   TestCodex0171WSComparablePreservesResponseFields
+=== PAUSE TestCodex0171WSComparablePreservesResponseFields
+=== RUN   TestCodex0172HTTPTraceFinalWireAndObservation
+=== RUN   TestCodex0172HTTPTraceFinalWireAndObservation/oauth/valid
+=== RUN   TestCodex0172HTTPTraceFinalWireAndObservation/oauth/compact
+=== RUN   TestCodex0172HTTPTraceFinalWireAndObservation/oauth/missing
+=== RUN   TestCodex0172HTTPTraceFinalWireAndObservation/oauth/invalid
+=== RUN   TestCodex0172HTTPTraceFinalWireAndObservation/oauth/duplicate
+=== RUN   TestCodex0172HTTPTraceFinalWireAndObservation/setup-token/valid
+=== RUN   TestCodex0172HTTPTraceFinalWireAndObservation/setup-token/compact
+=== RUN   TestCodex0172HTTPTraceFinalWireAndObservation/setup-token/missing
+=== RUN   TestCodex0172HTTPTraceFinalWireAndObservation/setup-token/invalid
+=== RUN   TestCodex0172HTTPTraceFinalWireAndObservation/setup-token/duplicate
+--- PASS: TestCodex0172HTTPTraceFinalWireAndObservation (0.00s)
+    --- PASS: TestCodex0172HTTPTraceFinalWireAndObservation/oauth/valid (0.00s)
+    --- PASS: TestCodex0172HTTPTraceFinalWireAndObservation/oauth/compact (0.00s)
+    --- PASS: TestCodex0172HTTPTraceFinalWireAndObservation/oauth/missing (0.00s)
+    --- PASS: TestCodex0172HTTPTraceFinalWireAndObservation/oauth/invalid (0.00s)
+    --- PASS: TestCodex0172HTTPTraceFinalWireAndObservation/oauth/duplicate (0.00s)
+    --- PASS: TestCodex0172HTTPTraceFinalWireAndObservation/setup-token/valid (0.00s)
+    --- PASS: TestCodex0172HTTPTraceFinalWireAndObservation/setup-token/compact (0.00s)
+    --- PASS: TestCodex0172HTTPTraceFinalWireAndObservation/setup-token/missing (0.00s)
+    --- PASS: TestCodex0172HTTPTraceFinalWireAndObservation/setup-token/invalid (0.00s)
+    --- PASS: TestCodex0172HTTPTraceFinalWireAndObservation/setup-token/duplicate (0.00s)
+=== RUN   TestCodex0172HTTPTraceRetryAndAPIKeyBoundary
+--- PASS: TestCodex0172HTTPTraceRetryAndAPIKeyBoundary (0.00s)
+=== RUN   TestCodex0172HTTPTraceObservationRequiresFinalHeaders
+--- PASS: TestCodex0172HTTPTraceObservationRequiresFinalHeaders (0.00s)
+=== RUN   TestBuildCodexCLIUserAgent
+--- PASS: TestBuildCodexCLIUserAgent (0.00s)
+=== RUN   TestCodexCanonicalUserAgentFollowsResolver
+--- PASS: TestCodexCanonicalUserAgentFollowsResolver (0.00s)
+=== RUN   TestCodexCatalogWebSearchProviderProjection
+=== RUN   TestCodexCatalogWebSearchProviderProjection/absent
+=== RUN   TestCodexCatalogWebSearchProviderProjection/null
+=== RUN   TestCodexCatalogWebSearchProviderProjection/standalone
+=== RUN   TestCodexCatalogWebSearchProviderProjection/search_MCP
+=== RUN   TestCodexCatalogWebSearchProviderProjection/future_provider
+=== RUN   TestCodexCatalogWebSearchProviderProjection/all_absent
+=== RUN   TestCodexCatalogWebSearchProviderProjection/all_null
+=== RUN   TestCodexCatalogWebSearchProviderProjection/matching_peers
+=== RUN   TestCodexCatalogWebSearchProviderProjection/conflicting_peers
+=== RUN   TestCodexCatalogWebSearchProviderProjection/missing_first_peer
+=== RUN   TestCodexCatalogWebSearchProviderProjection/missing_second_peer
+=== RUN   TestCodexCatalogWebSearchProviderProjection/null_and_absent
+=== RUN   TestCodexCatalogWebSearchProviderProjection/boolean_is_invalid
+=== RUN   TestCodexCatalogWebSearchProviderProjection/number_is_invalid
+=== RUN   TestCodexCatalogWebSearchProviderProjection/object_is_invalid
+=== RUN   TestCodexCatalogWebSearchProviderProjection/array_is_invalid
+--- PASS: TestCodexCatalogWebSearchProviderProjection (0.02s)
+    --- PASS: TestCodexCatalogWebSearchProviderProjection/absent (0.00s)
+    --- PASS: TestCodexCatalogWebSearchProviderProjection/null (0.00s)
+    --- PASS: TestCodexCatalogWebSearchProviderProjection/standalone (0.00s)
+    --- PASS: TestCodexCatalogWebSearchProviderProjection/search_MCP (0.00s)
+    --- PASS: TestCodexCatalogWebSearchProviderProjection/future_provider (0.00s)
+    --- PASS: TestCodexCatalogWebSearchProviderProjection/all_absent (0.00s)
+    --- PASS: TestCodexCatalogWebSearchProviderProjection/all_null (0.00s)
+    --- PASS: TestCodexCatalogWebSearchProviderProjection/matching_peers (0.00s)
+    --- PASS: TestCodexCatalogWebSearchProviderProjection/conflicting_peers (0.00s)
+    --- PASS: TestCodexCatalogWebSearchProviderProjection/missing_first_peer (0.00s)
+    --- PASS: TestCodexCatalogWebSearchProviderProjection/missing_second_peer (0.00s)
+    --- PASS: TestCodexCatalogWebSearchProviderProjection/null_and_absent (0.00s)
+    --- PASS: TestCodexCatalogWebSearchProviderProjection/boolean_is_invalid (0.00s)
+    --- PASS: TestCodexCatalogWebSearchProviderProjection/number_is_invalid (0.00s)
+    --- PASS: TestCodexCatalogWebSearchProviderProjection/object_is_invalid (0.00s)
+    --- PASS: TestCodexCatalogWebSearchProviderProjection/array_is_invalid (0.00s)
+=== RUN   TestCodexCatalogWebSearchProviderLiveMetadata
+=== RUN   TestCodexCatalogWebSearchProviderLiveMetadata/{"models":[{"slug":"catalog-target","web_search_provider":null}]}
+=== RUN   TestCodexCatalogWebSearchProviderLiveMetadata/{"data":[{"id":"catalog-target","web_search_provider":null}]}
+=== RUN   TestCodexCatalogWebSearchProviderLiveMetadata/{"models":[{"slug":"catalog-target","web_search_provider":"search_mcp"}]}
+=== RUN   TestCodexCatalogWebSearchProviderLiveMetadata/{"data":[{"id":"catalog-target","web_search_provider":"search_mcp"}]}
+=== RUN   TestCodexCatalogWebSearchProviderLiveMetadata/{"models":[{"slug":"catalog-target","web_search_provider":"future_provider"}]}
+=== RUN   TestCodexCatalogWebSearchProviderLiveMetadata/{"data":[{"id":"catalog-target","web_search_provider":"future_provider"}]}
+--- PASS: TestCodexCatalogWebSearchProviderLiveMetadata (0.02s)
+    --- PASS: TestCodexCatalogWebSearchProviderLiveMetadata/{"models":[{"slug":"catalog-target","web_search_provider":null}]} (0.00s)
+    --- PASS: TestCodexCatalogWebSearchProviderLiveMetadata/{"data":[{"id":"catalog-target","web_search_provider":null}]} (0.00s)
+    --- PASS: TestCodexCatalogWebSearchProviderLiveMetadata/{"models":[{"slug":"catalog-target","web_search_provider":"search_mcp"}]} (0.00s)
+    --- PASS: TestCodexCatalogWebSearchProviderLiveMetadata/{"data":[{"id":"catalog-target","web_search_provider":"search_mcp"}]} (0.00s)
+    --- PASS: TestCodexCatalogWebSearchProviderLiveMetadata/{"models":[{"slug":"catalog-target","web_search_provider":"future_provider"}]} (0.00s)
+    --- PASS: TestCodexCatalogWebSearchProviderLiveMetadata/{"data":[{"id":"catalog-target","web_search_provider":"future_provider"}]} (0.00s)
+=== RUN   TestCloneFingerprintObservationHeadersKeepsOnlySafePhysicalValues
+--- PASS: TestCloneFingerprintObservationHeadersKeepsOnlySafePhysicalValues (0.00s)
+=== RUN   TestOpenAIGroupCatalogOfficialDescriptorsRemainComplete
+--- PASS: TestOpenAIGroupCatalogOfficialDescriptorsRemainComplete (0.00s)
+=== RUN   TestCodexTelemetryNativeHTTPPreservesExporterUAAndFrozenSource
+--- PASS: TestCodexTelemetryNativeHTTPPreservesExporterUAAndFrozenSource (0.00s)
+=== RUN   TestCodexTelemetryNativeHTTPFreezesAccountAtInference
+--- PASS: TestCodexTelemetryNativeHTTPFreezesAccountAtInference (0.00s)
+=== RUN   TestFinalizeOpenAIOAuthResponsesRequestUsesFinalRoutingAndCanonicalIdentity
+--- PASS: TestFinalizeOpenAIOAuthResponsesRequestUsesFinalRoutingAndCanonicalIdentity (0.00s)
+=== RUN   TestFinalizeOpenAIOAuthResponsesRequestAppliesDefaultsAndWireSnapshotForAPIKey
+--- PASS: TestFinalizeOpenAIOAuthResponsesRequestAppliesDefaultsAndWireSnapshotForAPIKey (0.00s)
+=== RUN   TestFinalizeOpenAIOAuthResponsesRequestKeepsWireBodyIsolatedFromCaller
+=== RUN   TestFinalizeOpenAIOAuthResponsesRequestKeepsWireBodyIsolatedFromCaller/oauth
+=== RUN   TestFinalizeOpenAIOAuthResponsesRequestKeepsWireBodyIsolatedFromCaller/apikey
+--- PASS: TestFinalizeOpenAIOAuthResponsesRequestKeepsWireBodyIsolatedFromCaller (0.00s)
+    --- PASS: TestFinalizeOpenAIOAuthResponsesRequestKeepsWireBodyIsolatedFromCaller/oauth (0.00s)
+    --- PASS: TestFinalizeOpenAIOAuthResponsesRequestKeepsWireBodyIsolatedFromCaller/apikey (0.00s)
+=== RUN   TestFinalizeOpenAIOAuthResponsesRequestIsNoOpForOtherPlatforms
+--- PASS: TestFinalizeOpenAIOAuthResponsesRequestIsNoOpForOtherPlatforms (0.00s)
+=== RUN   TestFinalizeOpenAIOAuthResponsesRequestRejectsNilRequest
+--- PASS: TestFinalizeOpenAIOAuthResponsesRequestRejectsNilRequest (0.00s)
+=== RUN   TestFinalizeOpenAIOAuthResponsesRequestClassifiesPhysicalCompactionMode
+=== RUN   TestFinalizeOpenAIOAuthResponsesRequestClassifiesPhysicalCompactionMode/local_responses
+=== RUN   TestFinalizeOpenAIOAuthResponsesRequestClassifiesPhysicalCompactionMode/stream_false_fails_closed
+=== RUN   TestFinalizeOpenAIOAuthResponsesRequestClassifiesPhysicalCompactionMode/generate_false_fails_closed
+=== RUN   TestFinalizeOpenAIOAuthResponsesRequestClassifiesPhysicalCompactionMode/trigger_without_native_marker_fails_closed
+=== RUN   TestFinalizeOpenAIOAuthResponsesRequestClassifiesPhysicalCompactionMode/non_bare_path_fails_closed
+=== RUN   TestFinalizeOpenAIOAuthResponsesRequestClassifiesPhysicalCompactionMode/legacy_path
+=== RUN   TestFinalizeOpenAIOAuthResponsesRequestClassifiesPhysicalCompactionMode/native_v2_marker
+=== RUN   TestFinalizeOpenAIOAuthResponsesRequestClassifiesPhysicalCompactionMode/ordinary_turn_clears_candidate
+=== RUN   TestFinalizeOpenAIOAuthResponsesRequestClassifiesPhysicalCompactionMode/frozen_local_mode_survives_bridge_style_second_finalization
+--- PASS: TestFinalizeOpenAIOAuthResponsesRequestClassifiesPhysicalCompactionMode (0.01s)
+    --- PASS: TestFinalizeOpenAIOAuthResponsesRequestClassifiesPhysicalCompactionMode/local_responses (0.00s)
+    --- PASS: TestFinalizeOpenAIOAuthResponsesRequestClassifiesPhysicalCompactionMode/stream_false_fails_closed (0.00s)
+    --- PASS: TestFinalizeOpenAIOAuthResponsesRequestClassifiesPhysicalCompactionMode/generate_false_fails_closed (0.00s)
+    --- PASS: TestFinalizeOpenAIOAuthResponsesRequestClassifiesPhysicalCompactionMode/trigger_without_native_marker_fails_closed (0.00s)
+    --- PASS: TestFinalizeOpenAIOAuthResponsesRequestClassifiesPhysicalCompactionMode/non_bare_path_fails_closed (0.00s)
+    --- PASS: TestFinalizeOpenAIOAuthResponsesRequestClassifiesPhysicalCompactionMode/legacy_path (0.00s)
+    --- PASS: TestFinalizeOpenAIOAuthResponsesRequestClassifiesPhysicalCompactionMode/native_v2_marker (0.00s)
+    --- PASS: TestFinalizeOpenAIOAuthResponsesRequestClassifiesPhysicalCompactionMode/ordinary_turn_clears_candidate (0.00s)
+    --- PASS: TestFinalizeOpenAIOAuthResponsesRequestClassifiesPhysicalCompactionMode/frozen_local_mode_survives_bridge_style_second_finalization (0.00s)
+=== RUN   TestFinalizeOpenAIOAuthResponsesRequestUsesEffectiveResponsesLiteCapability
+=== RUN   TestFinalizeOpenAIOAuthResponsesRequestUsesEffectiveResponsesLiteCapability/unknown_manifest_honors_explicit_HTTP_marker
+=== RUN   TestFinalizeOpenAIOAuthResponsesRequestUsesEffectiveResponsesLiteCapability/default_metadata_profile_keeps_Lite_but_drops_tool_inventory
+=== RUN   TestFinalizeOpenAIOAuthResponsesRequestUsesEffectiveResponsesLiteCapability/known_false_overrides_explicit_marker
+=== RUN   TestFinalizeOpenAIOAuthResponsesRequestUsesEffectiveResponsesLiteCapability/known_true_enables_Lite_without_inbound_marker
+--- PASS: TestFinalizeOpenAIOAuthResponsesRequestUsesEffectiveResponsesLiteCapability (0.00s)
+    --- PASS: TestFinalizeOpenAIOAuthResponsesRequestUsesEffectiveResponsesLiteCapability/unknown_manifest_honors_explicit_HTTP_marker (0.00s)
+    --- PASS: TestFinalizeOpenAIOAuthResponsesRequestUsesEffectiveResponsesLiteCapability/default_metadata_profile_keeps_Lite_but_drops_tool_inventory (0.00s)
+    --- PASS: TestFinalizeOpenAIOAuthResponsesRequestUsesEffectiveResponsesLiteCapability/known_false_overrides_explicit_marker (0.00s)
+    --- PASS: TestFinalizeOpenAIOAuthResponsesRequestUsesEffectiveResponsesLiteCapability/known_true_enables_Lite_without_inbound_marker (0.00s)
+=== CONT  TestCodex0171MetadataBudget
+=== RUN   TestCodex0171MetadataBudget/below_budget_unchanged
+=== RUN   TestCodex0171MetadataBudget/exact_8096
+=== RUN   TestCodex0171MetadataBudget/8097_removes_whole_remote
+=== CONT  TestCodex0171MetadataBudgetObservation
+=== RUN   TestCodex0171MetadataBudget/no_workspaces_preserved
+--- PASS: TestCodex0171MetadataBudgetObservation (0.00s)
+=== CONT  TestCodex0171WSComparablePreservesResponseFields
+=== RUN   TestCodex0171MetadataBudget/base_over_budget_preserved
+--- PASS: TestCodex0171WSComparablePreservesResponseFields (0.00s)
+=== CONT  TestCodex0171WSTraceContext
+=== RUN   TestCodex0171WSTraceContext/valid
+=== RUN   TestCodex0171WSTraceContext/zero_trace
+=== RUN   TestCodex0171WSTraceContext/zero_span
+=== RUN   TestCodex0171MetadataBudget/origin_before_shorter_other
+=== RUN   TestCodex0171WSTraceContext/uppercase
+=== RUN   TestCodex0171WSTraceContext/version_ff
+=== RUN   TestCodex0171WSTraceContext/version_zero_suffix
+=== RUN   TestCodex0171MetadataBudget/empty_maps_and_nonremote_fields_preserved
+=== RUN   TestCodex0171WSTraceContext/future_version
+=== RUN   TestCodex0171WSTraceContext/state_without_parent
+=== RUN   TestCodex0171MetadataBudget/unicode_size_and_stable_order
+=== RUN   TestCodex0171WSTraceContext/duplicate_state
+=== RUN   TestCodex0171WSTraceContext/state_too_large
+=== RUN   TestCodex0171WSTraceContext/bad_state_key
+=== RUN   TestCodex0171WSTraceContext/bad_state_value
+=== RUN   TestCodex0171WSTraceContext/duplicate_parent_dropped
+=== RUN   TestCodex0171WSTraceContext/validated_once_and_snapshot_redacted
+--- PASS: TestCodex0171WSTraceContext (0.00s)
+    --- PASS: TestCodex0171WSTraceContext/valid (0.00s)
+    --- PASS: TestCodex0171WSTraceContext/zero_trace (0.00s)
+    --- PASS: TestCodex0171WSTraceContext/zero_span (0.00s)
+    --- PASS: TestCodex0171WSTraceContext/uppercase (0.00s)
+    --- PASS: TestCodex0171WSTraceContext/version_ff (0.00s)
+    --- PASS: TestCodex0171WSTraceContext/version_zero_suffix (0.00s)
+    --- PASS: TestCodex0171WSTraceContext/future_version (0.00s)
+    --- PASS: TestCodex0171WSTraceContext/state_without_parent (0.00s)
+    --- PASS: TestCodex0171WSTraceContext/duplicate_state (0.00s)
+    --- PASS: TestCodex0171WSTraceContext/state_too_large (0.00s)
+    --- PASS: TestCodex0171WSTraceContext/bad_state_key (0.00s)
+    --- PASS: TestCodex0171WSTraceContext/bad_state_value (0.00s)
+    --- PASS: TestCodex0171WSTraceContext/duplicate_parent_dropped (0.00s)
+    --- PASS: TestCodex0171WSTraceContext/validated_once_and_snapshot_redacted (0.00s)
+=== RUN   TestCodex0171MetadataBudget/body_header_independent_and_input_immutable
+=== RUN   TestCodex0171MetadataBudget/legacy_extensions_reserved
+--- PASS: TestCodex0171MetadataBudget (0.00s)
+    --- PASS: TestCodex0171MetadataBudget/below_budget_unchanged (0.00s)
+    --- PASS: TestCodex0171MetadataBudget/exact_8096 (0.00s)
+    --- PASS: TestCodex0171MetadataBudget/8097_removes_whole_remote (0.00s)
+    --- PASS: TestCodex0171MetadataBudget/no_workspaces_preserved (0.00s)
+    --- PASS: TestCodex0171MetadataBudget/base_over_budget_preserved (0.00s)
+    --- PASS: TestCodex0171MetadataBudget/origin_before_shorter_other (0.00s)
+    --- PASS: TestCodex0171MetadataBudget/empty_maps_and_nonremote_fields_preserved (0.00s)
+    --- PASS: TestCodex0171MetadataBudget/unicode_size_and_stable_order (0.00s)
+    --- PASS: TestCodex0171MetadataBudget/body_header_independent_and_input_immutable (0.00s)
+    --- PASS: TestCodex0171MetadataBudget/legacy_extensions_reserved (0.00s)
+PASS
+ok  	github.com/Wei-Shaw/sub2api/internal/service	1.582s
